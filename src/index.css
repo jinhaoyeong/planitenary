@@ -1,0 +1,393 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Jamm-inspired editorial tokens */
+  --color-cream: #FAF7F2;
+  --color-cream-elevated: #FFFFFF;
+  --color-ink: #0F0E0D;
+  --color-ink-muted: #5C5853;
+  --color-accent: #EE4D87;
+  --color-accent-soft: #FFE4EE;
+  --color-border-cream: #E8E1D5;
+
+  --color-cream-dark: #14110F;
+  --color-cream-elevated-dark: #1F1A17;
+  --color-ink-dark: #F5EFE4;
+  --color-ink-muted-dark: #A39B8C;
+  --color-accent-dark: #FF6B9A;
+  --color-accent-soft-dark: #3A1F2A;
+  --color-border-dark: #2C2521;
+
+  /* Legacy aliases so existing code still compiles with new palette */
+  --color-primary: #EE4D87;
+  --color-secondary: #0F0E0D;
+
+  --font-sans: 'Instrument Sans', 'Inter', system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', 'Times New Roman', serif;
+}
+
+/* Runtime theme variables (remapped to dark in .dark scope) */
+:root {
+  --bg: #FAF7F2;
+  --bg-elevated: #FFFFFF;
+  --ink: #0F0E0D;
+  --ink-muted: #5C5853;
+  --accent: #EE4D87;
+  --accent-soft: #FFE4EE;
+  --accent-ink: #0F0E0D;
+  --border: #E8E1D5;
+  --warn: #B45309;
+  --shadow-lift: 0 1px 0 rgba(15,14,13,0.04), 0 12px 32px -16px rgba(15,14,13,0.18);
+}
+
+.dark {
+  --bg: #14110F;
+  --bg-elevated: #1F1A17;
+  --ink: #F5EFE4;
+  --ink-muted: #A39B8C;
+  --accent: #FF6B9A;
+  --accent-soft: #3A1F2A;
+  --accent-ink: #0F0E0D;
+  --border: #2C2521;
+  --warn: #F5A524;
+  --shadow-lift: 0 1px 0 rgba(0,0,0,0.3), 0 18px 40px -18px rgba(0,0,0,0.6);
+}
+
+html {
+  background-color: var(--bg);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+/* ---------- Serif / display helpers ---------- */
+.font-display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.font-display-italic {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- Semantic cascade: remap legacy Tailwind classes ---------- *
+ * The codebase is large and uses slate/rose/white everywhere. Rather than
+ * rewriting every JSX file, we override the output of a small set of
+ * commonly-used utilities so the editorial palette cascades automatically.
+ * New code should prefer the explicit tokens below (bg-cream, text-ink,
+ * bg-accent, etc.).
+ * ------------------------------------------------------------------ */
+
+/* Backgrounds */
+.bg-slate-50   { background-color: var(--bg) !important; }
+.bg-slate-100  { background-color: var(--bg-elevated) !important; }
+.bg-white      { background-color: var(--bg-elevated) !important; }
+.bg-white\/95  { background-color: color-mix(in srgb, var(--bg-elevated) 95%, transparent) !important; }
+.bg-white\/80  { background-color: color-mix(in srgb, var(--bg-elevated) 80%, transparent) !important; }
+.bg-white\/10  { background-color: color-mix(in srgb, var(--ink) 6%, transparent) !important; }
+.bg-white\/20  { background-color: color-mix(in srgb, var(--ink) 10%, transparent) !important; }
+.bg-slate-900  { background-color: var(--ink) !important; }
+.bg-slate-900\/80 { background-color: color-mix(in srgb, var(--ink) 80%, transparent) !important; }
+.bg-slate-950  { background-color: var(--bg) !important; }
+.bg-slate-800  { background-color: var(--bg-elevated) !important; }
+
+.dark .dark\:bg-slate-950 { background-color: var(--bg) !important; }
+.dark .dark\:bg-slate-900 { background-color: var(--bg-elevated) !important; }
+.dark .dark\:bg-slate-800 { background-color: var(--bg-elevated) !important; }
+.dark .dark\:bg-slate-900\/95 { background-color: color-mix(in srgb, var(--bg-elevated) 95%, transparent) !important; }
+
+/* Text */
+.text-slate-900 { color: var(--ink) !important; }
+.text-slate-800 { color: var(--ink) !important; }
+.text-slate-700 { color: var(--ink) !important; }
+.text-slate-600 { color: var(--ink-muted) !important; }
+.text-slate-500 { color: var(--ink-muted) !important; }
+.text-slate-400 { color: var(--ink-muted) !important; }
+.text-white     { color: var(--bg-elevated) !important; }
+
+.dark .dark\:text-white     { color: var(--ink) !important; }
+.dark .dark\:text-slate-100 { color: var(--ink) !important; }
+.dark .dark\:text-slate-200 { color: var(--ink) !important; }
+.dark .dark\:text-slate-300 { color: var(--ink-muted) !important; }
+.dark .dark\:text-slate-400 { color: var(--ink-muted) !important; }
+
+/* Borders */
+.border-slate-100,
+.border-slate-200,
+.border-slate-300 { border-color: var(--border) !important; }
+.border-white\/10,
+.border-white\/20 { border-color: color-mix(in srgb, var(--ink) 12%, transparent) !important; }
+.dark .dark\:border-slate-600,
+.dark .dark\:border-slate-700,
+.dark .dark\:border-slate-800 { border-color: var(--border) !important; }
+
+/* Rose → Accent pink */
+.bg-rose-400   { background-color: var(--accent) !important; }
+.bg-rose-500   { background-color: var(--accent) !important; }
+.bg-rose-600   { background-color: var(--accent) !important; }
+.bg-rose-500\/10,
+.bg-rose-500\/20,
+.bg-rose-500\/30 { background-color: var(--accent-soft) !important; }
+.bg-rose-50    { background-color: var(--accent-soft) !important; }
+.dark .dark\:bg-rose-900\/30,
+.dark .dark\:bg-rose-900\/40 { background-color: var(--accent-soft) !important; }
+.dark .dark\:bg-rose-600 { background-color: var(--accent) !important; }
+
+.text-rose-400,
+.text-rose-500,
+.text-rose-600,
+.text-rose-700,
+.text-rose-200,
+.text-rose-300 { color: var(--accent) !important; }
+.dark .dark\:text-rose-300,
+.dark .dark\:text-rose-400 { color: var(--accent) !important; }
+
+.border-rose-500\/20,
+.border-rose-500\/30,
+.border-rose-200 { border-color: var(--accent) !important; }
+.dark .dark\:border-rose-700 { border-color: var(--accent) !important; }
+
+/* Emerald / Blue → Accent (action buttons across the app) */
+.bg-emerald-500, .bg-emerald-600,
+.hover\:bg-emerald-500:hover, .hover\:bg-emerald-600:hover,
+.bg-blue-600, .bg-blue-700,
+.hover\:bg-blue-600:hover, .hover\:bg-blue-700:hover { background-color: var(--accent) !important; color: var(--accent-ink) !important; }
+.dark .dark\:bg-emerald-600, .dark .dark\:hover\:bg-emerald-500:hover { background-color: var(--accent) !important; }
+.text-emerald-500, .text-emerald-600, .text-blue-500, .text-blue-600,
+.dark .dark\:text-blue-400 { color: var(--accent) !important; }
+.border-emerald-500, .border-emerald-600, .border-rose-600 { border-color: var(--accent) !important; }
+.shadow-emerald-500\/20, .shadow-emerald-500\/30, .shadow-rose-500\/30 { --tw-shadow-color: color-mix(in srgb, var(--accent) 30%, transparent) !important; }
+.focus\:ring-emerald-500\/20:focus, .focus\:ring-emerald-500\/50:focus,
+.focus\:border-emerald-500:focus { --tw-ring-color: color-mix(in srgb, var(--accent) 30%, transparent) !important; border-color: var(--accent) !important; }
+
+/* Modal / lightbox backdrops → warm ink scrim */
+.bg-slate-900\/60, .bg-black\/50 { background-color: color-mix(in srgb, var(--ink) 60%, transparent) !important; }
+.hover\:bg-black\/70:hover { background-color: color-mix(in srgb, var(--ink) 75%, transparent) !important; }
+
+/* Selection */
+::selection { background-color: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--ink); }
+
+/* Dark mode map tiles inversion — tuned for warm charcoal */
+.dark .leaflet-layer,
+.dark .leaflet-control-zoom-in,
+.dark .leaflet-control-zoom-out,
+.dark .leaflet-control-attribution {
+  filter: invert(92%) hue-rotate(180deg) brightness(90%) contrast(88%) sepia(10%);
+}
+
+/* Radius scale — generous editorial feel */
+.rounded-md  { border-radius: 0.75rem; }
+.rounded-lg  { border-radius: 1rem; }
+.rounded-xl  { border-radius: 1.25rem; }
+.rounded-2xl { border-radius: 1.75rem; }
+.rounded-3xl { border-radius: 2.25rem; }
+
+/* ---------- Marquee strip ---------- */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: marquee 40s linear infinite;
+}
+
+/* ---------- Custom cursor: hide native cursor everywhere ---------- */
+.cursor-none,
+.cursor-none * {
+  cursor: none !important;
+}
+
+/* ---------- Passcode PIN box ---------- */
+.pin-box:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ---------- Editorial primitives ---------- */
+.editorial-card {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1.75rem;
+  box-shadow: var(--shadow-lift);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.editorial-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 1px 0 rgba(15,14,13,0.06), 0 28px 48px -18px rgba(15,14,13,0.22);
+}
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.01em;
+  transition: transform 0.15s ease, background-color 0.2s ease, color 0.2s ease;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.pill-btn:active { transform: scale(0.97); }
+
+.pill-primary {
+  background-color: var(--accent);
+  color: #0F0E0D;
+}
+.pill-primary:hover { background-color: color-mix(in srgb, var(--accent) 88%, #000); }
+
+.pill-ghost {
+  background-color: transparent;
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.pill-ghost:hover { background-color: var(--ink); color: var(--bg); }
+
+.pill-soft {
+  background-color: var(--bg-elevated);
+  color: var(--ink);
+  border-color: var(--border);
+}
+.pill-soft:hover { border-color: var(--accent); color: var(--accent); }
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.eyebrow::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background-color: var(--accent);
+  display: inline-block;
+}
+
+/* Hand-drawn-style checkbox */
+.editorial-checkbox {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: 2px solid var(--ink);
+  background-color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease, transform 0.15s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.editorial-checkbox[data-checked="true"] {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+.editorial-checkbox[data-checked="true"]::after {
+  content: '';
+  width: 0.55rem;
+  height: 0.3rem;
+  border-left: 2px solid #0F0E0D;
+  border-bottom: 2px solid #0F0E0D;
+  transform: rotate(-45deg) translate(1px,-1px);
+}
+
+/* ---------- Editorial form primitives ---------- */
+.editorial-input,
+.editorial-select,
+.editorial-textarea {
+  width: 100%;
+  background-color: var(--bg-elevated) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+.editorial-input::placeholder,
+.editorial-textarea::placeholder {
+  color: var(--ink-muted);
+  font-family: var(--font-serif);
+  font-style: italic;
+  opacity: 0.75;
+}
+.editorial-input:hover,
+.editorial-select:hover,
+.editorial-textarea:hover {
+  border-color: color-mix(in srgb, var(--ink) 25%, var(--border)) !important;
+}
+.editorial-input:focus,
+.editorial-select:focus,
+.editorial-textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.editorial-input:disabled,
+.editorial-select:disabled,
+.editorial-textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.editorial-textarea {
+  resize: vertical;
+  min-height: 5.5rem;
+  font-family: var(--font-sans);
+}
+select.editorial-input,
+.editorial-select {
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%23EE4D87' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 0.75rem;
+}
+textarea.editorial-input {
+  resize: vertical;
+  min-height: 5.5rem;
+}
+.editorial-input.is-compact,
+.editorial-select.is-compact {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  border-radius: 0.75rem;
+}
+.editorial-select.is-compact {
+  padding-right: 2rem;
+  background-position: right 0.6rem center;
+}
+
+@media (max-width: 640px) {
+  .pill-btn {
+    padding: 0.7rem 1rem;
+    font-size: 0.82rem;
+  }
+
+  .editorial-card {
+    border-radius: 1.35rem;
+  }
+}
