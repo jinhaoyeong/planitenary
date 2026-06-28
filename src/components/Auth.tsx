@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured, getAuthRedirectUrl } from '../lib/supabase';
 import { Plane, Lock, Mail, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -37,6 +37,26 @@ export const Auth = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const supabaseReady = isSupabaseConfigured();
+
+  // When a verification / magic link fails, Supabase redirects back with the reason in the
+  // URL (e.g. ?error_description=Email+link+is+invalid+or+has+expired). Surface it instead of
+  // silently landing the user back on the login screen with no explanation.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const { hash, search } = window.location;
+    const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+    const queryParams = new URLSearchParams(search);
+    const description =
+      queryParams.get('error_description') ||
+      hashParams.get('error_description') ||
+      queryParams.get('error') ||
+      hashParams.get('error');
+    if (description) {
+      setError(decodeURIComponent(description.replace(/\+/g, ' ')));
+      // Strip the auth params so a refresh doesn't keep re-showing the error.
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   // Simple password strength check
   const isStrongPassword = (pass: string) => {
