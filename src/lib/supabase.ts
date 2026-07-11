@@ -18,6 +18,42 @@ export const isSupabaseConfigured = () => {
   return hasSupabaseConfig;
 };
 
+const trimRedirectUrl = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim().replace(/^['"]|['"]$/g, '');
+  return trimmed || undefined;
+};
+
+const isHttpUrl = (value: string): boolean => {
+  return /^https?:\/\//i.test(value);
+};
+
+const looksLikeHostname = (value: string): boolean => {
+  return /^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(value);
+};
+
+const resolveRedirectUrl = (value: string | undefined, currentOrigin?: string): string | undefined => {
+  const sanitizedValue = trimRedirectUrl(value);
+  if (!sanitizedValue) return currentOrigin;
+
+  try {
+    if (isHttpUrl(sanitizedValue)) {
+      return new URL(sanitizedValue).toString();
+    }
+
+    if (looksLikeHostname(sanitizedValue)) {
+      return new URL(`https://${sanitizedValue}`).toString();
+    }
+
+    if (currentOrigin) {
+      return new URL(sanitizedValue, currentOrigin).toString();
+    }
+  } catch {
+    // Fall through to the safe default below.
+  }
+
+  return currentOrigin;
+};
+
 // Where Supabase sends users after they click an email verification / magic link.
 // Priority: explicit env override -> the current site origin -> undefined (let Supabase
 // fall back to the Site URL configured in the dashboard). We never hardcode a domain so
@@ -25,13 +61,7 @@ export const isSupabaseConfigured = () => {
 // resolves to must also be added to the Supabase "Redirect URLs" allow-list, otherwise
 // Supabase ignores it and redirects to the dashboard's Site URL instead.
 export const getAuthRedirectUrl = (): string | undefined => {
-  if (configuredAuthRedirectUrl) {
-    return configuredAuthRedirectUrl;
-  }
-
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-
-  return undefined;
+  const currentOrigin =
+    typeof window !== 'undefined' && window.location?.origin ? window.location.origin : undefined;
+  return resolveRedirectUrl(configuredAuthRedirectUrl, currentOrigin);
 };
