@@ -11,8 +11,25 @@ node_modules
 dist
 dist-ssr
 .env
+.env.local
+.env.*.local
 deps/
 *.local
+.vercel
+.dbg/
+coverage/
+*.tsbuildinfo
+
+# Local assistant / planning files
+.claude/
+
+# Native build outputs
+android/.gradle/
+android/local.properties
+android/app/build/
+ios/App/Pods/
+ios/App/build/
+ios/App/App/public/
 
 # Editor directories and files
 .vscode/*

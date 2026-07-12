@@ -1,8 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const configuredAuthRedirectUrl = import.meta.env.VITE_SUPABASE_AUTH_REDIRECT_URL;
+
+const normalizeSupabaseUrl = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim().replace(/^['"]|['"]$/g, '');
+  if (!trimmed) return undefined;
+
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed.replace(/\/+(auth|rest)\/v1\/?$/i, '').replace(/\/+$/, '');
+  }
+};
+
+const supabaseUrl = normalizeSupabaseUrl(rawSupabaseUrl);
 const hasSupabaseConfig = Boolean(supabaseUrl && supabaseAnonKey);
 
 // Use harmless placeholder values when env vars are missing so the UI can still boot.
@@ -10,7 +23,7 @@ const fallbackUrl = 'https://placeholder-project.supabase.co';
 const fallbackAnonKey = 'placeholder-anon-key';
 
 export const supabase = createClient(
-  hasSupabaseConfig ? supabaseUrl : fallbackUrl,
+  supabaseUrl ?? fallbackUrl,
   hasSupabaseConfig ? supabaseAnonKey : fallbackAnonKey
 );
 
