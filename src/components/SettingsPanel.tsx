@@ -1,16 +1,9 @@
-import { useEffect, useState } from 'react';
-import type { ChangeEvent } from 'react';
-import { ImagePlus, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import type { ChangeEvent, CSSProperties } from 'react';
+import { ImagePlus, RotateCcw, Save, Trash2, Palette } from 'lucide-react';
 import type { Itinerary } from '../data';
-
-export interface TripAppSettings {
-  heroEyebrow: string;
-  heroHeadline: string;
-  coverLabel: string;
-  marqueeItems: string[];
-  coverImage: string | null;
-  immersiveEffects: boolean;
-}
+import { DEFAULT_TRIP_SETTINGS, mergeTripSettings } from '../lib/tripSettings';
+import type { TripAppSettings } from '../lib/tripSettings';
 
 interface SettingsPanelProps {
   itinerary: Itinerary;
@@ -26,17 +19,149 @@ const readFileAsDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
+const isValidHex = (value: string) => /^#?[0-9a-fA-F]{6}$/.test(value.trim());
+
+const normalizeHex = (value: string, fallback: string) => {
+  const trimmed = value.trim();
+  if (!isValidHex(trimmed)) return fallback.toUpperCase();
+  return `#${trimmed.replace('#', '').toUpperCase()}`;
+};
+
+const THEME_TOKEN_PRESETS: Record<keyof TripAppSettings['theme'], string[]> = {
+  bg: ['#14110F', '#171A22', '#F7F0E8', '#F4EEE7', '#ECE8E1'],
+  bgElevated: ['#1F1A17', '#232630', '#FFFFFF', '#FBF6EF', '#F2ECE4'],
+  ink: ['#F5EFE4', '#F7F2EB', '#0F0E0D', '#181614', '#1F2430'],
+  inkMuted: ['#A39B8C', '#8E8678', '#5C5853', '#6B655D', '#667085'],
+  accent: ['#FF6B9A', '#E7685D', '#C95C7C', '#8F6BFF', '#2F7D6E'],
+  accentSoft: ['#3A1F2A', '#41242C', '#F7D6DD', '#F1E8FF', '#DDEFEA'],
+};
+
+type SettingsSectionId = 'story' | 'copy' | 'theme';
+
+const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string; description: string }> = [
+  { id: 'story', label: 'Trip Story', description: 'Core trip identity, hero, cover, and media.' },
+  { id: 'copy', label: 'App Copy', description: 'Navigation labels and itinerary wording.' },
+  { id: 'theme', label: 'Theme', description: 'Palette tokens and visual atmosphere.' },
+];
+
+const THEME_TOKEN_DESCRIPTIONS: Record<keyof TripAppSettings['theme'], string> = {
+  bg: 'Base page background',
+  bgElevated: 'Cards and elevated surfaces',
+  ink: 'Main headlines and body text',
+  inkMuted: 'Secondary copy and labels',
+  accent: 'Buttons, highlights, and active states',
+  accentSoft: 'Soft fills and decorative tint',
+};
+
+function ThemeTokenField({
+  tokenKey,
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  tokenKey: keyof TripAppSettings['theme'];
+  label: string;
+  description: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [draftValue, setDraftValue] = useState(value);
+  const swatches = useMemo(() => THEME_TOKEN_PRESETS[tokenKey], [tokenKey]);
+
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
+            {label}
+          </label>
+          <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+            {description}
+          </p>
+        </div>
+        <div
+          className="shrink-0 rounded-[1rem] border p-1"
+          style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)' }}
+        >
+          <div
+            className="h-10 w-10 rounded-[0.75rem] border"
+            style={{ backgroundColor: value, borderColor: 'color-mix(in srgb, var(--ink) 12%, transparent)' }}
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex gap-2">
+          {swatches.map((swatch) => {
+            const active = swatch.toUpperCase() === value.toUpperCase();
+            return (
+              <button
+                key={swatch}
+                type="button"
+                aria-label={`${label} ${swatch}`}
+                onClick={() => onChange(swatch)}
+                className="theme-swatch shrink-0 w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
+                data-active={active ? 'true' : 'false'}
+                style={{ 
+                  backgroundColor: swatch,
+                  borderColor: active ? 'var(--accent)' : 'color-mix(in srgb, var(--ink) 10%, transparent)' 
+                }}
+              />
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            value={draftValue}
+            onChange={(event) => setDraftValue(event.target.value)}
+            onBlur={() => {
+              const normalized = normalizeHex(draftValue, value);
+              setDraftValue(normalized);
+              onChange(normalized);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                const normalized = normalizeHex(draftValue, value);
+                setDraftValue(normalized);
+                onChange(normalized);
+              }
+            }}
+            className="editorial-input w-24 text-center !py-1.5"
+            placeholder="#14110F"
+            inputMode="text"
+            autoCapitalize="characters"
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="pill-btn pill-soft !py-1.5 px-3"
+            onClick={() => {
+              const fallback = DEFAULT_TRIP_SETTINGS.theme[tokenKey];
+              setDraftValue(fallback);
+              onChange(fallback);
+            }}
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProps) {
   const [title, setTitle] = useState(itinerary.name);
   const [description, setDescription] = useState(itinerary.description);
   const [cities, setCities] = useState(itinerary.cities.join(', '));
-  const [heroEyebrow, setHeroEyebrow] = useState(settings.heroEyebrow);
-  const [heroHeadline, setHeroHeadline] = useState(settings.heroHeadline);
-  const [coverLabel, setCoverLabel] = useState(settings.coverLabel);
-  const [marqueeItems, setMarqueeItems] = useState(settings.marqueeItems.join(', '));
-  const [coverImage, setCoverImage] = useState<string | null>(settings.coverImage);
-  const [immersiveEffects, setImmersiveEffects] = useState(settings.immersiveEffects);
+  const [draftSettings, setDraftSettings] = useState<TripAppSettings>(mergeTripSettings(settings));
   const [isSaving, setIsSaving] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>('story');
 
   useEffect(() => {
     setTitle(itinerary.name);
@@ -45,12 +170,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
   }, [itinerary]);
 
   useEffect(() => {
-    setHeroEyebrow(settings.heroEyebrow);
-    setHeroHeadline(settings.heroHeadline);
-    setCoverLabel(settings.coverLabel);
-    setMarqueeItems(settings.marqueeItems.join(', '));
-    setCoverImage(settings.coverImage);
-    setImmersiveEffects(settings.immersiveEffects);
+    setDraftSettings(mergeTripSettings(settings));
   }, [settings]);
 
   const handleCoverUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -59,7 +179,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
 
     try {
       const dataUrl = await readFileAsDataUrl(file);
-      setCoverImage(dataUrl);
+      setDraftSettings((current) => ({ ...current, coverImage: dataUrl }));
     } catch (error) {
       console.error('Failed to read cover image', error);
       window.alert('Unable to read that image. Please try another file.');
@@ -81,37 +201,82 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
         .filter(Boolean),
     };
 
-    const nextSettings: TripAppSettings = {
-      heroEyebrow: heroEyebrow.trim() || 'A personalized travel starter',
-      heroHeadline: heroHeadline.trim() || 'Plan your next trip your way.',
-      coverLabel: coverLabel.trim() || 'Custom cover',
-      marqueeItems: marqueeItems
+    const nextSettings: TripAppSettings = mergeTripSettings({
+      ...draftSettings,
+      heroEyebrow: draftSettings.heroEyebrow.trim() || DEFAULT_TRIP_SETTINGS.heroEyebrow,
+      heroHeadline: draftSettings.heroHeadline.trim() || DEFAULT_TRIP_SETTINGS.heroHeadline,
+      heroDescription: draftSettings.heroDescription.trim() || DEFAULT_TRIP_SETTINGS.heroDescription,
+      heroPrimaryCta: draftSettings.heroPrimaryCta.trim() || DEFAULT_TRIP_SETTINGS.heroPrimaryCta,
+      heroSecondaryCta: draftSettings.heroSecondaryCta.trim() || DEFAULT_TRIP_SETTINGS.heroSecondaryCta,
+      coverLabel: draftSettings.coverLabel.trim() || DEFAULT_TRIP_SETTINGS.coverLabel,
+      coverHeadline: draftSettings.coverHeadline.trim() || DEFAULT_TRIP_SETTINGS.coverHeadline,
+      coverStatusEmpty: draftSettings.coverStatusEmpty.trim() || DEFAULT_TRIP_SETTINGS.coverStatusEmpty,
+      coverStatusFilled: draftSettings.coverStatusFilled.trim() || DEFAULT_TRIP_SETTINGS.coverStatusFilled,
+      coverModeEmpty: draftSettings.coverModeEmpty.trim() || DEFAULT_TRIP_SETTINGS.coverModeEmpty,
+      coverModeFilled: draftSettings.coverModeFilled.trim() || DEFAULT_TRIP_SETTINGS.coverModeFilled,
+      marqueeItems: draftSettings.marqueeItems
+        .join(', ')
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean),
-      coverImage,
-      immersiveEffects,
-    };
+      labels: {
+        ...draftSettings.labels,
+      },
+      theme: {
+        ...draftSettings.theme,
+      },
+    });
 
     onSave(nextItinerary, nextSettings);
     window.setTimeout(() => setIsSaving(false), 200);
   };
 
   const handleResetCover = () => {
-    setCoverImage(null);
+    setDraftSettings((current) => ({ ...current, coverImage: null }));
   };
+
+  const updateLabel = (key: keyof TripAppSettings['labels'], value: string) => {
+    setDraftSettings((current) => ({
+      ...current,
+      labels: {
+        ...current.labels,
+        [key]: value,
+      },
+    }));
+  };
+
+  const updateTheme = (key: keyof TripAppSettings['theme'], value: string) => {
+    setDraftSettings((current) => ({
+      ...current,
+      theme: {
+        ...current.theme,
+        [key]: value,
+      },
+    }));
+  };
+
+  const themePreviewStyle = {
+    '--bg': draftSettings.theme.bg,
+    '--bg-elevated': draftSettings.theme.bgElevated,
+    '--ink': draftSettings.theme.ink,
+    '--ink-muted': draftSettings.theme.inkMuted,
+    '--accent': draftSettings.theme.accent,
+    '--accent-soft': draftSettings.theme.accentSoft,
+  } as CSSProperties;
+
+  const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) || SETTINGS_SECTIONS[0];
 
   return (
     <section className="w-full">
-      <div className="editorial-card p-6 md:p-8">
+      <div className="editorial-card p-4 sm:p-5 md:p-8">
         <div className="flex flex-col sm:flex-row items-start sm:items-start justify-between gap-4">
           <div>
             <div className="eyebrow">Global Settings</div>
-            <h2 className="font-display text-4xl md:text-5xl mt-4" style={{ color: 'var(--ink)' }}>
+            <h2 className="font-display text-3xl sm:text-4xl md:text-5xl mt-4 leading-[0.95]" style={{ color: 'var(--ink)' }}>
               Make the handbook yours.
             </h2>
             <p className="mt-3 max-w-2xl text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
-              Customize the trip title, cover image, hero text, marquee strip, and a few visual settings in one place.
+              Customize the trip copy, labels, cover image, and color system so the handbook fits each plan instead of forcing one fixed template.
             </p>
           </div>
 
@@ -121,178 +286,500 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
           </button>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-5 md:gap-6 mt-8">
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                  Trip Title
-                </label>
-                <input
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  className="editorial-input w-full"
-                  placeholder="Summer in Japan"
-                />
-              </div>
+        <div className="flex flex-col xl:flex-row gap-6 md:gap-10 mt-6 md:mt-8">
+          <aside className="xl:w-1/4 shrink-0 space-y-4 xl:sticky xl:top-24 h-fit">
+            <div className="editorial-card p-4 md:p-5">
+              <div className="eyebrow">Sections</div>
+              <h3 className="font-display text-2xl sm:text-3xl mt-3" style={{ color: 'var(--ink)' }}>
+                Edit with focus.
+              </h3>
+              <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                Open one group at a time so the handbook is easier to tune without scrolling through every setting at once.
+              </p>
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                  Cities
-                </label>
-                <input
-                  value={cities}
-                  onChange={(event) => setCities(event.target.value)}
-                  className="editorial-input w-full"
-                  placeholder="Tokyo, Kyoto, Osaka"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                Trip Description
-              </label>
-              <textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                className="editorial-textarea w-full"
-                style={{ minHeight: '7rem' }}
-                placeholder="Short summary shown in the hero and overview."
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                  Hero Eyebrow
-                </label>
-                <input
-                  value={heroEyebrow}
-                  onChange={(event) => setHeroEyebrow(event.target.value)}
-                  className="editorial-input w-full"
-                  placeholder="A custom travel story"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                  Cover Label
-                </label>
-                <input
-                  value={coverLabel}
-                  onChange={(event) => setCoverLabel(event.target.value)}
-                  className="editorial-input w-full"
-                  placeholder="Trip cover"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 gap-2 mt-5">
+                {SETTINGS_SECTIONS.map((section) => {
+                  const active = section.id === activeSection;
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => setActiveSection(section.id)}
+                      className="text-left rounded-2xl px-4 py-3 border transition-colors"
+                      style={{
+                        backgroundColor: active ? 'var(--bg-elevated)' : 'var(--bg)',
+                        borderColor: active ? 'var(--accent)' : 'var(--border)',
+                        color: 'var(--ink)',
+                      }}
+                    >
+                      <div className="text-sm font-semibold">{section.label}</div>
+                      <div className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                        {section.description}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                Hero Headline
-              </label>
-              <textarea
-                value={heroHeadline}
-                onChange={(event) => setHeroHeadline(event.target.value)}
-                className="editorial-textarea w-full"
-                style={{ minHeight: '6rem' }}
-                placeholder="Plan your next trip your way."
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                Marquee Items
-              </label>
-              <input
-                value={marqueeItems}
-                onChange={(event) => setMarqueeItems(event.target.value)}
-                className="editorial-input w-full"
-                placeholder="Tokyo, Temples, Food, Maps, Notes"
-              />
-            </div>
-
-            <label
-              className="flex items-start gap-3 rounded-2xl p-4"
-              style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-            >
-              <input
-                type="checkbox"
-                checked={immersiveEffects}
-                onChange={(event) => setImmersiveEffects(event.target.checked)}
-                className="mt-1"
-              />
-              <div>
-                <div className="font-semibold" style={{ color: 'var(--ink)' }}>Immersive visual effects</div>
-                <div className="text-sm mt-1" style={{ color: 'var(--ink-muted)' }}>
-                  Turn on grain and the custom cursor. Keep this off if you want the smoothest performance.
+            <div className="editorial-card p-4 md:p-5 hidden xl:block">
+              <div className="eyebrow">Current Focus</div>
+              <h4 className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>
+                {activeSectionMeta.label}
+              </h4>
+              <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                {activeSectionMeta.description}
+              </p>
+              <div className="mt-5 rounded-2xl p-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                  Handbook
+                </div>
+                <div className="font-display text-2xl mt-2" style={{ color: 'var(--ink)' }}>
+                  {title.trim() || 'New Trip'}
+                </div>
+                <div className="text-sm mt-2" style={{ color: 'var(--ink-muted)' }}>
+                  {cities.trim() || 'No cities added yet'}
                 </div>
               </div>
-            </label>
-          </div>
+            </div>
+          </aside>
 
-          <div className="space-y-4">
-            <div className="editorial-card p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="eyebrow">Cover Image</div>
-                  <h3 className="font-display text-3xl mt-3">Upload your own photo</h3>
+          <div className="xl:w-3/4 space-y-4 md:space-y-5">
+            {activeSection === 'story' && (
+              <div className="flex flex-col xl:flex-row gap-5 items-start">
+                <div className="xl:w-3/5 space-y-4">
+                  <div className="editorial-card p-4 md:p-5">
+                    <div className="eyebrow">Trip Basics</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Trip Title
+                        </label>
+                        <input value={title} onChange={(event) => setTitle(event.target.value)} className="editorial-input w-full" placeholder="Summer in Japan" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Cities
+                        </label>
+                        <input value={cities} onChange={(event) => setCities(event.target.value)} className="editorial-input w-full" placeholder="Tokyo, Kyoto, Osaka" />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Trip Description
+                        </label>
+                        <textarea
+                          value={description}
+                          onChange={(event) => setDescription(event.target.value)}
+                          className="editorial-textarea w-full"
+                          style={{ minHeight: '7rem' }}
+                          placeholder="Short summary shown in the hero and overview."
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="editorial-card p-4 md:p-5">
+                    <div className="eyebrow">Hero Story</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Hero Eyebrow
+                        </label>
+                        <input
+                          value={draftSettings.heroEyebrow}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, heroEyebrow: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="A custom travel story"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Cover Label
+                        </label>
+                        <input
+                          value={draftSettings.coverLabel}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, coverLabel: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="Trip cover"
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Hero Headline
+                        </label>
+                        <textarea
+                          value={draftSettings.heroHeadline}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, heroHeadline: event.target.value }))}
+                          className="editorial-textarea w-full"
+                          style={{ minHeight: '6rem' }}
+                          placeholder="Plan your next trip your way."
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Hero Supporting Copy
+                        </label>
+                        <textarea
+                          value={draftSettings.heroDescription}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, heroDescription: event.target.value }))}
+                          className="editorial-textarea w-full"
+                          style={{ minHeight: '5rem' }}
+                          placeholder="Add cities, days, notes, budgets, maps, and documents as you build your travel plan."
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Primary Button
+                        </label>
+                        <input
+                          value={draftSettings.heroPrimaryCta}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, heroPrimaryCta: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="Open handbook"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Secondary Button
+                        </label>
+                        <input
+                          value={draftSettings.heroSecondaryCta}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, heroSecondaryCta: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="Open maps"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="editorial-card p-4 md:p-5">
+                    <div className="eyebrow">Cover Details</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Cover Headline
+                        </label>
+                        <textarea
+                          value={draftSettings.coverHeadline}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, coverHeadline: event.target.value }))}
+                          className="editorial-textarea w-full"
+                          style={{ minHeight: '5rem' }}
+                          placeholder={'Add your\nown story'}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Marquee Items
+                        </label>
+                        <input
+                          value={draftSettings.marqueeItems.join(', ')}
+                          onChange={(event) =>
+                            setDraftSettings((current) => ({
+                              ...current,
+                              marqueeItems: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                            }))
+                          }
+                          className="editorial-input w-full"
+                          placeholder="Tokyo, Temples, Food, Maps, Notes"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Cover Status Empty
+                        </label>
+                        <input
+                          value={draftSettings.coverStatusEmpty}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, coverStatusEmpty: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="No cities yet"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Cover Status Filled
+                        </label>
+                        <input
+                          value={draftSettings.coverStatusFilled}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, coverStatusFilled: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="{cities}"
+                        />
+                        <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Use <code>{'{cities}'}</code> to insert the trip cities automatically.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Cover Mode Empty
+                        </label>
+                        <input
+                          value={draftSettings.coverModeEmpty}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, coverModeEmpty: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="starter"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                          Cover Mode Filled
+                        </label>
+                        <input
+                          value={draftSettings.coverModeFilled}
+                          onChange={(event) => setDraftSettings((current) => ({ ...current, coverModeFilled: event.target.value }))}
+                          className="editorial-input w-full"
+                          placeholder="handbook"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="xl:w-2/5 space-y-4">
+                  <div className="editorial-card p-4 md:p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="eyebrow">Cover Image</div>
+                        <h3 className="font-display text-2xl sm:text-3xl mt-3">Upload your own photo</h3>
+                      </div>
+                    </div>
+
+                    <div
+                      className="mt-5 rounded-[2rem] overflow-hidden min-h-48 sm:min-h-72 flex items-center justify-center text-center"
+                      style={{ backgroundColor: 'var(--bg)', border: '1px dashed var(--border)' }}
+                    >
+                      {draftSettings.coverImage ? (
+                        <img src={draftSettings.coverImage} alt="Trip cover preview" className="w-full h-48 sm:h-72 object-cover" />
+                      ) : (
+                        <div className="px-6">
+                          <ImagePlus className="w-8 h-8 mx-auto" style={{ color: 'var(--accent)' }} />
+                          <p className="mt-4 text-sm" style={{ color: 'var(--ink-muted)' }}>
+                            Upload a hero image to replace the placeholder cover and make the handbook feel personal immediately.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-3 mt-5">
+                      <label className="pill-btn pill-primary cursor-pointer">
+                        <ImagePlus className="w-4 h-4" />
+                        Upload image
+                        <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
+                      </label>
+
+                      <button onClick={handleResetCover} className="pill-btn pill-ghost" type="button">
+                        <Trash2 className="w-4 h-4" />
+                        Remove image
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="editorial-card p-4 md:p-5">
+                    <div className="eyebrow">Quick Reset</div>
+                    <h3 className="font-display text-2xl sm:text-3xl mt-3">Reset the form</h3>
+                    <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                      Revert this editing session back to the last saved handbook settings.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTitle(itinerary.name);
+                        setDescription(itinerary.description);
+                        setCities(itinerary.cities.join(', '));
+                        setDraftSettings(mergeTripSettings(settings));
+                      }}
+                      className="pill-btn pill-ghost mt-5"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      Revert unsaved edits
+                    </button>
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div
-                className="mt-5 rounded-[2rem] overflow-hidden min-h-56 sm:min-h-72 flex items-center justify-center text-center"
-                style={{ backgroundColor: 'var(--bg)', border: '1px dashed var(--border)' }}
-              >
-                {coverImage ? (
-                  <img src={coverImage} alt="Trip cover preview" className="w-full h-56 sm:h-72 object-cover" />
-                ) : (
-                  <div className="px-6">
-                    <ImagePlus className="w-8 h-8 mx-auto" style={{ color: 'var(--accent)' }} />
-                    <p className="mt-4 text-sm" style={{ color: 'var(--ink-muted)' }}>
-                      Upload a hero image to replace the placeholder cover.
+            {activeSection === 'copy' && (
+              <div className="space-y-4">
+                <div className="editorial-card p-4 md:p-5">
+                  <div className="eyebrow">Navigation Labels</div>
+                  <h3 className="font-display text-2xl sm:text-3xl mt-3">Name the handbook sections clearly.</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-5">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Itinerary Tab</label>
+                      <input value={draftSettings.labels.itineraryTab} onChange={(event) => updateLabel('itineraryTab', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Maps Tab</label>
+                      <input value={draftSettings.labels.mapsTab} onChange={(event) => updateLabel('mapsTab', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Draft Tab</label>
+                      <input value={draftSettings.labels.draftTab} onChange={(event) => updateLabel('draftTab', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Budget Tab</label>
+                      <input value={draftSettings.labels.budgetTab} onChange={(event) => updateLabel('budgetTab', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Checklist Tab</label>
+                      <input value={draftSettings.labels.checklistTab} onChange={(event) => updateLabel('checklistTab', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Documents Tab</label>
+                      <input value={draftSettings.labels.documentsTab} onChange={(event) => updateLabel('documentsTab', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Photos Tab</label>
+                      <input value={draftSettings.labels.photosTab} onChange={(event) => updateLabel('photosTab', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2 xl:col-span-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Search Placeholder</label>
+                      <input value={draftSettings.labels.searchPlaceholder} onChange={(event) => updateLabel('searchPlaceholder', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="editorial-card p-4 md:p-5">
+                  <div className="eyebrow">Itinerary Copy</div>
+                  <h3 className="font-display text-2xl sm:text-3xl mt-3">Tune the trip language used across the planning views.</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-5">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Overview Eyebrow</label>
+                      <input value={draftSettings.labels.overviewEyebrow} onChange={(event) => updateLabel('overviewEyebrow', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Back Button</label>
+                      <input value={draftSettings.labels.backToOverview} onChange={(event) => updateLabel('backToOverview', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Customize Button</label>
+                      <input value={draftSettings.labels.customizePlan} onChange={(event) => updateLabel('customizePlan', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Done Button</label>
+                      <input value={draftSettings.labels.doneCustomizing} onChange={(event) => updateLabel('doneCustomizing', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Reset Button</label>
+                      <input value={draftSettings.labels.resetPlan} onChange={(event) => updateLabel('resetPlan', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Photos Button</label>
+                      <input value={draftSettings.labels.photosButton} onChange={(event) => updateLabel('photosButton', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Day Label</label>
+                      <input value={draftSettings.labels.dayLabel} onChange={(event) => updateLabel('dayLabel', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Days Badge Label</label>
+                      <input value={draftSettings.labels.daysLabel} onChange={(event) => updateLabel('daysLabel', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Current Location Label</label>
+                      <input value={draftSettings.labels.currentLocationLabel} onChange={(event) => updateLabel('currentLocationLabel', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Spots Suffix</label>
+                      <input value={draftSettings.labels.spotsSuffix} onChange={(event) => updateLabel('spotsSuffix', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Map Action Label</label>
+                      <input value={draftSettings.labels.openMapLabel} onChange={(event) => updateLabel('openMapLabel', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Activity Photos Label</label>
+                      <input value={draftSettings.labels.activityPhotosLabel} onChange={(event) => updateLabel('activityPhotosLabel', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2 xl:col-span-3">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Filled Overview Intro</label>
+                      <input value={draftSettings.labels.overviewIntroFilled} onChange={(event) => updateLabel('overviewIntroFilled', event.target.value)} className="editorial-input w-full" />
+                      <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Use <code>{'{cities}'}</code> to insert the current trip cities.</p>
+                    </div>
+                    <div className="space-y-2 xl:col-span-3">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Empty Overview Intro</label>
+                      <input value={draftSettings.labels.overviewIntroEmpty} onChange={(event) => updateLabel('overviewIntroEmpty', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2 xl:col-span-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Delete Confirmation</label>
+                      <input value={draftSettings.labels.deleteActivityConfirm} onChange={(event) => updateLabel('deleteActivityConfirm', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>Delete Label</label>
+                      <input value={draftSettings.labels.deleteActivityLabel} onChange={(event) => updateLabel('deleteActivityLabel', event.target.value)} className="editorial-input w-full" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSection === 'theme' && (
+              <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_320px] gap-4 md:gap-5 items-start">
+                <div className="editorial-card p-4 md:p-5" style={themePreviewStyle}>
+                  <div className="flex items-center gap-2">
+                    <Palette className="w-4 h-4" style={{ color: 'var(--accent)' }} />
+                    <div className="eyebrow">Theme Tokens</div>
+                  </div>
+                  <h3 className="font-display text-2xl sm:text-3xl mt-3">Shape the mood of this handbook.</h3>
+                  <p className="mt-3 text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
+                    Set the palette once and the hero, cards, accents, and supporting UI all follow the same tone.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 mt-8">
+                    {([
+                      ['bg', 'Background'],
+                      ['bgElevated', 'Elevated Surface'],
+                      ['ink', 'Text'],
+                      ['inkMuted', 'Muted Text'],
+                      ['accent', 'Accent'],
+                      ['accentSoft', 'Accent Soft'],
+                    ] as const).map(([key, label]) => (
+                      <ThemeTokenField
+                        key={key}
+                        tokenKey={key}
+                        label={label}
+                        description={THEME_TOKEN_DESCRIPTIONS[key]}
+                        value={draftSettings.theme[key]}
+                        onChange={(value) => updateTheme(key, value)}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4 xl:sticky xl:top-24">
+                  <div
+                    className="rounded-2xl p-4"
+                    style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="eyebrow">Effects</div>
+                        <div className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>Immersive visual effects</div>
+                        <div className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                          Turn on grain and the custom cursor. Keep this off if you want the smoothest performance.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={draftSettings.immersiveEffects}
+                        className="editorial-toggle shrink-0 mt-1"
+                        data-checked={draftSettings.immersiveEffects ? 'true' : 'false'}
+                        onClick={() =>
+                          setDraftSettings((current) => ({ ...current, immersiveEffects: !current.immersiveEffects }))
+                        }
+                      >
+                        <span className="editorial-toggle-thumb" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="editorial-card p-4 md:p-5">
+                    <div className="eyebrow">Palette Notes</div>
+                    <h3 className="font-display text-2xl mt-3">A calmer system reads better.</h3>
+                    <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                      Keep strong contrast between background and text, then use the accent sparingly for actions and emphasis. That usually keeps the editorial tone intact.
                     </p>
                   </div>
-                )}
+                </div>
               </div>
-
-              <div className="flex flex-wrap gap-3 mt-5">
-                <label className="pill-btn pill-primary cursor-pointer">
-                  <ImagePlus className="w-4 h-4" />
-                  Upload image
-                  <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
-                </label>
-
-                <button onClick={handleResetCover} className="pill-btn pill-ghost" type="button">
-                  <Trash2 className="w-4 h-4" />
-                  Remove image
-                </button>
-              </div>
-            </div>
-
-            <div className="editorial-card p-5">
-              <div className="eyebrow">Quick Reset</div>
-              <h3 className="font-display text-3xl mt-3">Reset the form</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setTitle(itinerary.name);
-                  setDescription(itinerary.description);
-                  setCities(itinerary.cities.join(', '));
-                  setHeroEyebrow(settings.heroEyebrow);
-                  setHeroHeadline(settings.heroHeadline);
-                  setCoverLabel(settings.coverLabel);
-                  setMarqueeItems(settings.marqueeItems.join(', '));
-                  setCoverImage(settings.coverImage);
-                  setImmersiveEffects(settings.immersiveEffects);
-                }}
-                className="pill-btn pill-ghost mt-5"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Revert unsaved edits
-              </button>
-            </div>
+            )}
           </div>
         </div>
       </div>

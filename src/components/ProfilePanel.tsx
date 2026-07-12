@@ -124,11 +124,11 @@ export function ProfilePanel() {
 
   return (
     <section className="w-full">
-      <div className="editorial-card p-6 md:p-8">
+      <div className="editorial-card p-4 sm:p-5 md:p-8">
         <div className="flex flex-col sm:flex-row items-start sm:items-start justify-between gap-4">
           <div>
             <div className="eyebrow">Profile</div>
-            <h2 className="font-display text-4xl md:text-5xl mt-4" style={{ color: 'var(--ink)' }}>
+            <h2 className="font-display text-3xl sm:text-4xl md:text-5xl mt-4 leading-[0.95]" style={{ color: 'var(--ink)' }}>
               Edit your personal details.
             </h2>
             <p className="mt-3 max-w-2xl text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
@@ -153,14 +153,14 @@ export function ProfilePanel() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 xl:grid-cols-[0.8fr_1.2fr] gap-6 mt-8">
-          <div className="space-y-4">
-            <div className="editorial-card p-5">
+        <div className="flex flex-col xl:flex-row gap-6 md:gap-10 mt-6 md:mt-8">
+          <div className="xl:w-1/3 shrink-0">
+            <div className="editorial-card p-4 md:p-5">
               <div className="eyebrow">Photo</div>
-              <h3 className="font-display text-3xl mt-3">Profile image</h3>
+              <h3 className="font-display text-2xl sm:text-3xl mt-3">Profile image</h3>
 
               <div
-                className="mt-5 rounded-[2rem] overflow-hidden aspect-square flex items-center justify-center text-center"
+                className="mt-5 rounded-[2rem] overflow-hidden aspect-square min-h-48 flex items-center justify-center text-center"
                 style={{ backgroundColor: 'var(--bg)', border: '1px dashed var(--border)' }}
               >
                 {profile.avatarImage ? (
@@ -176,12 +176,12 @@ export function ProfilePanel() {
               </div>
 
               <div className="flex flex-wrap gap-3 mt-5">
-                <label className="pill-btn pill-primary cursor-pointer">
+                <label className="pill-btn pill-primary cursor-pointer w-full justify-center">
                   <ImagePlus className="w-4 h-4" />
                   Upload image
                   <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
                 </label>
-                <button type="button" className="pill-btn pill-soft" onClick={() => updateField('avatarImage', null)}>
+                <button type="button" className="pill-btn pill-soft w-full justify-center" onClick={() => updateField('avatarImage', null)}>
                   <Trash2 className="w-4 h-4" />
                   Remove image
                 </button>
@@ -189,8 +189,8 @@ export function ProfilePanel() {
             </div>
           </div>
 
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="xl:w-2/3 space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                   Display Name

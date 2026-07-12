@@ -9,6 +9,8 @@ import { getPhotos, subscribeToPhotoChanges, syncAllPhotosFromRemote } from '../
 import { PhotoGallery } from './PhotoGallery';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
+import { applyTemplate } from '../lib/tripSettings';
+import type { TripAppSettings } from '../lib/tripSettings';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -321,11 +323,12 @@ const ActivityIcon = ({ type }: { type: string }) => {
   }
 };
 
-const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: { 
+const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: { 
   activity: Activity; 
   isEditing: boolean;
   onEdit?: (updated: Activity) => void;
   onDelete?: () => void;
+  settings: TripAppSettings;
 }) => {
   const [editedActivity, setEditedActivity] = useState(activity);
   const [showIconPicker, setShowIconPicker] = useState(false);
@@ -759,7 +762,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
               rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
             >
-              <ExternalLink className="w-3.5 h-3.5" /> Google Maps
+              <ExternalLink className="w-3.5 h-3.5" /> {settings.labels.openMapLabel}
             </a>
             <a 
               href={`https://www.google.com/search?q=${encodeURIComponent(editedActivity.name + ' ' + (editedActivity.location || ''))}&tbm=isch`}
@@ -767,7 +770,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
               rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
             >
-              <Camera className="w-3.5 h-3.5" /> Photos
+              <Camera className="w-3.5 h-3.5" /> {settings.labels.activityPhotosLabel}
             </a>
           </div>
         )}
@@ -777,7 +780,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
             onClick={onDelete}
             className="px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
           >
-            Delete
+            {settings.labels.deleteActivityLabel}
           </button>
           <button
             onClick={() => onEdit?.({ ...editedActivity, rating: normalizeActivityRating(editedActivity.rating) })}
@@ -802,7 +805,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
       >
         <ExternalLink className="w-3 h-3 shrink-0" />
         <span className="max-w-xs ml-1.5 md:max-w-0 md:ml-0 md:overflow-hidden md:group-hover/btn:max-w-xs md:group-hover/btn:ml-1.5 transition-all duration-300 ease-in-out whitespace-nowrap">
-          Map
+          {settings.labels.openMapLabel}
         </span>
       </a>
       <a
@@ -814,7 +817,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
       >
         <Camera className="w-3 h-3 shrink-0" />
         <span className="max-w-xs ml-1.5 md:max-w-0 md:ml-0 md:overflow-hidden md:group-hover/btn:max-w-xs md:group-hover/btn:ml-1.5 transition-all duration-300 ease-in-out whitespace-nowrap">
-          Photos
+          {settings.labels.activityPhotosLabel}
         </span>
       </a>
       <button
@@ -1140,9 +1143,10 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 // ... (existing imports)
 
-export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }: { 
+export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, settings }: {
   itinerary: Itinerary;
   onItineraryChange?: (itinerary: Itinerary) => void;
+  settings: TripAppSettings;
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newActivity, setNewActivity] = useState<Partial<Activity>>({
@@ -1196,6 +1200,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
   // Photo Gallery State
   const [galleryDay, setGalleryDay] = useState<number | null>(null);
   const [dayPhotos, setDayPhotos] = useState<Record<number, DayPhoto[]>>({});
+  const labels = settings.labels;
 
   // Initialize state with lazy loading from localStorage
   const [customItinerary, setCustomItinerary] = useState<Itinerary>(() => {
@@ -1410,7 +1415,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
   };
 
   const handleDeleteActivity = (dayIndex: number, activityIndex: number) => {
-    if (window.confirm('Delete this activity?')) {
+    if (window.confirm(labels.deleteActivityConfirm)) {
       const updatedDays = customItinerary.days.map((day, idx) => {
         if (idx !== dayIndex) return day;
         return {
@@ -1762,14 +1767,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
           <input
             type="text"
             className="editorial-input block w-full" style={{ paddingLeft: '2.75rem' }}
-            placeholder="Search itinerary or locations..."
+            placeholder={labels.searchPlaceholder}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
 
         <div className="text-center space-y-4">
-          <span className="eyebrow">The itinerary · day by day</span>
+          <span className="eyebrow">{labels.overviewEyebrow}</span>
           {isEditingMode && isTitleEditing ? (
             <div className="flex items-center justify-center gap-2">
               <input
@@ -1803,15 +1808,15 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                 }
               }}
             >
-              {customItinerary.name || `${customItinerary.days.length}-Day Trip`}
+            {customItinerary.name || `${customItinerary.days.length}-${labels.daysLabel}`}
               {isEditingMode && <Edit2 className="w-5 h-5 opacity-50" />}
             </h2>
           )}
 
           <p className="text-base md:text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
             {customItinerary.cities.length > 0
-              ? <>A day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span>.</>
-              : 'A blank day-by-day field guide ready for your trip details.'}
+              ? applyTemplate(labels.overviewIntroFilled, { cities: customItinerary.cities.join(' & ') })
+              : labels.overviewIntroEmpty}
           </p>
           
           <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mt-4">
@@ -1825,7 +1830,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
               )}
             >
               {isEditingMode ? <Save className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
-              {isEditingMode ? 'Done Customizing' : 'Customize Plan'}
+              {isEditingMode ? labels.doneCustomizing : labels.customizePlan}
             </button>
             
             {isEditingMode && (
@@ -1834,7 +1839,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                 className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-3xl text-sm font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 transition-all"
               >
                 <RefreshCw className="w-4 h-4" />
-                Reset
+                {labels.resetPlan}
               </button>
             )}
           </div>
@@ -1994,7 +1999,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                             )}
                             <div className="text-[11px] md:text-xs bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg group-hover:bg-rose-50 dark:group-hover:bg-rose-900/30 group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors shrink-0 flex items-center gap-1.5">
                               <Utensils className="w-3 h-3" />
-                              {day.activities.length} spots
+                              {day.activities.length} {labels.spotsSuffix}
                             </div>
                           </div>
 
@@ -2037,7 +2042,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
           onClick={() => setSelectedDay(null)}
           className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-medium px-4 py-2 rounded-3xl hover:bg-white dark:hover:bg-slate-800"
         >
-          <ChevronLeft className="w-5 h-5" /> Back to Overview
+          <ChevronLeft className="w-5 h-5" /> {labels.backToOverview}
         </button>
 
         <div className="flex items-center gap-2">
@@ -2051,7 +2056,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
           )}
         >
           {isEditingMode ? <Save className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
-          <span className="hidden sm:inline">{isEditingMode ? 'Done' : 'Customize'}</span>
+          <span className="hidden sm:inline">{isEditingMode ? labels.doneCustomizing : labels.customizePlan}</span>
         </button>
 
         <button
@@ -2059,7 +2064,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
           className="flex items-center gap-2 px-3 md:px-4 py-2 rounded-3xl text-sm font-medium bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-500/50 hover:text-rose-500 transition-all"
         >
           <ImageIcon className="w-4 h-4" />
-          <span className="hidden sm:inline">Photos</span>
+          <span className="hidden sm:inline">{labels.photosButton}</span>
           {dayPhotos[selectedDay!] && dayPhotos[selectedDay!].length > 0 && (
             <span className="w-5 h-5 rounded-full bg-rose-500 text-white text-xs flex items-center justify-center">
               {dayPhotos[selectedDay!].length}
@@ -2254,7 +2259,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                 selectedDay === day.day 
                   ? "text-rose-400 dark:text-white" 
                   : "text-rose-400"
-              )}>Day</span> {day.day}
+              )}>{labels.dayLabel}</span> {day.day}
             </div>
             <div className="text-[10px] md:text-xs truncate font-medium opacity-80">
               {day.city}
@@ -2279,7 +2284,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
               <MapPin className="w-20 h-20 md:w-32 md:h-32 text-slate-900 dark:text-white" />
             </div>
             <div className="relative z-10">
-              <div className="text-[10px] md:text-xs font-bold text-rose-500 uppercase tracking-widest mb-1 md:mb-2">Current Location</div>
+              <div className="text-[10px] md:text-xs font-bold text-rose-500 uppercase tracking-widest mb-1 md:mb-2">{labels.currentLocationLabel}</div>
               
               {isEditingMode && isTitleEditing ? (
                 <div className="flex items-center gap-2 mb-2 md:mb-3">
@@ -2385,6 +2390,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                   isEditing={isEditingMode && editingActivityIndex === originalIndex}
                   onEdit={(updated) => handleUpdateActivity(currentDayIndex, originalIndex, updated)}
                   onDelete={() => handleDeleteActivity(currentDayIndex, originalIndex)}
+                  settings={settings}
                 />
                 
                 {isEditingMode && editingActivityIndex !== originalIndex && (

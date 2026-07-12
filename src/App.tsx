@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import { itineraries } from './data';
 import type { Itinerary, DayPhoto } from './data';
 import { ItineraryView } from './components/ItineraryView';
@@ -28,8 +29,9 @@ import { useAuth } from './contexts/AuthContext';
 import { Auth } from './components/Auth';
 import { Dashboard } from './components/Dashboard';
 import { SettingsPanel } from './components/SettingsPanel';
-import type { TripAppSettings } from './components/SettingsPanel';
 import { ProfilePanel } from './components/ProfilePanel';
+import { DEFAULT_TRIP_SETTINGS, applyTemplate, mergeTripSettings } from './lib/tripSettings';
+import type { TripAppSettings } from './lib/tripSettings';
 
 interface CloudBackupSnapshot {
   kind: 'trip-backup-v1';
@@ -57,15 +59,6 @@ interface CloudBackupVersion {
   summaryText: string;
 }
 
-const DEFAULT_TRIP_SETTINGS: TripAppSettings = {
-  heroEyebrow: 'A personalized travel starter',
-  heroHeadline: 'Plan your next trip your way.',
-  coverLabel: 'Custom cover',
-  marqueeItems: ['Travel Handbook', 'Plans', 'Notes', 'Maps', 'Photos'],
-  coverImage: null,
-  immersiveEffects: false,
-};
-
 const createStarterItinerary = (id: string): Itinerary => ({
   ...itineraries[0],
   id,
@@ -81,6 +74,7 @@ function App() {
   const { user, isLoading, isDemoUser, isLocalTestUser, signOut } = useAuth();
   const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'settings'>('itinerary');
+  const [settingsView, setSettingsView] = useState<'handbook' | 'profile'>('handbook');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('hasVisited'));
   const [showRestoreModal, setShowRestoreModal] = useState(false);
@@ -160,11 +154,7 @@ function App() {
   useEffect(() => {
     if (!settingsStorageKey) return;
     const storedSettings = loadFromStorage<TripAppSettings>(settingsStorageKey);
-    setTripSettings({
-      ...DEFAULT_TRIP_SETTINGS,
-      ...storedSettings,
-      marqueeItems: storedSettings?.marqueeItems?.length ? storedSettings.marqueeItems : DEFAULT_TRIP_SETTINGS.marqueeItems,
-    });
+    setTripSettings(mergeTripSettings(storedSettings));
     settingsHydratedRef.current = true;
   }, [settingsStorageKey]);
 
@@ -337,13 +327,13 @@ function App() {
   };
 
   const tabs = [
-    { id: 'itinerary', label: 'Itinerary', icon: Calendar },
-    { id: 'maps', label: 'Maps', icon: Map },
-    { id: 'draft', label: 'Draft', icon: BookOpen },
-    { id: 'budget', label: 'Budget', icon: Wallet },
-    { id: 'checklist', label: 'Checklist', icon: CheckSquare },
-    { id: 'documents', label: 'Documents', icon: FileText },
-    { id: 'photos', label: 'Photo Wall', icon: ImageIcon },
+    { id: 'itinerary', label: tripSettings.labels.itineraryTab, icon: Calendar },
+    { id: 'maps', label: tripSettings.labels.mapsTab, icon: Map },
+    { id: 'draft', label: tripSettings.labels.draftTab, icon: BookOpen },
+    { id: 'budget', label: tripSettings.labels.budgetTab, icon: Wallet },
+    { id: 'checklist', label: tripSettings.labels.checklistTab, icon: CheckSquare },
+    { id: 'documents', label: tripSettings.labels.documentsTab, icon: FileText },
+    { id: 'photos', label: tripSettings.labels.photosTab, icon: ImageIcon },
   ] as const;
 
   /** Documents only appear in the hamburger Quick Menu on small screens, not the bottom pill. */
@@ -614,8 +604,23 @@ function App() {
     return <Dashboard onSelectTrip={setActiveItineraryId} />;
   }
 
+  const tripThemeStyle = {
+    '--bg': tripSettings.theme.bg,
+    '--bg-elevated': tripSettings.theme.bgElevated,
+    '--ink': tripSettings.theme.ink,
+    '--ink-muted': tripSettings.theme.inkMuted,
+    '--accent': tripSettings.theme.accent,
+    '--accent-soft': tripSettings.theme.accentSoft,
+  } as CSSProperties;
+
+  const coverStatusLabel =
+    displayItinerary.cities.length > 0
+      ? applyTemplate(tripSettings.coverStatusFilled, { cities: displayItinerary.cities.join(' · ') })
+      : tripSettings.coverStatusEmpty;
+  const coverModeLabel = displayItinerary.cities.length > 0 ? tripSettings.coverModeFilled : tripSettings.coverModeEmpty;
+
   return (
-    <div className="min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
+    <div className="min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden" style={{ ...tripThemeStyle, backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
 
       {/* Scroll progress bar */}
       <motion.div
@@ -816,7 +821,7 @@ function App() {
               className="mt-6 max-w-xl text-base md:text-lg leading-relaxed"
               style={{ color: 'var(--ink-muted)' }}
             >
-              {displayItinerary.description || 'Add cities, days, notes, budgets, maps, and documents as you build your travel plan.'}
+              {displayItinerary.description || tripSettings.heroDescription}
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 16 }}
@@ -825,10 +830,10 @@ function App() {
               className="mt-8 flex flex-wrap items-center gap-3"
             >
               <button onClick={() => handleTabChange('itinerary')} className="pill-btn pill-primary">
-                Open handbook
+                {tripSettings.heroPrimaryCta}
               </button>
               <button onClick={() => handleTabChange('maps')} className="pill-btn pill-ghost">
-                Open maps
+                {tripSettings.heroSecondaryCta}
               </button>
             </motion.div>
           </div>
@@ -863,20 +868,18 @@ function App() {
                 >
                   <div>
                     <div className="eyebrow justify-center">{tripSettings.coverLabel}</div>
-                    <div className="mt-4 font-display text-3xl sm:text-4xl md:text-5xl" style={{ color: 'var(--ink)' }}>
-                      Add your
-                      <br />
-                      own story
+                    <div className="mt-4 font-display text-3xl sm:text-4xl md:text-5xl whitespace-pre-line" style={{ color: 'var(--ink)' }}>
+                      {tripSettings.coverHeadline}
                     </div>
                   </div>
                 </div>
               )}
               <div className="flex items-center justify-between px-2 pt-3 pb-1">
                 <span className="font-display-italic text-lg" style={{ color: 'var(--ink)' }}>
-                  {displayItinerary.cities.length > 0 ? displayItinerary.cities.join(' · ') : 'No cities yet'}
+                  {coverStatusLabel}
                 </span>
                 <span className="text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--ink-muted)' }}>
-                  {displayItinerary.cities.length > 0 ? 'handbook' : 'starter'}
+                  {coverModeLabel}
                 </span>
               </div>
             </div>
@@ -889,7 +892,7 @@ function App() {
               style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
             >
               <span className="font-display text-2xl sm:text-3xl md:text-4xl leading-none">{displayItinerary.days.length}</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">days</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{tripSettings.labels.daysLabel}</span>
             </motion.div>
           </motion.div>
         </div>
@@ -927,6 +930,7 @@ function App() {
               <ItineraryView 
                 itinerary={displayItinerary} 
                 onItineraryChange={setCustomItinerary}
+                settings={tripSettings}
               />
             )}
             {activeTab === 'maps' && <Maps itinerary={displayItinerary} onItineraryChange={setCustomItinerary} />}
@@ -941,13 +945,46 @@ function App() {
             {activeTab === 'documents' && <Documents />}
             {activeTab === 'photos' && <PhotoWall itinerary={displayItinerary} />}
             {activeTab === 'settings' && (
-              <div className="grid grid-cols-1 2xl:grid-cols-[1.15fr_0.85fr] gap-6 xl:gap-8 items-start">
-                <SettingsPanel
-                  itinerary={displayItinerary}
-                  settings={tripSettings}
-                  onSave={handleSaveTripSettings}
-                />
-                <ProfilePanel />
+              <div className="space-y-4">
+                <div className="xl:hidden flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSettingsView('handbook')}
+                    className="pill-btn justify-center flex-1"
+                    style={{
+                      backgroundColor: settingsView === 'handbook' ? 'var(--accent)' : 'var(--bg-elevated)',
+                      color: settingsView === 'handbook' ? '#0F0E0D' : 'var(--ink)',
+                      border: settingsView === 'handbook' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    }}
+                  >
+                    Handbook Settings
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsView('profile')}
+                    className="pill-btn justify-center flex-1"
+                    style={{
+                      backgroundColor: settingsView === 'profile' ? 'var(--accent)' : 'var(--bg-elevated)',
+                      color: settingsView === 'profile' ? '#0F0E0D' : 'var(--ink)',
+                      border: settingsView === 'profile' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    }}
+                  >
+                    Profile
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-6 xl:gap-10 items-start max-w-[1200px] mx-auto">
+                  <div className={settingsView === 'handbook' ? 'w-full block' : 'hidden xl:block w-full'}>
+                    <SettingsPanel
+                      itinerary={displayItinerary}
+                      settings={tripSettings}
+                      onSave={handleSaveTripSettings}
+                    />
+                  </div>
+                  <div className={settingsView === 'profile' ? 'w-full block' : 'hidden xl:block w-full'}>
+                    <ProfilePanel />
+                  </div>
+                </div>
               </div>
             )}
           </motion.div>
