@@ -12,7 +12,7 @@ import { PhotoWall } from './components/PhotoWall';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, SlidersHorizontal, ChevronLeft, LogOut } from 'lucide-react';
+import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, SlidersHorizontal, ChevronLeft, LogOut, UserRound } from 'lucide-react';
 import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
@@ -73,8 +73,7 @@ const createStarterItinerary = (id: string): Itinerary => ({
 function App() {
   const { user, isLoading, isDemoUser, isLocalTestUser, signOut } = useAuth();
   const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'settings'>('itinerary');
-  const [settingsView, setSettingsView] = useState<'handbook' | 'profile'>('handbook');
+  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'settings' | 'account'>('itinerary');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('hasVisited'));
   const [showRestoreModal, setShowRestoreModal] = useState(false);
@@ -748,10 +747,23 @@ function App() {
                 border: '1px solid var(--border)',
                 backgroundColor: activeTab === 'settings' ? 'var(--bg-elevated)' : 'transparent',
               }}
-              aria-label="Open settings"
+              aria-label="Open handbook settings"
               whileTap={{ scale: 0.9 }}
             >
               <SlidersHorizontal className="w-4 h-4" />
+            </motion.button>
+            <motion.button
+              onClick={() => handleTabChange('account')}
+              className="p-2 rounded-full"
+              style={{
+                color: activeTab === 'account' ? 'var(--accent)' : 'var(--ink)',
+                border: '1px solid var(--border)',
+                backgroundColor: activeTab === 'account' ? 'var(--bg-elevated)' : 'transparent',
+              }}
+              aria-label="Open account settings"
+              whileTap={{ scale: 0.9 }}
+            >
+              <UserRound className="w-4 h-4" />
             </motion.button>
             <motion.button
               onClick={signOut}
@@ -912,7 +924,7 @@ function App() {
         id="main-content"
         className={clsx(
           'mx-auto px-3 sm:px-6 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10',
-          activeTab === 'settings' ? 'max-w-[1500px]' : 'max-w-7xl'
+          activeTab === 'settings' ? 'max-w-[1500px]' : activeTab === 'account' ? 'max-w-[1200px]' : 'max-w-7xl'
         )}
       >
         
@@ -945,48 +957,13 @@ function App() {
             {activeTab === 'documents' && <Documents />}
             {activeTab === 'photos' && <PhotoWall itinerary={displayItinerary} />}
             {activeTab === 'settings' && (
-              <div className="space-y-4">
-                <div className="xl:hidden flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSettingsView('handbook')}
-                    className="pill-btn justify-center flex-1"
-                    style={{
-                      backgroundColor: settingsView === 'handbook' ? 'var(--accent)' : 'var(--bg-elevated)',
-                      color: settingsView === 'handbook' ? '#0F0E0D' : 'var(--ink)',
-                      border: settingsView === 'handbook' ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    }}
-                  >
-                    Handbook Settings
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSettingsView('profile')}
-                    className="pill-btn justify-center flex-1"
-                    style={{
-                      backgroundColor: settingsView === 'profile' ? 'var(--accent)' : 'var(--bg-elevated)',
-                      color: settingsView === 'profile' ? '#0F0E0D' : 'var(--ink)',
-                      border: settingsView === 'profile' ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    }}
-                  >
-                    Profile
-                  </button>
-                </div>
-
-                <div className="flex flex-col gap-6 xl:gap-10 items-start max-w-[1200px] mx-auto">
-                  <div className={settingsView === 'handbook' ? 'w-full block' : 'hidden xl:block w-full'}>
-                    <SettingsPanel
-                      itinerary={displayItinerary}
-                      settings={tripSettings}
-                      onSave={handleSaveTripSettings}
-                    />
-                  </div>
-                  <div className={settingsView === 'profile' ? 'w-full block' : 'hidden xl:block w-full'}>
-                    <ProfilePanel />
-                  </div>
-                </div>
-              </div>
+              <SettingsPanel
+                itinerary={displayItinerary}
+                settings={tripSettings}
+                onSave={handleSaveTripSettings}
+              />
             )}
+            {activeTab === 'account' && <ProfilePanel />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -1214,16 +1191,28 @@ function App() {
                 ))}
               </div>
 
-              <button
-                onClick={() => {
-                  handleTabChange('settings');
-                  setIsMenuOpen(false);
-                }}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-              >
-                <SlidersHorizontal className="w-4 h-4 text-rose-500" />
-                Settings & Profile
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    handleTabChange('settings');
+                    setIsMenuOpen(false);
+                  }}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <SlidersHorizontal className="w-4 h-4 text-rose-500" />
+                  Handbook
+                </button>
+                <button
+                  onClick={() => {
+                    handleTabChange('account');
+                    setIsMenuOpen(false);
+                  }}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <UserRound className="w-4 h-4 text-rose-500" />
+                  Account
+                </button>
+              </div>
 
               <button
                 onClick={() => {

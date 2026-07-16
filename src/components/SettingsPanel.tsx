@@ -271,12 +271,12 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
       <div className="editorial-card p-4 sm:p-5 md:p-8">
         <div className="flex flex-col sm:flex-row items-start sm:items-start justify-between gap-4">
           <div>
-            <div className="eyebrow">Global Settings</div>
+            <div className="eyebrow">Handbook Settings</div>
             <h2 className="font-display text-3xl sm:text-4xl md:text-5xl mt-4 leading-[0.95]" style={{ color: 'var(--ink)' }}>
               Make the handbook yours.
             </h2>
             <p className="mt-3 max-w-2xl text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
-              Customize the trip copy, labels, cover image, and color system so the handbook fits each plan instead of forcing one fixed template.
+              Customize the trip copy, labels, cover image, and color system for this handbook without mixing it with account or profile controls.
             </p>
           </div>
 
