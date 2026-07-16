@@ -1,9 +1,8 @@
 @import "tailwindcss";
 
-@variant dark (&:where(.dark, .dark *));
-
-@theme {
-  /* Jamm-inspired editorial tokens */
+/* Runtime theme variables (remapped to dark in .dark scope) */
+:root {
+  /* Editorial palette tokens */
   --color-cream: #FAF7F2;
   --color-cream-elevated: #FFFFFF;
   --color-ink: #0F0E0D;
@@ -12,24 +11,13 @@
   --color-accent-soft: #FFE4EE;
   --color-border-cream: #E8E1D5;
 
-  --color-cream-dark: #14110F;
-  --color-cream-elevated-dark: #1F1A17;
-  --color-ink-dark: #F5EFE4;
-  --color-ink-muted-dark: #A39B8C;
-  --color-accent-dark: #FF6B9A;
-  --color-accent-soft-dark: #3A1F2A;
-  --color-border-dark: #2C2521;
-
   /* Legacy aliases so existing code still compiles with new palette */
   --color-primary: #EE4D87;
   --color-secondary: #0F0E0D;
 
   --font-sans: 'Instrument Sans', 'Inter', system-ui, sans-serif;
   --font-serif: 'Instrument Serif', 'Times New Roman', serif;
-}
 
-/* Runtime theme variables (remapped to dark in .dark scope) */
-:root {
   --bg: #FAF7F2;
   --bg-elevated: #FFFFFF;
   --ink: #0F0E0D;
@@ -43,6 +31,14 @@
 }
 
 .dark {
+  --color-cream-dark: #14110F;
+  --color-cream-elevated-dark: #1F1A17;
+  --color-ink-dark: #F5EFE4;
+  --color-ink-muted-dark: #A39B8C;
+  --color-accent-dark: #FF6B9A;
+  --color-accent-soft-dark: #3A1F2A;
+  --color-border-dark: #2C2521;
+
   --bg: #14110F;
   --bg-elevated: #1F1A17;
   --ink: #F5EFE4;
