@@ -42,8 +42,8 @@ export interface ThemePalettePreset {
   id: string;
   name: string;
   description: string;
-  mode: ThemeMode;
-  theme: TripThemeSettings;
+  light: TripThemeSettings;
+  dark: TripThemeSettings;
 }
 
 export const DEFAULT_LIGHT_THEME: TripThemeSettings = {
@@ -64,77 +64,28 @@ export const DEFAULT_DARK_THEME: TripThemeSettings = {
   accentSoft: '#3A1F2A',
 };
 
-/** Curated palettes — filtered by light/dark mode in the settings UI. */
+/** Theme families with paired light + dark variants. One tap applies both. */
 export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
-  {
-    id: 'parchment',
-    name: 'Parchment',
-    description: 'Warm paper with a soft rose accent.',
-    mode: 'light',
-    theme: {
-      bg: '#FAF7F2',
-      bgElevated: '#FFFFFF',
-      ink: '#0F0E0D',
-      inkMuted: '#5C5853',
-      accent: '#EE4D87',
-      accentSoft: '#FFE4EE',
-    },
-  },
-  {
-    id: 'mist-linen',
-    name: 'Mist Linen',
-    description: 'Cool linen surfaces with a teal spark.',
-    mode: 'light',
-    theme: {
-      bg: '#F3F5F4',
-      bgElevated: '#FFFFFF',
-      ink: '#15201C',
-      inkMuted: '#5F6B66',
-      accent: '#2F7D6E',
-      accentSoft: '#DDEFEA',
-    },
-  },
-  {
-    id: 'sky-sheet',
-    name: 'Sky Sheet',
-    description: 'Bright pages with a coastal blue accent.',
-    mode: 'light',
-    theme: {
-      bg: '#F2F6F9',
-      bgElevated: '#FFFFFF',
-      ink: '#132033',
-      inkMuted: '#5C6B7A',
-      accent: '#3D8FB5',
-      accentSoft: '#D7EAF3',
-    },
-  },
-  {
-    id: 'sandstone',
-    name: 'Sandstone',
-    description: 'Sunlit sand with a honey accent.',
-    mode: 'light',
-    theme: {
-      bg: '#F7F0E8',
-      bgElevated: '#FFFBF6',
-      ink: '#1A140E',
-      inkMuted: '#6B655D',
-      accent: '#C8842A',
-      accentSoft: '#F3E2C8',
-    },
-  },
   {
     id: 'ember-rose',
     name: 'Ember Rose',
-    description: 'Warm charcoal with a soft rose accent.',
-    mode: 'dark',
-    theme: { ...DEFAULT_DARK_THEME },
+    description: 'Warm paper by day, charcoal rose by night.',
+    light: { ...DEFAULT_LIGHT_THEME },
+    dark: { ...DEFAULT_DARK_THEME },
   },
   {
     id: 'midnight-slate',
     name: 'Midnight Slate',
-    description: 'Cool ink surfaces with a coral spark.',
-    mode: 'dark',
-    theme: {
+    description: 'Cool mist in light mode, slate ink after dark.',
+    light: {
+      bg: '#F4F5F8',
+      bgElevated: '#FFFFFF',
+      ink: '#171A22',
+      inkMuted: '#667085',
+      accent: '#E7685D',
+      accentSoft: '#F7D6DD',
+    },
+    dark: {
       bg: '#171A22',
       bgElevated: '#232630',
       ink: '#F7F2EB',
@@ -144,11 +95,18 @@ export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
     },
   },
   {
-    id: 'forest-night',
-    name: 'Forest Night',
-    description: 'Deep green calm for quieter evenings.',
-    mode: 'dark',
-    theme: {
+    id: 'forest',
+    name: 'Forest',
+    description: 'Linen green calm that deepens at night.',
+    light: {
+      bg: '#F3F5F4',
+      bgElevated: '#FFFFFF',
+      ink: '#15201C',
+      inkMuted: '#5F6B66',
+      accent: '#2F7D6E',
+      accentSoft: '#DDEFEA',
+    },
+    dark: {
       bg: '#121714',
       bgElevated: '#1B221D',
       ink: '#EEF3EC',
@@ -158,11 +116,18 @@ export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
     },
   },
   {
-    id: 'coastal-ink',
-    name: 'Coastal Ink',
-    description: 'Sea-glass accents on deep navy paper.',
-    mode: 'dark',
-    theme: {
+    id: 'coastal',
+    name: 'Coastal',
+    description: 'Sky-sheet pages with deep navy evenings.',
+    light: {
+      bg: '#F2F6F9',
+      bgElevated: '#FFFFFF',
+      ink: '#132033',
+      inkMuted: '#5C6B7A',
+      accent: '#3D8FB5',
+      accentSoft: '#D7EAF3',
+    },
+    dark: {
       bg: '#10161C',
       bgElevated: '#182129',
       ink: '#EEF4F7',
@@ -172,11 +137,18 @@ export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
     },
   },
   {
-    id: 'amber-lamp',
-    name: 'Amber Lamp',
-    description: 'Lamp-lit warmth with a honey accent.',
-    mode: 'dark',
-    theme: {
+    id: 'amber',
+    name: 'Amber',
+    description: 'Sunlit sandstone that turns lamp-warm at night.',
+    light: {
+      bg: '#F7F0E8',
+      bgElevated: '#FFFBF6',
+      ink: '#1A140E',
+      inkMuted: '#6B655D',
+      accent: '#C8842A',
+      accentSoft: '#F3E2C8',
+    },
+    dark: {
       bg: '#16120C',
       bgElevated: '#221B13',
       ink: '#F8F0E3',
@@ -192,12 +164,26 @@ export const themesMatch = (a: TripThemeSettings, b: TripThemeSettings) =>
     (key) => a[key].toUpperCase() === b[key].toUpperCase(),
   );
 
-export const getPresetsForMode = (mode: ThemeMode) =>
-  THEME_PALETTE_PRESETS.filter((preset) => preset.mode === mode);
+export const getPresetVariant = (preset: ThemePalettePreset, mode: ThemeMode) =>
+  mode === 'light' ? preset.light : preset.dark;
 
-export const findMatchingThemePreset = (theme: TripThemeSettings, mode?: ThemeMode) => {
-  const pool = mode ? getPresetsForMode(mode) : THEME_PALETTE_PRESETS;
-  return pool.find((preset) => themesMatch(preset.theme, theme)) ?? null;
+export const findMatchingThemePreset = (
+  settings: Pick<TripAppSettings, 'theme' | 'lightTheme'>,
+  mode?: ThemeMode,
+) => {
+  if (mode) {
+    const current = mode === 'light' ? settings.lightTheme : settings.theme;
+    return (
+      THEME_PALETTE_PRESETS.find((preset) => themesMatch(getPresetVariant(preset, mode), current)) ?? null
+    );
+  }
+
+  return (
+    THEME_PALETTE_PRESETS.find(
+      (preset) =>
+        themesMatch(preset.light, settings.lightTheme) && themesMatch(preset.dark, settings.theme),
+    ) ?? null
+  );
 };
 
 export const getThemeForMode = (settings: Pick<TripAppSettings, 'theme' | 'lightTheme'>, mode: ThemeMode) =>

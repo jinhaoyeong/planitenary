@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties } from 'react';
 import { ImagePlus, RotateCcw, Save, Trash2, Palette } from 'lucide-react';
 import type { Itinerary } from '../data';
@@ -8,10 +8,11 @@ import {
   DEFAULT_LIGHT_THEME,
   DEFAULT_TRIP_SETTINGS,
   findMatchingThemePreset,
-  getPresetsForMode,
+  getPresetVariant,
   mergeTripSettings,
+  THEME_PALETTE_PRESETS,
 } from '../lib/tripSettings';
-import type { TripAppSettings, TripThemeSettings } from '../lib/tripSettings';
+import type { ThemePalettePreset, TripAppSettings, TripThemeSettings } from '../lib/tripSettings';
 
 interface SettingsPanelProps {
   itinerary: Itinerary;
@@ -280,34 +281,43 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
 
   const activePalette = theme === 'light' ? draftSettings.lightTheme : draftSettings.theme;
   const defaultPalette = theme === 'light' ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
-  const modePresets = useMemo(() => getPresetsForMode(theme), [theme]);
   const tokenSwatches = theme === 'light' ? LIGHT_TOKEN_SWATCHES : DARK_TOKEN_SWATCHES;
-  const activeThemePreset = findMatchingThemePreset(activePalette, theme);
+  const activeThemePreset = findMatchingThemePreset(draftSettings, theme);
+  const fullyMatchedPreset = findMatchingThemePreset(draftSettings);
 
-  const commitPalette = (palette: TripThemeSettings) => {
+  const commitPalettes = (next: { lightTheme: TripThemeSettings; theme: TripThemeSettings }) => {
     themePushRef.current = true;
     setDraftSettings((current) => {
-      const next =
-        theme === 'light'
-          ? { ...current, lightTheme: { ...palette } }
-          : { ...current, theme: { ...palette } };
+      const updated = {
+        ...current,
+        lightTheme: { ...next.lightTheme },
+        theme: { ...next.theme },
+      };
       onThemeLiveChange?.(
         mergeTripSettings({
           ...settings,
-          theme: next.theme,
-          lightTheme: next.lightTheme,
+          theme: updated.theme,
+          lightTheme: updated.lightTheme,
         }),
       );
-      return next;
+      return updated;
     });
+  };
+
+  const commitPalette = (palette: TripThemeSettings) => {
+    commitPalettes(
+      theme === 'light'
+        ? { lightTheme: palette, theme: draftSettings.theme }
+        : { lightTheme: draftSettings.lightTheme, theme: palette },
+    );
   };
 
   const updateTheme = (key: keyof TripThemeSettings, value: string) => {
     commitPalette({ ...activePalette, [key]: value });
   };
 
-  const applyThemePreset = (nextTheme: TripThemeSettings) => {
-    commitPalette(nextTheme);
+  const applyThemePreset = (preset: ThemePalettePreset) => {
+    commitPalettes({ lightTheme: preset.light, theme: preset.dark });
   };
 
   // Preview uses the palette being edited for the current mode, with explicit colors
@@ -782,31 +792,44 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
                     Shape the mood of this handbook.
                   </h3>
                   <p className="mt-3 text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-                    You are editing the {theme === 'light' ? 'light' : 'dark'} mode palette. Presets apply instantly; custom tokens still work the same way.
+                    Pick a theme once — it adapts automatically when you switch light and dark mode. Fine-tune tokens below anytime.
                   </p>
 
                   <div className="mt-6">
                     <div className="flex items-end justify-between gap-3">
                       <div>
                         <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
-                          {theme === 'light' ? 'Light Color Themes' : 'Dark Color Themes'}
+                          Color Themes
                         </div>
                         <p className="mt-1 text-sm" style={{ color: 'var(--ink-muted)' }}>
-                          {activeThemePreset
-                            ? `Using ${activeThemePreset.name}. Adjust any token below to make it custom.`
-                            : 'Custom palette — choose a preset, or keep editing tokens below.'}
+                          {fullyMatchedPreset
+                            ? `Using ${fullyMatchedPreset.name} for light and dark.`
+                            : activeThemePreset
+                              ? `Using ${activeThemePreset.name} in ${theme} mode. Custom edits may differ in the other mode.`
+                              : `Custom ${theme} palette — choose a preset to sync both modes, or keep editing tokens.`}
                         </p>
+                      </div>
+                      <div
+                        className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
+                        style={{
+                          backgroundColor: 'var(--bg)',
+                          color: 'var(--ink-muted)',
+                          border: '1px solid var(--border)',
+                        }}
+                      >
+                        Showing {theme}
                       </div>
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                      {modePresets.map((preset) => {
+                      {THEME_PALETTE_PRESETS.map((preset) => {
                         const active = activeThemePreset?.id === preset.id;
+                        const preview = getPresetVariant(preset, theme);
                         return (
                           <button
                             key={preset.id}
                             type="button"
-                            onClick={() => applyThemePreset(preset.theme)}
+                            onClick={() => applyThemePreset(preset)}
                             className="text-left rounded-2xl p-3 border transition-transform hover:-translate-y-0.5"
                             style={{
                               backgroundColor: active ? 'color-mix(in srgb, var(--accent-soft) 55%, var(--bg-elevated))' : 'var(--bg)',
@@ -820,10 +843,10 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
                               aria-hidden="true"
                             >
                               <div className="flex h-full">
-                                <span className="flex-1" style={{ backgroundColor: preset.theme.bg }} />
-                                <span className="flex-1" style={{ backgroundColor: preset.theme.bgElevated }} />
-                                <span className="w-1/4" style={{ backgroundColor: preset.theme.accent }} />
-                                <span className="w-1/5" style={{ backgroundColor: preset.theme.accentSoft }} />
+                                <span className="flex-1" style={{ backgroundColor: preview.bg }} />
+                                <span className="flex-1" style={{ backgroundColor: preview.bgElevated }} />
+                                <span className="w-1/4" style={{ backgroundColor: preview.accent }} />
+                                <span className="w-1/5" style={{ backgroundColor: preview.accentSoft }} />
                               </div>
                             </div>
                             <div className="mt-3 flex items-start justify-between gap-2">
@@ -897,7 +920,7 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
                       Custom Tokens
                     </div>
                     <p className="mt-1 text-sm max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-                      Fine-tune any color for {theme === 'light' ? 'light' : 'dark'} mode. Changing a token marks the palette as custom until you pick a preset again.
+                      Fine-tune colors for the current {theme} mode. Presets still keep a matching pair for the other mode until you edit them too.
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 mt-6">
                       {([
