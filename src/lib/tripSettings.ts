@@ -34,6 +34,103 @@ export interface TripThemeSettings {
   accentSoft: string;
 }
 
+export interface ThemePalettePreset {
+  id: string;
+  name: string;
+  description: string;
+  theme: TripThemeSettings;
+}
+
+/** Curated dark-mode palettes users can apply in one tap. */
+export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
+  {
+    id: 'ember-rose',
+    name: 'Ember Rose',
+    description: 'Warm charcoal with a soft rose accent.',
+    theme: {
+      bg: '#14110F',
+      bgElevated: '#1F1A17',
+      ink: '#F5EFE4',
+      inkMuted: '#A39B8C',
+      accent: '#FF6B9A',
+      accentSoft: '#3A1F2A',
+    },
+  },
+  {
+    id: 'midnight-slate',
+    name: 'Midnight Slate',
+    description: 'Cool ink surfaces with a coral spark.',
+    theme: {
+      bg: '#171A22',
+      bgElevated: '#232630',
+      ink: '#F7F2EB',
+      inkMuted: '#8E8678',
+      accent: '#E7685D',
+      accentSoft: '#41242C',
+    },
+  },
+  {
+    id: 'forest-night',
+    name: 'Forest Night',
+    description: 'Deep green calm for quieter evenings.',
+    theme: {
+      bg: '#121714',
+      bgElevated: '#1B221D',
+      ink: '#EEF3EC',
+      inkMuted: '#8FA093',
+      accent: '#2F7D6E',
+      accentSoft: '#1E332C',
+    },
+  },
+  {
+    id: 'coastal-ink',
+    name: 'Coastal Ink',
+    description: 'Sea-glass accents on deep navy paper.',
+    theme: {
+      bg: '#10161C',
+      bgElevated: '#182129',
+      ink: '#EEF4F7',
+      inkMuted: '#8A9AA6',
+      accent: '#3D8FB5',
+      accentSoft: '#1A303A',
+    },
+  },
+  {
+    id: 'amber-lamp',
+    name: 'Amber Lamp',
+    description: 'Lamp-lit warmth with a honey accent.',
+    theme: {
+      bg: '#16120C',
+      bgElevated: '#221B13',
+      ink: '#F8F0E3',
+      inkMuted: '#A89880',
+      accent: '#E0A045',
+      accentSoft: '#3A2C18',
+    },
+  },
+  {
+    id: 'parchment',
+    name: 'Parchment',
+    description: 'Light editorial paper for a brighter handbook.',
+    theme: {
+      bg: '#F7F0E8',
+      bgElevated: '#FFFFFF',
+      ink: '#0F0E0D',
+      inkMuted: '#5C5853',
+      accent: '#EE4D87',
+      accentSoft: '#FFE4EE',
+    },
+  },
+];
+
+export const themesMatch = (a: TripThemeSettings, b: TripThemeSettings) =>
+  (Object.keys(a) as Array<keyof TripThemeSettings>).every(
+    (key) => a[key].toUpperCase() === b[key].toUpperCase(),
+  );
+
+export const findMatchingThemePreset = (theme: TripThemeSettings) =>
+  THEME_PALETTE_PRESETS.find((preset) => themesMatch(preset.theme, theme)) ?? null;
+
 export interface TripAppSettings {
   heroEyebrow: string;
   heroHeadline: string;
@@ -94,14 +191,7 @@ export const DEFAULT_TRIP_SETTINGS: TripAppSettings = {
     deleteActivityLabel: 'Delete',
     deleteActivityConfirm: 'Delete this activity?',
   },
-  theme: {
-    bg: '#14110F',
-    bgElevated: '#1F1A17',
-    ink: '#F5EFE4',
-    inkMuted: '#A39B8C',
-    accent: '#FF6B9A',
-    accentSoft: '#3A1F2A',
-  },
+  theme: { ...THEME_PALETTE_PRESETS[0].theme },
 };
 
 export const mergeTripSettings = (settings?: Partial<TripAppSettings> | null): TripAppSettings => ({

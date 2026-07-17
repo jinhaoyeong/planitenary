@@ -3,8 +3,8 @@ import type { ChangeEvent, CSSProperties } from 'react';
 import { ImagePlus, RotateCcw, Save, Trash2, Palette } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { useTheme } from '../contexts/ThemeContext';
-import { DEFAULT_TRIP_SETTINGS, mergeTripSettings } from '../lib/tripSettings';
-import type { TripAppSettings } from '../lib/tripSettings';
+import { DEFAULT_TRIP_SETTINGS, findMatchingThemePreset, mergeTripSettings, THEME_PALETTE_PRESETS } from '../lib/tripSettings';
+import type { TripAppSettings, TripThemeSettings } from '../lib/tripSettings';
 
 interface SettingsPanelProps {
   itinerary: Itinerary;
@@ -256,6 +256,15 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
       },
     }));
   };
+
+  const applyThemePreset = (nextTheme: TripThemeSettings) => {
+    setDraftSettings((current) => ({
+      ...current,
+      theme: { ...nextTheme },
+    }));
+  };
+
+  const activeThemePreset = findMatchingThemePreset(draftSettings.theme);
 
   // Live preview of trip palette tokens. These tokens apply in dark mode in the app shell,
   // so the preview always renders with explicit surface + ink colors for readable contrast
@@ -731,9 +740,76 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                   </h3>
                   <p className="mt-3 text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
                     {theme === 'light'
-                      ? 'Edit the dark-mode palette here. The settings screen stays light; the preview below shows how the tokens read together.'
-                      : 'Set the palette once and the hero, cards, accents, and supporting UI all follow the same tone.'}
+                      ? 'Pick a preset or tune individual tokens. The settings screen stays light; the preview shows how the palette reads together.'
+                      : 'Pick a preset palette, or keep fine-tuning every token yourself.'}
                   </p>
+
+                  <div className="mt-6">
+                    <div className="flex items-end justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
+                          Color Themes
+                        </div>
+                        <p className="mt-1 text-sm" style={{ color: 'var(--ink-muted)' }}>
+                          {activeThemePreset
+                            ? `Using ${activeThemePreset.name}. Adjust any token below to make it custom.`
+                            : 'Custom palette — choose a preset, or keep editing tokens below.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                      {THEME_PALETTE_PRESETS.map((preset) => {
+                        const active = activeThemePreset?.id === preset.id;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => applyThemePreset(preset.theme)}
+                            className="text-left rounded-2xl p-3 border transition-transform hover:-translate-y-0.5"
+                            style={{
+                              backgroundColor: active ? 'color-mix(in srgb, var(--accent-soft) 55%, var(--bg-elevated))' : 'var(--bg)',
+                              borderColor: active ? 'var(--accent)' : 'var(--border)',
+                            }}
+                            aria-pressed={active}
+                          >
+                            <div
+                              className="h-12 w-full overflow-hidden rounded-xl border"
+                              style={{ borderColor: 'color-mix(in srgb, var(--ink) 10%, transparent)' }}
+                              aria-hidden="true"
+                            >
+                              <div className="flex h-full">
+                                <span className="flex-1" style={{ backgroundColor: preset.theme.bg }} />
+                                <span className="flex-1" style={{ backgroundColor: preset.theme.bgElevated }} />
+                                <span className="w-1/4" style={{ backgroundColor: preset.theme.accent }} />
+                                <span className="w-1/5" style={{ backgroundColor: preset.theme.accentSoft }} />
+                              </div>
+                            </div>
+                            <div className="mt-3 flex items-start justify-between gap-2">
+                              <div>
+                                <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+                                  {preset.name}
+                                </div>
+                                <div className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                                  {preset.description}
+                                </div>
+                              </div>
+                              <span
+                                className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
+                                style={{
+                                  backgroundColor: active ? 'var(--accent)' : 'var(--bg-elevated)',
+                                  color: active ? '#0F0E0D' : 'var(--ink-muted)',
+                                  border: active ? 'none' : '1px solid var(--border)',
+                                }}
+                              >
+                                {active ? 'Active' : 'Use'}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
                   <div
                     className="mt-6 rounded-2xl p-4 md:p-5 border"
@@ -775,24 +851,32 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 mt-8">
-                    {([
-                      ['bg', 'Background'],
-                      ['bgElevated', 'Elevated Surface'],
-                      ['ink', 'Text'],
-                      ['inkMuted', 'Muted Text'],
-                      ['accent', 'Accent'],
-                      ['accentSoft', 'Accent Soft'],
-                    ] as const).map(([key, label]) => (
-                      <ThemeTokenField
-                        key={key}
-                        tokenKey={key}
-                        label={label}
-                        description={THEME_TOKEN_DESCRIPTIONS[key]}
-                        value={draftSettings.theme[key]}
-                        onChange={(value) => updateTheme(key, value)}
-                      />
-                    ))}
+                  <div className="mt-8 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
+                    <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
+                      Custom Tokens
+                    </div>
+                    <p className="mt-1 text-sm max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
+                      Fine-tune any color. Changing a token marks the palette as custom until you pick a preset again.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 mt-6">
+                      {([
+                        ['bg', 'Background'],
+                        ['bgElevated', 'Elevated Surface'],
+                        ['ink', 'Text'],
+                        ['inkMuted', 'Muted Text'],
+                        ['accent', 'Accent'],
+                        ['accentSoft', 'Accent Soft'],
+                      ] as const).map(([key, label]) => (
+                        <ThemeTokenField
+                          key={key}
+                          tokenKey={key}
+                          label={label}
+                          description={THEME_TOKEN_DESCRIPTIONS[key]}
+                          value={draftSettings.theme[key]}
+                          onChange={(value) => updateTheme(key, value)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -826,9 +910,9 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
 
                   <div className="editorial-card p-4 md:p-5">
                     <div className="eyebrow">Palette Notes</div>
-                    <h3 className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>A calmer system reads better.</h3>
+                    <h3 className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>Start with a preset.</h3>
                     <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                      Keep strong contrast between background and text, then use the accent sparingly for actions and emphasis. That usually keeps the editorial tone intact.
+                      Choose a ready-made theme for a balanced look, then adjust individual tokens if you want something more personal.
                     </p>
                   </div>
                 </div>
