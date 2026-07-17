@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, CSSProperties } from 'react';
 import { ImagePlus, RotateCcw, Save, Trash2, Palette } from 'lucide-react';
 import type { Itinerary } from '../data';
+import { useTheme } from '../contexts/ThemeContext';
 import { DEFAULT_TRIP_SETTINGS, mergeTripSettings } from '../lib/tripSettings';
 import type { TripAppSettings } from '../lib/tripSettings';
 
@@ -156,6 +157,7 @@ function ThemeTokenField({
 }
 
 export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProps) {
+  const { theme } = useTheme();
   const [title, setTitle] = useState(itinerary.name);
   const [description, setDescription] = useState(itinerary.description);
   const [cities, setCities] = useState(itinerary.cities.join(', '));
@@ -255,6 +257,9 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     }));
   };
 
+  // Live preview of trip palette tokens. These tokens apply in dark mode in the app shell,
+  // so the preview always renders with explicit surface + ink colors for readable contrast
+  // even when the user is currently in light mode.
   const themePreviewStyle = {
     '--bg': draftSettings.theme.bg,
     '--bg-elevated': draftSettings.theme.bgElevated,
@@ -262,6 +267,10 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     '--ink-muted': draftSettings.theme.inkMuted,
     '--accent': draftSettings.theme.accent,
     '--accent-soft': draftSettings.theme.accentSoft,
+    '--border': 'color-mix(in srgb, #2C2521 80%, transparent)',
+    backgroundColor: draftSettings.theme.bgElevated,
+    color: draftSettings.theme.ink,
+    borderColor: 'color-mix(in srgb, #2C2521 80%, transparent)',
   } as CSSProperties;
 
   const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) || SETTINGS_SECTIONS[0];
@@ -712,15 +721,60 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
 
             {activeSection === 'theme' && (
               <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_320px] gap-4 md:gap-5 items-start">
-                <div className="editorial-card p-4 md:p-5" style={themePreviewStyle}>
+                <div className="editorial-card p-4 md:p-5">
                   <div className="flex items-center gap-2">
                     <Palette className="w-4 h-4" style={{ color: 'var(--accent)' }} />
                     <div className="eyebrow">Theme Tokens</div>
                   </div>
-                  <h3 className="font-display text-2xl sm:text-3xl mt-3">Shape the mood of this handbook.</h3>
+                  <h3 className="font-display text-2xl sm:text-3xl mt-3" style={{ color: 'var(--ink)' }}>
+                    Shape the mood of this handbook.
+                  </h3>
                   <p className="mt-3 text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-                    Set the palette once and the hero, cards, accents, and supporting UI all follow the same tone.
+                    {theme === 'light'
+                      ? 'Edit the dark-mode palette here. The settings screen stays light; the preview below shows how the tokens read together.'
+                      : 'Set the palette once and the hero, cards, accents, and supporting UI all follow the same tone.'}
                   </p>
+
+                  <div
+                    className="mt-6 rounded-2xl p-4 md:p-5 border"
+                    style={themePreviewStyle}
+                    aria-label="Theme token preview"
+                  >
+                    <div className="eyebrow" style={{ color: 'var(--ink-muted)' }}>Live preview</div>
+                    <div className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>
+                      Stay in control of the vibe
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed max-w-xl" style={{ color: 'var(--ink-muted)' }}>
+                      Cards, accents, and supporting UI pick up these tokens together.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {([
+                        ['bg', draftSettings.theme.bg],
+                        ['elevated', draftSettings.theme.bgElevated],
+                        ['ink', draftSettings.theme.ink],
+                        ['muted', draftSettings.theme.inkMuted],
+                        ['accent', draftSettings.theme.accent],
+                        ['soft', draftSettings.theme.accentSoft],
+                      ] as const).map(([name, swatch]) => (
+                        <div
+                          key={name}
+                          className="flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider"
+                          style={{
+                            backgroundColor: 'color-mix(in srgb, var(--bg) 70%, transparent)',
+                            border: '1px solid color-mix(in srgb, var(--ink) 14%, transparent)',
+                            color: 'var(--ink-muted)',
+                          }}
+                        >
+                          <span
+                            className="h-3.5 w-3.5 rounded-full shrink-0"
+                            style={{ backgroundColor: swatch, boxShadow: '0 0 0 1px color-mix(in srgb, var(--ink) 18%, transparent)' }}
+                          />
+                          {name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 mt-8">
                     {([
                       ['bg', 'Background'],
@@ -772,7 +826,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
 
                   <div className="editorial-card p-4 md:p-5">
                     <div className="eyebrow">Palette Notes</div>
-                    <h3 className="font-display text-2xl mt-3">A calmer system reads better.</h3>
+                    <h3 className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>A calmer system reads better.</h3>
                     <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
                       Keep strong contrast between background and text, then use the accent sparingly for actions and emphasis. That usually keeps the editorial tone intact.
                     </p>
