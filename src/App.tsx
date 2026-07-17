@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { itineraries } from './data';
 import type { Itinerary, DayPhoto } from './data';
 import { ItineraryView } from './components/ItineraryView';
@@ -128,6 +128,24 @@ function App() {
   useEffect(() => {
     applyShellThemeToDocument(shellTheme, theme);
   }, [shellTheme, theme]);
+
+  const persistShellTheme = useCallback(
+    (settings: TripAppSettings) => {
+      const palettes = shellThemeFromTripSettings(settings);
+      // Write both keys so Dashboard still resolves if auth id timing differs.
+      saveShellTheme(user?.id, palettes);
+      saveShellTheme(null, palettes);
+      setShellTheme(palettes);
+      applyShellThemeToDocument(palettes, theme);
+    },
+    [theme, user?.id],
+  );
+
+  const returnToDashboard = useCallback(() => {
+    // Push the current trip's saved palette to the Dashboard shell before leaving.
+    persistShellTheme(tripSettings);
+    setActiveItineraryId(null);
+  }, [persistShellTheme, tripSettings]);
   const settingsStorageKey = activeItineraryId ? `trip-settings-${activeItineraryId}` : '';
 
   // Scroll-driven motion
@@ -413,8 +431,7 @@ function App() {
     setCustomItinerary(nextItinerary);
     setTripSettings(nextSettings);
     // Persist palettes for Dashboard / outer pages only after Save.
-    const nextShell = saveShellTheme(user?.id, shellThemeFromTripSettings(nextSettings));
-    setShellTheme(nextShell);
+    persistShellTheme(nextSettings);
   };
 
   const buildCloudSnapshot = async (): Promise<CloudBackupSnapshot> => {
@@ -674,12 +691,13 @@ function App() {
   }
 
   if (!activeItineraryId) {
-    const dashboardThemeStyle = buildTripThemeStyle(
-      theme === 'light' ? shellTheme.light : shellTheme.dark,
-      theme,
-    );
+    const dashboardPalette = theme === 'light' ? shellTheme.light : shellTheme.dark;
+    const dashboardThemeStyle = buildTripThemeStyle(dashboardPalette, theme);
     return (
-      <div style={{ ...dashboardThemeStyle, backgroundColor: 'var(--bg)', color: 'var(--ink)', minHeight: '100svh' }}>
+      <div
+        key={`dashboard-theme-${theme}-${dashboardPalette.bg}-${dashboardPalette.accent}`}
+        style={{ ...dashboardThemeStyle, backgroundColor: 'var(--bg)', color: 'var(--ink)', minHeight: '100svh' }}
+      >
         <Dashboard onSelectTrip={setActiveItineraryId} />
       </div>
     );
@@ -757,7 +775,7 @@ function App() {
         <div className="max-w-7xl mx-auto px-3 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-3 shrink min-w-0">
             <button 
-              onClick={() => setActiveItineraryId(null)}
+              onClick={returnToDashboard}
               className="p-2 -ml-2 rounded-xl text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               aria-label="Back to Dashboard"
             >
