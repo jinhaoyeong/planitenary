@@ -33,6 +33,13 @@ import { ProfilePanel } from './components/ProfilePanel';
 import { SecurityPanel } from './components/SecurityPanel';
 import { DEFAULT_TRIP_SETTINGS, applyTemplate, buildTripThemeStyle, getThemeForMode, mergeTripSettings } from './lib/tripSettings';
 import type { TripAppSettings } from './lib/tripSettings';
+import {
+  applyShellThemeToDocument,
+  loadShellTheme,
+  saveShellTheme,
+  shellThemeFromTripSettings,
+} from './lib/shellTheme';
+import type { ShellThemePalettes } from './lib/shellTheme';
 
 interface CloudBackupSnapshot {
   kind: 'trip-backup-v1';
@@ -98,6 +105,7 @@ function App() {
 
   const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
   const [tripSettings, setTripSettings] = useState<TripAppSettings>(DEFAULT_TRIP_SETTINGS);
+  const [shellTheme, setShellTheme] = useState<ShellThemePalettes>(() => loadShellTheme(null));
   const itinerarySyncReadyRef = useRef(false);
   const hasLocalItineraryRef = useRef(false);
   const remoteItineraryLoadedRef = useRef(false);
@@ -110,6 +118,16 @@ function App() {
   useEffect(() => {
     document.title = displayItinerary.name || 'Travel Handbook';
   }, [displayItinerary.name]);
+
+  // Load account shell theme (used by Dashboard and other outer pages).
+  useEffect(() => {
+    setShellTheme(loadShellTheme(user?.id));
+  }, [user?.id]);
+
+  // Keep document CSS variables in sync so outside pages react after Save.
+  useEffect(() => {
+    applyShellThemeToDocument(shellTheme, theme);
+  }, [shellTheme, theme]);
   const settingsStorageKey = activeItineraryId ? `trip-settings-${activeItineraryId}` : '';
 
   // Scroll-driven motion
@@ -394,6 +412,9 @@ function App() {
   const handleSaveTripSettings = (nextItinerary: Itinerary, nextSettings: TripAppSettings) => {
     setCustomItinerary(nextItinerary);
     setTripSettings(nextSettings);
+    // Persist palettes for Dashboard / outer pages only after Save.
+    const nextShell = saveShellTheme(user?.id, shellThemeFromTripSettings(nextSettings));
+    setShellTheme(nextShell);
   };
 
   const buildCloudSnapshot = async (): Promise<CloudBackupSnapshot> => {
@@ -653,7 +674,15 @@ function App() {
   }
 
   if (!activeItineraryId) {
-    return <Dashboard onSelectTrip={setActiveItineraryId} />;
+    const dashboardThemeStyle = buildTripThemeStyle(
+      theme === 'light' ? shellTheme.light : shellTheme.dark,
+      theme,
+    );
+    return (
+      <div style={{ ...dashboardThemeStyle, backgroundColor: 'var(--bg)', color: 'var(--ink)', minHeight: '100svh' }}>
+        <Dashboard onSelectTrip={setActiveItineraryId} />
+      </div>
+    );
   }
 
   const tripThemeStyle = buildTripThemeStyle(getThemeForMode(tripSettings, theme), theme);

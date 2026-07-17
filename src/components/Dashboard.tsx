@@ -148,12 +148,15 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
   }
 
   return (
-    <div className="min-h-screen bg-[color:var(--bg)] p-4 sm:p-6 md:p-10" style={{ color: 'var(--ink)' }}>
+    <div className="min-h-screen p-4 sm:p-6 md:p-10" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
       <div className="max-w-5xl mx-auto">
-        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-10 pb-6 border-b border-slate-200 dark:border-slate-800">
+        <header
+          className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-10 pb-6"
+          style={{ borderBottom: '1px solid var(--border)' }}
+        >
           <div>
-            <h1 className="font-display text-4xl md:text-5xl text-slate-900 dark:text-white">Your Dashboard</h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-2 text-sm md:text-base">
+            <h1 className="font-display text-4xl md:text-5xl" style={{ color: 'var(--ink)' }}>Your Dashboard</h1>
+            <p className="mt-2 text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
               {isDemoUser
                 ? 'Demo mode is active. Your test trip data stays on this device only.'
                 : isLocalTestUser
@@ -163,7 +166,8 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
           </div>
           <button
             onClick={signOut}
-            className="flex w-full sm:w-auto justify-center items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-rose-600 bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
+            className="flex w-full sm:w-auto justify-center items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+            style={{ color: 'var(--accent)', backgroundColor: 'var(--accent-soft)' }}
           >
             <LogOut className="w-4 h-4" />
             Sign Out
@@ -182,13 +186,17 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
             whileHover={{ y: -4 }}
             whileTap={{ scale: 0.98 }}
             onClick={handleCreateTrip}
-            className="editorial-card p-6 flex flex-col items-center justify-center min-h-[200px] cursor-pointer group border-dashed border-2 bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            className="editorial-card p-6 flex flex-col items-center justify-center min-h-[200px] cursor-pointer group border-dashed border-2"
+            style={{ backgroundColor: 'transparent' }}
           >
-            <div className="w-14 h-14 rounded-full bg-rose-100 dark:bg-rose-900/30 text-rose-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"
+              style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+            >
               <Plus className="w-6 h-6" />
             </div>
-            <h3 className="font-display text-2xl mt-4 text-slate-800 dark:text-slate-200">Start New Trip</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Create a blank canvas</p>
+            <h3 className="font-display text-2xl mt-4" style={{ color: 'var(--ink)' }}>Start New Trip</h3>
+            <p className="text-sm mt-1" style={{ color: 'var(--ink-muted)' }}>Create a blank canvas</p>
           </motion.div>
 
           {/* Trip Cards */}
@@ -202,25 +210,31 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
                 whileHover={{ y: -4 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => onSelectTrip(trip.id)}
-                className="editorial-card p-5 sm:p-6 cursor-pointer relative overflow-hidden group bg-white dark:bg-slate-900"
+                className="editorial-card p-5 sm:p-6 cursor-pointer relative overflow-hidden group"
               >
                 <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                  <Calendar className="w-24 h-24 text-rose-500" />
+                  <Calendar className="w-24 h-24" style={{ color: 'var(--accent)' }} />
                 </div>
                 <div className="relative z-10">
                   <div className="flex items-center gap-2 mb-3">
-                    <span className="eyebrow bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
+                    <span
+                      className="eyebrow px-2 py-1 rounded-md"
+                      style={{ backgroundColor: 'var(--bg)' }}
+                    >
                       {trip.days} Days
                     </span>
                   </div>
-                  <h3 className="font-display text-3xl mb-2 text-slate-900 dark:text-white truncate">
+                  <h3 className="font-display text-3xl mb-2 truncate" style={{ color: 'var(--ink)' }}>
                     {trip.name}
                   </h3>
-                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
                     <MapPin className="w-4 h-4 shrink-0" />
                     <span className="truncate">{trip.cities.length > 0 ? trip.cities.join(', ') : 'No cities yet'}</span>
                   </div>
-                  <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
+                  <div
+                    className="mt-6 pt-4 flex items-center justify-between text-xs"
+                    style={{ borderTop: '1px solid var(--border)', color: 'var(--ink-muted)' }}
+                  >
                     <span>Last updated</span>
                     <span>{new Date(trip.updated_at).toLocaleDateString()}</span>
                   </div>
@@ -255,9 +269,9 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
           </AnimatePresence>
 
           {loading && (
-            <div className="editorial-card p-6 flex flex-col items-center justify-center min-h-[200px] bg-white/50 dark:bg-slate-900/50">
-              <Loader2 className="w-8 h-8 animate-spin text-rose-500 mb-4" />
-              <p className="text-sm text-slate-500">Loading your trips...</p>
+            <div className="editorial-card p-6 flex flex-col items-center justify-center min-h-[200px]">
+              <Loader2 className="w-8 h-8 animate-spin mb-4" style={{ color: 'var(--accent)' }} />
+              <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>Loading your trips...</p>
             </div>
           )}
         </div>
