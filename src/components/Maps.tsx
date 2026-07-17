@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { Itinerary, Activity, ActivityType } from '../data';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, Plus, Calendar, Clock, Tag, X, Save, ExternalLink } from 'lucide-react';
+import { ThemedSelect } from './ui/ThemedSelect';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -713,7 +714,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Category</label>
-                    <select
+                    <ThemedSelect
                       value={editActivity.type}
                       onChange={(e) => setEditActivity({ ...editActivity, type: e.target.value as ActivityType })}
                       className="editorial-select"
@@ -726,7 +727,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                       <option value="nightlife">Nightlife</option>
                       <option value="cafe">Cafe</option>
                       <option value="other">Other</option>
-                    </select>
+                    </ThemedSelect>
                   </div>
                 </div>
 
@@ -851,7 +852,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Select Day</label>
                     <div className="relative">
-                      <select
+                      <ThemedSelect
                         value={selectedDay}
                         onChange={(e) => setSelectedDay(Number(e.target.value))}
                         className="editorial-select"
@@ -859,7 +860,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                         {itinerary.days.map(day => (
                           <option key={day.day} value={day.day}>Day {day.day} - {day.city}</option>
                         ))}
-                      </select>
+                      </ThemedSelect>
                       <Calendar className="absolute right-3 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
                     </div>
                   </div>
@@ -881,7 +882,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Category</label>
                   <div className="relative">
-                    <select
+                    <ThemedSelect
                       value={newActivity.type}
                       onChange={(e) => setNewActivity({...newActivity, type: e.target.value as ActivityType})}
                       className="editorial-select"
@@ -894,7 +895,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                       <option value="nightlife">Nightlife</option>
                       <option value="cafe">Cafe</option>
                       <option value="other">Other</option>
-                    </select>
+                    </ThemedSelect>
                     <Tag className="absolute right-3 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
                   </div>
                 </div>

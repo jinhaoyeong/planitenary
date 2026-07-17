@@ -23,6 +23,7 @@ import { loadFromStorage, saveToStorage, writeRawToStorage, getRestorePreview, r
 import type { RestoreDatasetId, RestoreDatasetPreview } from './lib/storageResilience';
 import { getAllPhotosForItinerary, restorePhotosForItinerary } from './lib/photoStorage';
 import { Marquee } from './components/ui/Marquee';
+import { ThemedSelect } from './components/ui/ThemedSelect';
 import { hapticMedium } from './lib/haptics';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import { useAuth } from './contexts/AuthContext';
@@ -30,6 +31,7 @@ import { Auth } from './components/Auth';
 import { Dashboard } from './components/Dashboard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ProfilePanel } from './components/ProfilePanel';
+import { SecurityPanel } from './components/SecurityPanel';
 import { DEFAULT_TRIP_SETTINGS, applyTemplate, mergeTripSettings } from './lib/tripSettings';
 import type { TripAppSettings } from './lib/tripSettings';
 
@@ -70,6 +72,18 @@ const createStarterItinerary = (id: string): Itinerary => ({
   })),
 });
 
+const LIGHT_THEME_STYLE = {
+  '--bg': '#FAF7F2',
+  '--bg-elevated': '#FFFFFF',
+  '--ink': '#0F0E0D',
+  '--ink-muted': '#5C5853',
+  '--accent': '#EE4D87',
+  '--accent-soft': '#FFE4EE',
+  '--accent-ink': '#0F0E0D',
+  '--border': '#E8E1D5',
+  '--shadow-lift': '0 1px 0 rgba(15,14,13,0.04), 0 12px 32px -16px rgba(15,14,13,0.18)',
+} as CSSProperties;
+
 function App() {
   const { user, isLoading, isDemoUser, isLocalTestUser, signOut } = useAuth();
   const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
@@ -101,6 +115,7 @@ function App() {
   const hasLocalItineraryRef = useRef(false);
   const remoteItineraryLoadedRef = useRef(false);
   const settingsHydratedRef = useRef(false);
+  const settingsCloudReadyRef = useRef(false);
 
   const activeItinerary = activeItineraryId ? itineraries.find((i) => i.id === activeItineraryId) ?? itineraries[0] : itineraries[0];
   const displayItinerary = customItinerary || activeItinerary;
@@ -161,6 +176,57 @@ function App() {
     if (!settingsHydratedRef.current || !settingsStorageKey) return;
     saveToStorage(settingsStorageKey, tripSettings);
   }, [settingsStorageKey, tripSettings]);
+
+  useEffect(() => {
+    settingsCloudReadyRef.current = false;
+    if (!settingsStorageKey || !activeItineraryId || !user?.id) return;
+    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
+      settingsCloudReadyRef.current = true;
+      return;
+    }
+    let mounted = true;
+    const hydrateCloudSettings = async () => {
+      const { data, error } = await supabase
+        .from('trip_settings')
+        .select('data')
+        .eq('id', activeItineraryId)
+        .maybeSingle();
+      if (!mounted) return;
+      if (error) console.error('Failed to load cloud trip settings:', error);
+      if (data?.data) {
+        const cloudSettings = mergeTripSettings(data.data as Partial<TripAppSettings>);
+        setTripSettings(cloudSettings);
+        saveToStorage(settingsStorageKey, cloudSettings);
+      } else if (!error) {
+        const localSettings = mergeTripSettings(loadFromStorage<TripAppSettings>(settingsStorageKey));
+        const { error: saveError } = await supabase.from('trip_settings').upsert({
+          id: activeItineraryId,
+          user_id: user.id,
+          data: localSettings,
+          updated_at: new Date().toISOString(),
+        });
+        if (saveError) console.error('Failed to create cloud trip settings:', saveError);
+      }
+      settingsCloudReadyRef.current = true;
+    };
+    void hydrateCloudSettings();
+    return () => { mounted = false; };
+  }, [activeItineraryId, settingsStorageKey, user?.id, isDemoUser, isLocalTestUser]);
+
+  useEffect(() => {
+    if (!settingsCloudReadyRef.current || !activeItineraryId || !user?.id) return;
+    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) return;
+    const timeoutId = window.setTimeout(async () => {
+      const { error } = await supabase.from('trip_settings').upsert({
+        id: activeItineraryId,
+        user_id: user.id,
+        data: tripSettings,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) console.error('Failed to save cloud trip settings:', error);
+    }, 700);
+    return () => window.clearTimeout(timeoutId);
+  }, [tripSettings, activeItineraryId, user?.id, isDemoUser, isLocalTestUser]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser || !activeItineraryId) return;
@@ -384,7 +450,7 @@ function App() {
       const backupId = `backup-${activeItineraryId}-${Date.now()}`;
       const { error } = await supabase
         .from('itineraries')
-        .upsert({ id: backupId, data: snapshot, updated_at: snapshot.createdAt });
+        .upsert({ id: backupId, user_id: user?.id, data: snapshot, updated_at: snapshot.createdAt });
       if (error) {
         window.alert('Unable to save cloud backup version.');
         return false;
@@ -463,13 +529,13 @@ function App() {
     if (datasetIds.includes('budget')) {
       const budgetData = loadFromStorage<Record<string, unknown>>(`budget-${activeItineraryId}`);
       if (budgetData) {
-        await supabase.from('budgets').upsert({ id: activeItineraryId, data: budgetData, updated_at: new Date().toISOString() });
+        await supabase.from('budgets').upsert({ id: activeItineraryId, user_id: user?.id, data: budgetData, updated_at: new Date().toISOString() });
       }
     }
     if (datasetIds.includes('checklist')) {
       const checklistData = loadFromStorage<unknown[]>('checklist-data');
       if (checklistData) {
-        await supabase.from('checklists').upsert({ id: 'default', data: checklistData, updated_at: new Date().toISOString() });
+        await supabase.from('checklists').upsert({ id: `default-${user?.id}`, user_id: user?.id, data: checklistData, updated_at: new Date().toISOString() });
       }
     }
     if (datasetIds.includes('drafts')) {
@@ -477,7 +543,7 @@ function App() {
       if (draftsData) {
         await supabase
           .from('itineraries')
-          .upsert({ id: `drafts-${activeItineraryId}`, data: { items: draftsData }, updated_at: new Date().toISOString() });
+          .upsert({ id: `drafts-${activeItineraryId}`, user_id: user?.id, data: { items: draftsData }, updated_at: new Date().toISOString() });
       }
     }
   };
@@ -603,14 +669,19 @@ function App() {
     return <Dashboard onSelectTrip={setActiveItineraryId} />;
   }
 
-  const tripThemeStyle = {
-    '--bg': tripSettings.theme.bg,
-    '--bg-elevated': tripSettings.theme.bgElevated,
-    '--ink': tripSettings.theme.ink,
-    '--ink-muted': tripSettings.theme.inkMuted,
-    '--accent': tripSettings.theme.accent,
-    '--accent-soft': tripSettings.theme.accentSoft,
-  } as CSSProperties;
+  const tripThemeStyle = theme === 'light'
+    ? LIGHT_THEME_STYLE
+    : {
+        '--bg': tripSettings.theme.bg,
+        '--bg-elevated': tripSettings.theme.bgElevated,
+        '--ink': tripSettings.theme.ink,
+        '--ink-muted': tripSettings.theme.inkMuted,
+        '--accent': tripSettings.theme.accent,
+        '--accent-soft': tripSettings.theme.accentSoft,
+        '--accent-ink': '#0F0E0D',
+        '--border': '#2C2521',
+        '--shadow-lift': '0 1px 0 rgba(0,0,0,0.3), 0 18px 40px -18px rgba(0,0,0,0.6)',
+      } as CSSProperties;
 
   const coverStatusLabel =
     displayItinerary.cities.length > 0
@@ -963,7 +1034,7 @@ function App() {
                 onSave={handleSaveTripSettings}
               />
             )}
-            {activeTab === 'account' && <ProfilePanel />}
+            {activeTab === 'account' && <div className="space-y-6"><ProfilePanel /><SecurityPanel /></div>}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -1044,7 +1115,7 @@ function App() {
                   transition={{ duration: 0.25 }}
                 >
                   <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Cloud Backup Versions</div>
-                  <select
+                  <ThemedSelect
                     value={selectedCloudBackupId}
                     onChange={(e) => setSelectedCloudBackupId(e.target.value)}
                     disabled={isCloudBackupsLoading || cloudBackups.length === 0}
@@ -1059,7 +1130,7 @@ function App() {
                         </option>
                       ))
                     )}
-                  </select>
+                  </ThemedSelect>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <motion.button
                       onClick={handleCloudBackupNow}

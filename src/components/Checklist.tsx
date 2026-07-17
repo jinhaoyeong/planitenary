@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Plus, CheckSquare, Square, Trash2, RefreshCw, Package, ClipboardList, CalendarDays, Layers, Edit2, Save, X } from 'lucide-react';
+import { ThemedSelect } from './ui/ThemedSelect';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 import { hapticTap } from '../lib/haptics';
+import { useAuth } from '../contexts/AuthContext';
 
 type Category = 'Packing' | 'Pre-trip' | 'Daily';
 
@@ -28,6 +30,10 @@ const CategoryIcon = ({ category, className }: { category: Category | 'All', cla
 const initialItems: ChecklistItem[] = [];
 
 export const Checklist = () => {
+  const { user, isDemoUser, isLocalTestUser } = useAuth();
+  const cloudEnabled = Boolean(user?.id && isSupabaseConfigured() && !isDemoUser && !isLocalTestUser);
+  const checklistCloudId = user?.id ? `default-${user.id}` : 'default-local';
+  const checklistStorageKey = user?.id ? `checklist-data-${user.id}` : 'checklist-data';
   const [items, setItems] = useState<ChecklistItem[]>(initialItems);
   const [activeCategory, setActiveCategory] = useState<Category | 'All'>('All');
   const [newItemText, setNewItemText] = useState('');
@@ -43,26 +49,26 @@ export const Checklist = () => {
     checklistSyncReadyRef.current = false;
     hasLocalChecklistRef.current = false;
     // 1. Try local storage first for instant load
-    const saved = loadFromStorage<ChecklistItem[]>('checklist-data');
+    const saved = loadFromStorage<ChecklistItem[]>(checklistStorageKey) || loadFromStorage<ChecklistItem[]>('checklist-data');
     if (saved) {
       setItems(saved);
       hasLocalChecklistRef.current = true;
     }
 
     // 2. Sync with Supabase if configured
-    if (isSupabaseConfigured()) {
+    if (cloudEnabled) {
       const fetchChecklist = async () => {
         const { data, error } = await supabase
           .from('checklists')
           .select('data')
-          .eq('id', 'default') // Assuming single shared checklist for now, or use itinerary ID
+          .eq('id', checklistCloudId)
           .single();
 
         if (data && data.data) {
           // Check if remote data is different to avoid unnecessary re-renders
           setItems(prev => {
             if (JSON.stringify(prev) !== JSON.stringify(data.data)) {
-              saveToStorage('checklist-data', data.data);
+              saveToStorage(checklistStorageKey, data.data);
               return data.data;
             }
             return prev;
@@ -79,15 +85,15 @@ export const Checklist = () => {
 
       // Real-time subscription
       const subscription = supabase
-        .channel('checklists')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'checklists', filter: 'id=eq.default' }, (payload) => {
+        .channel(`checklists-${checklistCloudId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'checklists', filter: `id=eq.${checklistCloudId}` }, (payload) => {
           const nextPayload = payload.new as { data?: ChecklistItem[] } | null;
           if (nextPayload?.data) {
             const newData = nextPayload.data;
             setItems(prev => {
               // Deep comparison to prevent loops
               if (JSON.stringify(prev) !== JSON.stringify(newData)) {
-                saveToStorage('checklist-data', newData);
+                saveToStorage(checklistStorageKey, newData);
                 return newData;
               }
               return prev;
@@ -101,22 +107,22 @@ export const Checklist = () => {
       };
     }
     checklistSyncReadyRef.current = true;
-  }, []); // Empty dependency array is fine here because we use functional state update
+  }, [checklistCloudId, checklistStorageKey, cloudEnabled]);
 
   // Save changes to Supabase/LocalStorage
   useEffect(() => {
     if (!checklistSyncReadyRef.current) return;
     // Save to local storage immediately
-    saveToStorage('checklist-data', items);
+    saveToStorage(checklistStorageKey, items);
     if (!hasLocalChecklistRef.current && JSON.stringify(items) === JSON.stringify(initialItems)) return;
     hasLocalChecklistRef.current = true;
 
     // Sync to Supabase with debounce
-    if (isSupabaseConfigured()) {
+    if (cloudEnabled) {
       const syncToSupabase = async () => {
         const { error } = await supabase
           .from('checklists')
-          .upsert({ id: 'default', data: items, updated_at: new Date().toISOString() });
+          .upsert({ id: checklistCloudId, user_id: user?.id, data: items, updated_at: new Date().toISOString() });
         
         if (error) console.error('Error syncing checklist:', error);
       };
@@ -124,7 +130,7 @@ export const Checklist = () => {
       const timeoutId = setTimeout(syncToSupabase, 1000);
       return () => clearTimeout(timeoutId);
     }
-  }, [items]);
+  }, [items, checklistCloudId, checklistStorageKey, cloudEnabled, user?.id]);
 
   const categories: (Category | 'All')[] = ['All', 'Packing', 'Pre-trip', 'Daily'];
 
@@ -226,7 +232,7 @@ export const Checklist = () => {
 
       {/* Controls */}
       <div className="bg-white dark:bg-slate-900 p-5 md:p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 space-y-6 transition-colors duration-300">
-        <div className="flex flex-col md:flex-row justify-between gap-6">
+        <div className="flex flex-col xl:flex-row justify-between gap-6">
           {/* Filters */}
           <div className="space-y-3">
             <label className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Filter by Category</label>
@@ -252,7 +258,7 @@ export const Checklist = () => {
           {/* Add Item */}
           <div className="space-y-3 flex-1">
              <label className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Add Custom Item</label>
-             <div className="flex flex-col sm:flex-row gap-2 min-w-0">
+             <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_10rem_3rem] gap-2 min-w-0">
                <input 
                  type="text" 
                  value={newItemText}
@@ -261,23 +267,22 @@ export const Checklist = () => {
                  placeholder="Add new checklist item..."
                  className="editorial-input flex-1 min-w-0"
                />
-               <div className="flex gap-2">
-                 <select
+                 <ThemedSelect
                    value={newItemCategory}
                    onChange={(e) => setNewItemCategory(e.target.value as Category)}
-                   className="editorial-input flex-1 sm:flex-none"
+                   className="is-compact min-w-0 !w-full"
                  >
                    <option value="Packing">Packing</option>
                    <option value="Pre-trip">Pre-trip</option>
                    <option value="Daily">Daily</option>
-                 </select>
+                 </ThemedSelect>
                  <button 
                    onClick={addItem}
-                   className="p-2.5 bg-emerald-500 dark:bg-emerald-600 text-white rounded-3xl hover:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors"
+                   className="h-12 w-12 shrink-0 justify-self-end sm:justify-self-auto inline-flex items-center justify-center bg-emerald-500 dark:bg-emerald-600 text-white rounded-3xl hover:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors"
+                   aria-label="Add checklist item"
                  >
                    <Plus className="w-5 h-5" />
                  </button>
-               </div>
              </div>
           </div>
         </div>
@@ -340,7 +345,7 @@ export const Checklist = () => {
                       onChange={(e) => setEditingText(e.target.value)}
                       className="editorial-input is-compact"
                     />
-                    <select
+                    <ThemedSelect
                       value={editingCategory}
                       onChange={(e) => setEditingCategory(e.target.value as Category)}
                       className="editorial-input is-compact"
@@ -348,7 +353,7 @@ export const Checklist = () => {
                       <option value="Packing">Packing</option>
                       <option value="Pre-trip">Pre-trip</option>
                       <option value="Daily">Daily</option>
-                    </select>
+                    </ThemedSelect>
                     <div className="flex gap-2">
                       <button
                         onClick={() => saveEditItem(item.id)}

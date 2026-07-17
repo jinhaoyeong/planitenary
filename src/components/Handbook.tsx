@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ActivityType, Itinerary } from '../data';
 import { Plus, Link as LinkIcon, Trash2, CheckCircle2, Edit2, Save, X, ExternalLink, BookOpen, ImagePlus } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { ThemedSelect } from './ui/ThemedSelect';
 
 type DraftItem = {
   id: string;
@@ -681,7 +682,7 @@ export const Draft = ({
             placeholder="Link (Google Maps, TikTok, Rednote, etc.)"
             className="editorial-input"
           />
-          <select
+          <ThemedSelect
             value={day}
             onChange={(e) => setDay(Number(e.target.value))}
             className="editorial-input"
@@ -691,7 +692,7 @@ export const Draft = ({
                 Day {plan.day} · {plan.city}
               </option>
             ))}
-          </select>
+          </ThemedSelect>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input
               value={time}
@@ -699,7 +700,7 @@ export const Draft = ({
               placeholder="Time (optional)"
               className="editorial-input"
             />
-            <select
+            <ThemedSelect
               value={type}
               onChange={(e) => setType(e.target.value as ActivityType)}
               className="editorial-input"
@@ -709,7 +710,7 @@ export const Draft = ({
                   {option.label}
                 </option>
               ))}
-            </select>
+            </ThemedSelect>
           </div>
         </div>
         <textarea
@@ -783,7 +784,7 @@ export const Draft = ({
                     placeholder="Link"
                     className="editorial-input"
                   />
-                  <select
+                  <ThemedSelect
                     value={editingDraft.day}
                     onChange={(e) => setEditingDraft((prev) => (prev ? { ...prev, day: Number(e.target.value) } : prev))}
                     className="editorial-input"
@@ -793,7 +794,7 @@ export const Draft = ({
                         Day {plan.day} · {plan.city}
                       </option>
                     ))}
-                  </select>
+                  </ThemedSelect>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <input
                       value={editingDraft.time}
@@ -801,7 +802,7 @@ export const Draft = ({
                       placeholder="Time (optional)"
                       className="editorial-input"
                     />
-                    <select
+                    <ThemedSelect
                       value={editingDraft.type}
                       onChange={(e) => setEditingDraft((prev) => (prev ? { ...prev, type: e.target.value as ActivityType } : prev))}
                       className="editorial-input"
@@ -811,7 +812,7 @@ export const Draft = ({
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </ThemedSelect>
                   </div>
                 </div>
                 <textarea

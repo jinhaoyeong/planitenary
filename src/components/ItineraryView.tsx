@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Shuffle, Star } from 'lucide-react';
+import { ThemedSelect } from './ui/ThemedSelect';
 import type { Itinerary, Activity, ActivityType, DayPhoto } from '../data';
 import { clsx } from 'clsx';
 import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
@@ -2247,19 +2248,21 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             className={clsx(
               "w-24 md:w-32 p-2 md:p-3 rounded-3xl border transition-all text-center group relative overflow-hidden",
               selectedDay === day.day
-                ? "bg-slate-900 dark:bg-rose-600 text-white border-slate-900 dark:border-rose-600 shadow-lg scale-105"
-                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-rose-200 dark:hover:border-rose-500/50 hover:-translate-y-0.5"
+                ? "shadow-lg scale-105"
+                : "hover:-translate-y-0.5"
             )}
+            style={{
+              backgroundColor: selectedDay === day.day ? 'var(--bg-elevated)' : 'color-mix(in srgb, var(--bg-elevated) 72%, var(--bg))',
+              borderColor: selectedDay === day.day ? 'var(--accent)' : 'var(--border)',
+              color: 'var(--ink)',
+              boxShadow: selectedDay === day.day ? '0 12px 30px -18px color-mix(in srgb, var(--accent) 65%, transparent)' : undefined,
+            }}
           >
             <div className={clsx("text-[10px] md:text-xs font-bold uppercase tracking-wider mb-0.5 md:mb-1 opacity-70")}>
               {day.date}
             </div>
             <div className="font-extrabold text-base md:text-xl mb-0.5 md:mb-1">
-              <span className={clsx(
-                selectedDay === day.day 
-                  ? "text-rose-400 dark:text-white" 
-                  : "text-rose-400"
-              )}>{labels.dayLabel}</span> {day.day}
+              <span style={{ color: 'var(--accent)' }}>{labels.dayLabel}</span> {day.day}
             </div>
             <div className="text-[10px] md:text-xs truncate font-medium opacity-80">
               {day.city}
@@ -2279,7 +2282,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           className="space-y-4 md:space-y-6"
           {...swipeHandlers}
         >
-          <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-950 p-5 md:p-8 rounded-3xl shadow-sm border border-white dark:border-slate-800 relative overflow-hidden">
+          <div
+            className="p-5 md:p-8 rounded-3xl shadow-sm border relative overflow-hidden"
+            style={{
+              background: 'linear-gradient(135deg, var(--bg-elevated), color-mix(in srgb, var(--bg) 82%, var(--bg-elevated)))',
+              borderColor: 'var(--border)',
+              color: 'var(--ink)',
+            }}
+          >
             <div className="absolute top-0 right-0 p-4 md:p-8 opacity-5 pointer-events-none">
               <MapPin className="w-20 h-20 md:w-32 md:h-32 text-slate-900 dark:text-white" />
             </div>
@@ -2561,7 +2571,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Category</label>
                   <div className="relative">
-                    <select
+                    <ThemedSelect
                       value={newActivity.type}
                       onChange={(e) => setNewActivity({...newActivity, type: e.target.value as ActivityType})}
                       className="editorial-select w-full"
@@ -2569,7 +2579,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                       {ICON_OPTIONS.map(opt => (
                         <option key={opt.id} value={opt.id}>{opt.label}</option>
                       ))}
-                    </select>
+                    </ThemedSelect>
                   </div>
                 </div>
 

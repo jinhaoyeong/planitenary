@@ -123,6 +123,24 @@ export const Auth = () => {
     }
   };
 
+  const handleForgotPassword = async () => {
+    setError(null);
+    if (!email.trim()) {
+      setError('Enter your account email first, then select Forgot password.');
+      return;
+    }
+    if (!supabaseReady) {
+      setError('Password recovery requires a configured cloud account.');
+      return;
+    }
+    setLoading(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: getAuthRedirectUrl(),
+    });
+    setLoading(false);
+    setError(resetError ? getAuthErrorMessage(resetError) : 'Password reset email sent. Follow the link, then set a new password in Account → Security.');
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-[color:var(--bg)]" style={{ color: 'var(--ink)' }}>
       <motion.div 
@@ -207,7 +225,7 @@ export const Auth = () => {
                   />
                   <span className="text-sm text-slate-600 dark:text-slate-400">Remember me</span>
                 </label>
-                <a href="#" className="text-sm font-semibold text-rose-500 hover:text-rose-600">Forgot password?</a>
+                <button type="button" onClick={() => void handleForgotPassword()} className="text-sm font-semibold text-rose-500 hover:text-rose-600">Forgot password?</button>
               </div>
             )}
 

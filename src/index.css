@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Runtime theme variables (remapped to dark in .dark scope) */
 :root {
@@ -368,6 +369,10 @@ select.editorial-input,
   background-repeat: no-repeat;
   background-position: right 1rem center;
   background-size: 0.75rem;
+}
+.themed-select-trigger {
+  background-image: none !important;
+  cursor: pointer;
 }
 textarea.editorial-input {
   resize: vertical;

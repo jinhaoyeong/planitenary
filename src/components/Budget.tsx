@@ -7,6 +7,8 @@ import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 import { clsx } from 'clsx';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { CurrencySelector, CompactCurrencySelector } from './CurrencySelector';
+import { getCurrencySymbol } from '../lib/currency';
+import { useAuth } from '../contexts/AuthContext';
 
 interface BudgetItem {
   id: string;
@@ -288,9 +290,11 @@ const BudgetCard = ({
 };
 
 export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
+  const { user, isDemoUser, isLocalTestUser } = useAuth();
+  const cloudEnabled = Boolean(user?.id && isSupabaseConfigured() && !isDemoUser && !isLocalTestUser);
   const [activeView, setActiveView] = React.useState<'budget' | 'expenses'>('budget');
-  const { currency, convert, rates } = useCurrency();
-  const currencySymbol = currency === 'MYR' ? 'RM' : '¥';
+  const { currency, convert, toBase, rates } = useCurrency();
+  const currencySymbol = getCurrencySymbol(currency);
   const [customBudget, setCustomBudget] = React.useState<CustomBudget>(createDefaultBudget(0, 0, 0, {
     transport: { details: [] },
     food: { details: [] },
@@ -321,7 +325,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
             const values = matches.map(parseFloat);
             // Cost in itinerary is in RMB
             const costInRMB = values.reduce((a, b) => a + b, 0) / values.length;
-            const costInMYR = convert(costInRMB, 'MYR');
+            const costInMYR = toBase(costInRMB, 'CNY');
 
             const item = { id: `auto-${day.day}-${i}`, label: activity.name, cost: activity.cost };
             if (activity.type === 'travel') {
@@ -344,7 +348,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       food: { total: foodCost, details: foodDetails },
       activities: { total: activityCost, details: activityDetails }
     };
-  }, [itinerary, convert]);
+  }, [itinerary, toBase]);
 
   const transportMYR = Math.ceil(costs.transport.total);
   const foodMYR = Math.ceil(costs.food.total);
@@ -366,7 +370,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
     const syncBudgetToSupabase = async (budget: CustomBudget, updatedAt: string) => {
       const { error } = await supabase
         .from('budgets')
-        .upsert({ id: itinerary.id, data: budget, updated_at: updatedAt });
+        .upsert({ id: itinerary.id, user_id: user?.id, data: budget, updated_at: updatedAt });
       if (error) console.error('Error syncing budget:', error);
     };
 
@@ -374,7 +378,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       hasLocalBudgetRef.current = true;
     }
 
-    if (isSupabaseConfigured()) {
+    if (cloudEnabled) {
       const fetchBudget = async () => {
         const { data, error } = await supabase
           .from('budgets')
@@ -459,23 +463,23 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
     persistBudgetToStorage(itinerary.id, customBudget, updatedAt);
     hasLocalBudgetRef.current = true;
     
-    if (isSupabaseConfigured()) {
+    if (cloudEnabled) {
       const syncToSupabase = async () => {
         const { error } = await supabase
           .from('budgets')
-          .upsert({ id: itinerary.id, data: customBudget, updated_at: updatedAt });
+          .upsert({ id: itinerary.id, user_id: user?.id, data: customBudget, updated_at: updatedAt });
         
         if (error) console.error('Error syncing budget:', error);
       };
       const timeout = setTimeout(syncToSupabase, 1000);
       return () => clearTimeout(timeout);
     }
-  }, [customBudget, itinerary.id]);
+  }, [customBudget, itinerary.id, cloudEnabled, user?.id]);
 
   const updateRange = (category: BudgetCategoryKey, type: 'min' | 'max', value: string) => {
     const numValue = parseInt(value) || 0;
     // Convert from selected currency back to MYR for storage
-    const valueInMYR = currency === 'CNY' ? Math.round(numValue / rates.CNY) : numValue;
+    const valueInMYR = Math.round(toBase(numValue));
     setCustomBudget(prev => ({
       ...prev,
       [category]: {
@@ -512,7 +516,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       id: Date.now().toString(),
       description: expenseDraft.description,
       amountMYR: expenseDraft.amountMYR,
-      amountCNY: expenseDraft.amountMYR * rates.CNY,
+      amountCNY: expenseDraft.amountMYR * rates.values.CNY,
       paidBy: expenseDraft.paidBy as 'Traveler 1' | 'Traveler 2',
       category: expenseDraft.category as BudgetCategoryKey | 'general',
       date: new Date().toISOString(),
@@ -541,7 +545,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
 
   const getExpensesTotal = () => {
     const expenses = customBudget.expenses || [];
-    return expenses.reduce((sum, e) => sum + (currency === 'CNY' ? e.amountCNY : e.amountMYR), 0);
+    return expenses.reduce((sum, expense) => sum + convert(expense.amountMYR, 'MYR'), 0);
   };
 
   const deleteCustomItem = (category: BudgetCategoryKey, id: string) => {
@@ -675,7 +679,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
               ? `Plan the budget for ${itinerary.cities.length > 0 ? itinerary.cities.join(' & ') : 'your trip'}.`
               : 'Track expenses as your trip takes shape.'}
             <span className="block text-sm mt-1 font-display-italic">
-              {currency === 'CNY' ? 'shown in ¥ (CNY)' : 'shown in RM (MYR)'}
+              shown in {currencySymbol} ({currency})
             </span>
           </p>
 
@@ -817,7 +821,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                   <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                     <div className="text-right">
                       <div className="font-bold text-slate-900 dark:text-white text-sm sm:text-base">
-                        {currencySymbol} {(currency === 'CNY' ? expense.amountCNY : expense.amountMYR).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {currencySymbol} {convert(expense.amountMYR, 'MYR').toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </div>
                     <button 
@@ -1089,11 +1093,11 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                   <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Amount ({currencySymbol})</label>
                   <input
                     type="number"
-                    value={expenseDraft.amountMYR || ''}
+                    value={expenseDraft.amountMYR ? convert(expenseDraft.amountMYR, 'MYR') : ''}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       // If user is in CNY mode, convert input back to MYR for storage
-                      const amountMYR = currency === 'CNY' ? val / rates.CNY : val;
+                      const amountMYR = toBase(val);
                       setExpenseDraft(prev => ({ ...prev, amountMYR }));
                     }}
                     placeholder="0.00"

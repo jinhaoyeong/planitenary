@@ -35,6 +35,28 @@ create table if not exists public.draft_items (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- Account-wide UI preferences (theme, currency, and future user settings)
+create table if not exists public.user_preferences (
+  user_id uuid primary key references auth.users on delete cascade,
+  theme text check (theme in ('light', 'dark')),
+  currency text,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.user_preferences add column if not exists theme text;
+alter table public.user_preferences add column if not exists currency text;
+
+-- Per-trip handbook copy, cover, effects, and palette settings
+create table if not exists public.trip_settings (
+  id text primary key,
+  user_id uuid references auth.users on delete cascade not null,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists trip_settings_user_id_idx on public.trip_settings(user_id);
+
 create index if not exists draft_items_itinerary_id_idx on public.draft_items(itinerary_id);
 create index if not exists itineraries_user_id_idx on public.itineraries(user_id);
 
@@ -43,6 +65,8 @@ alter table public.itineraries enable row level security;
 alter table public.budgets enable row level security;
 alter table public.checklists enable row level security;
 alter table public.draft_items enable row level security;
+alter table public.user_preferences enable row level security;
+alter table public.trip_settings enable row level security;
 
 -- Create policies for authenticated users
 drop policy if exists "Users can only access their own itineraries" on public.itineraries;
@@ -72,6 +96,22 @@ with check (auth.uid() = user_id);
 drop policy if exists "Users can only access their own draft items" on public.draft_items;
 create policy "Users can only access their own draft items"
 on public.draft_items
+for all
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can only access their own preferences" on public.user_preferences;
+create policy "Users can only access their own preferences"
+on public.user_preferences
+for all
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can only access their own trip settings" on public.trip_settings;
+create policy "Users can only access their own trip settings"
+on public.trip_settings
 for all
 to authenticated
 using (auth.uid() = user_id)

@@ -25,6 +25,22 @@ npm run dev
 npm run build
 ```
 
+## Vercel deployment
+
+Import the GitHub repository into Vercel. The included `vercel.json` uses the Vite build command, publishes `dist`, and rewrites client-side routes to `index.html`.
+
+Add these variables in Vercel Project Settings → Environment Variables:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+VITE_SUPABASE_AUTH_REDIRECT_URL
+```
+
+Use `.env.example` as the variable-name reference. Never commit `.env.local`, Supabase service-role keys, build output, dependencies, or `.vercel` state.
+
+In Supabase Authentication → URL Configuration, add the Vercel production URL to the redirect allow list.
+
 ## Native mobile setup
 
 Install dependencies first:
