@@ -1,15 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties } from 'react';
 import { ImagePlus, RotateCcw, Save, Trash2, Palette } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { useTheme } from '../contexts/ThemeContext';
-import { DEFAULT_TRIP_SETTINGS, findMatchingThemePreset, mergeTripSettings, THEME_PALETTE_PRESETS } from '../lib/tripSettings';
+import {
+  DEFAULT_DARK_THEME,
+  DEFAULT_LIGHT_THEME,
+  DEFAULT_TRIP_SETTINGS,
+  findMatchingThemePreset,
+  getPresetsForMode,
+  mergeTripSettings,
+} from '../lib/tripSettings';
 import type { TripAppSettings, TripThemeSettings } from '../lib/tripSettings';
 
 interface SettingsPanelProps {
   itinerary: Itinerary;
   settings: TripAppSettings;
   onSave: (itinerary: Itinerary, settings: TripAppSettings) => void;
+  /** Live-apply theme palette changes without waiting for Save. */
+  onThemeLiveChange?: (settings: TripAppSettings) => void;
 }
 
 const readFileAsDataUrl = (file: File) =>
@@ -28,13 +37,22 @@ const normalizeHex = (value: string, fallback: string) => {
   return `#${trimmed.replace('#', '').toUpperCase()}`;
 };
 
-const THEME_TOKEN_PRESETS: Record<keyof TripAppSettings['theme'], string[]> = {
-  bg: ['#14110F', '#171A22', '#F7F0E8', '#F4EEE7', '#ECE8E1'],
-  bgElevated: ['#1F1A17', '#232630', '#FFFFFF', '#FBF6EF', '#F2ECE4'],
-  ink: ['#F5EFE4', '#F7F2EB', '#0F0E0D', '#181614', '#1F2430'],
-  inkMuted: ['#A39B8C', '#8E8678', '#5C5853', '#6B655D', '#667085'],
-  accent: ['#FF6B9A', '#E7685D', '#C95C7C', '#8F6BFF', '#2F7D6E'],
-  accentSoft: ['#3A1F2A', '#41242C', '#F7D6DD', '#F1E8FF', '#DDEFEA'],
+const LIGHT_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
+  bg: ['#FAF7F2', '#F7F0E8', '#F3F5F4', '#F2F6F9', '#ECE8E1'],
+  bgElevated: ['#FFFFFF', '#FFFBF6', '#FBF6EF', '#F2ECE4', '#F7FAFC'],
+  ink: ['#0F0E0D', '#15201C', '#132033', '#181614', '#1A140E'],
+  inkMuted: ['#5C5853', '#5F6B66', '#5C6B7A', '#6B655D', '#667085'],
+  accent: ['#EE4D87', '#2F7D6E', '#3D8FB5', '#C8842A', '#C95C7C'],
+  accentSoft: ['#FFE4EE', '#DDEFEA', '#D7EAF3', '#F3E2C8', '#F7D6DD'],
+};
+
+const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
+  bg: ['#14110F', '#171A22', '#121714', '#10161C', '#16120C'],
+  bgElevated: ['#1F1A17', '#232630', '#1B221D', '#182129', '#221B13'],
+  ink: ['#F5EFE4', '#F7F2EB', '#EEF3EC', '#EEF4F7', '#F8F0E3'],
+  inkMuted: ['#A39B8C', '#8E8678', '#8FA093', '#8A9AA6', '#A89880'],
+  accent: ['#FF6B9A', '#E7685D', '#2F7D6E', '#3D8FB5', '#E0A045'],
+  accentSoft: ['#3A1F2A', '#41242C', '#1E332C', '#1A303A', '#3A2C18'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';
@@ -45,7 +63,7 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSectionId; label: string; descripti
   { id: 'theme', label: 'Theme', description: 'Palette tokens and visual atmosphere.' },
 ];
 
-const THEME_TOKEN_DESCRIPTIONS: Record<keyof TripAppSettings['theme'], string> = {
+const THEME_TOKEN_DESCRIPTIONS: Record<keyof TripThemeSettings, string> = {
   bg: 'Base page background',
   bgElevated: 'Cards and elevated surfaces',
   ink: 'Main headlines and body text',
@@ -55,20 +73,21 @@ const THEME_TOKEN_DESCRIPTIONS: Record<keyof TripAppSettings['theme'], string> =
 };
 
 function ThemeTokenField({
-  tokenKey,
   label,
   description,
   value,
+  defaultValue,
+  swatches,
   onChange,
 }: {
-  tokenKey: keyof TripAppSettings['theme'];
   label: string;
   description: string;
   value: string;
+  defaultValue: string;
+  swatches: string[];
   onChange: (value: string) => void;
 }) {
   const [draftValue, setDraftValue] = useState(value);
-  const swatches = useMemo(() => THEME_TOKEN_PRESETS[tokenKey], [tokenKey]);
 
   useEffect(() => {
     setDraftValue(value);
@@ -97,7 +116,7 @@ function ThemeTokenField({
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {swatches.map((swatch) => {
             const active = swatch.toUpperCase() === value.toUpperCase();
             return (
@@ -108,9 +127,9 @@ function ThemeTokenField({
                 onClick={() => onChange(swatch)}
                 className="theme-swatch shrink-0 w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
                 data-active={active ? 'true' : 'false'}
-                style={{ 
+                style={{
                   backgroundColor: swatch,
-                  borderColor: active ? 'var(--accent)' : 'color-mix(in srgb, var(--ink) 10%, transparent)' 
+                  borderColor: active ? 'var(--accent)' : 'color-mix(in srgb, var(--ink) 10%, transparent)',
                 }}
               />
             );
@@ -134,7 +153,7 @@ function ThemeTokenField({
               }
             }}
             className="editorial-input w-24 text-center !py-1.5"
-            placeholder="#14110F"
+            placeholder={defaultValue}
             inputMode="text"
             autoCapitalize="characters"
             spellCheck={false}
@@ -143,9 +162,8 @@ function ThemeTokenField({
             type="button"
             className="pill-btn pill-soft !py-1.5 px-3"
             onClick={() => {
-              const fallback = DEFAULT_TRIP_SETTINGS.theme[tokenKey];
-              setDraftValue(fallback);
-              onChange(fallback);
+              setDraftValue(defaultValue);
+              onChange(defaultValue);
             }}
           >
             Reset
@@ -156,7 +174,7 @@ function ThemeTokenField({
   );
 }
 
-export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProps) {
+export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }: SettingsPanelProps) {
   const { theme } = useTheme();
   const [title, setTitle] = useState(itinerary.name);
   const [description, setDescription] = useState(itinerary.description);
@@ -164,6 +182,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
   const [draftSettings, setDraftSettings] = useState<TripAppSettings>(mergeTripSettings(settings));
   const [isSaving, setIsSaving] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('story');
+  const themePushRef = useRef(false);
 
   useEffect(() => {
     setTitle(itinerary.name);
@@ -172,6 +191,15 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
   }, [itinerary]);
 
   useEffect(() => {
+    if (themePushRef.current) {
+      themePushRef.current = false;
+      setDraftSettings((current) => ({
+        ...current,
+        theme: { ...settings.theme },
+        lightTheme: { ...mergeTripSettings(settings).lightTheme },
+      }));
+      return;
+    }
     setDraftSettings(mergeTripSettings(settings));
   }, [settings]);
 
@@ -227,6 +255,9 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
       theme: {
         ...draftSettings.theme,
       },
+      lightTheme: {
+        ...draftSettings.lightTheme,
+      },
     });
 
     onSave(nextItinerary, nextSettings);
@@ -247,39 +278,51 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     }));
   };
 
-  const updateTheme = (key: keyof TripAppSettings['theme'], value: string) => {
-    setDraftSettings((current) => ({
-      ...current,
-      theme: {
-        ...current.theme,
-        [key]: value,
-      },
-    }));
+  const activePalette = theme === 'light' ? draftSettings.lightTheme : draftSettings.theme;
+  const defaultPalette = theme === 'light' ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  const modePresets = useMemo(() => getPresetsForMode(theme), [theme]);
+  const tokenSwatches = theme === 'light' ? LIGHT_TOKEN_SWATCHES : DARK_TOKEN_SWATCHES;
+  const activeThemePreset = findMatchingThemePreset(activePalette, theme);
+
+  const commitPalette = (palette: TripThemeSettings) => {
+    themePushRef.current = true;
+    setDraftSettings((current) => {
+      const next =
+        theme === 'light'
+          ? { ...current, lightTheme: { ...palette } }
+          : { ...current, theme: { ...palette } };
+      onThemeLiveChange?.(
+        mergeTripSettings({
+          ...settings,
+          theme: next.theme,
+          lightTheme: next.lightTheme,
+        }),
+      );
+      return next;
+    });
+  };
+
+  const updateTheme = (key: keyof TripThemeSettings, value: string) => {
+    commitPalette({ ...activePalette, [key]: value });
   };
 
   const applyThemePreset = (nextTheme: TripThemeSettings) => {
-    setDraftSettings((current) => ({
-      ...current,
-      theme: { ...nextTheme },
-    }));
+    commitPalette(nextTheme);
   };
 
-  const activeThemePreset = findMatchingThemePreset(draftSettings.theme);
-
-  // Live preview of trip palette tokens. These tokens apply in dark mode in the app shell,
-  // so the preview always renders with explicit surface + ink colors for readable contrast
-  // even when the user is currently in light mode.
+  // Preview uses the palette being edited for the current mode, with explicit colors
+  // so contrast stays correct regardless of ambient shell tokens.
   const themePreviewStyle = {
-    '--bg': draftSettings.theme.bg,
-    '--bg-elevated': draftSettings.theme.bgElevated,
-    '--ink': draftSettings.theme.ink,
-    '--ink-muted': draftSettings.theme.inkMuted,
-    '--accent': draftSettings.theme.accent,
-    '--accent-soft': draftSettings.theme.accentSoft,
-    '--border': 'color-mix(in srgb, #2C2521 80%, transparent)',
-    backgroundColor: draftSettings.theme.bgElevated,
-    color: draftSettings.theme.ink,
-    borderColor: 'color-mix(in srgb, #2C2521 80%, transparent)',
+    '--bg': activePalette.bg,
+    '--bg-elevated': activePalette.bgElevated,
+    '--ink': activePalette.ink,
+    '--ink-muted': activePalette.inkMuted,
+    '--accent': activePalette.accent,
+    '--accent-soft': activePalette.accentSoft,
+    '--border': theme === 'light' ? '#E8E1D5' : '#2C2521',
+    backgroundColor: activePalette.bgElevated,
+    color: activePalette.ink,
+    borderColor: theme === 'light' ? '#E8E1D5' : '#2C2521',
   } as CSSProperties;
 
   const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) || SETTINGS_SECTIONS[0];
@@ -739,16 +782,14 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                     Shape the mood of this handbook.
                   </h3>
                   <p className="mt-3 text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-                    {theme === 'light'
-                      ? 'Pick a preset or tune individual tokens. The settings screen stays light; the preview shows how the palette reads together.'
-                      : 'Pick a preset palette, or keep fine-tuning every token yourself.'}
+                    You are editing the {theme === 'light' ? 'light' : 'dark'} mode palette. Presets apply instantly; custom tokens still work the same way.
                   </p>
 
                   <div className="mt-6">
                     <div className="flex items-end justify-between gap-3">
                       <div>
                         <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
-                          Color Themes
+                          {theme === 'light' ? 'Light Color Themes' : 'Dark Color Themes'}
                         </div>
                         <p className="mt-1 text-sm" style={{ color: 'var(--ink-muted)' }}>
                           {activeThemePreset
@@ -759,7 +800,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                      {THEME_PALETTE_PRESETS.map((preset) => {
+                      {modePresets.map((preset) => {
                         const active = activeThemePreset?.id === preset.id;
                         return (
                           <button
@@ -825,12 +866,12 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
                       {([
-                        ['bg', draftSettings.theme.bg],
-                        ['elevated', draftSettings.theme.bgElevated],
-                        ['ink', draftSettings.theme.ink],
-                        ['muted', draftSettings.theme.inkMuted],
-                        ['accent', draftSettings.theme.accent],
-                        ['soft', draftSettings.theme.accentSoft],
+                        ['bg', activePalette.bg],
+                        ['elevated', activePalette.bgElevated],
+                        ['ink', activePalette.ink],
+                        ['muted', activePalette.inkMuted],
+                        ['accent', activePalette.accent],
+                        ['soft', activePalette.accentSoft],
                       ] as const).map(([name, swatch]) => (
                         <div
                           key={name}
@@ -856,7 +897,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                       Custom Tokens
                     </div>
                     <p className="mt-1 text-sm max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-                      Fine-tune any color. Changing a token marks the palette as custom until you pick a preset again.
+                      Fine-tune any color for {theme === 'light' ? 'light' : 'dark'} mode. Changing a token marks the palette as custom until you pick a preset again.
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 mt-6">
                       {([
@@ -868,11 +909,12 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                         ['accentSoft', 'Accent Soft'],
                       ] as const).map(([key, label]) => (
                         <ThemeTokenField
-                          key={key}
-                          tokenKey={key}
+                          key={`${theme}-${key}`}
                           label={label}
                           description={THEME_TOKEN_DESCRIPTIONS[key]}
-                          value={draftSettings.theme[key]}
+                          value={activePalette[key]}
+                          defaultValue={defaultPalette[key]}
+                          swatches={tokenSwatches[key]}
                           onChange={(value) => updateTheme(key, value)}
                         />
                       ))}

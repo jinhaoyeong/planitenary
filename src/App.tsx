@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import type { CSSProperties } from 'react';
 import { itineraries } from './data';
 import type { Itinerary, DayPhoto } from './data';
 import { ItineraryView } from './components/ItineraryView';
@@ -32,7 +31,7 @@ import { Dashboard } from './components/Dashboard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ProfilePanel } from './components/ProfilePanel';
 import { SecurityPanel } from './components/SecurityPanel';
-import { DEFAULT_TRIP_SETTINGS, applyTemplate, mergeTripSettings } from './lib/tripSettings';
+import { DEFAULT_TRIP_SETTINGS, applyTemplate, buildTripThemeStyle, getThemeForMode, mergeTripSettings } from './lib/tripSettings';
 import type { TripAppSettings } from './lib/tripSettings';
 
 interface CloudBackupSnapshot {
@@ -71,18 +70,6 @@ const createStarterItinerary = (id: string): Itinerary => ({
     photos: day.photos ? [...day.photos] : undefined,
   })),
 });
-
-const LIGHT_THEME_STYLE = {
-  '--bg': '#FAF7F2',
-  '--bg-elevated': '#FFFFFF',
-  '--ink': '#0F0E0D',
-  '--ink-muted': '#5C5853',
-  '--accent': '#EE4D87',
-  '--accent-soft': '#FFE4EE',
-  '--accent-ink': '#0F0E0D',
-  '--border': '#E8E1D5',
-  '--shadow-lift': '0 1px 0 rgba(15,14,13,0.04), 0 12px 32px -16px rgba(15,14,13,0.18)',
-} as CSSProperties;
 
 function App() {
   const { user, isLoading, isDemoUser, isLocalTestUser, signOut } = useAuth();
@@ -669,19 +656,7 @@ function App() {
     return <Dashboard onSelectTrip={setActiveItineraryId} />;
   }
 
-  const tripThemeStyle = theme === 'light'
-    ? LIGHT_THEME_STYLE
-    : {
-        '--bg': tripSettings.theme.bg,
-        '--bg-elevated': tripSettings.theme.bgElevated,
-        '--ink': tripSettings.theme.ink,
-        '--ink-muted': tripSettings.theme.inkMuted,
-        '--accent': tripSettings.theme.accent,
-        '--accent-soft': tripSettings.theme.accentSoft,
-        '--accent-ink': '#0F0E0D',
-        '--border': '#2C2521',
-        '--shadow-lift': '0 1px 0 rgba(0,0,0,0.3), 0 18px 40px -18px rgba(0,0,0,0.6)',
-      } as CSSProperties;
+  const tripThemeStyle = buildTripThemeStyle(getThemeForMode(tripSettings, theme), theme);
 
   const coverStatusLabel =
     displayItinerary.cities.length > 0
@@ -1032,6 +1007,7 @@ function App() {
                 itinerary={displayItinerary}
                 settings={tripSettings}
                 onSave={handleSaveTripSettings}
+                onThemeLiveChange={setTripSettings}
               />
             )}
             {activeTab === 'account' && <div className="space-y-6"><ProfilePanel /><SecurityPanel /></div>}
