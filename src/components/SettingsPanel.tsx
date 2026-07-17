@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChangeEvent, CSSProperties } from 'react';
 import { ImagePlus, RotateCcw, Save, Trash2, Palette } from 'lucide-react';
 import type { Itinerary } from '../data';
@@ -18,8 +18,6 @@ interface SettingsPanelProps {
   itinerary: Itinerary;
   settings: TripAppSettings;
   onSave: (itinerary: Itinerary, settings: TripAppSettings) => void;
-  /** Live-apply theme palette changes without waiting for Save. */
-  onThemeLiveChange?: (settings: TripAppSettings) => void;
 }
 
 const readFileAsDataUrl = (file: File) =>
@@ -175,7 +173,7 @@ function ThemeTokenField({
   );
 }
 
-export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }: SettingsPanelProps) {
+export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProps) {
   const { theme } = useTheme();
   const [title, setTitle] = useState(itinerary.name);
   const [description, setDescription] = useState(itinerary.description);
@@ -183,7 +181,6 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
   const [draftSettings, setDraftSettings] = useState<TripAppSettings>(mergeTripSettings(settings));
   const [isSaving, setIsSaving] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('story');
-  const themePushRef = useRef(false);
 
   useEffect(() => {
     setTitle(itinerary.name);
@@ -192,15 +189,6 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
   }, [itinerary]);
 
   useEffect(() => {
-    if (themePushRef.current) {
-      themePushRef.current = false;
-      setDraftSettings((current) => ({
-        ...current,
-        theme: { ...settings.theme },
-        lightTheme: { ...mergeTripSettings(settings).lightTheme },
-      }));
-      return;
-    }
     setDraftSettings(mergeTripSettings(settings));
   }, [settings]);
 
@@ -286,22 +274,11 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
   const fullyMatchedPreset = findMatchingThemePreset(draftSettings);
 
   const commitPalettes = (next: { lightTheme: TripThemeSettings; theme: TripThemeSettings }) => {
-    themePushRef.current = true;
-    setDraftSettings((current) => {
-      const updated = {
-        ...current,
-        lightTheme: { ...next.lightTheme },
-        theme: { ...next.theme },
-      };
-      onThemeLiveChange?.(
-        mergeTripSettings({
-          ...settings,
-          theme: updated.theme,
-          lightTheme: updated.lightTheme,
-        }),
-      );
-      return updated;
-    });
+    setDraftSettings((current) => ({
+      ...current,
+      lightTheme: { ...next.lightTheme },
+      theme: { ...next.theme },
+    }));
   };
 
   const commitPalette = (palette: TripThemeSettings) => {
@@ -792,7 +769,7 @@ export function SettingsPanel({ itinerary, settings, onSave, onThemeLiveChange }
                     Shape the mood of this handbook.
                   </h3>
                   <p className="mt-3 text-sm leading-relaxed max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-                    Pick a theme once — it adapts automatically when you switch light and dark mode. Fine-tune tokens below anytime.
+                    Pick a theme once — it adapts for light and dark. Changes apply when you save settings.
                   </p>
 
                   <div className="mt-6">

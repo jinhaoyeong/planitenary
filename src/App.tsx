@@ -1007,7 +1007,6 @@ function App() {
                 itinerary={displayItinerary}
                 settings={tripSettings}
                 onSave={handleSaveTripSettings}
-                onThemeLiveChange={setTripSettings}
               />
             )}
             {activeTab === 'account' && <div className="space-y-6"><ProfilePanel /><SecurityPanel /></div>}
