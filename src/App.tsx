@@ -79,7 +79,7 @@ const createStarterItinerary = (id: string): Itinerary => ({
 });
 
 function App() {
-  const { user, isLoading, isDemoUser, isLocalTestUser, signOut } = useAuth();
+  const { user, isLoading, isDemoUser, isLocalTestUser, needsMfaVerification, signOut } = useAuth();
   const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'settings' | 'account'>('itinerary');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -686,7 +686,7 @@ function App() {
     return <WelcomeScreen onStart={handleStart} />;
   }
 
-  if (!user) {
+  if (!user || needsMfaVerification) {
     return <Auth />;
   }
 

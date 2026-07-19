@@ -41,6 +41,15 @@ Use `.env.example` as the variable-name reference. Never commit `.env.local`, Su
 
 In Supabase Authentication → URL Configuration, add the Vercel production URL to the redirect allow list.
 
+### Account security (2FA)
+
+In the Supabase dashboard:
+
+1. Enable Multi-factor authentication (TOTP) under Authentication → MFA / Multi-factor.
+2. Optionally enable password, email, and phone change notification emails under Authentication → Emails.
+
+In the app, cloud accounts can enroll an authenticator under **Account → Security**. Sign-in then requires a 6-digit TOTP code, and password / email / phone changes require the current password plus that code when 2FA is enabled.
+
 ## Native mobile setup
 
 Install dependencies first:
