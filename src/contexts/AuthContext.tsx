@@ -11,6 +11,10 @@ interface AuthContextType {
   isLocalTestUser: boolean;
   /** Cloud session signed in at AAL1 while MFA is enrolled — must verify TOTP. */
   needsMfaVerification: boolean;
+  /** True once MFA status has been checked for the current cloud session. */
+  mfaStatusReady: boolean;
+  /** True when the cloud account has at least one verified TOTP factor. */
+  mfaEnabled: boolean;
   mfaFactorId: string | null;
   signInDemo: () => void;
   signInLocal: (email: string, password: string) => { success: boolean; error?: string };
@@ -78,6 +82,8 @@ const AuthContext = createContext<AuthContextType>({
   isDemoUser: false,
   isLocalTestUser: false,
   needsMfaVerification: false,
+  mfaStatusReady: false,
+  mfaEnabled: false,
   mfaFactorId: null,
   signInDemo: () => {},
   signInLocal: () => ({ success: false }),
@@ -94,23 +100,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isDemoUser, setIsDemoUser] = useState(false);
   const [isLocalTestUser, setIsLocalTestUser] = useState(false);
   const [needsMfaVerification, setNeedsMfaVerification] = useState(false);
+  const [mfaStatusReady, setMfaStatusReady] = useState(false);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
 
   const applyMfaStatus = useCallback(async (activeSession: Session | null) => {
     if (!activeSession || !isSupabaseConfigured()) {
       setNeedsMfaVerification(false);
+      setMfaEnabled(false);
       setMfaFactorId(null);
+      setMfaStatusReady(true);
       return;
     }
 
     try {
       const status = await getMfaStatus();
       setNeedsMfaVerification(status.needsChallenge);
+      setMfaEnabled(status.isEnabled);
       setMfaFactorId(status.verifiedFactors[0]?.id ?? null);
     } catch {
       // If MFA status cannot be read, do not block the session indefinitely.
       setNeedsMfaVerification(false);
+      setMfaEnabled(false);
       setMfaFactorId(null);
+    } finally {
+      setMfaStatusReady(true);
     }
   }, []);
 
@@ -126,7 +140,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIsDemoUser(true);
       setIsLocalTestUser(false);
       setNeedsMfaVerification(false);
+      setMfaEnabled(false);
       setMfaFactorId(null);
+      setMfaStatusReady(true);
       setIsLoading(false);
       return;
     }
@@ -138,12 +154,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIsDemoUser(false);
       setIsLocalTestUser(true);
       setNeedsMfaVerification(false);
+      setMfaEnabled(false);
       setMfaFactorId(null);
+      setMfaStatusReady(true);
       setIsLoading(false);
       return;
     }
 
     if (!isSupabaseConfigured()) {
+      setMfaStatusReady(true);
       setIsLoading(false);
       return;
     }
@@ -184,7 +203,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsDemoUser(true);
     setIsLocalTestUser(false);
     setNeedsMfaVerification(false);
+    setMfaEnabled(false);
     setMfaFactorId(null);
+    setMfaStatusReady(true);
     setIsLoading(false);
   };
 
@@ -205,7 +226,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsDemoUser(false);
     setIsLocalTestUser(true);
     setNeedsMfaVerification(false);
+    setMfaEnabled(false);
     setMfaFactorId(null);
+    setMfaStatusReady(true);
     setIsLoading(false);
     return { success: true };
   };
@@ -227,7 +250,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsDemoUser(false);
     setIsLocalTestUser(true);
     setNeedsMfaVerification(false);
+    setMfaEnabled(false);
     setMfaFactorId(null);
+    setMfaStatusReady(true);
     setIsLoading(false);
     return { success: true };
   };
@@ -258,7 +283,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsDemoUser(false);
     setIsLocalTestUser(false);
     setNeedsMfaVerification(false);
+    setMfaEnabled(false);
     setMfaFactorId(null);
+    setMfaStatusReady(false);
     if (isSupabaseConfigured()) {
       await supabase.auth.signOut();
     }
@@ -273,6 +300,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         isDemoUser,
         isLocalTestUser,
         needsMfaVerification,
+        mfaStatusReady,
+        mfaEnabled,
         mfaFactorId,
         signInDemo,
         signInLocal,
