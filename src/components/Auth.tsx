@@ -28,9 +28,17 @@ const getAuthErrorMessage = (err: { message?: string; code?: string; status?: nu
 };
 
 export const Auth = () => {
-  const { signInDemo, signInLocal, signUpLocal } = useAuth();
+  const {
+    signInDemo,
+    signInLocal,
+    signUpLocal,
+    needsMfaVerification,
+    completeMfaChallenge,
+    signOut,
+  } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -141,6 +149,19 @@ export const Auth = () => {
     setError(resetError ? getAuthErrorMessage(resetError) : 'Password reset email sent. Follow the link, then set a new password in Account → Security.');
   };
 
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const result = await completeMfaChallenge(mfaCode);
+    setLoading(false);
+    if (!result.success) {
+      setError(result.error || 'Invalid authenticator code.');
+      return;
+    }
+    setMfaCode('');
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-[color:var(--bg)]" style={{ color: 'var(--ink)' }}>
       <motion.div 
@@ -156,9 +177,58 @@ export const Auth = () => {
             Travel <span className="font-display-italic text-rose-500">Handbook</span>
           </h1>
           <p className="text-slate-500 dark:text-slate-400">
-            {isLogin ? 'Welcome back. Sign in to your trips.' : 'Create an account to start planning.'}
+            {needsMfaVerification
+              ? 'Enter the 6-digit code from your authenticator app.'
+              : isLogin
+                ? 'Welcome back. Sign in to your trips.'
+                : 'Create an account to start planning.'}
           </p>
 
+          {needsMfaVerification ? (
+          <form onSubmit={handleMfaSubmit} className="mt-8 space-y-5 text-left">
+            {error && (
+              <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Authenticator code</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  maxLength={6}
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="editorial-input w-full !pl-11 tracking-[0.35em] text-center font-semibold"
+                  placeholder="000000"
+                />
+                <Lock className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-400" />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={loading || mfaCode.length !== 6}
+              className="w-full py-3.5 rounded-xl bg-slate-900 dark:bg-rose-600 text-white font-bold hover:bg-slate-800 dark:hover:bg-rose-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Verifying…' : 'Verify and continue'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMfaCode('');
+                setError(null);
+                void signOut();
+              }}
+              className="w-full py-3 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:border-rose-500 hover:text-rose-500 transition-colors"
+            >
+              Cancel and sign out
+            </button>
+          </form>
+          ) : (
           <form onSubmit={handleSubmit} className="mt-8 space-y-5 text-left">
             {!supabaseReady && (
               <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-sm">
@@ -258,7 +328,9 @@ export const Auth = () => {
               </p>
             )}
           </form>
+          )}
 
+          {!needsMfaVerification && (
           <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400">
             {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
             <button
@@ -271,6 +343,7 @@ export const Auth = () => {
               {isLogin ? 'Sign up' : 'Sign in'}
             </button>
           </div>
+          )}
         </div>
       </motion.div>
     </div>

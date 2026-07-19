@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { getMfaStatus, verifyTotpCode } from '../lib/authSecurity';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface AuthContextType {
@@ -8,9 +9,14 @@ interface AuthContextType {
   isLoading: boolean;
   isDemoUser: boolean;
   isLocalTestUser: boolean;
+  /** Cloud session signed in at AAL1 while MFA is enrolled — must verify TOTP. */
+  needsMfaVerification: boolean;
+  mfaFactorId: string | null;
   signInDemo: () => void;
   signInLocal: (email: string, password: string) => { success: boolean; error?: string };
   signUpLocal: (email: string, password: string) => { success: boolean; error?: string };
+  completeMfaChallenge: (code: string) => Promise<{ success: boolean; error?: string }>;
+  refreshMfaStatus: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -71,9 +77,13 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   isDemoUser: false,
   isLocalTestUser: false,
+  needsMfaVerification: false,
+  mfaFactorId: null,
   signInDemo: () => {},
   signInLocal: () => ({ success: false }),
   signUpLocal: () => ({ success: false }),
+  completeMfaChallenge: async () => ({ success: false }),
+  refreshMfaStatus: async () => {},
   signOut: async () => {},
 });
 
@@ -83,6 +93,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isDemoUser, setIsDemoUser] = useState(false);
   const [isLocalTestUser, setIsLocalTestUser] = useState(false);
+  const [needsMfaVerification, setNeedsMfaVerification] = useState(false);
+  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
+
+  const applyMfaStatus = useCallback(async (activeSession: Session | null) => {
+    if (!activeSession || !isSupabaseConfigured()) {
+      setNeedsMfaVerification(false);
+      setMfaFactorId(null);
+      return;
+    }
+
+    try {
+      const status = await getMfaStatus();
+      setNeedsMfaVerification(status.needsChallenge);
+      setMfaFactorId(status.verifiedFactors[0]?.id ?? null);
+    } catch {
+      // If MFA status cannot be read, do not block the session indefinitely.
+      setNeedsMfaVerification(false);
+      setMfaFactorId(null);
+    }
+  }, []);
+
+  const refreshMfaStatus = useCallback(async () => {
+    await applyMfaStatus(session);
+  }, [applyMfaStatus, session]);
 
   useEffect(() => {
     const hasDemoSession = localStorage.getItem(DEMO_STORAGE_KEY) === 'true';
@@ -91,6 +125,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(createDemoUser());
       setIsDemoUser(true);
       setIsLocalTestUser(false);
+      setNeedsMfaVerification(false);
+      setMfaFactorId(null);
       setIsLoading(false);
       return;
     }
@@ -101,6 +137,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(createLocalTestUser(localSessionEmail));
       setIsDemoUser(false);
       setIsLocalTestUser(true);
+      setNeedsMfaVerification(false);
+      setMfaFactorId(null);
       setIsLoading(false);
       return;
     }
@@ -110,25 +148,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    let cancelled = false;
+
+    supabase.auth.getSession().then(async ({ data: { session: nextSession } }) => {
+      if (cancelled) return;
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
       setIsDemoUser(false);
       setIsLocalTestUser(false);
-      setIsLoading(false);
+      await applyMfaStatus(nextSession);
+      if (!cancelled) setIsLoading(false);
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
       setIsDemoUser(false);
       setIsLocalTestUser(false);
+      void applyMfaStatus(nextSession);
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [applyMfaStatus]);
 
   const signInDemo = () => {
     localStorage.setItem(DEMO_STORAGE_KEY, 'true');
@@ -137,6 +183,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(createDemoUser());
     setIsDemoUser(true);
     setIsLocalTestUser(false);
+    setNeedsMfaVerification(false);
+    setMfaFactorId(null);
     setIsLoading(false);
   };
 
@@ -156,6 +204,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(createLocalTestUser(matchedUser.email));
     setIsDemoUser(false);
     setIsLocalTestUser(true);
+    setNeedsMfaVerification(false);
+    setMfaFactorId(null);
     setIsLoading(false);
     return { success: true };
   };
@@ -176,8 +226,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(createLocalTestUser(normalizedEmail));
     setIsDemoUser(false);
     setIsLocalTestUser(true);
+    setNeedsMfaVerification(false);
+    setMfaFactorId(null);
     setIsLoading(false);
     return { success: true };
+  };
+
+  const completeMfaChallenge = async (code: string) => {
+    if (!mfaFactorId) {
+      return { success: false, error: 'No authenticator is enrolled on this account.' };
+    }
+
+    try {
+      await verifyTotpCode(mfaFactorId, code);
+      setNeedsMfaVerification(false);
+      await applyMfaStatus((await supabase.auth.getSession()).data.session);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Invalid authenticator code.',
+      };
+    }
   };
 
   const signOut = async () => {
@@ -187,13 +257,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(null);
     setIsDemoUser(false);
     setIsLocalTestUser(false);
+    setNeedsMfaVerification(false);
+    setMfaFactorId(null);
     if (isSupabaseConfigured()) {
       await supabase.auth.signOut();
     }
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, isLoading, isDemoUser, isLocalTestUser, signInDemo, signInLocal, signUpLocal, signOut }}>
+    <AuthContext.Provider
+      value={{
+        session,
+        user,
+        isLoading,
+        isDemoUser,
+        isLocalTestUser,
+        needsMfaVerification,
+        mfaFactorId,
+        signInDemo,
+        signInLocal,
+        signUpLocal,
+        completeMfaChallenge,
+        refreshMfaStatus,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
