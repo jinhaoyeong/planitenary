@@ -48,7 +48,9 @@ In the Supabase dashboard:
 1. Enable Multi-factor authentication (TOTP) under Authentication → MFA / Multi-factor.
 2. Optionally enable password, email, and phone change notification emails under Authentication → Emails.
 
-In the app, cloud accounts can enroll an authenticator under **Account → Security**. Sign-in then requires a 6-digit TOTP code, and password / email / phone changes require the current password plus that code when 2FA is enabled.
+In the app, cloud accounts are required to enroll an authenticator after sign-in (Demo / local test accounts skip this). Sign-in then requires a 6-digit TOTP code, and password / email / phone changes require the current password plus that code.
+
+Enabling TOTP in the Supabase dashboard only turns the feature on for the project — each user still enrolls from the app setup screen.
 
 ## Native mobile setup
 

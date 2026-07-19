@@ -31,6 +31,7 @@ import { Dashboard } from './components/Dashboard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ProfilePanel } from './components/ProfilePanel';
 import { SecurityPanel } from './components/SecurityPanel';
+import { MfaSetupScreen } from './components/MfaSetupScreen';
 import { DEFAULT_TRIP_SETTINGS, applyTemplate, buildTripThemeStyle, getThemeForMode, mergeTripSettings } from './lib/tripSettings';
 import type { TripAppSettings } from './lib/tripSettings';
 import {
@@ -79,7 +80,16 @@ const createStarterItinerary = (id: string): Itinerary => ({
 });
 
 function App() {
-  const { user, isLoading, isDemoUser, isLocalTestUser, needsMfaVerification, signOut } = useAuth();
+  const {
+    user,
+    isLoading,
+    isDemoUser,
+    isLocalTestUser,
+    needsMfaVerification,
+    mfaStatusReady,
+    mfaEnabled,
+    signOut,
+  } = useAuth();
   const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'settings' | 'account'>('itinerary');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -690,6 +700,14 @@ function App() {
     return <Auth />;
   }
 
+  const isCloudAccount = Boolean(user && isSupabaseConfigured() && !isDemoUser && !isLocalTestUser);
+  if (isCloudAccount && !mfaStatusReady) {
+    return <div className="min-h-screen bg-[color:var(--bg)] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" /></div>;
+  }
+  if (isCloudAccount && mfaStatusReady && !mfaEnabled) {
+    return <MfaSetupScreen />;
+  }
+
   if (!activeItineraryId) {
     const dashboardPalette = theme === 'light' ? shellTheme.light : shellTheme.dark;
     const dashboardThemeStyle = buildTripThemeStyle(dashboardPalette, theme);
@@ -1056,7 +1074,7 @@ function App() {
                 onSave={handleSaveTripSettings}
               />
             )}
-            {activeTab === 'account' && <div className="space-y-6"><ProfilePanel /><SecurityPanel /></div>}
+            {activeTab === 'account' && <div className="space-y-6"><SecurityPanel /><ProfilePanel /></div>}
           </motion.div>
         </AnimatePresence>
       </main>
