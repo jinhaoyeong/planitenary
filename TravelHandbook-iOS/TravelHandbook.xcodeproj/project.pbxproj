@@ -1,0 +1,379 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A00000000000000000B20015 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20014 /* AppRootView.swift */; };
+		A00000000000000000B20017 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20016 /* Models.swift */; };
+		A00000000000000000B20019 /* TripSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20018 /* TripSettings.swift */; };
+		A00000000000000000B2001B /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2001A /* AuthService.swift */; };
+		A00000000000000000B2001D /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2001C /* Config.swift */; };
+		A00000000000000000B2001F /* CurrencyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2001E /* CurrencyService.swift */; };
+		A00000000000000000B20021 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20020 /* Haptics.swift */; };
+		A00000000000000000B20023 /* LocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20022 /* LocalStore.swift */; };
+		A00000000000000000B20025 /* NominatimClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20024 /* NominatimClient.swift */; };
+		A00000000000000000B20027 /* PhotoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20026 /* PhotoStore.swift */; };
+		A00000000000000000B20029 /* SupabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20028 /* SupabaseClient.swift */; };
+		A00000000000000000B2002B /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2002A /* AppTheme.swift */; };
+		A00000000000000000B2002D /* TravelHandbookApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2002C /* TravelHandbookApp.swift */; };
+		A00000000000000000B2002F /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2002E /* AuthViewModel.swift */; };
+		A00000000000000000B20031 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20030 /* AccountView.swift */; };
+		A00000000000000000B20033 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20032 /* AuthView.swift */; };
+		A00000000000000000B20035 /* MfaSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20034 /* MfaSetupView.swift */; };
+		A00000000000000000B20037 /* BudgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20036 /* BudgetView.swift */; };
+		A00000000000000000B20039 /* ChecklistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20038 /* ChecklistView.swift */; };
+		A00000000000000000B2003B /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2003A /* EmptyState.swift */; };
+		A00000000000000000B2003D /* PillButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2003C /* PillButton.swift */; };
+		A00000000000000000B2003F /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2003E /* SectionHeader.swift */; };
+		A00000000000000000B20041 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20040 /* DashboardView.swift */; };
+		A00000000000000000B20043 /* DocumentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20042 /* DocumentsView.swift */; };
+		A00000000000000000B20045 /* DraftView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20044 /* DraftView.swift */; };
+		A00000000000000000B20047 /* DayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20046 /* DayDetailView.swift */; };
+		A00000000000000000B20049 /* ItineraryHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20048 /* ItineraryHomeView.swift */; };
+		A00000000000000000B2004B /* ItinerarySupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2004A /* ItinerarySupport.swift */; };
+		A00000000000000000B2004D /* MapsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2004C /* MapsView.swift */; };
+		A00000000000000000B2004F /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B2004E /* WelcomeView.swift */; };
+		A00000000000000000B20051 /* PhotoWallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20050 /* PhotoWallView.swift */; };
+		A00000000000000000B20053 /* HandbookSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20052 /* HandbookSettingsView.swift */; };
+		A00000000000000000B20055 /* TripRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20054 /* TripRootView.swift */; };
+		A00000000000000000B20057 /* TripSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20056 /* TripSession.swift */; };
+		A00000000000000000B20012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20011 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A00000000000000000B20014 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppRootView.swift; path = "AppRootView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20016 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Models.swift; path = "Models/Models.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20018 /* TripSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TripSettings.swift; path = "Models/TripSettings.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2001A /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AuthService.swift; path = "Services/AuthService.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2001C /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Config.swift; path = "Services/Config.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2001E /* CurrencyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CurrencyService.swift; path = "Services/CurrencyService.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20020 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Haptics.swift; path = "Services/Haptics.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20022 /* LocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LocalStore.swift; path = "Services/LocalStore.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20024 /* NominatimClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NominatimClient.swift; path = "Services/NominatimClient.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20026 /* PhotoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotoStore.swift; path = "Services/PhotoStore.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20028 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SupabaseClient.swift; path = "Services/SupabaseClient.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2002A /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppTheme.swift; path = "Theme/AppTheme.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2002C /* TravelHandbookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TravelHandbookApp.swift; path = "TravelHandbookApp.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2002E /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AuthViewModel.swift; path = "ViewModels/AuthViewModel.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20030 /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AccountView.swift; path = "Views/Account/AccountView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20032 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AuthView.swift; path = "Views/Auth/AuthView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20034 /* MfaSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MfaSetupView.swift; path = "Views/Auth/MfaSetupView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20036 /* BudgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BudgetView.swift; path = "Views/Budget/BudgetView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20038 /* ChecklistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ChecklistView.swift; path = "Views/Checklist/ChecklistView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2003A /* EmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EmptyState.swift; path = "Views/Components/EmptyState.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2003C /* PillButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PillButton.swift; path = "Views/Components/PillButton.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2003E /* SectionHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SectionHeader.swift; path = "Views/Components/SectionHeader.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20040 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DashboardView.swift; path = "Views/Dashboard/DashboardView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20042 /* DocumentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DocumentsView.swift; path = "Views/Documents/DocumentsView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20044 /* DraftView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DraftView.swift; path = "Views/Draft/DraftView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20046 /* DayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayDetailView.swift; path = "Views/Itinerary/DayDetailView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20048 /* ItineraryHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ItineraryHomeView.swift; path = "Views/Itinerary/ItineraryHomeView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2004A /* ItinerarySupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ItinerarySupport.swift; path = "Views/Itinerary/ItinerarySupport.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2004C /* MapsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MapsView.swift; path = "Views/Maps/MapsView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B2004E /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WelcomeView.swift; path = "Views/Onboarding/WelcomeView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20050 /* PhotoWallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PhotoWallView.swift; path = "Views/Photos/PhotoWallView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20052 /* HandbookSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HandbookSettingsView.swift; path = "Views/Settings/HandbookSettingsView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20054 /* TripRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TripRootView.swift; path = "Views/Trip/TripRootView.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20056 /* TripSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TripSession.swift; path = "Views/Trip/TripSession.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00000000000000000B20013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A00000000000000000B2000C /* TravelHandbook.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TravelHandbook.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00000000000000000B20004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00000000000000000B2000D = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000B2000E /* TravelHandbook */,
+				A00000000000000000B2000F /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00000000000000000B2000E /* TravelHandbook */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000B20010 /* Sources */,
+				A00000000000000000B20011 /* Assets.xcassets */,
+				A00000000000000000B20013 /* Info.plist */,
+			);
+			path = TravelHandbook;
+			sourceTree = "<group>";
+		};
+		A00000000000000000B20010 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000B20014 /* AppRootView.swift */,
+				A00000000000000000B20016 /* Models.swift */,
+				A00000000000000000B20018 /* TripSettings.swift */,
+				A00000000000000000B2001A /* AuthService.swift */,
+				A00000000000000000B2001C /* Config.swift */,
+				A00000000000000000B2001E /* CurrencyService.swift */,
+				A00000000000000000B20020 /* Haptics.swift */,
+				A00000000000000000B20022 /* LocalStore.swift */,
+				A00000000000000000B20024 /* NominatimClient.swift */,
+				A00000000000000000B20026 /* PhotoStore.swift */,
+				A00000000000000000B20028 /* SupabaseClient.swift */,
+				A00000000000000000B2002A /* AppTheme.swift */,
+				A00000000000000000B2002C /* TravelHandbookApp.swift */,
+				A00000000000000000B2002E /* AuthViewModel.swift */,
+				A00000000000000000B20030 /* AccountView.swift */,
+				A00000000000000000B20032 /* AuthView.swift */,
+				A00000000000000000B20034 /* MfaSetupView.swift */,
+				A00000000000000000B20036 /* BudgetView.swift */,
+				A00000000000000000B20038 /* ChecklistView.swift */,
+				A00000000000000000B2003A /* EmptyState.swift */,
+				A00000000000000000B2003C /* PillButton.swift */,
+				A00000000000000000B2003E /* SectionHeader.swift */,
+				A00000000000000000B20040 /* DashboardView.swift */,
+				A00000000000000000B20042 /* DocumentsView.swift */,
+				A00000000000000000B20044 /* DraftView.swift */,
+				A00000000000000000B20046 /* DayDetailView.swift */,
+				A00000000000000000B20048 /* ItineraryHomeView.swift */,
+				A00000000000000000B2004A /* ItinerarySupport.swift */,
+				A00000000000000000B2004C /* MapsView.swift */,
+				A00000000000000000B2004E /* WelcomeView.swift */,
+				A00000000000000000B20050 /* PhotoWallView.swift */,
+				A00000000000000000B20052 /* HandbookSettingsView.swift */,
+				A00000000000000000B20054 /* TripRootView.swift */,
+				A00000000000000000B20056 /* TripSession.swift */,
+			);
+			name = Sources;
+			sourceTree = "<group>";
+		};
+		A00000000000000000B2000F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000B2000C /* TravelHandbook.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00000000000000000B20002 /* TravelHandbook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000B20007 /* Build configuration list for PBXNativeTarget "TravelHandbook" */;
+			buildPhases = (
+				A00000000000000000B20003 /* Sources */,
+				A00000000000000000B20004 /* Frameworks */,
+				REA00000000000000000B20003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TravelHandbook;
+			productName = TravelHandbook;
+			productReference = A00000000000000000B2000C /* TravelHandbook.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000B20001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+			};
+			buildConfigurationList = A00000000000000000B20006 /* Build configuration list for PBXProject "TravelHandbook" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A00000000000000000B2000D;
+			productRefGroup = A00000000000000000B2000F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A00000000000000000B20002 /* TravelHandbook */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		REA00000000000000000B20003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000B20012 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00000000000000000B20003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000B20015 /* AppRootView.swift in Sources */,
+				A00000000000000000B20017 /* Models.swift in Sources */,
+				A00000000000000000B20019 /* TripSettings.swift in Sources */,
+				A00000000000000000B2001B /* AuthService.swift in Sources */,
+				A00000000000000000B2001D /* Config.swift in Sources */,
+				A00000000000000000B2001F /* CurrencyService.swift in Sources */,
+				A00000000000000000B20021 /* Haptics.swift in Sources */,
+				A00000000000000000B20023 /* LocalStore.swift in Sources */,
+				A00000000000000000B20025 /* NominatimClient.swift in Sources */,
+				A00000000000000000B20027 /* PhotoStore.swift in Sources */,
+				A00000000000000000B20029 /* SupabaseClient.swift in Sources */,
+				A00000000000000000B2002B /* AppTheme.swift in Sources */,
+				A00000000000000000B2002D /* TravelHandbookApp.swift in Sources */,
+				A00000000000000000B2002F /* AuthViewModel.swift in Sources */,
+				A00000000000000000B20031 /* AccountView.swift in Sources */,
+				A00000000000000000B20033 /* AuthView.swift in Sources */,
+				A00000000000000000B20035 /* MfaSetupView.swift in Sources */,
+				A00000000000000000B20037 /* BudgetView.swift in Sources */,
+				A00000000000000000B20039 /* ChecklistView.swift in Sources */,
+				A00000000000000000B2003B /* EmptyState.swift in Sources */,
+				A00000000000000000B2003D /* PillButton.swift in Sources */,
+				A00000000000000000B2003F /* SectionHeader.swift in Sources */,
+				A00000000000000000B20041 /* DashboardView.swift in Sources */,
+				A00000000000000000B20043 /* DocumentsView.swift in Sources */,
+				A00000000000000000B20045 /* DraftView.swift in Sources */,
+				A00000000000000000B20047 /* DayDetailView.swift in Sources */,
+				A00000000000000000B20049 /* ItineraryHomeView.swift in Sources */,
+				A00000000000000000B2004B /* ItinerarySupport.swift in Sources */,
+				A00000000000000000B2004D /* MapsView.swift in Sources */,
+				A00000000000000000B2004F /* WelcomeView.swift in Sources */,
+				A00000000000000000B20051 /* PhotoWallView.swift in Sources */,
+				A00000000000000000B20053 /* HandbookSettingsView.swift in Sources */,
+				A00000000000000000B20055 /* TripRootView.swift in Sources */,
+				A00000000000000000B20057 /* TripSession.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		DEBUGA00000000000000000B20001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A00000000000000000B20009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		DEBUGA00000000000000000B20002 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TravelHandbook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.blankcanvas.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A00000000000000000B2000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TravelHandbook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.blankcanvas.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00000000000000000B20006 /* Build configuration list for PBXProject "TravelHandbook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DEBUGA00000000000000000B20001 /* Debug */,
+				A00000000000000000B20009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000B20007 /* Build configuration list for PBXNativeTarget "TravelHandbook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DEBUGA00000000000000000B20002 /* Debug */,
+				A00000000000000000B2000B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A00000000000000000B20001 /* Project object */;
+}
