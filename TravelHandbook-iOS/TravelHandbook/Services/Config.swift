@@ -23,8 +23,23 @@ enum SupabaseConfig {
     }
 
     static var isConfigured: Bool {
-        normalizedURL(from: infoString(urlInfoKey)) != nil
-            && !(infoString(anonKeyInfoKey)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        guard let url = normalizedURL(from: infoString(urlInfoKey)),
+              let host = url.host?.lowercased(),
+              !host.isEmpty,
+              !host.contains("your-project"),
+              !host.contains("placeholder") else {
+            return false
+        }
+
+        let key = infoString(anonKeyInfoKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "'\"")) ?? ""
+        guard !key.isEmpty,
+              !key.localizedCaseInsensitiveContains("your-public"),
+              !key.localizedCaseInsensitiveContains("placeholder") else {
+            return false
+        }
+        return true
     }
 
     static var authRedirectURL: URL? {

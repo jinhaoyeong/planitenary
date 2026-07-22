@@ -26,6 +26,7 @@ struct AppRootView: View {
                 TripRootView(tripSession: tripSession)
             }
         }
+        .handbookTheme(theme)
         .animation(.easeInOut(duration: 0.25), value: auth.isLoading)
         .animation(.easeInOut(duration: 0.25), value: tripSession.activeItineraryId)
         .onChange(of: auth.user?.id) { _, newValue in
@@ -38,6 +39,7 @@ struct AppRootView: View {
         .onAppear {
             tripSession.itineraryOwnerHint = auth.user?.id
             theme.setUserId(auth.user?.id)
+            theme.applyShellPalette(userId: auth.user?.id)
         }
     }
 

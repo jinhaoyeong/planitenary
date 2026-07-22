@@ -54,12 +54,14 @@ struct ChecklistView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(eyebrow: "The checklist", title: "Small things to remember")
-            Text("Packing, pre-trip prep, and daily habits.")
-                .font(.subheadline)
-                .foregroundStyle(ShellChrome.inkMuted)
-        }
+        EditorialPageHeader(
+            eyebrow: "The checklist · small things to remember",
+            titleLeading: "Bits to",
+            titleAccent: "pack.",
+            subtitle: "Pre-trip chores, daily reminders, and everything that needs to fit in the suitcase.",
+            centered: true,
+            titleSize: 42
+        )
     }
 
     private var filterBar: some View {

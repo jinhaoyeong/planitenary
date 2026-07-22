@@ -44,11 +44,11 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Travel Handbook needs photo library access for the photo wall, draft screenshots, and documents.</string>
 	<key>SUPABASE_ANON_KEY</key>
-	<string>your-public-anon-or-publishable-key</string>
+	<string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5bWR5enh1ZmtkdWNmeGZqZHJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTQzNjEsImV4cCI6MjA5MjA5MDM2MX0.6SvfZjwDA4Yv0PxscTBRawtvYWw6pAOENAnX2ARIBMI</string>
 	<key>SUPABASE_AUTH_REDIRECT_URL</key>
 	<string>travelhandbook://auth-callback</string>
 	<key>SUPABASE_URL</key>
-	<string>https://your-project.supabase.co</string>
+	<string>https://fymdyzxufkducfxfjdrr.supabase.co</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

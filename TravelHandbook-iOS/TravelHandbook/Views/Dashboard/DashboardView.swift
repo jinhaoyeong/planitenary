@@ -67,6 +67,11 @@ struct DashboardView: View {
             .padding(.bottom, 32)
         }
         .background(ShellChrome.background.ignoresSafeArea())
+        .handbookTheme(theme)
+        .onAppear {
+            theme.applyTripSettings(nil)
+            theme.applyShellPalette(userId: auth.user?.id)
+        }
         .task(id: auth.user?.id) {
             await reloadTrips()
         }
@@ -104,54 +109,72 @@ struct DashboardView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    AppBrandTitle()
-                    Text(accountSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(ShellChrome.inkMuted)
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Your Dashboard")
+                .font(.system(size: 40, weight: .regular, design: .serif))
+                .foregroundStyle(ShellChrome.ink)
+
+            Text(accountSubtitle)
+                .font(.subheadline)
+                .foregroundStyle(ShellChrome.inkMuted)
+
+            Button {
+                Task { await auth.signOut() }
+            } label: {
+                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ShellChrome.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(ShellChrome.accentSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            HStack {
                 Spacer()
                 Button {
-                    Task { await auth.signOut() }
+                    theme.toggleTheme()
                 } label: {
-                    Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    Image(systemName: theme.mode == .dark ? "sun.max.fill" : "moon.fill")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(ShellChrome.ink)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(ShellChrome.cardBackground)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(ShellChrome.border, lineWidth: 1))
+                        .foregroundStyle(ShellChrome.inkMuted)
                 }
                 .buttonStyle(.plain)
             }
 
-            SectionHeader(eyebrow: "Dashboard", title: "Your trips")
+            Rectangle()
+                .fill(ShellChrome.border)
+                .frame(height: 1)
+                .padding(.top, 4)
         }
     }
 
     private var startNewTripCard: some View {
         Button(action: startNewTrip) {
-            HStack(spacing: 16) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 32))
+            VStack(spacing: 14) {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(ShellChrome.accent)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Start New Trip")
-                        .font(.headline)
-                        .foregroundStyle(ShellChrome.ink)
-                    Text("Create a fresh handbook with a starter day plan.")
-                        .font(.subheadline)
-                        .foregroundStyle(ShellChrome.inkMuted)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
+                    .frame(width: 56, height: 56)
+                    .background(ShellChrome.accentSoft, in: Circle())
+
+                Text("Start New Trip")
+                    .font(.system(size: 28, weight: .regular, design: .serif))
+                    .foregroundStyle(ShellChrome.ink)
+
+                Text("Create a blank canvas")
+                    .font(.subheadline)
                     .foregroundStyle(ShellChrome.inkMuted)
             }
-            .padding(20)
-            .shellCard()
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 36)
+            .padding(.horizontal, 20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7, 6]))
+                    .foregroundStyle(ShellChrome.border)
+            )
         }
         .buttonStyle(.plain)
     }

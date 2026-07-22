@@ -41,7 +41,7 @@ struct PillButton: View {
 
     private var foregroundColor: Color {
         switch kind {
-        case .primary: return .white
+        case .primary: return Color(hex: "#0F0E0D")
         case .ghost: return ShellChrome.ink
         case .soft: return ShellChrome.accent
         }
@@ -50,13 +50,13 @@ struct PillButton: View {
     private var backgroundColor: Color {
         switch kind {
         case .primary: return ShellChrome.accent
-        case .ghost: return ShellChrome.cardBackground
+        case .ghost: return Color.clear
         case .soft: return ShellChrome.accentSoft
         }
     }
 
     private var borderColor: Color {
-        kind == .ghost ? ShellChrome.border : .clear
+        kind == .ghost ? ShellChrome.ink.opacity(0.45) : .clear
     }
 }
 
@@ -78,9 +78,12 @@ struct CompactPillButton: View {
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
-            .foregroundStyle(kind == .primary ? Color.white : ShellChrome.ink)
-            .background(kind == .primary ? ShellChrome.accent : ShellChrome.accentSoft)
+            .foregroundStyle(kind == .primary ? Color(hex: "#0F0E0D") : (kind == .soft ? ShellChrome.accent : ShellChrome.ink))
+            .background(kind == .primary ? ShellChrome.accent : (kind == .soft ? ShellChrome.accentSoft : Color.clear))
             .clipShape(Capsule())
+            .overlay(
+                Capsule().stroke(kind == .ghost ? ShellChrome.ink.opacity(0.45) : Color.clear, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
     }

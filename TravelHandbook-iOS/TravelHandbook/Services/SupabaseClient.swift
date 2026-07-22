@@ -363,7 +363,7 @@ final class SupabaseClient: @unchecked Sendable {
         }
 
         let data = try await authRequest(path: "user", method: "GET", authorized: true)
-        let user = try JSONDecoder.supabase.decode(AuthUser.self, from: data)
+        let user = try JSONDecoder.supabaseAuth.decode(AuthUser.self, from: data)
         return AuthSession(
             accessToken: access,
             refreshToken: inMemoryRefreshToken ?? "",
@@ -382,7 +382,7 @@ final class SupabaseClient: @unchecked Sendable {
 
     func updateUser(attributes: [String: Any]) async throws -> AuthUser {
         let data = try await authRequest(path: "user", method: "PUT", json: attributes, authorized: true)
-        let user = try JSONDecoder.supabase.decode(AuthUser.self, from: data)
+        let user = try JSONDecoder.supabaseAuth.decode(AuthUser.self, from: data)
         return user
     }
 
@@ -394,7 +394,7 @@ final class SupabaseClient: @unchecked Sendable {
             "friendly_name": friendlyName,
         ]
         let data = try await authRequest(path: "factors", method: "POST", json: body, authorized: true)
-        return try JSONDecoder.supabase.decode(MFAEnrollResponse.self, from: data)
+        return try JSONDecoder.supabaseAuth.decode(MFAEnrollResponse.self, from: data)
     }
 
     func mfaChallenge(factorId: String) async throws -> MFAChallengeResponse {
@@ -403,7 +403,7 @@ final class SupabaseClient: @unchecked Sendable {
             method: "POST",
             authorized: true
         )
-        return try JSONDecoder.supabase.decode(MFAChallengeResponse.self, from: data)
+        return try JSONDecoder.supabaseAuth.decode(MFAChallengeResponse.self, from: data)
     }
 
     func mfaVerify(factorId: String, challengeId: String, code: String) async throws -> AuthSession? {
@@ -430,12 +430,12 @@ final class SupabaseClient: @unchecked Sendable {
 
     func listFactors() async throws -> MFAFactorsResponse {
         let data = try await authRequest(path: "factors", method: "GET", authorized: true)
-        return try JSONDecoder.supabase.decode(MFAFactorsResponse.self, from: data)
+        return try JSONDecoder.supabaseAuth.decode(MFAFactorsResponse.self, from: data)
     }
 
     func getAuthenticatorAssuranceLevel(accessToken: String? = nil, verifiedFactorCount: Int = 0) -> AuthenticatorAssuranceLevel {
         let token = accessToken ?? currentAccessToken()
-        var current = decodeJWTPayload(token)?["aal"]?.stringValue
+        var current = token.flatMap { decodeJWTPayload($0)?["aal"]?.stringValue }
         var next = current
 
         if verifiedFactorCount > 0 {
@@ -488,7 +488,7 @@ final class SupabaseClient: @unchecked Sendable {
         guard isConfigured else {
             throw SupabaseAuthError(message: "Supabase is not configured.", code: nil)
         }
-        var components = URLComponents(url: SupabaseConfig.url.appendingPathComponent("rest/v1/\(table)"), resolvingAgainstBaseURL: false)!
+        var components = URLComponents(url: supabaseURL("rest", "v1", table), resolvingAgainstBaseURL: false)!
         if !queryItems.isEmpty { components.queryItems = queryItems }
         guard let url = components.url else {
             throw SupabaseAuthError(message: "Invalid PostgREST URL.", code: nil)
@@ -521,9 +521,7 @@ final class SupabaseClient: @unchecked Sendable {
 
     func uploadObject(bucket: String, path: String, data: Data, contentType: String, upsert: Bool = true) async throws {
         guard isConfigured else { return }
-        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        let url = SupabaseConfig.url
-            .appendingPathComponent("storage/v1/object/\(bucket)/\(encodedPath)")
+        let url = supabaseURL("storage", "v1", "object", bucket, path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = data
@@ -543,9 +541,7 @@ final class SupabaseClient: @unchecked Sendable {
     }
 
     func downloadObject(bucket: String, path: String) async throws -> Data {
-        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        let url = SupabaseConfig.url
-            .appendingPathComponent("storage/v1/object/\(bucket)/\(encodedPath)")
+        let url = supabaseURL("storage", "v1", "object", bucket, path)
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         applyAnonHeaders(&request)
@@ -561,11 +557,11 @@ final class SupabaseClient: @unchecked Sendable {
     }
 
     func publicObjectURL(bucket: String, path: String) -> URL {
-        SupabaseConfig.url.appendingPathComponent("storage/v1/object/public/\(bucket)/\(path)")
+        supabaseURL("storage", "v1", "object", "public", bucket, path)
     }
 
     func createSignedURL(bucket: String, path: String, expiresIn seconds: Int = 3600) async throws -> URL {
-        let url = SupabaseConfig.url.appendingPathComponent("storage/v1/object/sign/\(bucket)/\(path)")
+        let url = supabaseURL("storage", "v1", "object", "sign", bucket, path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: ["expiresIn": seconds])
@@ -595,11 +591,16 @@ final class SupabaseClient: @unchecked Sendable {
             }
             return absolute
         }
-        return SupabaseConfig.url.appendingPathComponent(signed.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        let base = SupabaseConfig.url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let suffix = signed.hasPrefix("/") ? signed : "/\(signed)"
+        guard let absolute = URL(string: base + suffix) else {
+            throw SupabaseAuthError(message: "Invalid signed URL.", code: nil)
+        }
+        return absolute
     }
 
     func removeObjects(bucket: String, paths: [String]) async throws {
-        let url = SupabaseConfig.url.appendingPathComponent("storage/v1/object/\(bucket)")
+        let url = supabaseURL("storage", "v1", "object", bucket)
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.httpBody = try JSONSerialization.data(withJSONObject: ["prefixes": paths])
@@ -669,7 +670,7 @@ final class SupabaseClient: @unchecked Sendable {
             throw SupabaseAuthError(message: "Supabase is not configured.", code: nil)
         }
         var components = URLComponents(
-            url: SupabaseConfig.url.appendingPathComponent("auth/v1/\(path)"),
+            url: supabaseURL("auth", "v1", path),
             resolvingAgainstBaseURL: false
         )!
         if !query.isEmpty { components.queryItems = query }
@@ -698,7 +699,19 @@ final class SupabaseClient: @unchecked Sendable {
 
     private func applyAnonHeaders(_ request: inout URLRequest) {
         request.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(SupabaseConfig.anonKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+    }
+
+    /// Builds `base/seg1/seg2/...` without percent-encoding `/` (unlike `appendingPathComponent("a/b")`).
+    private func supabaseURL(_ pathComponents: String...) -> URL {
+        var url = SupabaseConfig.url
+        for component in pathComponents {
+            for part in component.split(separator: "/") where !part.isEmpty {
+                url = url.appendingPathComponent(String(part))
+            }
+        }
+        return url
     }
 
     private func parseAuthSession(from data: Data) throws -> AuthSession? {
@@ -717,7 +730,9 @@ final class SupabaseClient: @unchecked Sendable {
                 case user
             }
         }
-        let payload = try JSONDecoder.supabase.decode(AuthPayload.self, from: data)
+        // Use plain decoder: these models already map snake_case via CodingKeys.
+        // `JSONDecoder.supabase` (convertFromSnakeCase) breaks that and drops access_token.
+        let payload = try JSONDecoder.supabaseAuth.decode(AuthPayload.self, from: data)
         guard let access = payload.accessToken, let user = payload.user else { return nil }
         let expiresAt = payload.expiresIn.map { Date().timeIntervalSince1970 + Double($0) }
         return AuthSession(
@@ -731,24 +746,37 @@ final class SupabaseClient: @unchecked Sendable {
     }
 
     private func parseAuthError(from data: Data) -> SupabaseAuthError? {
-        struct ErrorPayload: Decodable {
-            let msg: String?
-            let message: String?
-            let error: String?
-            let errorDescription: String?
-            let code: String?
-
-            enum CodingKeys: String, CodingKey {
-                case msg
-                case message
-                case error
-                case errorDescription = "error_description"
-                case code
+        // Supabase may return `code` as Int (400) or String — avoid snake_case decoder + typed `code: String`
+        // which silently fails and leaves users with a generic "Auth request failed (400)".
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            if let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !raw.isEmpty {
+                return SupabaseAuthError(message: raw, code: nil)
             }
+            return nil
         }
-        guard let payload = try? JSONDecoder.supabase.decode(ErrorPayload.self, from: data) else { return nil }
-        let text = payload.msg ?? payload.message ?? payload.errorDescription ?? payload.error ?? "Request failed."
-        return SupabaseAuthError(message: text, code: payload.code)
+
+        let textCandidates: [String?] = [
+            object["msg"] as? String,
+            object["message"] as? String,
+            object["error_description"] as? String,
+            object["error"] as? String,
+        ]
+        let text = textCandidates.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Request failed."
+
+        let code: String?
+        if let stringCode = object["error_code"] as? String {
+            code = stringCode
+        } else if let stringCode = object["code"] as? String {
+            code = stringCode
+        } else if let intCode = object["code"] as? Int {
+            code = String(intCode)
+        } else {
+            code = nil
+        }
+
+        return SupabaseAuthError(message: text, code: code)
     }
 
     private func isAccessTokenExpired(_ token: String) -> Bool {
@@ -808,5 +836,10 @@ extension JSONDecoder {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return decoder
+    }()
+
+    /// Auth models use explicit `CodingKeys` for snake_case — do not also convertFromSnakeCase.
+    static let supabaseAuth: JSONDecoder = {
+        JSONDecoder()
     }()
 }

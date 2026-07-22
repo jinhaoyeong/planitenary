@@ -46,13 +46,23 @@ struct BudgetView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(eyebrow: "The wallet", title: "Where the money goes")
-            Text(segment == .budget
-                 ? "Plan your trip budget by category."
-                 : "Track what you actually spend and settle up.")
-            .font(.subheadline)
-            .foregroundStyle(ShellChrome.inkMuted)
+        VStack(spacing: 12) {
+            EditorialPageHeader(
+                eyebrow: "The wallet · what it'll cost",
+                titleLeading: "Where the",
+                titleAccent: "money",
+                titleTrailing: "goes.",
+                subtitle: segment == .budget
+                    ? "Plan the budget for \(session.itinerary?.cities.isEmpty == false ? session.itinerary!.cities.joined(separator: " & ") : "your trip")."
+                    : "Track expenses as your trip takes shape.",
+                centered: true,
+                titleSize: 42
+            )
+
+            Text("shown in \(currency.currency)")
+                .font(.system(.footnote, design: .serif).italic())
+                .foregroundStyle(ShellChrome.inkMuted)
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -563,6 +573,7 @@ private struct ExpenseDraft {
     var date = Date()
 }
 
+@MainActor
 private enum BudgetLogic {
     static func title(for category: BudgetCategory) -> String {
         switch category {

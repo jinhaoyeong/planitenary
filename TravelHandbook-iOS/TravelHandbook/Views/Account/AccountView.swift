@@ -32,7 +32,7 @@ struct AccountView: View {
                     message: profileMessage,
                     error: profileError,
                     isSaving: isSavingProfile,
-                    avatarPreview: avatarPreview,
+                    avatarPreview: { avatarPreview },
                     onSave: saveProfile
                 )
                 SecurityPanel(

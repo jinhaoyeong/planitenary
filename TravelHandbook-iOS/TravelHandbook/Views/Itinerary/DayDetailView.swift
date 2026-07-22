@@ -728,7 +728,7 @@ final class VoiceNoteRecorder: ObservableObject {
     private var fileURL: URL?
 
     func startRecording() {
-        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+        AVAudioApplication.requestRecordPermission { granted in
             Task { @MainActor in
                 guard granted else { return }
                 self.beginCapture()

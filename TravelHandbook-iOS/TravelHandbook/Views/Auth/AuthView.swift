@@ -26,7 +26,7 @@ struct AuthView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 24)
         }
-        .background(EmberRoseTheme.paperBackground.ignoresSafeArea())
+        .background(ShellChrome.background.ignoresSafeArea())
         .onAppear {
             rememberMe = auth.rememberMe
         }
@@ -36,17 +36,11 @@ struct AuthView: View {
         VStack(spacing: 12) {
             Image(systemName: "airplane")
                 .font(.title)
-                .foregroundStyle(EmberRoseTheme.accent)
+                .foregroundStyle(ShellChrome.accent)
                 .frame(width: 64, height: 64)
-                .background(EmberRoseTheme.accentSoft, in: Circle())
+                .background(ShellChrome.accentSoft, in: Circle())
 
-            HStack(spacing: 4) {
-                Text("Travel")
-                Text("Handbook")
-                    .italic()
-                    .foregroundStyle(EmberRoseTheme.accent)
-            }
-            .font(.system(.largeTitle, design: .serif))
+            AppBrandTitle(size: 36)
 
             Group {
                 if auth.needsMfaVerification {
@@ -58,7 +52,7 @@ struct AuthView: View {
                 }
             }
             .font(.subheadline)
-            .foregroundStyle(EmberRoseTheme.inkMuted)
+            .foregroundStyle(ShellChrome.inkMuted)
             .multilineTextAlignment(.center)
         }
         .padding(.bottom, 24)
@@ -85,7 +79,7 @@ struct AuthView: View {
                     .font(.subheadline.weight(.bold))
                 HStack {
                     Image(systemName: "envelope")
-                        .foregroundStyle(EmberRoseTheme.inkMuted)
+                        .foregroundStyle(ShellChrome.inkMuted)
                     TextField("you@example.com", text: $email)
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
@@ -93,8 +87,8 @@ struct AuthView: View {
                         .autocorrectionDisabled()
                 }
                 .padding(14)
-                .background(EmberRoseTheme.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(EmberRoseTheme.border))
+                .background(ShellChrome.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(ShellChrome.border))
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -102,7 +96,7 @@ struct AuthView: View {
                     .font(.subheadline.weight(.bold))
                 HStack {
                     Image(systemName: "lock")
-                        .foregroundStyle(EmberRoseTheme.inkMuted)
+                        .foregroundStyle(ShellChrome.inkMuted)
                     Group {
                         if showPassword {
                             TextField(isLogin ? "Password" : "Min. 8 chars, 1 uppercase, 1 number", text: $password)
@@ -116,12 +110,12 @@ struct AuthView: View {
                         Haptics.selectionChanged()
                     } label: {
                         Image(systemName: showPassword ? "eye.slash" : "eye")
-                            .foregroundStyle(EmberRoseTheme.inkMuted)
+                            .foregroundStyle(ShellChrome.inkMuted)
                     }
                 }
                 .padding(14)
-                .background(EmberRoseTheme.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(EmberRoseTheme.border))
+                .background(ShellChrome.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(ShellChrome.border))
 
                 if !isLogin, !password.isEmpty, !isStrongPassword(password) {
                     Text("Password must be 8+ chars with at least 1 uppercase and 1 number.")
@@ -135,7 +129,7 @@ struct AuthView: View {
                     Toggle(isOn: $rememberMe) {
                         Text("Remember me")
                             .font(.subheadline)
-                            .foregroundStyle(EmberRoseTheme.inkMuted)
+                            .foregroundStyle(ShellChrome.inkMuted)
                     }
                     .toggleStyle(.checkbox)
                     .onChange(of: rememberMe) { _, newValue in
@@ -146,7 +140,7 @@ struct AuthView: View {
                         Task { await handleForgotPassword() }
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(EmberRoseTheme.accent)
+                    .foregroundStyle(ShellChrome.accent)
                 }
             }
 
@@ -171,19 +165,19 @@ struct AuthView: View {
 
             Text("Test login: \(AuthConstants.demoEmail) / \(AuthConstants.demoPassword)")
                 .font(.caption)
-                .foregroundStyle(EmberRoseTheme.inkMuted)
+                .foregroundStyle(ShellChrome.inkMuted)
                 .frame(maxWidth: .infinity, alignment: .center)
 
             if !isLogin {
                 Text("If Supabase email is rate-limited, the app will create a local test account with these same credentials.")
                     .font(.caption)
-                    .foregroundStyle(EmberRoseTheme.inkMuted)
+                    .foregroundStyle(ShellChrome.inkMuted)
             }
 
             HStack {
                 Spacer()
                 Text(isLogin ? "Don't have an account?" : "Already have an account?")
-                    .foregroundStyle(EmberRoseTheme.inkMuted)
+                    .foregroundStyle(ShellChrome.inkMuted)
                 Button(isLogin ? "Sign up" : "Sign in") {
                     isLogin.toggle()
                     errorMessage = nil
@@ -191,15 +185,15 @@ struct AuthView: View {
                     Haptics.selectionChanged()
                 }
                 .fontWeight(.bold)
-                .foregroundStyle(EmberRoseTheme.accent)
+                .foregroundStyle(ShellChrome.accent)
                 Spacer()
             }
             .font(.subheadline)
             .padding(.top, 8)
         }
         .padding(20)
-        .background(EmberRoseTheme.cardBackground, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 28).stroke(EmberRoseTheme.border))
+        .background(ShellChrome.cardBackground, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28).stroke(ShellChrome.border))
     }
 
     private var mfaForm: some View {
@@ -213,7 +207,7 @@ struct AuthView: View {
                     .font(.subheadline.weight(.bold))
                 HStack {
                     Image(systemName: "lock")
-                        .foregroundStyle(EmberRoseTheme.inkMuted)
+                        .foregroundStyle(ShellChrome.inkMuted)
                     TextField("000000", text: $mfaCode)
                         .keyboardType(.numberPad)
                         .textContentType(.oneTimeCode)
@@ -225,8 +219,8 @@ struct AuthView: View {
                         }
                 }
                 .padding(14)
-                .background(EmberRoseTheme.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(EmberRoseTheme.border))
+                .background(ShellChrome.cardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(ShellChrome.border))
             }
 
             Button {
@@ -247,8 +241,8 @@ struct AuthView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(20)
-        .background(EmberRoseTheme.cardBackground, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 28).stroke(EmberRoseTheme.border))
+        .background(ShellChrome.cardBackground, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28).stroke(ShellChrome.border))
     }
 
     private enum BannerStyle { case error, warning, info }
@@ -258,7 +252,7 @@ struct AuthView: View {
             switch style {
             case .error: return (Color.red.opacity(0.12), .red)
             case .warning: return (Color.orange.opacity(0.12), .orange)
-            case .info: return (EmberRoseTheme.accentSoft, EmberRoseTheme.accent)
+            case .info: return (ShellChrome.accentSoft, ShellChrome.accent)
             }
         }()
         return HStack(alignment: .top, spacing: 10) {
@@ -280,16 +274,16 @@ struct AuthView: View {
 
         if isLogin {
             let result = await auth.signIn(email: email, password: password)
-            if case .failure(let message) = result {
-                errorMessage = message
+            if case .failure(let failure) = result {
+                errorMessage = failure.message
             }
         } else {
             let result = await auth.signUp(email: email, password: password)
             switch result {
             case .success(let notice):
                 if let notice { infoMessage = notice }
-            case .failure(let message):
-                errorMessage = message
+            case .failure(let failure):
+                errorMessage = failure.message
             }
         }
     }
@@ -307,8 +301,8 @@ struct AuthView: View {
         switch result {
         case .success:
             infoMessage = "Password reset email sent. Follow the link, then set a new password in Account → Security."
-        case .failure(let message):
-            errorMessage = message
+        case .failure(let failure):
+            errorMessage = failure.message
         }
     }
 
@@ -317,8 +311,8 @@ struct AuthView: View {
         isSubmitting = true
         let result = await auth.completeMfaChallenge(code: mfaCode)
         isSubmitting = false
-        if case .failure(let message) = result {
-            errorMessage = message
+        if case .failure(let failure) = result {
+            errorMessage = failure.message
             Haptics.errorNotification()
         } else {
             mfaCode = ""
@@ -340,7 +334,7 @@ private struct CheckboxToggleStyle: ToggleStyle {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: configuration.isOn ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(configuration.isOn ? EmberRoseTheme.accent : EmberRoseTheme.inkMuted)
+                    .foregroundStyle(configuration.isOn ? ShellChrome.accent : ShellChrome.inkMuted)
                 configuration.label
             }
         }

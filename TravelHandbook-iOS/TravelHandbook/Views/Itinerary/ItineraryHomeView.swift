@@ -8,6 +8,35 @@ struct ItineraryHomeView: View {
     @State private var isEditMode = false
     @State private var showResetConfirm = false
     @State private var navigationDay: DayNavigationTarget?
+    @State private var searchText = ""
+
+    private var labels: TripCopyLabels { session.tripSettings.labels }
+
+    private var filteredDays: [DayPlan] {
+        let days = session.itinerary?.days ?? []
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return days }
+        return days.filter { day in
+            day.title.lowercased().contains(query)
+                || day.city.lowercased().contains(query)
+                || day.date.lowercased().contains(query)
+                || day.activities.contains {
+                    $0.name.lowercased().contains(query)
+                        || ($0.location?.lowercased().contains(query) ?? false)
+                        || $0.description.lowercased().contains(query)
+                }
+        }
+    }
+
+    private var overviewIntro: String {
+        let cities = session.itinerary?.cities ?? []
+        if cities.isEmpty {
+            return labels.overviewIntroEmpty
+        }
+        return applyTemplate(labels.overviewIntroFilled, replacements: [
+            "cities": cities.joined(separator: " & "),
+        ])
+    }
 
     var body: some View {
         NavigationStack {
@@ -31,6 +60,7 @@ struct ItineraryHomeView: View {
     private var itineraryContent: some View {
         VStack(alignment: .leading, spacing: 20) {
             planHeader
+            searchField
             editToolbar
             daysList
         }
@@ -44,8 +74,15 @@ struct ItineraryHomeView: View {
     }
 
     private var planHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(eyebrow: "Itinerary", title: session.tripDisplayName)
+        VStack(alignment: .leading, spacing: 14) {
+            EditorialPageHeader(
+                eyebrow: labels.overviewEyebrow,
+                titleLeading: Self.splitName(session.tripDisplayName).leading,
+                titleAccent: Self.splitName(session.tripDisplayName).accent,
+                subtitle: overviewIntro,
+                centered: false,
+                titleSize: 36
+            )
 
             if isEditingPlanName {
                 HStack(spacing: 10) {
@@ -67,19 +104,37 @@ struct ItineraryHomeView: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            if let description = session.itinerary?.description, !description.isEmpty {
-                Text(description)
-                    .font(.subheadline)
-                    .foregroundStyle(ShellChrome.inkMuted)
-            }
         }
+    }
+
+    private static func splitName(_ name: String) -> (leading: String, accent: String) {
+        let parts = name.split(separator: " ").map(String.init)
+        guard parts.count > 1 else { return ("", name) }
+        return (parts.dropLast().joined(separator: " "), parts.last!)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(ShellChrome.inkMuted)
+            TextField(labels.searchPlaceholder, text: $searchText)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(ShellChrome.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(ShellChrome.border, lineWidth: 1)
+        )
     }
 
     private var editToolbar: some View {
         HStack(spacing: 10) {
             CompactPillButton(
-                title: isEditMode ? "Done" : "Customize",
+                title: isEditMode ? labels.doneCustomizing : labels.customizePlan,
                 systemImage: isEditMode ? "checkmark" : "slider.horizontal.3",
                 kind: isEditMode ? .primary : .soft
             ) {
@@ -90,7 +145,7 @@ struct ItineraryHomeView: View {
                 CompactPillButton(title: "Add Day", systemImage: "plus", kind: .soft) {
                     addDay()
                 }
-                CompactPillButton(title: "Reset", systemImage: "arrow.counterclockwise", kind: .soft) {
+                CompactPillButton(title: labels.resetPlan, systemImage: "arrow.counterclockwise", kind: .soft) {
                     showResetConfirm = true
                 }
             }
@@ -98,60 +153,65 @@ struct ItineraryHomeView: View {
     }
 
     private var daysList: some View {
-        List {
-            ForEach(session.itinerary?.days ?? []) { day in
-                dayCard(day)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard !isEditMode else { return }
-                        navigationDay = DayNavigationTarget(day: day.day)
+        Group {
+            if filteredDays.isEmpty {
+                EmptyState(
+                    systemImage: "calendar.badge.plus",
+                    title: searchText.isEmpty ? "Day 1 is ready" : "No matching days",
+                    message: searchText.isEmpty
+                        ? "Tap Customize Plan to add days, or open Day 1 and start adding activities, places, and notes."
+                        : "Try a different search term."
+                )
+                .padding(.top, 12)
+            } else {
+                List {
+                    ForEach(filteredDays) { day in
+                        dayCard(day)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard !isEditMode else { return }
+                                navigationDay = DayNavigationTarget(day: day.day)
+                            }
                     }
+                    .onMove(perform: isEditMode && searchText.isEmpty ? moveDays : nil)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.editMode, .constant(isEditMode ? EditMode.active : EditMode.inactive))
+                .frame(minHeight: CGFloat(max(filteredDays.count, 1) * 120))
             }
-            .onMove(perform: isEditMode ? moveDays : nil)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .environment(\.editMode, .constant(isEditMode ? EditMode.active : EditMode.inactive))
-        .frame(minHeight: CGFloat((session.itinerary?.days.count ?? 1) * 120))
     }
 
     private func dayCard(_ day: DayPlan) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(spacing: 4) {
-                Text("\(day.day)")
-                    .font(.title2.weight(.bold))
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(String(format: "%02d", day.day))
+                    .font(.system(size: 44, weight: .regular, design: .serif))
                     .foregroundStyle(ShellChrome.accent)
-                Text("DAY")
+                Spacer()
+                Text(day.date.uppercased())
                     .font(.caption2.weight(.bold))
+                    .tracking(1.4)
                     .foregroundStyle(ShellChrome.inkMuted)
             }
-            .frame(width: 44)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(day.title)
-                    .font(.headline)
-                    .foregroundStyle(ShellChrome.ink)
-                HStack(spacing: 12) {
-                    Label(day.city, systemImage: "mappin.and.ellipse")
-                    Label(day.date, systemImage: "calendar")
-                }
-                .font(.caption)
-                .foregroundStyle(ShellChrome.inkMuted)
-                Text("\(day.activities.count) activities")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(ShellChrome.accent)
+            Text(day.title)
+                .font(.system(size: 24, weight: .regular, design: .serif))
+                .foregroundStyle(ShellChrome.ink)
+
+            HStack(spacing: 16) {
+                Label(day.city, systemImage: "mappin.and.ellipse")
+                Spacer()
+                Label("\(day.activities.count) \(labels.spotsSuffix)", systemImage: "fork.knife")
             }
-            Spacer()
-            if !isEditMode {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(ShellChrome.inkMuted)
-            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(ShellChrome.inkMuted)
         }
-        .padding(18)
+        .padding(20)
         .shellCard()
     }
 

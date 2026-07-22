@@ -24,7 +24,14 @@ struct DraftView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            SectionHeader(eyebrow: "Draft", title: "Saved ideas")
+            EditorialPageHeader(
+                eyebrow: "The draft book · ideas & finds",
+                titleLeading: "Scraps &",
+                titleAccent: "shortlists.",
+                subtitle: "A loose pile of places we spotted on Rednote, TikTok, and friends' maps. Pin, tag, and pull the good ones into the itinerary.",
+                centered: true,
+                titleSize: 42
+            )
             draftForm
             draftsList
         }
@@ -34,8 +41,13 @@ struct DraftView: View {
 
     private var draftForm: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(isFormPresented || editingDraft != nil ? "Edit draft" : "New draft")
-                .font(.headline)
+            HStack(spacing: 8) {
+                Circle().fill(ShellChrome.accent).frame(width: 6, height: 6)
+                Text((isFormPresented || editingDraft != nil ? "Edit idea" : "Add a new idea").uppercased())
+                    .font(.caption.weight(.semibold))
+                    .tracking(1.4)
+                    .foregroundStyle(ShellChrome.inkMuted)
+            }
             TextField("Name", text: $formName)
                 .textFieldStyle(.roundedBorder)
             TextField("Link", text: $formLink)

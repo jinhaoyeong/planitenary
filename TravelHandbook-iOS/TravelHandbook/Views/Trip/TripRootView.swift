@@ -11,32 +11,75 @@ struct TripRootView: View {
     @State private var restoreMessage: String?
     @State private var isRestoreBusy = false
 
+    private var marqueeItems: [String] {
+        let settingsItems = tripSession.tripSettings.marqueeItems
+        let fallback = settingsItems.isEmpty ? DEFAULT_TRIP_SETTINGS.marqueeItems : settingsItems
+        let cities = tripSession.itinerary?.cities ?? []
+        return cities.isEmpty ? fallback : cities + fallback
+    }
+
+    private var showsHeroInScroll: Bool {
+        tripSession.activeTab.showsInPrimaryPillBar
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             ShellChrome.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 tripHeader
-                tabContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            // Web order: hero → cover → auto-slider → page title/content
+                            if showsHeroInScroll {
+                                TripHeroView(session: tripSession)
+                                    .id("hero")
+                            }
+
+                            TripMarqueeView(items: marqueeItems)
+                                .padding(.top, showsHeroInScroll ? 6 : 0)
+                                .id("marquee")
+
+                            tabContent
+                                .id("page-title")
+                                .padding(.top, 18)
+                                .padding(.bottom, tripSession.activeTab.showsInPrimaryPillBar ? 120 : 28)
+                        }
+                    }
+                    .onChange(of: tripSession.activeTab) { _, _ in
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.28)) {
+                                proxy.scrollTo("page-title", anchor: .top)
+                            }
+                        }
+                    }
+                }
             }
 
             if tripSession.activeTab.showsInPrimaryPillBar {
                 primaryTabBar
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 10)
             }
         }
-        .sheet(isPresented: $isMenuPresented) {
-            tripMenuSheet
+        .handbookTheme(theme)
+        .onAppear {
+            syncTripTheme()
         }
-        .sheet(isPresented: $isRestorePresented) {
-            restoreBackupSheet
+        .onChange(of: tripSession.tripSettings) { _, _ in syncTripTheme() }
+        .onChange(of: theme.mode) { _, _ in syncTripTheme() }
+        .onDisappear {
+            theme.applyTripSettings(nil)
+            theme.applyShellPalette(userId: auth.user?.id)
         }
+        .sheet(isPresented: $isMenuPresented) { tripMenuSheet }
+        .sheet(isPresented: $isRestorePresented) { restoreBackupSheet }
     }
 
     private var tripHeader: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Button {
                 tripSession.saveTripData()
                 persistShellThemeFromTrip()
@@ -46,24 +89,22 @@ struct TripRootView: View {
                     .font(.body.weight(.semibold))
                     .foregroundStyle(ShellChrome.ink)
                     .frame(width: 36, height: 36)
-                    .background(ShellChrome.cardBackground)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(ShellChrome.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Back to dashboard")
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(tripSession.tripDisplayName)
-                    .font(.headline)
+            Spacer(minLength: 0)
+
+            (
+                Text(brandLeading)
                     .foregroundStyle(ShellChrome.ink)
-                    .lineLimit(1)
-                Text("Travel Handbook")
-                    .font(.caption)
-                    .foregroundStyle(ShellChrome.inkMuted)
-            }
+                + Text(brandAccent)
+                    .italic()
+                    .foregroundStyle(ShellChrome.accent)
+            )
+            .font(.system(size: 22, weight: .regular, design: .serif))
+            .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 0)
 
             headerIconButton(systemImage: "slider.horizontal.3") {
                 tripSession.activeTab = .settings
@@ -75,9 +116,24 @@ struct TripRootView: View {
                 isMenuPresented = true
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(ShellChrome.background)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(ShellChrome.border).frame(height: 1)
+        }
+    }
+
+    private var brandLeading: String {
+        let name = tripSession.tripDisplayName
+        let parts = name.split(separator: " ")
+        guard parts.count > 1 else { return name + " " }
+        return parts.dropLast().joined(separator: " ") + " "
+    }
+
+    private var brandAccent: String {
+        let parts = tripSession.tripDisplayName.split(separator: " ")
+        return parts.count > 1 ? String(parts.last!) : ""
     }
 
     private func headerIconButton(systemImage: String, action: @escaping () -> Void) -> some View {
@@ -97,28 +153,21 @@ struct TripRootView: View {
     private var tabContent: some View {
         switch tripSession.activeTab {
         case .itinerary:
-            ScrollView {
-                ItineraryHomeView(session: tripSession)
-                    .padding(.bottom, 120)
-            }
-            .refreshable {
-                await tripSession.refreshItineraryFromCloud(auth: auth)
-            }
+            ItineraryHomeView(session: tripSession)
         case .maps:
             MapsView(session: tripSession)
-                .padding(.bottom, 120)
         case .draft:
-            ScrollView { DraftView(session: tripSession).padding(.bottom, 120) }
+            DraftView(session: tripSession)
         case .budget:
-            ScrollView { BudgetView(session: tripSession).padding(.bottom, 120) }
+            BudgetView(session: tripSession)
         case .checklist:
-            ScrollView { ChecklistView(session: tripSession).padding(.bottom, 120) }
+            ChecklistView(session: tripSession)
         case .documents:
-            ScrollView { DocumentsView(session: tripSession).padding(.bottom, 24) }
+            DocumentsView(session: tripSession)
         case .photos:
-            ScrollView { PhotoWallView(session: tripSession).padding(.bottom, 24) }
+            PhotoWallView(session: tripSession)
         case .settings:
-            ScrollView { HandbookSettingsView(session: tripSession).padding(.bottom, 24) }
+            HandbookSettingsView(session: tripSession)
         case .account:
             AccountView()
         }
@@ -130,33 +179,36 @@ struct TripRootView: View {
                 Button {
                     tripSession.activeTab = tab
                 } label: {
-                    VStack(spacing: 6) {
+                    VStack(spacing: 4) {
                         ZStack {
                             if tripSession.activeTab == tab {
                                 Circle()
                                     .fill(ShellChrome.accent)
-                                    .frame(width: 40, height: 40)
+                                    .frame(width: 42, height: 42)
                             }
                             Image(systemName: tab.systemImage)
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(tripSession.activeTab == tab ? Color.white : ShellChrome.inkMuted)
+                                .foregroundStyle(
+                                    tripSession.activeTab == tab
+                                    ? Color(hex: "#0F0E0D")
+                                    : ShellChrome.inkMuted
+                                )
                         }
-                        Text(shortTabLabel(tab))
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(tripSession.activeTab == tab ? ShellChrome.accent : ShellChrome.inkMuted)
+                        .frame(height: 42)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(shortTabLabel(tab))
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(ShellChrome.cardBackground)
+        .background(ShellChrome.cardBackground.opacity(0.96))
         .clipShape(Capsule())
         .overlay(Capsule().stroke(ShellChrome.border, lineWidth: 1))
-        .shadow(color: Color.black.opacity(0.08), radius: 18, x: 0, y: 8)
+        .shadow(color: Color.black.opacity(ShellChrome.isDark ? 0.4 : 0.1), radius: 18, x: 0, y: 8)
     }
 
     private func shortTabLabel(_ tab: TripTab) -> String {
@@ -183,7 +235,6 @@ struct TripRootView: View {
                         }
                     }
                 }
-
                 Section("Handbook") {
                     Button {
                         isMenuPresented = false
@@ -191,14 +242,15 @@ struct TripRootView: View {
                     } label: {
                         Label("Restore Backup", systemImage: "arrow.counterclockwise")
                     }
-
                     Button {
                         theme.toggleTheme()
                     } label: {
-                        Label(theme.mode == .light ? "Dark theme" : "Light theme", systemImage: theme.mode == .light ? "moon.fill" : "sun.max.fill")
+                        Label(
+                            theme.mode == .light ? "Dark theme" : "Light theme",
+                            systemImage: theme.mode == .light ? "moon.fill" : "sun.max.fill"
+                        )
                     }
                 }
-
                 Section {
                     Button(role: .destructive) {
                         isMenuPresented = false
@@ -231,11 +283,8 @@ struct TripRootView: View {
                     ForEach(previews) { preview in
                         Toggle(isOn: bindingForRestore(preview.id)) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(preview.id.label)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(preview.detail)
-                                    .font(.caption)
-                                    .foregroundStyle(ShellChrome.inkMuted)
+                                Text(preview.id.label).font(.subheadline.weight(.semibold))
+                                Text(preview.detail).font(.caption).foregroundStyle(ShellChrome.inkMuted)
                             }
                         }
                         .toggleStyle(SwitchToggleStyle(tint: ShellChrome.accent))
@@ -243,12 +292,14 @@ struct TripRootView: View {
                     }
 
                     if let restoreMessage {
-                        Text(restoreMessage)
-                            .font(.footnote)
-                            .foregroundStyle(ShellChrome.inkMuted)
+                        Text(restoreMessage).font(.footnote).foregroundStyle(ShellChrome.inkMuted)
                     }
 
-                    PillButton(title: isRestoreBusy ? "Restoring…" : "Restore", kind: .primary, isEnabled: !selectedRestoreIds.isEmpty && !isRestoreBusy) {
+                    PillButton(
+                        title: isRestoreBusy ? "Restoring…" : "Restore",
+                        kind: .primary,
+                        isEnabled: !selectedRestoreIds.isEmpty && !isRestoreBusy
+                    ) {
                         performRestore()
                     }
 
@@ -285,9 +336,7 @@ struct TripRootView: View {
             }
             .onAppear {
                 selectedRestoreIds = Set(
-                    tripSession.restorePreview(userId: auth.user?.id)
-                        .filter(\.isAvailable)
-                        .map(\.id)
+                    tripSession.restorePreview(userId: auth.user?.id).filter(\.isAvailable).map(\.id)
                 )
             }
         }
@@ -298,11 +347,7 @@ struct TripRootView: View {
         Binding(
             get: { selectedRestoreIds.contains(id) },
             set: { isOn in
-                if isOn {
-                    selectedRestoreIds.insert(id)
-                } else {
-                    selectedRestoreIds.remove(id)
-                }
+                if isOn { selectedRestoreIds.insert(id) } else { selectedRestoreIds.remove(id) }
             }
         )
     }
@@ -315,7 +360,10 @@ struct TripRootView: View {
     }
 
     private func persistShellThemeFromTrip() {
-        let palettes = shellThemeFromTripSettings(tripSession.tripSettings)
-        LocalStore.saveShellTheme(palettes, userId: auth.user?.id)
+        LocalStore.saveShellTheme(shellThemeFromTripSettings(tripSession.tripSettings), userId: auth.user?.id)
+    }
+
+    private func syncTripTheme() {
+        theme.applyTripSettings(tripSession.tripSettings)
     }
 }

@@ -41,6 +41,7 @@
 		A00000000000000000B20053 /* HandbookSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20052 /* HandbookSettingsView.swift */; };
 		A00000000000000000B20055 /* TripRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20054 /* TripRootView.swift */; };
 		A00000000000000000B20057 /* TripSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20056 /* TripSession.swift */; };
+		A00000000000000000B20059 /* TripHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20058 /* TripHeroView.swift */; };
 		A00000000000000000B20012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000B20011 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -79,6 +80,7 @@
 		A00000000000000000B20052 /* HandbookSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HandbookSettingsView.swift; path = "Views/Settings/HandbookSettingsView.swift"; sourceTree = "<group>"; };
 		A00000000000000000B20054 /* TripRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TripRootView.swift; path = "Views/Trip/TripRootView.swift"; sourceTree = "<group>"; };
 		A00000000000000000B20056 /* TripSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TripSession.swift; path = "Views/Trip/TripSession.swift"; sourceTree = "<group>"; };
+		A00000000000000000B20058 /* TripHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TripHeroView.swift; path = "Views/Trip/TripHeroView.swift"; sourceTree = "<group>"; };
 		A00000000000000000B20011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000B20013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A00000000000000000B2000C /* TravelHandbook.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TravelHandbook.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -150,6 +152,7 @@
 				A00000000000000000B20052 /* HandbookSettingsView.swift */,
 				A00000000000000000B20054 /* TripRootView.swift */,
 				A00000000000000000B20056 /* TripSession.swift */,
+				A00000000000000000B20058 /* TripHeroView.swift */,
 			);
 			name = Sources;
 			sourceTree = "<group>";
@@ -260,6 +263,7 @@
 				A00000000000000000B20053 /* HandbookSettingsView.swift in Sources */,
 				A00000000000000000B20055 /* TripRootView.swift in Sources */,
 				A00000000000000000B20057 /* TripSession.swift in Sources */,
+				A00000000000000000B20059 /* TripHeroView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

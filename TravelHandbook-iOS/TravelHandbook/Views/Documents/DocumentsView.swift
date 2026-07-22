@@ -366,7 +366,7 @@ struct DocumentsView: View {
         }
 
         let now = ISO8601DateFormatter().string(from: Date())
-        var docId = editingDocument?.id ?? UUID().uuidString
+        let docId = editingDocument?.id ?? UUID().uuidString
         var files = existingFiles
 
         for pending in importedFiles {

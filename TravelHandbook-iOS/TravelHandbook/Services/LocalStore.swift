@@ -28,7 +28,7 @@ enum LocalStore {
     static func shellThemeKey(userId: String) -> String { "shell-theme-\(userId)" }
     static func selectedCurrencyKey(userId: String) -> String { "selected-currency-\(userId)" }
     static func checklistDataKey(userId: String) -> String { "checklist-data-\(userId)" }
-    static func themeKey(userId: String) -> String { ThemeManager.themeKey(for: userId) }
+    static func themeKey(userId: String) -> String { "theme-\(userId)" }
 
     static func getJSON<T: Decodable>(_ type: T.Type, key: String, userDefaults: UserDefaults = .standard) -> T? {
         guard let data = userDefaults.data(forKey: key) else {

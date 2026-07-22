@@ -3,6 +3,7 @@ import SwiftUI
 struct WelcomeView: View {
     var onFinish: () -> Void = {}
 
+    @EnvironmentObject private var theme: ThemeManager
     @State private var activeIndex = 0
 
     private let slides: [WelcomeSlide] = [
@@ -57,29 +58,32 @@ struct WelcomeView: View {
 
     var body: some View {
         ZStack {
-            EmberRoseTheme.paperBackground.ignoresSafeArea()
+            ShellChrome.background.ignoresSafeArea()
             RadialGradient(
-                colors: [EmberRoseTheme.accent.opacity(0.16), .clear],
-                center: .top,
-                startRadius: 0,
+                colors: [ShellChrome.accent.opacity(0.18), .clear],
+                center: .topTrailing,
+                startRadius: 20,
                 endRadius: 420
             )
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 HStack {
-                    Text("Travel handbook")
-                        .font(.caption.weight(.semibold))
-                        .tracking(2)
-                        .textCase(.uppercase)
-                        .foregroundStyle(EmberRoseTheme.inkMuted)
+                    HStack(spacing: 8) {
+                        Circle().fill(ShellChrome.accent).frame(width: 6, height: 6)
+                        Text("Travel handbook")
+                            .font(.caption.weight(.semibold))
+                            .tracking(2)
+                            .textCase(.uppercase)
+                            .foregroundStyle(ShellChrome.ink)
+                    }
                     Spacer()
                     Button("Skip") {
                         Haptics.lightImpact()
                         finishOnboarding()
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(EmberRoseTheme.inkMuted)
+                    .foregroundStyle(ShellChrome.inkMuted)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -116,9 +120,11 @@ struct WelcomeView: View {
                             activeIndex = min(activeIndex + 1, slides.count - 1)
                         }
                     } label: {
-                        Label(isLastSlide ? "Start planning" : "Continue", systemImage: "arrow.right")
-                            .labelStyle(.titleAndIcon)
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            Text(isLastSlide ? "Start planning" : "Continue")
+                            Image(systemName: "arrow.right")
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(PillButtonStyle(variant: .primary))
                 }
@@ -127,43 +133,46 @@ struct WelcomeView: View {
 
                 Text("Swipe left or right to move through the intro.")
                     .font(.caption)
-                    .foregroundStyle(EmberRoseTheme.inkMuted)
+                    .foregroundStyle(ShellChrome.inkMuted)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                     .padding(.top, 12)
                     .padding(.bottom, 16)
             }
         }
+        .handbookTheme(theme)
     }
 
     private func slideCard(_ slide: WelcomeSlide, index: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(slide.eyebrow)
-                    .font(.caption.weight(.semibold))
-                    .tracking(2)
-                    .textCase(.uppercase)
-                    .foregroundStyle(EmberRoseTheme.inkMuted)
+                HStack(spacing: 8) {
+                    Circle().fill(ShellChrome.accent).frame(width: 6, height: 6)
+                    Text(slide.eyebrow.uppercased())
+                        .font(.caption.weight(.semibold))
+                        .tracking(2)
+                        .foregroundStyle(ShellChrome.ink)
+                }
                 Spacer()
                 Image(systemName: slide.systemImage)
-                    .font(.title2)
-                    .foregroundStyle(EmberRoseTheme.accent)
+                    .font(.title3)
+                    .foregroundStyle(ShellChrome.accent)
                     .frame(width: 48, height: 48)
-                    .background(EmberRoseTheme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(ShellChrome.accentSoft, in: Circle())
             }
 
             Text(slide.titleTop)
                 .font(.system(size: 42, weight: .regular, design: .serif))
-                .foregroundStyle(EmberRoseTheme.ink)
+                .foregroundStyle(ShellChrome.ink)
                 .padding(.top, 20)
             Text(slide.titleAccent)
                 .font(.system(size: 42, weight: .regular, design: .serif))
                 .italic()
-                .foregroundStyle(EmberRoseTheme.accent)
+                .foregroundStyle(ShellChrome.accent)
 
             Text(slide.body)
                 .font(.body)
-                .foregroundStyle(EmberRoseTheme.inkMuted)
+                .foregroundStyle(ShellChrome.inkMuted)
                 .lineSpacing(4)
                 .padding(.top, 16)
 
@@ -172,38 +181,30 @@ struct WelcomeView: View {
                     .font(.caption2.weight(.bold))
                     .tracking(2)
                     .textCase(.uppercase)
-                    .foregroundStyle(EmberRoseTheme.inkMuted)
+                    .foregroundStyle(ShellChrome.inkMuted)
                 Text(slide.cardTitle)
                     .font(.system(.title, design: .serif))
-                    .foregroundStyle(EmberRoseTheme.ink)
+                    .foregroundStyle(ShellChrome.ink)
                 Text(slide.cardBody)
                     .font(.subheadline)
-                    .foregroundStyle(EmberRoseTheme.inkMuted)
+                    .foregroundStyle(ShellChrome.inkMuted)
                     .lineSpacing(3)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                LinearGradient(
-                    colors: [EmberRoseTheme.accentSoft.opacity(0.9), EmberRoseTheme.cardBackground],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 28, style: .continuous)
-            )
+            .background(ShellChrome.accentSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(EmberRoseTheme.border, lineWidth: 1)
+                    .stroke(ShellChrome.border, lineWidth: 1)
             )
             .padding(.top, 24)
         }
         .padding(22)
-        .background(EmberRoseTheme.cardBackground, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .background(ShellChrome.cardBackground, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .stroke(EmberRoseTheme.border, lineWidth: 1)
+                .stroke(ShellChrome.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 24, y: 8)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
     }
@@ -216,11 +217,10 @@ struct WelcomeView: View {
                     activeIndex = index
                 } label: {
                     Capsule()
-                        .fill(index == activeIndex ? EmberRoseTheme.accent : EmberRoseTheme.ink.opacity(0.14))
+                        .fill(index == activeIndex ? ShellChrome.accent : ShellChrome.ink.opacity(0.22))
                         .frame(width: index == activeIndex ? 28 : 8, height: 8)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Go to intro page \(index + 1)")
             }
         }
     }
@@ -241,14 +241,15 @@ private struct WelcomeSlide {
     let cardBody: String
 }
 
+@MainActor
 enum EmberRoseTheme {
-    static let paperBackground = Color(red: 250 / 255, green: 247 / 255, blue: 242 / 255)
-    static let cardBackground = Color.white
-    static let accent = Color(red: 238 / 255, green: 77 / 255, blue: 135 / 255)
-    static let accentSoft = Color(red: 253 / 255, green: 232 / 255, blue: 239 / 255)
-    static let ink = Color(red: 28 / 255, green: 25 / 255, blue: 23 / 255)
-    static let inkMuted = Color(red: 87 / 255, green: 83 / 255, blue: 78 / 255)
-    static let border = Color.black.opacity(0.08)
+    static var paperBackground: Color { ShellChrome.background }
+    static var cardBackground: Color { ShellChrome.cardBackground }
+    static var accent: Color { ShellChrome.accent }
+    static var accentSoft: Color { ShellChrome.accentSoft }
+    static var ink: Color { ShellChrome.ink }
+    static var inkMuted: Color { ShellChrome.inkMuted }
+    static var border: Color { ShellChrome.border }
 }
 
 struct PillButtonStyle: ButtonStyle {
@@ -263,22 +264,27 @@ struct PillButtonStyle: ButtonStyle {
             .padding(.horizontal, 18)
             .background(backgroundColor(isPressed: configuration.isPressed), in: Capsule())
             .foregroundStyle(foregroundColor)
+            .overlay(
+                Capsule().stroke(variant == .soft ? ShellChrome.border : Color.clear, lineWidth: 1)
+            )
+            .opacity(configuration.isPressed ? 0.9 : 1)
     }
 
     private var foregroundColor: Color {
-        variant == .primary ? .white : EmberRoseTheme.ink
+        variant == .primary ? Color(hex: "#0F0E0D") : ShellChrome.inkMuted
     }
 
     private func backgroundColor(isPressed: Bool) -> Color {
         switch variant {
         case .primary:
-            return isPressed ? EmberRoseTheme.accent.opacity(0.85) : EmberRoseTheme.accent
+            return isPressed ? ShellChrome.accent.opacity(0.85) : ShellChrome.accent
         case .soft:
-            return isPressed ? EmberRoseTheme.accentSoft.opacity(0.7) : EmberRoseTheme.accentSoft
+            return isPressed ? ShellChrome.cardBackground.opacity(0.7) : ShellChrome.cardBackground
         }
     }
 }
 
 #Preview {
     WelcomeView()
+        .environmentObject(ThemeManager())
 }

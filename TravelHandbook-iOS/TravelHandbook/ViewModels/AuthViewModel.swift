@@ -52,7 +52,7 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
-    func signIn(email: String, password: String) async -> Result<Void, String> {
+    func signIn(email: String, password: String) async -> Result<Void, AuthFailure> {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedEmail == AuthConstants.demoEmail, password == AuthConstants.demoPassword {
             signInDemo()
@@ -68,9 +68,9 @@ final class AuthViewModel: ObservableObject {
         }
 
         guard SupabaseClient.shared.isConfigured else {
-            return .failure(
+            return .failure(AuthFailure(
                 "Authentication is not configured yet. Add your Supabase environment variables to enable cloud sign in, or use a local test account created on this device."
-            )
+            ))
         }
 
         do {
@@ -79,15 +79,15 @@ final class AuthViewModel: ObservableObject {
             await applyMfaStatus(for: cloudSession)
             return .success(())
         } catch let error as SupabaseAuthError {
-            return .failure(Self.mapAuthError(error))
+            return .failure(AuthFailure(Self.mapAuthError(error)))
         } catch {
-            return .failure(error.localizedDescription)
+            return .failure(AuthFailure(error.localizedDescription))
         }
     }
 
-    func signUp(email: String, password: String) async -> Result<String?, String> {
+    func signUp(email: String, password: String) async -> Result<String?, AuthFailure> {
         guard Self.isStrongPassword(password) else {
-            return .failure("Password must be at least 8 characters long and contain a number and an uppercase letter.")
+            return .failure(AuthFailure("Password must be at least 8 characters long and contain a number and an uppercase letter."))
         }
 
         if SupabaseClient.shared.isConfigured {
@@ -100,9 +100,9 @@ final class AuthViewModel: ObservableObject {
                 }
                 return .success("Registration successful! Please check your email to verify your account before signing in.")
             } catch let error as SupabaseAuthError {
-                return .failure(Self.mapAuthError(error))
+                return .failure(AuthFailure(Self.mapAuthError(error)))
             } catch {
-                return .failure(error.localizedDescription)
+                return .failure(AuthFailure(error.localizedDescription))
             }
         }
 
@@ -110,8 +110,8 @@ final class AuthViewModel: ObservableObject {
         case .success(let localUser):
             applyLocalUser(localUser)
             return .success(nil)
-        case .failure(let message):
-            return .failure(message)
+        case .failure(let failure):
+            return .failure(failure)
         }
     }
 
@@ -120,29 +120,29 @@ final class AuthViewModel: ObservableObject {
         applyDemoUser(AuthService.createDemoUser())
     }
 
-    func signInLocal(email: String, password: String) -> Result<Void, String> {
+    func signInLocal(email: String, password: String) -> Result<Void, AuthFailure> {
         switch authService.signInLocal(email: email, password: password) {
         case .success(let localUser):
             applyLocalUser(localUser)
             return .success(())
-        case .failure(let message):
-            return .failure(message)
+        case .failure(let failure):
+            return .failure(failure)
         }
     }
 
-    func signUpLocal(email: String, password: String) -> Result<Void, String> {
+    func signUpLocal(email: String, password: String) -> Result<Void, AuthFailure> {
         switch authService.signUpLocal(email: email, password: password) {
         case .success(let localUser):
             applyLocalUser(localUser)
             return .success(())
-        case .failure(let message):
-            return .failure(message)
+        case .failure(let failure):
+            return .failure(failure)
         }
     }
 
-    func completeMfaChallenge(code: String) async -> Result<Void, String> {
+    func completeMfaChallenge(code: String) async -> Result<Void, AuthFailure> {
         guard let factorId = mfaFactorId else {
-            return .failure("No authenticator is enrolled on this account.")
+            return .failure(AuthFailure("No authenticator is enrolled on this account."))
         }
         do {
             try await authService.verifyTotpChallenge(factorId: factorId, code: code)
@@ -154,9 +154,9 @@ final class AuthViewModel: ObservableObject {
             await refreshMfaStatus()
             return .success(())
         } catch let error as SupabaseAuthError {
-            return .failure(error.message)
+            return .failure(AuthFailure(error.message))
         } catch {
-            return .failure(error.localizedDescription)
+            return .failure(AuthFailure(error.localizedDescription))
         }
     }
 
@@ -178,17 +178,17 @@ final class AuthViewModel: ObservableObject {
         mfaStatusReady = true
     }
 
-    func resetPassword(email: String) async -> Result<Void, String> {
+    func resetPassword(email: String) async -> Result<Void, AuthFailure> {
         guard SupabaseClient.shared.isConfigured else {
-            return .failure("Password recovery requires a configured cloud account.")
+            return .failure(AuthFailure("Password recovery requires a configured cloud account."))
         }
         do {
             try await authService.resetPassword(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
             return .success(())
         } catch let error as SupabaseAuthError {
-            return .failure(Self.mapAuthError(error))
+            return .failure(AuthFailure(Self.mapAuthError(error)))
         } catch {
-            return .failure(error.localizedDescription)
+            return .failure(AuthFailure(error.localizedDescription))
         }
     }
 
@@ -269,10 +269,12 @@ final class AuthViewModel: ObservableObject {
         if code == "over_email_send_rate_limit" || message.localizedCaseInsensitiveContains("rate limit") {
             return "Too many signup emails were requested. Wait a few minutes, or use a different email while testing."
         }
-        if message.localizedCaseInsensitiveContains("email not confirmed") {
+        if code == "email_not_confirmed" || message.localizedCaseInsensitiveContains("email not confirmed") {
             return "This account exists, but the email has not been confirmed yet. Open the verification email first."
         }
-        if message.localizedCaseInsensitiveContains("invalid login credentials") {
+        if code == "invalid_credentials"
+            || message.localizedCaseInsensitiveContains("invalid login credentials")
+            || message.localizedCaseInsensitiveContains("invalid_credentials") {
             return "Incorrect email or password. If you just signed up, verify the email before signing in."
         }
         return message

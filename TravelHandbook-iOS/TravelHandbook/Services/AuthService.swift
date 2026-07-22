@@ -1,5 +1,12 @@
 import Foundation
 
+/// User-facing auth failure message. `Result` requires `Failure: Error` (String alone is not enough).
+struct AuthFailure: Error, LocalizedError, Equatable {
+    let message: String
+    var errorDescription: String? { message }
+    init(_ message: String) { self.message = message }
+}
+
 enum AuthConstants {
     static let demoEmail = "demo@travelhandbook.local"
     static let demoPassword = "Demo1234"
@@ -54,23 +61,23 @@ final class AuthService {
         LocalStore.remove(key: LocalStore.localAuthSessionKey)
     }
 
-    func signInLocal(email: String, password: String) -> Result<AuthUser, String> {
+    func signInLocal(email: String, password: String) -> Result<AuthUser, AuthFailure> {
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard let matched = readLocalAuthUsers().first(where: {
             $0.email.lowercased() == normalized && $0.password == password
         }) else {
-            return .failure("Incorrect email or password.")
+            return .failure(AuthFailure("Incorrect email or password."))
         }
         LocalStore.remove(key: LocalStore.demoUserKey)
         LocalStore.setString(matched.email, key: LocalStore.localAuthSessionKey)
         return .success(Self.createLocalTestUser(email: matched.email))
     }
 
-    func signUpLocal(email: String, password: String) -> Result<AuthUser, String> {
+    func signUpLocal(email: String, password: String) -> Result<AuthUser, AuthFailure> {
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var users = readLocalAuthUsers()
         if users.contains(where: { $0.email.lowercased() == normalized }) {
-            return .failure("A local test account with this email already exists. Try signing in instead.")
+            return .failure(AuthFailure("A local test account with this email already exists. Try signing in instead."))
         }
         users.append(LocalAuthUser(email: normalized, password: password))
         writeLocalAuthUsers(users)

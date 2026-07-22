@@ -532,7 +532,7 @@ private struct ThemePreviewCard: View {
 
     var body: some View {
         let palette = getThemeForMode(settings: settings, mode: activeMode)
-        let colors = AppColors(palette: palette)
+        let colors = AppColors(palette: palette, mode: activeMode)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {

@@ -30,7 +30,7 @@ struct ExchangeRates: Equatable {
 final class CurrencyManager: ObservableObject {
     static let shared = CurrencyManager()
 
-    static let supportedCurrencies: [SupportedCurrency] = [
+    nonisolated static let supportedCurrencies: [SupportedCurrency] = [
         SupportedCurrency(code: "MYR", name: "Malaysian Ringgit", symbol: "RM"),
         SupportedCurrency(code: "CNY", name: "Chinese Yuan", symbol: "¥"),
         SupportedCurrency(code: "USD", name: "US Dollar", symbol: "$"),
@@ -45,7 +45,7 @@ final class CurrencyManager: ObservableObject {
         SupportedCurrency(code: "CAD", name: "Canadian Dollar", symbol: "C$"),
     ]
 
-    static let fallbackValues: [String: Double] = [
+    nonisolated static let fallbackValues: [String: Double] = [
         "MYR": 1, "CNY": 1.66, "USD": 0.23, "EUR": 0.20, "GBP": 0.17, "SGD": 0.29,
         "JPY": 35.5, "KRW": 334, "THB": 7.3, "IDR": 3800, "AUD": 0.33, "CAD": 0.31,
     ]
@@ -169,7 +169,7 @@ final class CurrencyManager: ObservableObject {
         Self.convertCurrency(amount, from: fromCurrency ?? currency, to: "MYR", rates: rates)
     }
 
-    static func formatCurrency(_ amount: Double, currency: String) -> String {
+    nonisolated static func formatCurrency(_ amount: Double, currency: String) -> String {
         let fractionDigits: Int = ["JPY", "KRW", "IDR"].contains(currency) ? 0 : 2
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
@@ -179,7 +179,7 @@ final class CurrencyManager: ObservableObject {
         return formatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
     }
 
-    static func convertCurrency(_ amount: Double, from: String, to: String, rates: ExchangeRates) -> Double {
+    nonisolated static func convertCurrency(_ amount: Double, from: String, to: String, rates: ExchangeRates) -> Double {
         if from == to { return amount }
         guard let fromRate = rates.values[from], let toRate = rates.values[to], fromRate > 0 else {
             return amount

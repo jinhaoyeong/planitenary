@@ -11,6 +11,15 @@ struct MapActivityPin: Identifiable, Hashable {
     let city: String
     let type: ActivityType
     let coordinate: CLLocationCoordinate2D
+
+    // CLLocationCoordinate2D is not Hashable; identity is enough for Map selection.
+    static func == (lhs: MapActivityPin, rhs: MapActivityPin) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
 }
 
 struct MapsView: View {
