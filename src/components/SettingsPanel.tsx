@@ -884,7 +884,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                               : `Custom ${theme} palette — choose a preset to sync both modes, or keep editing tokens.`}
                         </p>
                       </div>
-                      <div className="flex shrink-0 flex-col items-stretch sm:items-end gap-2">
+                      <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:min-w-[320px] sm:items-end">
                         <div
                           className="self-start sm:self-end text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
                           style={{
@@ -895,12 +895,12 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                         >
                           Showing {theme}
                         </div>
-                        <div className="flex flex-col sm:flex-row items-stretch gap-2">
-                          <label className="theme-file-button pill-btn pill-soft cursor-pointer justify-center whitespace-nowrap">
+                        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+                          <label className="theme-file-button pill-btn pill-soft w-full cursor-pointer justify-center whitespace-nowrap">
                             <Upload className="w-4 h-4" /> Import theme
                             <input type="file" accept="application/json,.json" className="hidden" onChange={importTheme} />
                           </label>
-                          <button type="button" className="pill-btn pill-ghost justify-center whitespace-nowrap" onClick={exportTheme}>
+                          <button type="button" className="pill-btn pill-ghost w-full justify-center whitespace-nowrap" onClick={exportTheme}>
                             <Download className="w-4 h-4" /> Export theme
                           </button>
                         </div>
