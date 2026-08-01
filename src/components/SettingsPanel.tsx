@@ -369,6 +369,12 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     setThemeImportError('Custom theme saved. Save settings to keep it in your presets.');
   };
 
+  const deleteCustomTheme = () => {
+    setDraftSettings((current) => ({ ...current, customThemePreset: null }));
+    setCustomThemeName('My Custom Theme');
+    setThemeImportError('Custom theme removed. Save settings to keep it deleted.');
+  };
+
   const exportTheme = () => {
     const payload = {
       format: 'travel-handbook-theme',
@@ -951,50 +957,64 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                         const active = activeThemePreset?.id === preset.id;
                         const preview = getPresetVariant(preset, theme);
                         return (
-                          <button
+                          <div
                             key={preset.id}
-                            type="button"
-                            onClick={() => applyThemePreset(preset)}
                             className="text-left rounded-2xl p-3 border transition-transform hover:-translate-y-0.5"
                             style={{
                               backgroundColor: active ? 'color-mix(in srgb, var(--accent-soft) 55%, var(--bg-elevated))' : 'var(--bg)',
                               borderColor: active ? 'var(--accent)' : 'var(--border)',
                             }}
-                            aria-pressed={active}
                           >
-                            <div
-                              className="h-12 w-full overflow-hidden rounded-xl border"
-                              style={{ borderColor: 'color-mix(in srgb, var(--ink) 10%, transparent)' }}
-                              aria-hidden="true"
+                            <button
+                              type="button"
+                              onClick={() => applyThemePreset(preset)}
+                              className="w-full text-left"
+                              aria-pressed={active}
                             >
-                              <div className="flex h-full">
-                                <span className="flex-1" style={{ backgroundColor: preview.bg }} />
-                                <span className="flex-1" style={{ backgroundColor: preview.bgElevated }} />
-                                <span className="w-1/4" style={{ backgroundColor: preview.accent }} />
-                                <span className="w-1/5" style={{ backgroundColor: preview.accentSoft }} />
-                              </div>
-                            </div>
-                            <div className="mt-3 flex items-start justify-between gap-2">
-                              <div>
-                                <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
-                                  {preset.name}
-                                </div>
-                                <div className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                                  {preset.description}
-                                </div>
-                              </div>
-                              <span
-                                className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
-                                style={{
-                                  backgroundColor: active ? 'var(--accent)' : 'var(--bg-elevated)',
-                                  color: active ? '#0F0E0D' : 'var(--ink-muted)',
-                                  border: active ? 'none' : '1px solid var(--border)',
-                                }}
+                              <div
+                                className="h-12 w-full overflow-hidden rounded-xl border"
+                                style={{ borderColor: 'color-mix(in srgb, var(--ink) 10%, transparent)' }}
+                                aria-hidden="true"
                               >
-                                {active ? 'Active' : 'Use'}
-                              </span>
-                            </div>
-                          </button>
+                                <div className="flex h-full">
+                                  <span className="flex-1" style={{ backgroundColor: preview.bg }} />
+                                  <span className="flex-1" style={{ backgroundColor: preview.bgElevated }} />
+                                  <span className="w-1/4" style={{ backgroundColor: preview.accent }} />
+                                  <span className="w-1/5" style={{ backgroundColor: preview.accentSoft }} />
+                                </div>
+                              </div>
+                              <div className="mt-3 flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+                                    {preset.name}
+                                  </div>
+                                  <div className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                                    {preset.description}
+                                  </div>
+                                </div>
+                                <span
+                                  className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
+                                  style={{
+                                    backgroundColor: active ? 'var(--accent)' : 'var(--bg-elevated)',
+                                    color: active ? '#0F0E0D' : 'var(--ink-muted)',
+                                    border: active ? 'none' : '1px solid var(--border)',
+                                  }}
+                                >
+                                  {active ? 'Active' : 'Use'}
+                                </span>
+                              </div>
+                            </button>
+                            {preset.id === 'custom' && (
+                              <button
+                                type="button"
+                                className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold transition-colors hover:text-[color:var(--accent)]"
+                                style={{ color: 'var(--ink-muted)' }}
+                                onClick={deleteCustomTheme}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" /> Delete custom theme
+                              </button>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
@@ -1055,7 +1075,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                           aria-label="Custom theme name"
                           value={customThemeName}
                           onChange={(event) => setCustomThemeName(event.target.value)}
-                          className="editorial-input min-w-0 flex-1 lg:w-44"
+                          className="editorial-input w-full min-w-0 sm:w-56 sm:flex-none lg:w-52"
                           placeholder="My Custom Theme"
                         />
                         <button type="button" className="pill-btn pill-soft justify-center whitespace-nowrap" onClick={saveCustomTheme}>
