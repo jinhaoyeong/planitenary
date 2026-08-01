@@ -48,21 +48,21 @@ const isThemePalette = (value: unknown): value is TripThemeSettings => {
 };
 
 const LIGHT_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#FAF7F2', '#FFF0F8'],
-  bgElevated: ['#FFFFFF', '#FFF7FC'],
-  ink: ['#0F0E0D', '#91185C'],
-  inkMuted: ['#5C5853', '#A82A70'],
-  accent: ['#EE4D87', '#E6067A'],
-  accentSoft: ['#FFE4EE', '#FFD6FF'],
+  bg: ['#FAF7F2', '#FFF0F8', '#F6E6EE', '#F8F7FA', '#FFFFFF'],
+  bgElevated: ['#FFFFFF', '#FFF7FC', '#FDEDC9', '#FFFFFF', '#FFFFFF'],
+  ink: ['#0F0E0D', '#91185C', '#5B5B5B', '#3D3C4F', '#000000'],
+  inkMuted: ['#5C5853', '#A82A70', '#7A7A7A', '#6B6880', '#333333'],
+  accent: ['#EE4D87', '#E6067A', '#D04F99', '#8A79AB', '#FF3333'],
+  accentSoft: ['#FFE4EE', '#FFD6FF', '#8ACFD1', '#DFD9EC', '#FFFF00'],
 };
 
 const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#14110F', '#1A0922'],
-  bgElevated: ['#1F1A17', '#2A1435'],
-  ink: ['#F5EFE4', '#FFB3FF'],
-  inkMuted: ['#A39B8C', '#D67AD6'],
-  accent: ['#FF6B9A', '#FF6BEF'],
-  accentSoft: ['#3A1F2A', '#46204F'],
+  bg: ['#14110F', '#1A0922', '#12242E', '#1A1823', '#000000'],
+  bgElevated: ['#1F1A17', '#2A1435', '#1C2E38', '#232030', '#333333'],
+  ink: ['#F5EFE4', '#FFB3FF', '#F3E3EA', '#E0DDEF', '#FFFFFF'],
+  inkMuted: ['#A39B8C', '#D67AD6', '#E4A2B1', '#A09AAD', '#CCCCCC'],
+  accent: ['#FF6B9A', '#FF6BEF', '#FBE2A7', '#A995C9', '#FF6666'],
+  accentSoft: ['#3A1F2A', '#46204F', '#E4A2B1', '#5A5370', '#FFFF33'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';
