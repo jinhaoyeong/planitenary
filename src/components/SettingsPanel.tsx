@@ -898,7 +898,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
             )}
 
             {activeSection === 'theme' && (
-              <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_320px] gap-4 md:gap-5 items-start">
+              <div className="grid grid-cols-1 gap-4 md:gap-5 items-start">
                 <div className="editorial-card p-4 md:p-5">
                   <div className="flex items-center gap-2">
                     <Palette className="w-4 h-4" style={{ color: 'var(--accent)' }} />
@@ -1106,7 +1106,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                   </div>
                 </div>
 
-                <div className="space-y-4 xl:sticky xl:top-24">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div
                     className="rounded-2xl p-4"
                     style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
