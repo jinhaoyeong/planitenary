@@ -190,6 +190,8 @@ export const getThemeForMode = (settings: Pick<TripAppSettings, 'theme' | 'light
   mode === 'light' ? settings.lightTheme : settings.theme;
 
 export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode): CSSProperties => {
+  const border = `color-mix(in srgb, ${palette.ink} 22%, ${palette.bgElevated})`;
+
   if (mode === 'light') {
     return {
       '--bg': palette.bg,
@@ -199,7 +201,7 @@ export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode)
       '--accent': palette.accent,
       '--accent-soft': palette.accentSoft,
       '--accent-ink': '#0F0E0D',
-      '--border': '#E8E1D5',
+      '--border': border,
       '--shadow-lift': '0 1px 0 rgba(15,14,13,0.04), 0 12px 32px -16px rgba(15,14,13,0.18)',
     } as CSSProperties;
   }
@@ -212,7 +214,7 @@ export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode)
     '--accent': palette.accent,
     '--accent-soft': palette.accentSoft,
     '--accent-ink': '#0F0E0D',
-    '--border': '#2C2521',
+    '--border': border,
     '--shadow-lift': '0 1px 0 rgba(0,0,0,0.3), 0 18px 40px -18px rgba(0,0,0,0.6)',
   } as CSSProperties;
 };
@@ -237,6 +239,8 @@ export interface TripAppSettings {
   theme: TripThemeSettings;
   /** Light-mode palette. */
   lightTheme: TripThemeSettings;
+  /** Optional user-saved palette shown alongside the built-in presets. */
+  customThemePreset: ThemePalettePreset | null;
 }
 
 export const DEFAULT_TRIP_SETTINGS: TripAppSettings = {
@@ -282,6 +286,7 @@ export const DEFAULT_TRIP_SETTINGS: TripAppSettings = {
   },
   theme: { ...DEFAULT_DARK_THEME },
   lightTheme: { ...DEFAULT_LIGHT_THEME },
+  customThemePreset: null,
 };
 
 export const mergeTripSettings = (settings?: Partial<TripAppSettings> | null): TripAppSettings => ({
@@ -303,6 +308,13 @@ export const mergeTripSettings = (settings?: Partial<TripAppSettings> | null): T
     ...DEFAULT_TRIP_SETTINGS.lightTheme,
     ...(settings?.lightTheme || {}),
   },
+  customThemePreset: settings?.customThemePreset
+    ? {
+        ...settings.customThemePreset,
+        light: { ...settings.customThemePreset.light },
+        dark: { ...settings.customThemePreset.dark },
+      }
+    : null,
 });
 
 export const applyTemplate = (template: string, replacements: Record<string, string>) =>

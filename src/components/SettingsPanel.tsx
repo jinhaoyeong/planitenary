@@ -11,6 +11,7 @@ import {
   getPresetVariant,
   mergeTripSettings,
   THEME_PALETTE_PRESETS,
+  themesMatch,
 } from '../lib/tripSettings';
 import type { ThemePalettePreset, TripAppSettings, TripThemeSettings } from '../lib/tripSettings';
 
@@ -47,21 +48,21 @@ const isThemePalette = (value: unknown): value is TripThemeSettings => {
 };
 
 const LIGHT_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#FAF7F2', '#F4F1E6', '#EEF4F7', '#F6F1F8', '#ECE8E1'],
-  bgElevated: ['#FFFFFF', '#FFFDF5', '#FFFFFF', '#FFFFFF', '#F7FAFC'],
-  ink: ['#0F0E0D', '#1E241B', '#122033', '#241B2B', '#1A140E'],
-  inkMuted: ['#5C5853', '#69705D', '#60778A', '#72677A', '#667085'],
-  accent: ['#EE4D87', '#B78925', '#2457A6', '#9A5FB3', '#C95C7C'],
-  accentSoft: ['#FFE4EE', '#EEE4BA', '#D5E1F4', '#EBDDF1', '#F7D6DD'],
+  bg: ['#FAF7F2', '#F1F4F8', '#EEF5F1', '#F7F1F5', '#FAF1EB'],
+  bgElevated: ['#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFCF9'],
+  ink: ['#0F0E0D', '#14243A', '#183029', '#301C2F', '#321C17'],
+  inkMuted: ['#5C5853', '#5B6C82', '#5E756C', '#7E687B', '#806A62'],
+  accent: ['#EE4D87', '#2F67B2', '#D35F55', '#A84D79', '#C65E46'],
+  accentSoft: ['#FFE4EE', '#DCE8F7', '#F4DCD7', '#F0D9E5', '#F2D8D0'],
 };
 
 const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#14110F', '#151A12', '#0D1522', '#18131D', '#16120C'],
-  bgElevated: ['#1F1A17', '#232719', '#17243A', '#27202E', '#221B13'],
-  ink: ['#F5EFE4', '#F3F1E4', '#F0F5FA', '#F5EEF8', '#F8F0E3'],
-  inkMuted: ['#A39B8C', '#AEB39A', '#9BAFC6', '#B7A6BC', '#A89880'],
-  accent: ['#FF6B9A', '#D7B65E', '#7FA7E8', '#C79AD7', '#E0A045'],
-  accentSoft: ['#3A1F2A', '#3A351C', '#24395E', '#3A2944', '#3A2C18'],
+  bg: ['#14110F', '#0E1725', '#101C19', '#201522', '#211512'],
+  bgElevated: ['#1F1A17', '#18263A', '#1B2C27', '#302038', '#33221C'],
+  ink: ['#F5EFE4', '#F1F5FB', '#F1F7F3', '#FAF0F6', '#FFF2E9'],
+  inkMuted: ['#A39B8C', '#A7B8CE', '#A8BDB3', '#C1A9BA', '#C8A99B'],
+  accent: ['#FF6B9A', '#76A7EF', '#F08272', '#E7B45D', '#73A6C4'],
+  accentSoft: ['#3A1F2A', '#243C62', '#4A2927', '#4B3525', '#243A48'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';
@@ -195,6 +196,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [uploadError, setUploadError] = useState('');
   const [themeImportError, setThemeImportError] = useState('');
+  const [customThemeName, setCustomThemeName] = useState(settings.customThemePreset?.name || 'My Custom Theme');
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('story');
 
   const savedSnapshot = JSON.stringify({
@@ -214,6 +216,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
 
   useEffect(() => {
     setDraftSettings(mergeTripSettings(settings));
+    setCustomThemeName(settings.customThemePreset?.name || 'My Custom Theme');
   }, [settings]);
 
   const handleCoverUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -316,8 +319,16 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
   const activePalette = theme === 'light' ? draftSettings.lightTheme : draftSettings.theme;
   const defaultPalette = theme === 'light' ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
   const tokenSwatches = theme === 'light' ? LIGHT_TOKEN_SWATCHES : DARK_TOKEN_SWATCHES;
-  const activeThemePreset = findMatchingThemePreset(draftSettings, theme);
-  const fullyMatchedPreset = findMatchingThemePreset(draftSettings);
+  const customThemePreset = draftSettings.customThemePreset;
+  const customMatchesCurrentMode = customThemePreset
+    ? themesMatch(getPresetVariant(customThemePreset, theme), activePalette)
+    : false;
+  const customMatchesBothModes = customThemePreset
+    ? themesMatch(customThemePreset.light, draftSettings.lightTheme) && themesMatch(customThemePreset.dark, draftSettings.theme)
+    : false;
+  const activeThemePreset = customMatchesCurrentMode ? customThemePreset : findMatchingThemePreset(draftSettings, theme);
+  const fullyMatchedPreset = customMatchesBothModes ? customThemePreset : findMatchingThemePreset(draftSettings);
+  const themePresets = customThemePreset ? [customThemePreset, ...THEME_PALETTE_PRESETS] : THEME_PALETTE_PRESETS;
 
   const commitPalettes = (next: { lightTheme: TripThemeSettings; theme: TripThemeSettings }) => {
     setDraftSettings((current) => ({
@@ -344,6 +355,20 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     setThemeImportError('');
   };
 
+  const saveCustomTheme = () => {
+    const name = customThemeName.trim() || 'My Custom Theme';
+    const customPreset: ThemePalettePreset = {
+      id: 'custom',
+      name,
+      description: 'A palette shaped from your own colors and saved for this handbook.',
+      light: { ...draftSettings.lightTheme },
+      dark: { ...draftSettings.theme },
+    };
+    setDraftSettings((current) => ({ ...current, customThemePreset: customPreset }));
+    setCustomThemeName(name);
+    setThemeImportError('Custom theme saved. Save settings to keep it in your presets.');
+  };
+
   const exportTheme = () => {
     const payload = {
       format: 'travel-handbook-theme',
@@ -367,11 +392,21 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     if (!file) return;
 
     try {
-      const parsed = JSON.parse(await file.text()) as { light?: unknown; dark?: unknown };
+      const parsed = JSON.parse(await file.text()) as { name?: unknown; light?: unknown; dark?: unknown };
       if (!isThemePalette(parsed.light) || !isThemePalette(parsed.dark)) {
         throw new Error('The file must contain valid light and dark theme palettes.');
       }
+      const importedName = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : 'Imported Theme';
+      const importedPreset: ThemePalettePreset = {
+        id: 'custom',
+        name: importedName,
+        description: 'An imported palette saved for this handbook.',
+        light: parsed.light,
+        dark: parsed.dark,
+      };
       commitPalettes({ lightTheme: parsed.light, theme: parsed.dark });
+      setDraftSettings((current) => ({ ...current, customThemePreset: importedPreset }));
+      setCustomThemeName(importedName);
       setThemeImportError('Theme imported. Save settings to apply it.');
     } catch (error) {
       console.error('Failed to import theme', error);
@@ -388,10 +423,10 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     '--ink-muted': activePalette.inkMuted,
     '--accent': activePalette.accent,
     '--accent-soft': activePalette.accentSoft,
-    '--border': theme === 'light' ? '#E8E1D5' : '#2C2521',
+    '--border': `color-mix(in srgb, ${activePalette.ink} 22%, ${activePalette.bgElevated})`,
     backgroundColor: activePalette.bgElevated,
     color: activePalette.ink,
-    borderColor: theme === 'light' ? '#E8E1D5' : '#2C2521',
+    borderColor: `color-mix(in srgb, ${activePalette.ink} 22%, ${activePalette.bgElevated})`,
   } as CSSProperties;
 
   const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) || SETTINGS_SECTIONS[0];
@@ -912,7 +947,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                     </p>
 
                     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                      {THEME_PALETTE_PRESETS.map((preset) => {
+                      {themePresets.map((preset) => {
                         const active = activeThemePreset?.id === preset.id;
                         const preview = getPresetVariant(preset, theme);
                         return (
@@ -1006,12 +1041,28 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                   </div>
 
                   <div className="mt-8 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
-                    <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
-                      Custom Tokens
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
+                          Custom Tokens
+                        </div>
+                        <p className="mt-1 text-sm max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
+                          Fine-tune colors for the current {theme} mode. Presets still keep a matching pair for the other mode until you edit them too.
+                        </p>
+                      </div>
+                      <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+                        <input
+                          aria-label="Custom theme name"
+                          value={customThemeName}
+                          onChange={(event) => setCustomThemeName(event.target.value)}
+                          className="editorial-input min-w-0 flex-1 lg:w-44"
+                          placeholder="My Custom Theme"
+                        />
+                        <button type="button" className="pill-btn pill-soft justify-center whitespace-nowrap" onClick={saveCustomTheme}>
+                          <Save className="w-4 h-4" /> Save as custom
+                        </button>
+                      </div>
                     </div>
-                    <p className="mt-1 text-sm max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-                      Fine-tune colors for the current {theme} mode. Presets still keep a matching pair for the other mode until you edit them too.
-                    </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 mt-6">
                       {([
                         ['bg', 'Background'],
