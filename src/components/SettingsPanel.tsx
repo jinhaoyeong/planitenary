@@ -47,21 +47,21 @@ const isThemePalette = (value: unknown): value is TripThemeSettings => {
 };
 
 const LIGHT_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#FAF7F2', '#F4F5EF', '#F1F4F8', '#FAF1EA', '#ECE8E1'],
-  bgElevated: ['#FFFFFF', '#FFFEF9', '#FFFFFF', '#FFFDF9', '#F7FAFC'],
-  ink: ['#0F0E0D', '#1B241F', '#172333', '#241A15', '#1A140E'],
-  inkMuted: ['#5C5853', '#5D6A61', '#5F7184', '#78645A', '#667085'],
-  accent: ['#EE4D87', '#527A63', '#3E6FA8', '#C66A4A', '#C95C7C'],
-  accentSoft: ['#FFE4EE', '#E2ECE2', '#DCE7F4', '#F2DCD1', '#F7D6DD'],
+  bg: ['#FAF7F2', '#F4F1E6', '#EEF4F7', '#F6F1F8', '#ECE8E1'],
+  bgElevated: ['#FFFFFF', '#FFFDF5', '#FFFFFF', '#FFFFFF', '#F7FAFC'],
+  ink: ['#0F0E0D', '#1E241B', '#122033', '#241B2B', '#1A140E'],
+  inkMuted: ['#5C5853', '#69705D', '#60778A', '#72677A', '#667085'],
+  accent: ['#EE4D87', '#B78925', '#2457A6', '#9A5FB3', '#C95C7C'],
+  accentSoft: ['#FFE4EE', '#EEE4BA', '#D5E1F4', '#EBDDF1', '#F7D6DD'],
 };
 
 const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#14110F', '#121814', '#101821', '#1B1210', '#16120C'],
-  bgElevated: ['#1F1A17', '#1D251F', '#192531', '#291B17', '#221B13'],
-  ink: ['#F5EFE4', '#F3F5EB', '#EFF5FA', '#F8EEE7', '#F8F0E3'],
-  inkMuted: ['#A39B8C', '#9BAA9B', '#9BAFBE', '#B99A8D', '#A89880'],
-  accent: ['#FF6B9A', '#8DB38C', '#80A9D4', '#E08C6A', '#E0A045'],
-  accentSoft: ['#3A1F2A', '#26382B', '#24364A', '#452820', '#3A2C18'],
+  bg: ['#14110F', '#151A12', '#0D1522', '#18131D', '#16120C'],
+  bgElevated: ['#1F1A17', '#232719', '#17243A', '#27202E', '#221B13'],
+  ink: ['#F5EFE4', '#F3F1E4', '#F0F5FA', '#F5EEF8', '#F8F0E3'],
+  inkMuted: ['#A39B8C', '#AEB39A', '#9BAFC6', '#B7A6BC', '#A89880'],
+  accent: ['#FF6B9A', '#D7B65E', '#7FA7E8', '#C79AD7', '#E0A045'],
+  accentSoft: ['#3A1F2A', '#3A351C', '#24395E', '#3A2944', '#3A2C18'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';
