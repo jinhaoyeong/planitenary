@@ -124,8 +124,9 @@ export const Auth = () => {
           setError('Registration successful! Please check your email to verify your account on this same site.');
         }
       }
-    } catch (err: any) {
-      setError(getAuthErrorMessage(err));
+    } catch (err: unknown) {
+      const authError = err && typeof err === 'object' ? (err as { message?: string; code?: string; status?: number }) : null;
+      setError(getAuthErrorMessage(authError));
     } finally {
       setLoading(false);
     }
@@ -133,7 +134,8 @@ export const Auth = () => {
 
   const handleForgotPassword = async () => {
     setError(null);
-    if (!email.trim()) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
       setError('Enter your account email first, then select Forgot password.');
       return;
     }
@@ -142,11 +144,32 @@ export const Auth = () => {
       return;
     }
     setLoading(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: getAuthRedirectUrl(),
-    });
-    setLoading(false);
-    setError(resetError ? getAuthErrorMessage(resetError) : 'Password reset email sent. Follow the link, then set a new password in Account → Security.');
+    try {
+      const { data: lookup, error: lookupError } = await supabase.functions.invoke('check-user-email', {
+        body: { email: normalizedEmail },
+      });
+
+      if (lookupError) throw lookupError;
+      if (!lookup?.exists) {
+        setError('No account was found for this email. Please enter a real account email and try again.');
+        return;
+      }
+
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: getAuthRedirectUrl(),
+      });
+      if (resetError) throw resetError;
+      setError('Password reset email sent. Follow the link, then set a new password in Account → Security.');
+    } catch (err: unknown) {
+      const authError = err && typeof err === 'object' ? (err as { message?: string; code?: string; status?: number }) : null;
+      setError(
+        authError?.message?.toLowerCase().includes('function') || authError?.message?.toLowerCase().includes('failed to fetch')
+          ? 'Password recovery is not available yet. Please contact support or try again later.'
+          : getAuthErrorMessage(authError),
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMfaSubmit = async (e: React.FormEvent) => {

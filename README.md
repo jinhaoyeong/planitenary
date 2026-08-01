@@ -52,6 +52,20 @@ In the app, cloud accounts are required to enroll an authenticator after sign-in
 
 Enabling TOTP in the Supabase dashboard only turns the feature on for the project — each user still enrolls from the app setup screen.
 
+### Password recovery
+
+Forgot-password requests first call the `check-user-email` Supabase Edge Function. The function uses `SUPABASE_SERVICE_ROLE_KEY` only on the server to confirm that the email belongs to an Auth user; the key is never exposed to the browser. The reset email is sent only when the lookup returns `exists: true`.
+
+Deploy it from the repository root:
+
+```bash
+supabase functions deploy check-user-email --no-verify-jwt
+```
+
+The function runtime provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Keep the service-role key out of all `VITE_*` variables and frontend code.
+
+The branded recovery email is in `supabase/templates/recovery.html`. For a hosted Supabase project, copy it into Authentication → Email Templates → Reset Password and use the subject `Reset your Travel Handbook password`. Local Supabase CLI runs use `supabase/config.toml`.
+
 ## Native mobile setup
 
 Install dependencies first:
