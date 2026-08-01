@@ -147,18 +147,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    const localSessionEmail = localStorage.getItem(LOCAL_AUTH_SESSION_KEY);
-    if (localSessionEmail) {
-      setSession(null);
-      setUser(createLocalTestUser(localSessionEmail));
-      setIsDemoUser(false);
-      setIsLocalTestUser(true);
-      setNeedsMfaVerification(false);
-      setMfaEnabled(false);
-      setMfaFactorId(null);
-      setMfaStatusReady(true);
-      setIsLoading(false);
-      return;
+    if (import.meta.env.DEV) {
+      const localSessionEmail = localStorage.getItem(LOCAL_AUTH_SESSION_KEY);
+      if (localSessionEmail) {
+        setSession(null);
+        setUser(createLocalTestUser(localSessionEmail));
+        setIsDemoUser(false);
+        setIsLocalTestUser(true);
+        setNeedsMfaVerification(false);
+        setMfaEnabled(false);
+        setMfaFactorId(null);
+        setMfaStatusReady(true);
+        setIsLoading(false);
+        return;
+      }
+    } else {
+      // Local test sessions are development-only and must never survive into production.
+      localStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
     }
 
     if (!isSupabaseConfigured()) {
@@ -210,6 +215,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signInLocal = (email: string, password: string) => {
+    if (!import.meta.env.DEV) return { success: false };
+
     const normalizedEmail = email.trim().toLowerCase();
     const matchedUser = readLocalAuthUsers().find(
       (item) => item.email.toLowerCase() === normalizedEmail && item.password === password
@@ -234,6 +241,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signUpLocal = (email: string, password: string) => {
+    if (!import.meta.env.DEV) return { success: false };
+
     const normalizedEmail = email.trim().toLowerCase();
     const users = readLocalAuthUsers();
 

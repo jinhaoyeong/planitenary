@@ -30,11 +30,6 @@ final class AuthViewModel: ObservableObject {
             return
         }
 
-        if let localUser = authService.restoreLocalSession() {
-            applyLocalUser(localUser)
-            return
-        }
-
         guard SupabaseClient.shared.isConfigured else {
             mfaStatusReady = true
             return
@@ -59,17 +54,9 @@ final class AuthViewModel: ObservableObject {
             return .success(())
         }
 
-        switch authService.signInLocal(email: email, password: password) {
-        case .success(let localUser):
-            applyLocalUser(localUser)
-            return .success(())
-        case .failure:
-            break
-        }
-
         guard SupabaseClient.shared.isConfigured else {
             return .failure(AuthFailure(
-                "Authentication is not configured yet. Add your Supabase environment variables to enable cloud sign in, or use a local test account created on this device."
+                "Cloud authentication is not configured. Add the Supabase environment variables before signing in."
             ))
         }
 
@@ -106,38 +93,14 @@ final class AuthViewModel: ObservableObject {
             }
         }
 
-        switch authService.signUpLocal(email: email, password: password) {
-        case .success(let localUser):
-            applyLocalUser(localUser)
-            return .success(nil)
-        case .failure(let failure):
-            return .failure(failure)
-        }
+        return .failure(AuthFailure(
+            "Cloud authentication is not configured. Add the Supabase environment variables before creating an account."
+        ))
     }
 
     func signInDemo() {
         authService.signInDemo()
         applyDemoUser(AuthService.createDemoUser())
-    }
-
-    func signInLocal(email: String, password: String) -> Result<Void, AuthFailure> {
-        switch authService.signInLocal(email: email, password: password) {
-        case .success(let localUser):
-            applyLocalUser(localUser)
-            return .success(())
-        case .failure(let failure):
-            return .failure(failure)
-        }
-    }
-
-    func signUpLocal(email: String, password: String) -> Result<Void, AuthFailure> {
-        switch authService.signUpLocal(email: email, password: password) {
-        case .success(let localUser):
-            applyLocalUser(localUser)
-            return .success(())
-        case .failure(let failure):
-            return .failure(failure)
-        }
     }
 
     func completeMfaChallenge(code: String) async -> Result<Void, AuthFailure> {
@@ -165,7 +128,7 @@ final class AuthViewModel: ObservableObject {
     }
 
     func signOut() async {
-        authService.clearLocalSessions()
+        authService.clearDemoSession()
         session = nil
         user = nil
         isDemoUser = false
@@ -208,17 +171,6 @@ final class AuthViewModel: ObservableObject {
         user = demoUser
         isDemoUser = true
         isLocalTestUser = false
-        needsMfaVerification = false
-        mfaEnabled = false
-        mfaFactorId = nil
-        mfaStatusReady = true
-    }
-
-    private func applyLocalUser(_ localUser: AuthUser) {
-        session = nil
-        user = localUser
-        isDemoUser = false
-        isLocalTestUser = true
         needsMfaVerification = false
         mfaEnabled = false
         mfaFactorId = nil

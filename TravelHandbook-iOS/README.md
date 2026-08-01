@@ -25,7 +25,7 @@ Native **SwiftUI** sibling of the web/Capacitor app in `../planitenary`. Open th
 | Area | Status |
 |------|--------|
 | Welcome onboarding (5 slides) | Yes |
-| Auth (sign in / up, demo, local, cloud) | Yes |
+| Auth (sign in / up, demo, cloud) | Yes |
 | MFA challenge + mandatory TOTP setup for cloud | Yes |
 | Dashboard (create / open / rename / delete trips) | Yes |
 | Trip shell + bottom pill nav + hamburger menu | Yes |

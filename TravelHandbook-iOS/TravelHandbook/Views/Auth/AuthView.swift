@@ -62,7 +62,7 @@ struct AuthView: View {
         VStack(alignment: .leading, spacing: 16) {
             if !SupabaseConfig.isConfigured {
                 banner(
-                    text: "Cloud auth needs Supabase URL and anon key, but local test sign up still works on this device.",
+                    text: "Cloud auth needs Supabase URL and anon key before you can create or access an account.",
                     style: .warning
                 )
             }
@@ -167,12 +167,6 @@ struct AuthView: View {
                 .font(.caption)
                 .foregroundStyle(ShellChrome.inkMuted)
                 .frame(maxWidth: .infinity, alignment: .center)
-
-            if !isLogin {
-                Text("If Supabase email is rate-limited, the app will create a local test account with these same credentials.")
-                    .font(.caption)
-                    .foregroundStyle(ShellChrome.inkMuted)
-            }
 
             HStack {
                 Spacer()

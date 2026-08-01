@@ -4,8 +4,6 @@ enum LocalStore {
     static let hasVisitedKey = "hasVisited"
     static let exchangeRatesKey = "exchange-rates-v2"
     static let demoUserKey = "travel-handbook-demo-user"
-    static let localAuthUsersKey = "travel-handbook-local-auth-users"
-    static let localAuthSessionKey = "travel-handbook-local-auth-session"
     static let shellThemeKey = "shell-theme"
     static let selectedCurrencyKey = "selected-currency"
     static let checklistDataKey = "checklist-data"

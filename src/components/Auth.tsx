@@ -4,7 +4,21 @@ import { Plane, Lock, Mail, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DEMO_EMAIL, DEMO_PASSWORD, useAuth } from '../contexts/AuthContext';
 
-const getAuthErrorMessage = (err: { message?: string; code?: string; status?: number } | null | undefined) => {
+type AuthError = { message?: string; code?: string; status?: number };
+
+const canUseLocalFallback = (err: AuthError | null | undefined) => {
+  const message = err?.message?.toLowerCase() ?? '';
+  return (
+    err?.status === 429 ||
+    err?.code === 'over_email_send_rate_limit' ||
+    message.includes('rate limit') ||
+    message.includes('failed to fetch') ||
+    message.includes('network error') ||
+    message.includes('fetch failed')
+  );
+};
+
+const getAuthErrorMessage = (err: AuthError | null | undefined) => {
   const message = err?.message ?? 'An error occurred during authentication.';
   const code = err?.code ?? '';
 
@@ -41,6 +55,7 @@ export const Auth = () => {
   const [mfaCode, setMfaCode] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [localFallbackMessage, setLocalFallbackMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -74,6 +89,7 @@ export const Auth = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setLocalFallbackMessage(null);
     setLoading(true);
 
     if (email.trim().toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD) {
@@ -90,24 +106,31 @@ export const Auth = () => {
 
     try {
       if (isLogin) {
-        const localSignIn = signInLocal(email, password);
-        if (localSignIn.success) return;
-
         if (!supabaseReady) {
-          setError('Authentication is not configured yet. Add your Supabase environment variables to enable cloud sign in, or use a local test account created on this device.');
+          if (import.meta.env.DEV) {
+            const localSignIn = signInLocal(email, password);
+            if (localSignIn.success) {
+              setLocalFallbackMessage('Local test account active. Supabase was not configured, so this account is stored on this device only.');
+              return;
+            }
+          }
+          setError('Cloud authentication is not configured. Add the Supabase environment variables before signing in.');
           return;
         }
 
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
         if (!supabaseReady) {
-          const localSignUp = signUpLocal(email, password);
-          if (!localSignUp.success) {
-            setError(localSignUp.error || 'Unable to create local test account.');
+          if (import.meta.env.DEV) {
+            const localSignUp = signUpLocal(email, password);
+            if (localSignUp.success) {
+              setLocalFallbackMessage('Local test account created. Supabase was not configured, so this account is stored on this device only.');
+            } else {
+              setError(localSignUp.error || 'Unable to create local test account.');
+            }
+          } else {
+            setError('Cloud authentication is not configured. Add the Supabase environment variables before creating an account.');
           }
           return;
         }
@@ -125,7 +148,18 @@ export const Auth = () => {
         }
       }
     } catch (err: unknown) {
-      const authError = err && typeof err === 'object' ? (err as { message?: string; code?: string; status?: number }) : null;
+      const authError = err && typeof err === 'object' ? (err as AuthError) : null;
+      if (import.meta.env.DEV && canUseLocalFallback(authError)) {
+        const localResult = isLogin ? signInLocal(email, password) : signUpLocal(email, password);
+        if (localResult.success) {
+          setLocalFallbackMessage(
+            isLogin
+              ? 'Local test account active. Supabase was unavailable, so this account is stored on this device only.'
+              : 'Local test account created. Supabase signup was unavailable, so this account is stored on this device only.',
+          );
+          return;
+        }
+      }
       setError(getAuthErrorMessage(authError));
     } finally {
       setLoading(false);
@@ -255,13 +289,19 @@ export const Auth = () => {
           <form onSubmit={handleSubmit} className="mt-8 space-y-5 text-left">
             {!supabaseReady && (
               <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-sm">
-                Cloud auth needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, but local test sign up still works on this device.
+                Cloud auth needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` before you can create or access an account.
               </div>
             )}
             {error && (
               <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 shrink-0" />
                 <span>{error}</span>
+              </div>
+            )}
+            {localFallbackMessage && (
+              <div role="status" className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-sm flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <span>{localFallbackMessage}</span>
               </div>
             )}
 
@@ -336,6 +376,7 @@ export const Auth = () => {
                 setEmail(DEMO_EMAIL);
                 setPassword(DEMO_PASSWORD);
                 setError(null);
+                setLocalFallbackMessage(null);
                 signInDemo();
               }}
               className="w-full py-3 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:border-rose-500 hover:text-rose-500 transition-colors"
@@ -345,11 +386,6 @@ export const Auth = () => {
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Test login: <span className="font-semibold">{DEMO_EMAIL}</span> / <span className="font-semibold">{DEMO_PASSWORD}</span>
             </p>
-            {!isLogin && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                If Supabase email is rate-limited, the app will create a local test account with these same credentials.
-              </p>
-            )}
           </form>
           )}
 
@@ -360,6 +396,7 @@ export const Auth = () => {
               onClick={() => {
                 setIsLogin(!isLogin);
                 setError(null);
+                setLocalFallbackMessage(null);
               }}
               className="font-bold text-rose-500 hover:text-rose-600 transition-colors"
             >

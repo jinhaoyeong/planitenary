@@ -13,11 +13,6 @@ enum AuthConstants {
     static let rememberMeKey = "travel-handbook-remember-me"
 }
 
-struct LocalAuthUser: Codable, Equatable {
-    let email: String
-    let password: String
-}
-
 final class AuthService {
     static let shared = AuthService()
 
@@ -36,59 +31,17 @@ final class AuthService {
         )
     }
 
-    static func createLocalTestUser(email: String) -> AuthUser {
-        AuthUser(
-            id: "local-\(email.lowercased())",
-            email: email,
-            createdAt: ISO8601DateFormatter().string(from: Date()),
-            appMetadata: nil,
-            userMetadata: ["localTest": .bool(true)]
-        )
-    }
-
     func restoreDemoSession() -> AuthUser? {
         guard LocalStore.getString(key: LocalStore.demoUserKey) == "true" else { return nil }
         return Self.createDemoUser()
     }
 
-    func restoreLocalSession() -> AuthUser? {
-        guard let email = LocalStore.getString(key: LocalStore.localAuthSessionKey) else { return nil }
-        return Self.createLocalTestUser(email: email)
-    }
-
     func signInDemo() {
         LocalStore.setString("true", key: LocalStore.demoUserKey)
-        LocalStore.remove(key: LocalStore.localAuthSessionKey)
     }
 
-    func signInLocal(email: String, password: String) -> Result<AuthUser, AuthFailure> {
-        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard let matched = readLocalAuthUsers().first(where: {
-            $0.email.lowercased() == normalized && $0.password == password
-        }) else {
-            return .failure(AuthFailure("Incorrect email or password."))
-        }
+    func clearDemoSession() {
         LocalStore.remove(key: LocalStore.demoUserKey)
-        LocalStore.setString(matched.email, key: LocalStore.localAuthSessionKey)
-        return .success(Self.createLocalTestUser(email: matched.email))
-    }
-
-    func signUpLocal(email: String, password: String) -> Result<AuthUser, AuthFailure> {
-        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        var users = readLocalAuthUsers()
-        if users.contains(where: { $0.email.lowercased() == normalized }) {
-            return .failure(AuthFailure("A local test account with this email already exists. Try signing in instead."))
-        }
-        users.append(LocalAuthUser(email: normalized, password: password))
-        writeLocalAuthUsers(users)
-        LocalStore.remove(key: LocalStore.demoUserKey)
-        LocalStore.setString(normalized, key: LocalStore.localAuthSessionKey)
-        return .success(Self.createLocalTestUser(email: normalized))
-    }
-
-    func clearLocalSessions() {
-        LocalStore.remove(key: LocalStore.demoUserKey)
-        LocalStore.remove(key: LocalStore.localAuthSessionKey)
     }
 
     func signInCloud(email: String, password: String) async throws -> AuthSession {
@@ -166,23 +119,6 @@ final class AuthService {
             throw SupabaseAuthError(message: "New password must be at least 8 characters long and contain a number and an uppercase letter.", code: nil)
         }
 
-        if isLocalTestUser {
-            guard let email else {
-                throw SupabaseAuthError(message: "Missing local account email.", code: nil)
-            }
-            let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            var users = readLocalAuthUsers()
-            guard let index = users.firstIndex(where: { $0.email.lowercased() == normalized }) else {
-                throw SupabaseAuthError(message: "Local account not found on this device.", code: nil)
-            }
-            guard users[index].password == trimmedCurrent else {
-                throw SupabaseAuthError(message: "Current password is incorrect.", code: nil)
-            }
-            users[index] = LocalAuthUser(email: users[index].email, password: trimmedNew)
-            writeLocalAuthUsers(users)
-            return
-        }
-
         guard let email else {
             throw SupabaseAuthError(message: "Missing account email.", code: nil)
         }
@@ -210,11 +146,4 @@ final class AuthService {
         set { defaults.set(newValue, forKey: AuthConstants.rememberMeKey) }
     }
 
-    private func readLocalAuthUsers() -> [LocalAuthUser] {
-        LocalStore.getJSON([LocalAuthUser].self, key: LocalStore.localAuthUsersKey) ?? []
-    }
-
-    private func writeLocalAuthUsers(_ users: [LocalAuthUser]) {
-        LocalStore.setJSON(users, key: LocalStore.localAuthUsersKey)
-    }
 }
