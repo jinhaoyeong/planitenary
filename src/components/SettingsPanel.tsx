@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ChangeEvent, CSSProperties } from 'react';
-import { ImagePlus, RotateCcw, Save, Trash2, Palette } from 'lucide-react';
+import { ImagePlus, RotateCcw, Save, Trash2, Palette, Download, Upload } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { useTheme } from '../contexts/ThemeContext';
 import {
@@ -36,22 +36,32 @@ const normalizeHex = (value: string, fallback: string) => {
   return `#${trimmed.replace('#', '').toUpperCase()}`;
 };
 
+const THEME_TOKEN_KEYS: Array<keyof TripThemeSettings> = ['bg', 'bgElevated', 'ink', 'inkMuted', 'accent', 'accentSoft'];
+
+const isThemePalette = (value: unknown): value is TripThemeSettings => {
+  if (!value || typeof value !== 'object') return false;
+  return THEME_TOKEN_KEYS.every((key) => {
+    const token = (value as Record<string, unknown>)[key];
+    return typeof token === 'string' && isValidHex(token);
+  });
+};
+
 const LIGHT_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#FAF7F2', '#F7F0E8', '#F3F5F4', '#F2F6F9', '#ECE8E1'],
-  bgElevated: ['#FFFFFF', '#FFFBF6', '#FBF6EF', '#F2ECE4', '#F7FAFC'],
-  ink: ['#0F0E0D', '#15201C', '#132033', '#181614', '#1A140E'],
-  inkMuted: ['#5C5853', '#5F6B66', '#5C6B7A', '#6B655D', '#667085'],
-  accent: ['#EE4D87', '#2F7D6E', '#3D8FB5', '#C8842A', '#C95C7C'],
-  accentSoft: ['#FFE4EE', '#DDEFEA', '#D7EAF3', '#F3E2C8', '#F7D6DD'],
+  bg: ['#FAF7F2', '#F4F5EF', '#F1F4F8', '#FAF1EA', '#ECE8E1'],
+  bgElevated: ['#FFFFFF', '#FFFEF9', '#FFFFFF', '#FFFDF9', '#F7FAFC'],
+  ink: ['#0F0E0D', '#1B241F', '#172333', '#241A15', '#1A140E'],
+  inkMuted: ['#5C5853', '#5D6A61', '#5F7184', '#78645A', '#667085'],
+  accent: ['#EE4D87', '#527A63', '#3E6FA8', '#C66A4A', '#C95C7C'],
+  accentSoft: ['#FFE4EE', '#E2ECE2', '#DCE7F4', '#F2DCD1', '#F7D6DD'],
 };
 
 const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#14110F', '#171A22', '#121714', '#10161C', '#16120C'],
-  bgElevated: ['#1F1A17', '#232630', '#1B221D', '#182129', '#221B13'],
-  ink: ['#F5EFE4', '#F7F2EB', '#EEF3EC', '#EEF4F7', '#F8F0E3'],
-  inkMuted: ['#A39B8C', '#8E8678', '#8FA093', '#8A9AA6', '#A89880'],
-  accent: ['#FF6B9A', '#E7685D', '#2F7D6E', '#3D8FB5', '#E0A045'],
-  accentSoft: ['#3A1F2A', '#41242C', '#1E332C', '#1A303A', '#3A2C18'],
+  bg: ['#14110F', '#121814', '#101821', '#1B1210', '#16120C'],
+  bgElevated: ['#1F1A17', '#1D251F', '#192531', '#291B17', '#221B13'],
+  ink: ['#F5EFE4', '#F3F5EB', '#EFF5FA', '#F8EEE7', '#F8F0E3'],
+  inkMuted: ['#A39B8C', '#9BAA9B', '#9BAFBE', '#B99A8D', '#A89880'],
+  accent: ['#FF6B9A', '#8DB38C', '#80A9D4', '#E08C6A', '#E0A045'],
+  accentSoft: ['#3A1F2A', '#26382B', '#24364A', '#452820', '#3A2C18'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';
@@ -184,6 +194,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [uploadError, setUploadError] = useState('');
+  const [themeImportError, setThemeImportError] = useState('');
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('story');
 
   const savedSnapshot = JSON.stringify({
@@ -330,6 +341,42 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
 
   const applyThemePreset = (preset: ThemePalettePreset) => {
     commitPalettes({ lightTheme: preset.light, theme: preset.dark });
+    setThemeImportError('');
+  };
+
+  const exportTheme = () => {
+    const payload = {
+      format: 'travel-handbook-theme',
+      version: 1,
+      name: fullyMatchedPreset?.name || 'Custom Travel Handbook theme',
+      light: draftSettings.lightTheme,
+      dark: draftSettings.theme,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${payload.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'travel-handbook-theme'}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importTheme = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const parsed = JSON.parse(await file.text()) as { light?: unknown; dark?: unknown };
+      if (!isThemePalette(parsed.light) || !isThemePalette(parsed.dark)) {
+        throw new Error('The file must contain valid light and dark theme palettes.');
+      }
+      commitPalettes({ lightTheme: parsed.light, theme: parsed.dark });
+      setThemeImportError('Theme imported. Save settings to apply it.');
+    } catch (error) {
+      console.error('Failed to import theme', error);
+      setThemeImportError('That theme file is invalid. Export a theme from this app or choose another JSON file.');
+    }
   };
 
   // Preview uses the palette being edited for the current mode, with explicit colors
@@ -824,7 +871,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                   </p>
 
                   <div className="mt-6">
-                    <div className="flex items-end justify-between gap-3">
+                    <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
                       <div>
                         <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
                           Color Themes
@@ -837,17 +884,30 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                               : `Custom ${theme} palette — choose a preset to sync both modes, or keep editing tokens.`}
                         </p>
                       </div>
-                      <div
+                          <div
                         className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
                         style={{
                           backgroundColor: 'var(--bg)',
                           color: 'var(--ink-muted)',
                           border: '1px solid var(--border)',
                         }}
-                      >
-                        Showing {theme}
+                          >
+                            Showing {theme}
+                          </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="theme-file-button pill-btn pill-soft cursor-pointer">
+                          <Upload className="w-4 h-4" /> Import theme
+                          <input type="file" accept="application/json,.json" className="hidden" onChange={importTheme} />
+                        </label>
+                        <button type="button" className="pill-btn pill-ghost" onClick={exportTheme}>
+                          <Download className="w-4 h-4" /> Export theme
+                        </button>
                       </div>
                     </div>
+
+                    <p className="mt-3 text-xs leading-relaxed" aria-live="polite" style={{ color: themeImportError.startsWith('Theme imported') ? 'var(--accent)' : themeImportError ? 'var(--warn)' : 'var(--ink-muted)' }}>
+                      {themeImportError || 'Import or export both light and dark colors as a portable JSON theme.'}
+                    </p>
 
                     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                       {THEME_PALETTE_PRESETS.map((preset) => {
