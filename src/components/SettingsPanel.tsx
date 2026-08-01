@@ -1061,7 +1061,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                   </div>
 
                   <div className="mt-8 pt-6" style={{ borderTop: '1px solid var(--border)' }}>
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="flex flex-col gap-4">
                       <div>
                         <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
                           Custom Tokens
@@ -1070,7 +1070,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                           Fine-tune colors for the current {theme} mode. Presets still keep a matching pair for the other mode until you edit them too.
                         </p>
                       </div>
-                      <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+                      <div className="flex w-full flex-col gap-2 sm:flex-row">
                         <input
                           aria-label="Custom theme name"
                           value={customThemeName}
