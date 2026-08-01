@@ -198,8 +198,51 @@ body {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
 }
-.animate-marquee {
-  animation: marquee 40s linear infinite;
+.marquee-strip {
+  border-top: 1px solid color-mix(in srgb, var(--ink) 72%, var(--border));
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 72%, var(--border));
+  padding: 0.9rem 0;
+}
+.marquee-scroll {
+  overflow: visible;
+}
+.marquee-track {
+  animation: marquee 18s linear infinite;
+  will-change: transform;
+}
+.marquee-item {
+  gap: 1.25rem;
+  padding: 0 1.15rem;
+  font-size: clamp(1.3rem, 2.6vw, 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.marquee-label {
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.marquee-separator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.45rem;
+  height: 0.45rem;
+  font-size: 0;
+  background: var(--accent);
+  transform: rotate(45deg);
+  flex: 0 0 auto;
+}
+@media (max-width: 640px) {
+  .marquee-strip { padding-block: 0.75rem; }
+  .marquee-item { padding-inline: 0.85rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track {
+    animation: none;
+    transform: none;
+  }
 }
 
 /* ---------- Custom cursor: hide native cursor everywhere ---------- */
