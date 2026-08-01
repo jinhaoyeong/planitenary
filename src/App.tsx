@@ -31,7 +31,6 @@ import { Dashboard } from './components/Dashboard';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ProfilePanel } from './components/ProfilePanel';
 import { SecurityPanel } from './components/SecurityPanel';
-import { MfaSetupScreen } from './components/MfaSetupScreen';
 import { DEFAULT_TRIP_SETTINGS, applyTemplate, buildTripThemeStyle, getThemeForMode, mergeTripSettings } from './lib/tripSettings';
 import type { TripAppSettings } from './lib/tripSettings';
 import {
@@ -87,7 +86,6 @@ function App() {
     isLocalTestUser,
     needsMfaVerification,
     mfaStatusReady,
-    mfaEnabled,
     signOut,
   } = useAuth();
   const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
@@ -704,10 +702,6 @@ function App() {
   if (isCloudAccount && !mfaStatusReady) {
     return <div className="min-h-screen bg-[color:var(--bg)] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" /></div>;
   }
-  if (isCloudAccount && mfaStatusReady && !mfaEnabled) {
-    return <MfaSetupScreen />;
-  }
-
   if (!activeItineraryId) {
     const dashboardPalette = theme === 'light' ? shellTheme.light : shellTheme.dark;
     const dashboardThemeStyle = buildTripThemeStyle(dashboardPalette, theme);

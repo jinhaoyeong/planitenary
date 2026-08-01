@@ -52,10 +52,10 @@ export function SecurityPanel() {
 
   return (
     <section className="editorial-card p-4 sm:p-5 md:p-8">
-      <div className="eyebrow">Security</div>
+      <div className="eyebrow">Account security</div>
       <h2 className="font-display text-3xl sm:text-4xl mt-4">Protect your account.</h2>
       <p className="mt-3 text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
-        Enable two-factor authentication and confirm password, email, or phone changes with your current password
+        Two-factor authentication is optional. Enable it when you want an additional sign-in step, then confirm password, email, or phone changes with your current password
         {mfaEnabled ? ' and authenticator code' : ''}.
       </p>
 
