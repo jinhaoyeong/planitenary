@@ -48,21 +48,21 @@ const isThemePalette = (value: unknown): value is TripThemeSettings => {
 };
 
 const LIGHT_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#FAF7F2', '#FFF0F8', '#F6E6EE', '#F8F7FA', '#FFFFFF'],
-  bgElevated: ['#FFFFFF', '#FFF7FC', '#FDEDC9', '#FFFFFF', '#FFFFFF'],
-  ink: ['#0F0E0D', '#91185C', '#5B5B5B', '#3D3C4F', '#000000'],
-  inkMuted: ['#5C5853', '#A82A70', '#7A7A7A', '#6B6880', '#333333'],
-  accent: ['#EE4D87', '#E6067A', '#D04F99', '#8A79AB', '#FF3333'],
-  accentSoft: ['#FFE4EE', '#FFD6FF', '#8ACFD1', '#DFD9EC', '#FFFF00'],
+  bg: ['#FAF7F2', '#FFF0F8', '#F6E6EE', '#F8F7FA', '#FFFFFF', '#F7F9F3', '#E8EBED'],
+  bgElevated: ['#FFFFFF', '#FFF7FC', '#FDEDC9', '#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFFFF'],
+  ink: ['#0F0E0D', '#91185C', '#5B5B5B', '#3D3C4F', '#000000', '#000000', '#333333'],
+  inkMuted: ['#5C5853', '#A82A70', '#7A7A7A', '#6B6880', '#333333', '#333333', '#6B7280'],
+  accent: ['#EE4D87', '#E6067A', '#D04F99', '#8A79AB', '#FF3333', '#4F46E5', '#E05D38'],
+  accentSoft: ['#FFE4EE', '#FFD6FF', '#8ACFD1', '#DFD9EC', '#FFFF00', '#14B8A6', '#D6E4F0'],
 };
 
 const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#14110F', '#1A0922', '#12242E', '#1A1823', '#000000'],
-  bgElevated: ['#1F1A17', '#2A1435', '#1C2E38', '#232030', '#333333'],
-  ink: ['#F5EFE4', '#FFB3FF', '#F3E3EA', '#E0DDEF', '#FFFFFF'],
-  inkMuted: ['#A39B8C', '#D67AD6', '#E4A2B1', '#A09AAD', '#CCCCCC'],
-  accent: ['#FF6B9A', '#FF6BEF', '#FBE2A7', '#A995C9', '#FF6666'],
-  accentSoft: ['#3A1F2A', '#46204F', '#E4A2B1', '#5A5370', '#FFFF33'],
+  bg: ['#14110F', '#1A0922', '#12242E', '#1A1823', '#000000', '#000000', '#1C2433'],
+  bgElevated: ['#1F1A17', '#2A1435', '#1C2E38', '#232030', '#333333', '#1A212B', '#2A3040'],
+  ink: ['#F5EFE4', '#FFB3FF', '#F3E3EA', '#E0DDEF', '#FFFFFF', '#FFFFFF', '#E5E5E5'],
+  inkMuted: ['#A39B8C', '#D67AD6', '#E4A2B1', '#A09AAD', '#CCCCCC', '#CCCCCC', '#A3A3A3'],
+  accent: ['#FF6B9A', '#FF6BEF', '#FBE2A7', '#A995C9', '#FF6666', '#818CF8', '#E05D38'],
+  accentSoft: ['#3A1F2A', '#46204F', '#E4A2B1', '#5A5370', '#FFFF33', '#2DD4BF', '#2A3656'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';

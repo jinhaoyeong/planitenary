@@ -157,6 +157,48 @@ export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
       accentSoft: '#FFFF33',
     },
   },
+  {
+    id: 'garden-indigo',
+    name: 'Garden Indigo',
+    description: 'Leafy greens with indigo structure, teal lift, and a warm amber signal.',
+    light: {
+      bg: '#F7F9F3',
+      bgElevated: '#FFFFFF',
+      ink: '#000000',
+      inkMuted: '#333333',
+      accent: '#4F46E5',
+      accentSoft: '#14B8A6',
+    },
+    dark: {
+      bg: '#000000',
+      bgElevated: '#1A212B',
+      ink: '#FFFFFF',
+      inkMuted: '#CCCCCC',
+      accent: '#818CF8',
+      accentSoft: '#2DD4BF',
+    },
+  },
+  {
+    id: 'terracotta-coast',
+    name: 'Terracotta Coast',
+    description: 'Weathered stone, terracotta warmth, and a restrained coastal blue.',
+    light: {
+      bg: '#E8EBED',
+      bgElevated: '#FFFFFF',
+      ink: '#333333',
+      inkMuted: '#6B7280',
+      accent: '#E05D38',
+      accentSoft: '#D6E4F0',
+    },
+    dark: {
+      bg: '#1C2433',
+      bgElevated: '#2A3040',
+      ink: '#E5E5E5',
+      inkMuted: '#A3A3A3',
+      accent: '#E05D38',
+      accentSoft: '#2A3656',
+    },
+  },
 ];
 
 export const themesMatch = (a: TripThemeSettings, b: TripThemeSettings) =>
