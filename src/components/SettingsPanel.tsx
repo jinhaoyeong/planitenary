@@ -898,7 +898,45 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
             )}
 
             {activeSection === 'theme' && (
-              <div className="grid grid-cols-1 gap-4 md:gap-5 items-start">
+              <div className="space-y-4 md:space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div
+                    className="rounded-2xl p-4"
+                    style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="eyebrow">Effects</div>
+                        <div className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>Immersive visual effects</div>
+                        <div className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                          Turn on grain and the custom cursor. Keep this off if you want the smoothest performance.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={draftSettings.immersiveEffects}
+                        aria-label="Enable immersive visual effects"
+                        className="editorial-toggle shrink-0 mt-1"
+                        data-checked={draftSettings.immersiveEffects ? 'true' : 'false'}
+                        onClick={() =>
+                          setDraftSettings((current) => ({ ...current, immersiveEffects: !current.immersiveEffects }))
+                        }
+                      >
+                        <span className="editorial-toggle-thumb" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="editorial-card p-4 md:p-5">
+                    <div className="eyebrow">Palette Notes</div>
+                    <h3 className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>Start with a preset.</h3>
+                    <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                      Choose a ready-made theme for a balanced look, then adjust individual tokens if you want something more personal.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="editorial-card p-4 md:p-5">
                   <div className="flex items-center gap-2">
                     <Palette className="w-4 h-4" style={{ color: 'var(--accent)' }} />
@@ -935,7 +973,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                               : `Custom ${theme} palette — choose a preset to sync both modes, or keep editing tokens.`}
                         </p>
                       </div>
-                      <div className="grid w-full shrink-0 grid-cols-2 gap-2 md:w-80">
+                      <div className="grid w-full shrink-0 grid-cols-1 gap-2 sm:grid-cols-2 md:w-80">
                         <label className="theme-file-button pill-btn pill-soft w-full cursor-pointer justify-center whitespace-nowrap">
                           <Upload className="w-4 h-4" /> Import theme
                           <input type="file" accept="application/json,.json" className="hidden" onChange={importTheme} />
@@ -1104,43 +1142,6 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div
-                    className="rounded-2xl p-4"
-                    style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="eyebrow">Effects</div>
-                        <div className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>Immersive visual effects</div>
-                        <div className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                          Turn on grain and the custom cursor. Keep this off if you want the smoothest performance.
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={draftSettings.immersiveEffects}
-                        aria-label="Enable immersive visual effects"
-                        className="editorial-toggle shrink-0 mt-1"
-                        data-checked={draftSettings.immersiveEffects ? 'true' : 'false'}
-                        onClick={() =>
-                          setDraftSettings((current) => ({ ...current, immersiveEffects: !current.immersiveEffects }))
-                        }
-                      >
-                        <span className="editorial-toggle-thumb" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="editorial-card p-4 md:p-5">
-                    <div className="eyebrow">Palette Notes</div>
-                    <h3 className="font-display text-2xl mt-3" style={{ color: 'var(--ink)' }}>Start with a preset.</h3>
-                    <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                      Choose a ready-made theme for a balanced look, then adjust individual tokens if you want something more personal.
-                    </p>
-                  </div>
-                </div>
               </div>
             )}
           </div>
