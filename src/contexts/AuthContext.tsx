@@ -16,11 +16,14 @@ interface AuthContextType {
   /** True when the cloud account has at least one verified TOTP factor. */
   mfaEnabled: boolean;
   mfaFactorId: string | null;
+  /** True while the user is completing a password recovery session. */
+  isPasswordRecovery: boolean;
   signInDemo: () => void;
   signInLocal: (email: string, password: string) => { success: boolean; error?: string };
   signUpLocal: (email: string, password: string) => { success: boolean; error?: string };
   completeMfaChallenge: (code: string) => Promise<{ success: boolean; error?: string }>;
   refreshMfaStatus: () => Promise<void>;
+  clearPasswordRecovery: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -58,6 +61,13 @@ const createLocalTestUser = (email: string): User =>
     user_metadata: { localTest: true },
   }) as User;
 
+const hasPasswordRecoveryUrl = () => {
+  if (typeof window === 'undefined') return false;
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const queryParams = new URLSearchParams(window.location.search);
+  return hashParams.get('type') === 'recovery' || queryParams.get('type') === 'recovery';
+};
+
 const readLocalAuthUsers = (): LocalAuthUser[] => {
   const raw = localStorage.getItem(LOCAL_AUTH_USERS_KEY);
   if (!raw) return [];
@@ -85,11 +95,13 @@ const AuthContext = createContext<AuthContextType>({
   mfaStatusReady: false,
   mfaEnabled: false,
   mfaFactorId: null,
+  isPasswordRecovery: false,
   signInDemo: () => {},
   signInLocal: () => ({ success: false }),
   signUpLocal: () => ({ success: false }),
   completeMfaChallenge: async () => ({ success: false }),
   refreshMfaStatus: async () => {},
+  clearPasswordRecovery: () => {},
   signOut: async () => {},
 });
 
@@ -103,6 +115,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [mfaStatusReady, setMfaStatusReady] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   const applyMfaStatus = useCallback(async (activeSession: Session | null) => {
     if (!activeSession || !isSupabaseConfigured()) {
@@ -173,6 +186,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     let cancelled = false;
+    const recoveryUrl = hasPasswordRecoveryUrl();
+    setIsPasswordRecovery(recoveryUrl);
 
     supabase.auth.getSession().then(async ({ data: { session: nextSession } }) => {
       if (cancelled) return;
@@ -180,18 +195,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(nextSession?.user ?? null);
       setIsDemoUser(false);
       setIsLocalTestUser(false);
-      await applyMfaStatus(nextSession);
+      if (recoveryUrl) {
+        setNeedsMfaVerification(false);
+        setMfaStatusReady(true);
+      } else {
+        await applyMfaStatus(nextSession);
+      }
       if (!cancelled) setIsLoading(false);
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      const recoverySession = event === 'PASSWORD_RECOVERY' || hasPasswordRecoveryUrl();
+      setIsPasswordRecovery(recoverySession);
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
       setIsDemoUser(false);
       setIsLocalTestUser(false);
-      void applyMfaStatus(nextSession);
+      if (recoverySession) {
+        setNeedsMfaVerification(false);
+        setMfaStatusReady(true);
+      } else {
+        void applyMfaStatus(nextSession);
+      }
     });
 
     return () => {
@@ -300,6 +327,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const clearPasswordRecovery = () => {
+    setIsPasswordRecovery(false);
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -312,11 +346,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         mfaStatusReady,
         mfaEnabled,
         mfaFactorId,
+        isPasswordRecovery,
         signInDemo,
         signInLocal,
         signUpLocal,
         completeMfaChallenge,
         refreshMfaStatus,
+        clearPasswordRecovery,
         signOut,
       }}
     >
