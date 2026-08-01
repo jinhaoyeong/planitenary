@@ -255,6 +255,20 @@ body {
 }
 .pill-primary:hover { background-color: color-mix(in srgb, var(--accent) 88%, #000); }
 
+.auth-submit {
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 8px 18px -12px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.auth-submit:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--accent) 88%, #000);
+  transform: translateY(-1px);
+}
+.auth-submit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .pill-ghost {
   background-color: transparent;
   color: var(--ink);

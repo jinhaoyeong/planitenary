@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured, getAuthRedirectUrl } from '../lib/supabase';
-import { Plane, Lock, Mail, AlertTriangle, Eye, EyeOff } from 'lucide-react';
+import { Plane, Lock, Mail, AlertTriangle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DEMO_EMAIL, DEMO_PASSWORD, useAuth } from '../contexts/AuthContext';
 
@@ -55,6 +55,7 @@ export const Auth = () => {
   const [mfaCode, setMfaCode] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [localFallbackMessage, setLocalFallbackMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -76,6 +77,7 @@ export const Auth = () => {
       hashParams.get('error');
     if (description) {
       setError(decodeURIComponent(description.replace(/\+/g, ' ')));
+      setSuccessMessage(null);
       // Strip the auth params so a refresh doesn't keep re-showing the error.
       window.history.replaceState({}, document.title, window.location.pathname);
     }
@@ -89,6 +91,7 @@ export const Auth = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessMessage(null);
     setLocalFallbackMessage(null);
     setLoading(true);
 
@@ -144,7 +147,7 @@ export const Auth = () => {
         });
         if (error) throw error;
         if (data.user && !data.session) {
-          setError('Registration successful! Please check your email to verify your account on this same site.');
+          setSuccessMessage('Account created. Check your inbox to verify your email, then come back here to sign in.');
         }
       }
     } catch (err: unknown) {
@@ -168,6 +171,8 @@ export const Auth = () => {
 
   const handleForgotPassword = async () => {
     setError(null);
+    setSuccessMessage(null);
+    setLocalFallbackMessage(null);
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setError('Enter your account email first, then select Forgot password.');
@@ -193,9 +198,9 @@ export const Auth = () => {
         redirectTo: getAuthRedirectUrl(),
       });
       if (resetError) throw resetError;
-      setError('Password reset email sent. Follow the link, then set a new password in Account → Security.');
+      setSuccessMessage('Password reset email sent. Follow the link to choose a new password.');
     } catch (err: unknown) {
-      const authError = err && typeof err === 'object' ? (err as { message?: string; code?: string; status?: number }) : null;
+      const authError = err && typeof err === 'object' ? (err as AuthError) : null;
       setError(
         authError?.message?.toLowerCase().includes('function') || authError?.message?.toLowerCase().includes('failed to fetch')
           ? 'Password recovery is not available yet. Please contact support or try again later.'
@@ -209,6 +214,7 @@ export const Auth = () => {
   const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessMessage(null);
     setLoading(true);
     const result = await completeMfaChallenge(mfaCode);
     setLoading(false);
@@ -304,6 +310,12 @@ export const Auth = () => {
                 <span>{localFallbackMessage}</span>
               </div>
             )}
+            {successMessage && (
+              <div role="status" className="p-4 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--accent)] text-[color:var(--ink)] text-sm flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 shrink-0 text-[color:var(--accent)]" />
+                <span>{successMessage}</span>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Email Address</label>
@@ -365,7 +377,7 @@ export const Auth = () => {
             <button
               type="submit"
               disabled={loading || (!isLogin && !isStrongPassword(password))}
-              className="w-full py-3.5 rounded-xl bg-slate-900 dark:bg-rose-600 text-white font-bold hover:bg-slate-800 dark:hover:bg-rose-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="auth-submit w-full py-3.5 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
             </button>
@@ -376,6 +388,7 @@ export const Auth = () => {
                 setEmail(DEMO_EMAIL);
                 setPassword(DEMO_PASSWORD);
                 setError(null);
+                setSuccessMessage(null);
                 setLocalFallbackMessage(null);
                 signInDemo();
               }}
@@ -396,6 +409,7 @@ export const Auth = () => {
               onClick={() => {
                 setIsLogin(!isLogin);
                 setError(null);
+                setSuccessMessage(null);
                 setLocalFallbackMessage(null);
               }}
               className="font-bold text-rose-500 hover:text-rose-600 transition-colors"
