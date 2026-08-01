@@ -11,8 +11,8 @@ import { PhotoWall } from './components/PhotoWall';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, SlidersHorizontal, ChevronLeft, LogOut, UserRound } from 'lucide-react';
-import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
+import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, SlidersHorizontal, ChevronLeft, LogOut, UserRound, MoreHorizontal } from 'lucide-react';
+import { motion, AnimatePresence, animate, useScroll, useSpring, useReducedMotion } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
 import { GrainOverlay } from './components/motion/GrainOverlay';
@@ -93,6 +93,7 @@ function App() {
   const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'settings' | 'account'>('itinerary');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isUtilityMenuOpen, setIsUtilityMenuOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('hasVisited'));
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [restorePreview, setRestorePreview] = useState<RestoreDatasetPreview[]>([]);
@@ -107,6 +108,16 @@ function App() {
   const [isCloudBackupRestoring, setIsCloudBackupRestoring] = useState(false);
 
   const { theme, toggleTheme } = useTheme();
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const handleMenuKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleMenuKeyDown);
+    return () => window.removeEventListener('keydown', handleMenuKeyDown);
+  }, [isMenuOpen]);
 
   const handleStart = () => {
     setShowWelcome(false);
@@ -787,36 +798,31 @@ function App() {
           backgroundColor: 'color-mix(in srgb, var(--bg) 85%, transparent)',
           borderBottom: '1px solid var(--border)',
           paddingTop: 'env(safe-area-inset-top)',
-          willChange: 'transform',
         }}
       >
         <div className="max-w-7xl mx-auto px-3 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-3 shrink min-w-0">
             <button 
               onClick={returnToDashboard}
-              className="p-2 -ml-2 rounded-xl text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="header-control inline-flex min-h-11 min-w-11 items-center justify-center p-2 -ml-2 rounded-xl text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               aria-label="Back to Dashboard"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <span className="font-display text-lg sm:text-2xl md:text-3xl leading-none tracking-tight truncate" style={{ color: 'var(--ink)' }}>
-              {(() => {
-                const title = displayItinerary.name || 'Travel Handbook';
-                const words = title.trim().split(' ');
-                const lastWord = words.pop() || '';
-                return (
-                  <>
-                    {words.join(' ')}{words.length > 0 ? ' ' : ''}
-                    <span className="font-display-italic" style={{ color: 'var(--accent)' }}>{lastWord}</span>
-                  </>
-                );
-              })()}
-            </span>
+            <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
+              <span className="font-display text-lg sm:text-2xl leading-none tracking-tight whitespace-nowrap" style={{ color: 'var(--ink)' }}>
+                Travel <span className="font-display-italic" style={{ color: 'var(--accent)' }}>Handbook</span>
+              </span>
+              <span className="hidden sm:inline max-w-[10rem] truncate border-l pl-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--ink-muted)', borderColor: 'var(--border)' }}>
+                {displayItinerary.name || 'New Trip'}
+              </span>
+            </div>
           </div>
 
           <motion.nav 
-            initial="hidden"
-            animate="visible"
+            aria-label="Trip sections"
+            initial={reduceMotion ? false : 'hidden'}
+            animate={reduceMotion ? undefined : 'visible'}
             variants={{
               hidden: { opacity: 0 },
               visible: {
@@ -833,8 +839,9 @@ function App() {
                   hidden: { opacity: 0, y: -10 },
                   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } }
                 }}
-                onClick={() => handleTabChange(tab.id as any)}
-                className="relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors"
+                onClick={() => handleTabChange(tab.id)}
+                aria-current={activeTab === tab.id ? 'page' : undefined}
+                className="header-nav-link relative min-h-11 px-3 lg:px-4 py-2 text-sm font-semibold tracking-tight transition-colors"
                 style={{ color: activeTab === tab.id ? 'var(--ink)' : 'var(--ink-muted)' }}
               >
                 {tab.label}
@@ -849,10 +856,10 @@ function App() {
             ))}
           </motion.nav>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="relative flex items-center gap-1.5 sm:gap-2 shrink-0">
             <motion.button
               onClick={() => handleTabChange('settings')}
-              className="p-2 rounded-full"
+              className="header-control hidden md:inline-flex min-h-11 min-w-11 items-center justify-center p-2 rounded-full"
               style={{
                 color: activeTab === 'settings' ? 'var(--accent)' : 'var(--ink)',
                 border: '1px solid var(--border)',
@@ -864,55 +871,53 @@ function App() {
               <SlidersHorizontal className="w-4 h-4" />
             </motion.button>
             <motion.button
-              onClick={() => handleTabChange('account')}
-              className="p-2 rounded-full"
-              style={{
-                color: activeTab === 'account' ? 'var(--accent)' : 'var(--ink)',
-                border: '1px solid var(--border)',
-                backgroundColor: activeTab === 'account' ? 'var(--bg-elevated)' : 'transparent',
-              }}
-              aria-label="Open account settings"
+              type="button"
+              className="header-control hidden md:inline-flex min-h-11 min-w-11 items-center justify-center p-2 rounded-full"
+              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
+              aria-label={isUtilityMenuOpen ? 'Close account and utility menu' : 'Open account and utility menu'}
+              aria-expanded={isUtilityMenuOpen}
+              aria-controls="header-utility-menu"
+              onClick={() => setIsUtilityMenuOpen((open) => !open)}
               whileTap={{ scale: 0.9 }}
             >
-              <UserRound className="w-4 h-4" />
+              <MoreHorizontal className="w-4 h-4" />
             </motion.button>
+            <AnimatePresence>
+              {isUtilityMenuOpen && (
+                <motion.div
+                  id="header-utility-menu"
+                  role="menu"
+                  aria-label="Account and utility actions"
+                  initial={reduceMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={reduceMotion ? undefined : { opacity: 0, y: -4, scale: 0.98 }}
+                  className="header-utility-menu absolute right-0 top-[calc(100%+0.75rem)] z-50 min-w-48 rounded-2xl p-2 shadow-xl"
+                  style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+                >
+                  <button role="menuitem" className="header-menu-item" onClick={() => { handleTabChange('account'); setIsUtilityMenuOpen(false); }}>
+                    <UserRound className="w-4 h-4" /> Account settings
+                  </button>
+                  <button role="menuitem" className="header-menu-item" onClick={() => { openRestoreModal(); setIsUtilityMenuOpen(false); }}>
+                    <RefreshCw className="w-4 h-4" /> Restore backup
+                  </button>
+                  <button role="menuitem" className="header-menu-item" onClick={() => { toggleTheme(); setIsUtilityMenuOpen(false); }}>
+                    {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />} Change theme
+                  </button>
+                  <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
+                  <button role="menuitem" className="header-menu-item" onClick={() => { void signOut(); setIsUtilityMenuOpen(false); }}>
+                    <LogOut className="w-4 h-4" /> Sign out
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <motion.button
-              onClick={signOut}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              whileTap={{ scale: 0.95 }}
-              whileHover={{ y: -1 }}
-              aria-label="Sign out"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </motion.button>
-            <motion.button
-              onClick={openRestoreModal}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              whileTap={{ scale: 0.95 }}
-              whileHover={{ y: -1 }}
-              aria-label="Restore backup"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Restore</span>
-            </motion.button>
-            <motion.button
-              onClick={toggleTheme}
-              className="hidden sm:inline-flex p-2 rounded-full"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              aria-label="Toggle theme"
-              whileTap={{ scale: 0.9, rotate: -12 }}
-            >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </motion.button>
-            <motion.button
-              className="md:hidden p-2 rounded-full"
+              className="header-control md:hidden min-h-11 min-w-11 items-center justify-center p-2 rounded-full"
               style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               whileTap={{ scale: 0.9 }}
               aria-label="Menu"
+              aria-expanded={isMenuOpen}
+              aria-controls="mobile-quick-menu"
             >
               {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </motion.button>
@@ -1082,9 +1087,9 @@ function App() {
       <AnimatePresence>
         {showRestoreModal && (
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={reduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            exit={reduceMotion ? undefined : { opacity: 0 }}
             className="fixed inset-0 z-[70] flex items-center justify-center p-4"
           >
             <button className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" onClick={() => setShowRestoreModal(false)} />
@@ -1228,10 +1233,11 @@ function App() {
             return (
               <motion.button
                 key={tab.id}
-                onClick={() => handleTabChange(tab.id as any)}
-                className="relative flex-1 flex flex-col items-center justify-center py-1.5 rounded-full min-w-0"
+                onClick={() => handleTabChange(tab.id)}
+                className="header-nav-link relative flex-1 flex min-h-11 flex-col items-center justify-center py-1.5 rounded-full min-w-0"
                 whileTap={{ scale: 0.9 }}
                 aria-label={tab.label}
+                aria-current={active ? 'page' : undefined}
               >
                 <div
                   className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-colors shrink-0"
@@ -1256,13 +1262,17 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            id="mobile-quick-menu"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Quick menu"
             className="fixed inset-0 z-40 md:hidden flex items-start justify-center px-4 pt-[calc(5rem+env(safe-area-inset-top))]"
             onClick={() => setIsMenuOpen(false)}
           >
             <motion.div
-              initial={{ opacity: 0, y: -10, scale: 0.98 }}
+              initial={reduceMotion ? false : { opacity: 0, y: -10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.98 }}
+              exit={reduceMotion ? undefined : { opacity: 0, y: -8, scale: 0.98 }}
               className="w-full max-w-sm rounded-3xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl p-4 space-y-3"
               onClick={(e) => e.stopPropagation()}
             >
@@ -1291,7 +1301,7 @@ function App() {
                   <button
                     key={tab.id}
                     onClick={() => {
-                      handleTabChange(tab.id as any);
+                      handleTabChange(tab.id);
                       setIsMenuOpen(false);
                     }}
                     className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 p-3 rounded-xl flex flex-col items-center gap-2 transition-colors border border-slate-200 dark:border-slate-700"
