@@ -884,24 +884,26 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                               : `Custom ${theme} palette — choose a preset to sync both modes, or keep editing tokens.`}
                         </p>
                       </div>
-                          <div
-                        className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
-                        style={{
-                          backgroundColor: 'var(--bg)',
-                          color: 'var(--ink-muted)',
-                          border: '1px solid var(--border)',
-                        }}
-                          >
-                            Showing {theme}
-                          </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="theme-file-button pill-btn pill-soft cursor-pointer">
-                          <Upload className="w-4 h-4" /> Import theme
-                          <input type="file" accept="application/json,.json" className="hidden" onChange={importTheme} />
-                        </label>
-                        <button type="button" className="pill-btn pill-ghost" onClick={exportTheme}>
-                          <Download className="w-4 h-4" /> Export theme
-                        </button>
+                      <div className="flex shrink-0 flex-col items-stretch sm:items-end gap-2">
+                        <div
+                          className="self-start sm:self-end text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
+                          style={{
+                            backgroundColor: 'var(--bg)',
+                            color: 'var(--ink-muted)',
+                            border: '1px solid var(--border)',
+                          }}
+                        >
+                          Showing {theme}
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                          <label className="theme-file-button pill-btn pill-soft cursor-pointer justify-center whitespace-nowrap">
+                            <Upload className="w-4 h-4" /> Import theme
+                            <input type="file" accept="application/json,.json" className="hidden" onChange={importTheme} />
+                          </label>
+                          <button type="button" className="pill-btn pill-ghost justify-center whitespace-nowrap" onClick={exportTheme}>
+                            <Download className="w-4 h-4" /> Export theme
+                          </button>
+                        </div>
                       </div>
                     </div>
 
