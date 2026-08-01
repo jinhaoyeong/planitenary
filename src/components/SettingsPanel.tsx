@@ -48,21 +48,21 @@ const isThemePalette = (value: unknown): value is TripThemeSettings => {
 };
 
 const LIGHT_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#FAF7F2', '#F1F4F8', '#EEF5F1', '#F7F1F5', '#FAF1EB'],
-  bgElevated: ['#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFCF9'],
-  ink: ['#0F0E0D', '#14243A', '#183029', '#301C2F', '#321C17'],
-  inkMuted: ['#5C5853', '#5B6C82', '#5E756C', '#7E687B', '#806A62'],
-  accent: ['#EE4D87', '#2F67B2', '#D35F55', '#A84D79', '#C65E46'],
-  accentSoft: ['#FFE4EE', '#DCE8F7', '#F4DCD7', '#F0D9E5', '#F2D8D0'],
+  bg: ['#FAF7F2', '#FFF0F8', '#F1F4F8', '#EEF5F1', '#F7F1F5', '#FAF1EB'],
+  bgElevated: ['#FFFFFF', '#FFF7FC', '#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFCF9'],
+  ink: ['#0F0E0D', '#91185C', '#14243A', '#183029', '#301C2F', '#321C17'],
+  inkMuted: ['#5C5853', '#A82A70', '#5B6C82', '#5E756C', '#7E687B', '#806A62'],
+  accent: ['#EE4D87', '#E6067A', '#2F67B2', '#D35F55', '#A84D79', '#C65E46'],
+  accentSoft: ['#FFE4EE', '#FFD6FF', '#DCE8F7', '#F4DCD7', '#F0D9E5', '#F2D8D0'],
 };
 
 const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
-  bg: ['#14110F', '#0E1725', '#101C19', '#201522', '#211512'],
-  bgElevated: ['#1F1A17', '#18263A', '#1B2C27', '#302038', '#33221C'],
-  ink: ['#F5EFE4', '#F1F5FB', '#F1F7F3', '#FAF0F6', '#FFF2E9'],
-  inkMuted: ['#A39B8C', '#A7B8CE', '#A8BDB3', '#C1A9BA', '#C8A99B'],
-  accent: ['#FF6B9A', '#76A7EF', '#F08272', '#E7B45D', '#73A6C4'],
-  accentSoft: ['#3A1F2A', '#243C62', '#4A2927', '#4B3525', '#243A48'],
+  bg: ['#14110F', '#1A0922', '#0E1725', '#101C19', '#201522', '#211512'],
+  bgElevated: ['#1F1A17', '#2A1435', '#18263A', '#1B2C27', '#302038', '#33221C'],
+  ink: ['#F5EFE4', '#FFB3FF', '#F1F5FB', '#F1F7F3', '#FAF0F6', '#FFF2E9'],
+  inkMuted: ['#A39B8C', '#D67AD6', '#A7B8CE', '#A8BDB3', '#C1A9BA', '#C8A99B'],
+  accent: ['#FF6B9A', '#FF6BEF', '#76A7EF', '#F08272', '#E7B45D', '#73A6C4'],
+  accentSoft: ['#3A1F2A', '#46204F', '#243C62', '#4A2927', '#4B3525', '#243A48'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';

@@ -74,6 +74,27 @@ export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
     dark: { ...DEFAULT_DARK_THEME },
   },
   {
+    id: 'quantum-rose',
+    name: 'Quantum Rose',
+    description: 'A vivid pink interface with lilac depth and editorial contrast.',
+    light: {
+      bg: '#FFF0F8',
+      bgElevated: '#FFF7FC',
+      ink: '#91185C',
+      inkMuted: '#A82A70',
+      accent: '#E6067A',
+      accentSoft: '#FFD6FF',
+    },
+    dark: {
+      bg: '#1A0922',
+      bgElevated: '#2A1435',
+      ink: '#FFB3FF',
+      inkMuted: '#D67AD6',
+      accent: '#FF6BEF',
+      accentSoft: '#46204F',
+    },
+  },
+  {
     id: 'moss-marigold',
     name: 'Cobalt & Cream',
     description: 'Crisp archive paper with a confident cobalt signal.',
@@ -191,9 +212,27 @@ export const getThemeForMode = (settings: Pick<TripAppSettings, 'theme' | 'light
 
 export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode): CSSProperties => {
   const border = `color-mix(in srgb, ${palette.ink} 22%, ${palette.bgElevated})`;
+  const sharedTokens = {
+    '--background': palette.bg,
+    '--foreground': palette.ink,
+    '--card': palette.bgElevated,
+    '--card-foreground': palette.ink,
+    '--popover': palette.bgElevated,
+    '--popover-foreground': palette.ink,
+    '--primary': palette.accent,
+    '--primary-foreground': '#0F0E0D',
+    '--secondary': palette.accentSoft,
+    '--secondary-foreground': palette.ink,
+    '--muted': palette.accentSoft,
+    '--muted-foreground': palette.inkMuted,
+    '--accent-foreground': '#0F0E0D',
+    '--input': border,
+    '--ring': palette.accent,
+  };
 
   if (mode === 'light') {
     return {
+      ...sharedTokens,
       '--bg': palette.bg,
       '--bg-elevated': palette.bgElevated,
       '--ink': palette.ink,
@@ -207,6 +246,7 @@ export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode)
   }
 
   return {
+    ...sharedTokens,
     '--bg': palette.bg,
     '--bg-elevated': palette.bgElevated,
     '--ink': palette.ink,
