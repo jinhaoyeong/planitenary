@@ -363,19 +363,21 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving || !hasUnsavedChanges}
-            aria-busy={isSaving}
-            className="pill-btn pill-primary w-full sm:w-auto justify-center disabled:opacity-55 disabled:cursor-not-allowed"
-          >
-            <Save className="w-4 h-4" />
-            {isSaving ? 'Saving...' : saveStatus === 'saved' && !hasUnsavedChanges ? 'All changes saved' : 'Save settings'}
-          </button>
-          <p className="settings-save-status" aria-live="polite">
-            {saveStatus === 'error' ? 'Couldn’t save changes. Please try again.' : hasUnsavedChanges ? 'Unsaved changes' : saveStatus === 'saved' ? 'All changes saved' : ''}
-          </p>
+          <div className="flex w-full sm:w-auto flex-col items-stretch sm:items-end gap-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving || !hasUnsavedChanges}
+              aria-busy={isSaving}
+              className="pill-btn pill-primary w-full sm:w-auto justify-center disabled:opacity-55 disabled:cursor-not-allowed"
+            >
+              <Save className="w-4 h-4" />
+              {isSaving ? 'Saving...' : saveStatus === 'saved' && !hasUnsavedChanges ? 'All changes saved' : 'Save settings'}
+            </button>
+            <p className="settings-save-status" aria-live="polite">
+              {saveStatus === 'error' ? 'Couldn’t save changes. Please try again.' : hasUnsavedChanges ? 'Unsaved changes' : saveStatus === 'saved' ? 'All changes saved' : ''}
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-col xl:flex-row gap-6 md:gap-10 mt-6 md:mt-8">
