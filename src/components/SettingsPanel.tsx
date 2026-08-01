@@ -912,10 +912,20 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                   </p>
 
                   <div className="mt-6">
-                    <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-                      <div>
-                        <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
-                          Color Themes
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
+                          <span>Color Themes</span>
+                          <span
+                            className="rounded-md px-2 py-1 text-[10px] tracking-wider"
+                            style={{
+                              backgroundColor: 'var(--bg)',
+                              color: 'var(--ink-muted)',
+                              border: '1px solid var(--border)',
+                            }}
+                          >
+                            Showing {theme}
+                          </span>
                         </div>
                         <p className="mt-1 text-sm" style={{ color: 'var(--ink-muted)' }}>
                           {fullyMatchedPreset
@@ -925,26 +935,14 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                               : `Custom ${theme} palette — choose a preset to sync both modes, or keep editing tokens.`}
                         </p>
                       </div>
-                      <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:min-w-[320px] sm:items-end">
-                        <div
-                          className="self-start sm:self-end text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md"
-                          style={{
-                            backgroundColor: 'var(--bg)',
-                            color: 'var(--ink-muted)',
-                            border: '1px solid var(--border)',
-                          }}
-                        >
-                          Showing {theme}
-                        </div>
-                        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-                          <label className="theme-file-button pill-btn pill-soft w-full cursor-pointer justify-center whitespace-nowrap">
-                            <Upload className="w-4 h-4" /> Import theme
-                            <input type="file" accept="application/json,.json" className="hidden" onChange={importTheme} />
-                          </label>
-                          <button type="button" className="pill-btn pill-ghost w-full justify-center whitespace-nowrap" onClick={exportTheme}>
-                            <Download className="w-4 h-4" /> Export theme
-                          </button>
-                        </div>
+                      <div className="grid w-full shrink-0 grid-cols-2 gap-2 md:w-80">
+                        <label className="theme-file-button pill-btn pill-soft w-full cursor-pointer justify-center whitespace-nowrap">
+                          <Upload className="w-4 h-4" /> Import theme
+                          <input type="file" accept="application/json,.json" className="hidden" onChange={importTheme} />
+                        </label>
+                        <button type="button" className="pill-btn pill-ghost w-full justify-center whitespace-nowrap" onClick={exportTheme}>
+                          <Download className="w-4 h-4" /> Export theme
+                        </button>
                       </div>
                     </div>
 
@@ -1070,15 +1068,15 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                           Fine-tune colors for the current {theme} mode. Presets still keep a matching pair for the other mode until you edit them too.
                         </p>
                       </div>
-                      <div className="flex w-full flex-col gap-2 sm:flex-row">
+                      <div className="flex w-full min-w-0 flex-col gap-2 sm:flex-row">
                         <input
                           aria-label="Custom theme name"
                           value={customThemeName}
                           onChange={(event) => setCustomThemeName(event.target.value)}
-                          className="editorial-input w-full min-w-0 sm:w-56 sm:flex-none lg:w-52"
+                          className="editorial-input w-full min-w-0 flex-1 basis-0 sm:w-auto"
                           placeholder="My Custom Theme"
                         />
-                        <button type="button" className="pill-btn pill-soft justify-center whitespace-nowrap" onClick={saveCustomTheme}>
+                        <button type="button" className="pill-btn pill-soft shrink-0 justify-center whitespace-nowrap" onClick={saveCustomTheme}>
                           <Save className="w-4 h-4" /> Save as custom
                         </button>
                       </div>
