@@ -911,7 +911,7 @@ function App() {
               )}
             </AnimatePresence>
             <motion.button
-              className="header-control md:hidden min-h-11 min-w-11 items-center justify-center p-2 rounded-full"
+              className="header-control md:hidden inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center p-2 rounded-full leading-none"
               style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               whileTap={{ scale: 0.9 }}
@@ -1240,13 +1240,13 @@ function App() {
                 aria-current={active ? 'page' : undefined}
               >
                 <div
-                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-colors shrink-0"
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-colors shrink-0 leading-none"
                   style={{
                     backgroundColor: active ? 'var(--accent)' : 'transparent',
                     color: active ? 'var(--accent-ink)' : 'var(--ink-muted)',
                   }}
                 >
-                  <tab.icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
+                  <tab.icon className="w-5 h-5 shrink-0" strokeWidth={active ? 2.5 : 2} />
                 </div>
               </motion.button>
             );

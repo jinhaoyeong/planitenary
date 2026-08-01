@@ -695,9 +695,11 @@ export const Draft = ({
           </ThemedSelect>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input
+              type="time"
               value={time}
               onChange={(e) => setTime(e.target.value)}
-              placeholder="Time (optional)"
+              step={900}
+              aria-label="Draft time"
               className="editorial-input"
             />
             <ThemedSelect
@@ -797,9 +799,11 @@ export const Draft = ({
                   </ThemedSelect>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <input
+                      type="time"
                       value={editingDraft.time}
                       onChange={(e) => setEditingDraft((prev) => (prev ? { ...prev, time: e.target.value } : prev))}
-                      placeholder="Time (optional)"
+                      step={900}
+                      aria-label="Draft time"
                       className="editorial-input"
                     />
                     <ThemedSelect

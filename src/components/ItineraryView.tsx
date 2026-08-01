@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Shuffle, Star } from 'lucide-react';
 import { ThemedSelect } from './ui/ThemedSelect';
-import type { Itinerary, Activity, ActivityType, DayPhoto } from '../data';
+import type { Itinerary, Activity, ActivityType, DayPhoto, DayPlan } from '../data';
 import { clsx } from 'clsx';
 import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 import { getPhotos, subscribeToPhotoChanges, syncAllPhotosFromRemote } from '../lib/photoStorage';
@@ -52,6 +52,9 @@ const REACTION_EMOJI: Record<MoodReaction, string> = {
 };
 
 const RATING_OPTIONS = Array.from({ length: 11 }, (_, index) => index);
+
+const toDateInputValue = (value: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
 
 const normalizeActivityRating = (rating?: number) => {
   if (typeof rating !== 'number' || Number.isNaN(rating)) return undefined;
@@ -1714,6 +1717,24 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     onItineraryChange?.(updatedItinerary);
   };
 
+  const handleAddDay = () => {
+    const nextDay = customItinerary.days.length + 1;
+    const newDay: DayPlan = {
+      day: nextDay,
+      date: 'Add date',
+      city: 'Add city',
+      title: nextDay === 1 ? 'Plan your first day' : `Plan your day ${nextDay}`,
+      activities: []
+    };
+    const updatedItinerary = {
+      ...customItinerary,
+      days: [...customItinerary.days, newDay]
+    };
+    setCustomItinerary(updatedItinerary);
+    onItineraryChange?.(updatedItinerary);
+    setIsEditingMode(true);
+  };
+
   const handleCityEdit = (dayIndex: number) => {
     setEditingCityIndex(null);
     if (!editedCity.trim()) return;
@@ -1822,6 +1843,19 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           
           <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mt-4">
             <button
+              type="button"
+              onClick={handleAddDay}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-3xl text-sm font-medium transition-all"
+              style={{
+                color: 'var(--ink)',
+                backgroundColor: 'var(--bg-elevated)',
+                border: '1px solid var(--border)'
+              }}
+            >
+              <Plus className="w-4 h-4" />
+              Add day
+            </button>
+            <button
               onClick={() => setIsEditingMode(!isEditingMode)}
               className={clsx(
                 "w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-3xl text-sm font-medium transition-all",
@@ -1909,12 +1943,12 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                               <div className="flex items-center gap-1.5">
                                 <input
                                   autoFocus
-                                  type="text"
+                                  type="date"
                                   value={editedDate}
                                   onChange={(e) => setEditedDate(e.target.value)}
                                   onKeyDown={(e) => e.key === 'Enter' && handleDateEdit(index)}
-                                  placeholder="e.g. Apr 23"
-                                  className="editorial-input is-compact w-16 md:w-24" style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                                  aria-label={`Choose date for day ${day.day}`}
+                                  className="editorial-input is-compact w-32 md:w-36" style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em' }}
                                 />
                                 <button 
                                   onClick={() => handleDateEdit(index)}
@@ -1931,7 +1965,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                                 )}
                                 onClick={() => {
                                   if (isEditingMode) {
-                                    setEditedDate(day.date);
+                                    setEditedDate(toDateInputValue(day.date));
                                     setEditingDateIndex(index);
                                   }
                                 }}
