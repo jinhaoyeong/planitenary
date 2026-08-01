@@ -87,6 +87,7 @@ function ThemeTokenField({
   onChange: (value: string) => void;
 }) {
   const [draftValue, setDraftValue] = useState(value);
+  const fieldId = `theme-token-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
   useEffect(() => {
     setDraftValue(value);
@@ -96,7 +97,7 @@ function ThemeTokenField({
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
+          <label htmlFor={fieldId} className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink)' }}>
             {label}
           </label>
           <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
@@ -124,7 +125,7 @@ function ThemeTokenField({
                 type="button"
                 aria-label={`${label} ${swatch}`}
                 onClick={() => onChange(swatch)}
-                className="theme-swatch shrink-0 w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
+                className="theme-swatch shrink-0 w-11 h-11 rounded-full border-2 transition-transform hover:scale-110"
                 data-active={active ? 'true' : 'false'}
                 style={{
                   backgroundColor: swatch,
@@ -137,6 +138,7 @@ function ThemeTokenField({
 
         <div className="flex items-center gap-2">
           <input
+            id={fieldId}
             value={draftValue}
             onChange={(event) => setDraftValue(event.target.value)}
             onBlur={() => {
@@ -180,7 +182,18 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
   const [cities, setCities] = useState(itinerary.cities.join(', '));
   const [draftSettings, setDraftSettings] = useState<TripAppSettings>(mergeTripSettings(settings));
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+  const [uploadError, setUploadError] = useState('');
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('story');
+
+  const savedSnapshot = JSON.stringify({
+    title: itinerary.name,
+    description: itinerary.description,
+    cities: itinerary.cities.join(', '),
+    settings: mergeTripSettings(settings),
+  });
+  const draftSnapshot = JSON.stringify({ title, description, cities, settings: draftSettings });
+  const hasUnsavedChanges = savedSnapshot !== draftSnapshot;
 
   useEffect(() => {
     setTitle(itinerary.name);
@@ -196,19 +209,33 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     const file = event.target.files?.[0];
     if (!file) return;
 
+    setUploadError('');
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please choose an image file.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setUploadError('That image is larger than 8 MB. Please choose a smaller file.');
+      event.target.value = '';
+      return;
+    }
+
     try {
       const dataUrl = await readFileAsDataUrl(file);
       setDraftSettings((current) => ({ ...current, coverImage: dataUrl }));
     } catch (error) {
       console.error('Failed to read cover image', error);
-      window.alert('Unable to read that image. Please try another file.');
+      setUploadError('Unable to read that image. Please try another file.');
     } finally {
       event.target.value = '';
     }
   };
 
   const handleSave = () => {
+    if (isSaving || !hasUnsavedChanges) return;
     setIsSaving(true);
+    setSaveStatus('idle');
 
     const nextItinerary: Itinerary = {
       ...itinerary,
@@ -249,11 +276,19 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
       },
     });
 
-    onSave(nextItinerary, nextSettings);
-    window.setTimeout(() => setIsSaving(false), 200);
+    try {
+      onSave(nextItinerary, nextSettings);
+      setSaveStatus('saved');
+    } catch (error) {
+      console.error('Failed to save handbook settings', error);
+      setSaveStatus('error');
+    } finally {
+      window.setTimeout(() => setIsSaving(false), 400);
+    }
   };
 
   const handleResetCover = () => {
+    setUploadError('');
     setDraftSettings((current) => ({ ...current, coverImage: null }));
   };
 
@@ -328,10 +363,19 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
             </p>
           </div>
 
-          <button onClick={handleSave} className="pill-btn pill-primary w-full sm:w-auto justify-center">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving || !hasUnsavedChanges}
+            aria-busy={isSaving}
+            className="pill-btn pill-primary w-full sm:w-auto justify-center disabled:opacity-55 disabled:cursor-not-allowed"
+          >
             <Save className="w-4 h-4" />
-            {isSaving ? 'Saving...' : 'Save settings'}
+            {isSaving ? 'Saving...' : saveStatus === 'saved' && !hasUnsavedChanges ? 'All changes saved' : 'Save settings'}
           </button>
+          <p className="settings-save-status" aria-live="polite">
+            {saveStatus === 'error' ? 'Couldn’t save changes. Please try again.' : hasUnsavedChanges ? 'Unsaved changes' : saveStatus === 'saved' ? 'All changes saved' : ''}
+          </p>
         </div>
 
         <div className="flex flex-col xl:flex-row gap-6 md:gap-10 mt-6 md:mt-8">
@@ -353,7 +397,8 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                       key={section.id}
                       type="button"
                       onClick={() => setActiveSection(section.id)}
-                      className="text-left rounded-2xl px-4 py-3 border transition-colors"
+                      aria-current={active ? 'page' : undefined}
+                      className="settings-section-button min-h-11 text-left rounded-2xl px-4 py-3 border transition-colors"
                       style={{
                         backgroundColor: active ? 'var(--bg-elevated)' : 'var(--bg)',
                         borderColor: active ? 'var(--accent)' : 'var(--border)',
@@ -400,22 +445,23 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                     <div className="eyebrow">Trip Basics</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                       <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                        <label htmlFor="settings-trip-title" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                           Trip Title
                         </label>
-                        <input value={title} onChange={(event) => setTitle(event.target.value)} className="editorial-input w-full" placeholder="Summer in Japan" />
+                        <input id="settings-trip-title" value={title} onChange={(event) => setTitle(event.target.value)} className="editorial-input w-full" placeholder="Summer in Japan" />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                        <label htmlFor="settings-cities" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                           Cities
                         </label>
-                        <input value={cities} onChange={(event) => setCities(event.target.value)} className="editorial-input w-full" placeholder="Tokyo, Kyoto, Osaka" />
+                        <input id="settings-cities" value={cities} onChange={(event) => setCities(event.target.value)} className="editorial-input w-full" placeholder="Tokyo, Kyoto, Osaka" />
                       </div>
                       <div className="space-y-2 md:col-span-2">
-                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                        <label htmlFor="settings-description" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                           Trip Description
                         </label>
                         <textarea
+                          id="settings-description"
                           value={description}
                           onChange={(event) => setDescription(event.target.value)}
                           className="editorial-textarea w-full"
@@ -611,6 +657,9 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                         Upload image
                         <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
                       </label>
+                      <p className="w-full text-xs leading-relaxed" aria-live="polite" style={{ color: uploadError ? 'var(--warn)' : 'var(--ink-muted)' }}>
+                        {uploadError || 'JPG, PNG, or WebP up to 8 MB.'}
+                      </p>
 
                       <button onClick={handleResetCover} className="pill-btn pill-ghost" type="button">
                         <Trash2 className="w-4 h-4" />
@@ -621,9 +670,9 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
 
                   <div className="editorial-card p-4 md:p-5">
                     <div className="eyebrow">Quick Reset</div>
-                    <h3 className="font-display text-2xl sm:text-3xl mt-3">Reset the form</h3>
+                    <h3 className="font-display text-2xl sm:text-3xl mt-3">Discard unsaved changes</h3>
                     <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                      Revert this editing session back to the last saved handbook settings.
+                      Revert this editing session back to the last saved handbook settings. Your saved handbook will not change.
                     </p>
                     <button
                       type="button"
@@ -939,6 +988,7 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
                         type="button"
                         role="switch"
                         aria-checked={draftSettings.immersiveEffects}
+                        aria-label="Enable immersive visual effects"
                         className="editorial-toggle shrink-0 mt-1"
                         data-checked={draftSettings.immersiveEffects ? 'true' : 'false'}
                         onClick={() =>

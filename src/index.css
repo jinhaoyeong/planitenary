@@ -435,6 +435,20 @@ body {
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
+.settings-section-button:focus-visible,
+.theme-swatch:focus-visible,
+.editorial-toggle:focus-visible,
+.settings-save-status:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.settings-save-status {
+  min-height: 1.25rem;
+  margin: -0.5rem 0 0 auto;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-align: right;
+}
 .editorial-input:disabled,
 .editorial-select:disabled,
 .editorial-textarea:disabled {
