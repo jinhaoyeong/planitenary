@@ -258,18 +258,20 @@ export const Checklist = () => {
           {/* Add Item */}
           <div className="space-y-3 flex-1">
              <label className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Add Custom Item</label>
-             <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_10rem_3rem] gap-2 min-w-0">
+             <div className="grid grid-cols-[minmax(0,1fr)_3rem] sm:grid-cols-[minmax(0,1fr)_10rem_3rem] gap-2 min-w-0">
                <input 
                  type="text" 
                  value={newItemText}
                  onChange={(e) => setNewItemText(e.target.value)}
                  onKeyDown={(e) => e.key === 'Enter' && addItem()}
                  placeholder="Add new checklist item..."
-                 className="editorial-input flex-1 min-w-0"
+                 aria-label="New checklist item"
+                 className="editorial-input col-span-2 sm:col-span-1 min-w-0"
                />
                  <ThemedSelect
                    value={newItemCategory}
                    onChange={(e) => setNewItemCategory(e.target.value as Category)}
+                   aria-label="Checklist item category"
                    className="is-compact min-w-0 !w-full"
                  >
                    <option value="Packing">Packing</option>
@@ -277,8 +279,9 @@ export const Checklist = () => {
                    <option value="Daily">Daily</option>
                  </ThemedSelect>
                  <button 
+                   type="button"
                    onClick={addItem}
-                   className="h-12 w-12 shrink-0 justify-self-end sm:justify-self-auto inline-flex items-center justify-center bg-emerald-500 dark:bg-emerald-600 text-white rounded-3xl hover:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors"
+                   className="h-12 w-full sm:w-12 shrink-0 inline-flex items-center justify-center bg-emerald-500 dark:bg-emerald-600 text-white rounded-3xl hover:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors"
                    aria-label="Add checklist item"
                  >
                    <Plus className="w-5 h-5" />

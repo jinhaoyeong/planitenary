@@ -68,6 +68,81 @@ interface CloudBackupVersion {
   summaryText: string;
 }
 
+interface InlineEditableProps {
+  value: string;
+  onSave: (value: string) => void;
+  className?: string;
+  multiline?: boolean;
+  ariaLabel: string;
+}
+
+function InlineEditable({ value, onSave, className, multiline = false, ariaLabel }: InlineEditableProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const lastTapRef = useRef(0);
+
+  useEffect(() => {
+    if (!isEditing) setDraft(value);
+  }, [value, isEditing]);
+
+  const beginEditing = () => {
+    setDraft(value);
+    setIsEditing(true);
+  };
+
+  const commit = () => {
+    const nextValue = draft.trim();
+    if (nextValue && nextValue !== value) onSave(nextValue);
+    setIsEditing(false);
+  };
+
+  const cancel = () => {
+    setDraft(value);
+    setIsEditing(false);
+  };
+
+  const handleTouchEnd = (event: React.TouchEvent<HTMLSpanElement>) => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 350) {
+      event.preventDefault();
+      beginEditing();
+    }
+    lastTapRef.current = now;
+  };
+
+  if (isEditing) {
+    const sharedProps = {
+      autoFocus: true,
+      value: draft,
+      onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(event.target.value),
+      onBlur: commit,
+      onClick: (event: React.MouseEvent<HTMLInputElement | HTMLTextAreaElement>) => event.stopPropagation(),
+      onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        if (event.key === 'Escape') cancel();
+        if (event.key === 'Enter' && !multiline) commit();
+      },
+      'aria-label': ariaLabel,
+      className: clsx('inline-edit-control', className),
+    };
+
+    return multiline ? <textarea {...sharedProps} rows={3} /> : <input {...sharedProps} type="text" />;
+  }
+
+  return (
+    <span
+      className={clsx('inline-editable', className)}
+      onDoubleClick={beginEditing}
+      onTouchEnd={handleTouchEnd}
+      onClick={(event) => event.stopPropagation()}
+      tabIndex={0}
+      title="Double-tap to edit"
+      aria-label={`${ariaLabel}. Double-tap to edit.`}
+    >
+      {value}
+    </span>
+  );
+}
+
 const createStarterItinerary = (id: string): Itinerary => ({
   ...itineraries[0],
   id,
@@ -931,7 +1006,12 @@ function App() {
           {/* Left copy */}
           <div className="md:col-span-7">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}>
-              <span className="eyebrow">{tripSettings.heroEyebrow}</span>
+              <InlineEditable
+                value={tripSettings.heroEyebrow}
+                onSave={(value) => setTripSettings((current) => ({ ...current, heroEyebrow: value }))}
+                className="eyebrow"
+                ariaLabel="Hero eyebrow"
+              />
             </motion.div>
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
@@ -940,7 +1020,12 @@ function App() {
               className="mt-5 font-display text-[clamp(2.8rem,12vw,4.6rem)] sm:text-6xl md:text-[5.5rem] lg:text-[6.5rem] leading-[0.95] tracking-tight whitespace-pre-line"
               style={{ color: 'var(--ink)' }}
             >
-              {tripSettings.heroHeadline}
+              <InlineEditable
+                value={tripSettings.heroHeadline}
+                onSave={(value) => setTripSettings((current) => ({ ...current, heroHeadline: value }))}
+                className="whitespace-pre-line"
+                ariaLabel="Hero headline"
+              />
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 16 }}
@@ -949,7 +1034,20 @@ function App() {
               className="mt-6 max-w-xl text-base md:text-lg leading-relaxed"
               style={{ color: 'var(--ink-muted)' }}
             >
-              {displayItinerary.description || tripSettings.heroDescription}
+              <InlineEditable
+                value={displayItinerary.description || tripSettings.heroDescription}
+                onSave={(value) => {
+                  if (displayItinerary.description) {
+                    const nextItinerary = { ...displayItinerary, description: value };
+                    setCustomItinerary(nextItinerary);
+                  } else {
+                    setTripSettings((current) => ({ ...current, heroDescription: value }));
+                  }
+                }}
+                className="block"
+                multiline
+                ariaLabel="Hero description"
+              />
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 16 }}
@@ -958,10 +1056,18 @@ function App() {
               className="mt-8 flex flex-wrap items-center gap-3"
             >
               <button onClick={() => handleTabChange('itinerary')} className="pill-btn pill-primary">
-                {tripSettings.heroPrimaryCta}
+                <InlineEditable
+                  value={tripSettings.heroPrimaryCta}
+                  onSave={(value) => setTripSettings((current) => ({ ...current, heroPrimaryCta: value }))}
+                  ariaLabel="Primary button label"
+                />
               </button>
               <button onClick={() => handleTabChange('maps')} className="pill-btn pill-ghost">
-                {tripSettings.heroSecondaryCta}
+                <InlineEditable
+                  value={tripSettings.heroSecondaryCta}
+                  onSave={(value) => setTripSettings((current) => ({ ...current, heroSecondaryCta: value }))}
+                  ariaLabel="Secondary button label"
+                />
               </button>
             </motion.div>
           </div>
@@ -986,7 +1092,11 @@ function App() {
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
                   <div className="absolute top-5 left-5 eyebrow justify-center bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm text-white">
-                    {tripSettings.coverLabel}
+                    <InlineEditable
+                      value={tripSettings.coverLabel}
+                      onSave={(value) => setTripSettings((current) => ({ ...current, coverLabel: value }))}
+                      ariaLabel="Cover label"
+                    />
                   </div>
                 </div>
               ) : (
@@ -995,19 +1105,44 @@ function App() {
                   style={{ background: 'linear-gradient(135deg, var(--accent-soft), color-mix(in srgb, var(--bg-elevated) 60%, var(--accent-soft)))' }}
                 >
                   <div>
-                    <div className="eyebrow justify-center">{tripSettings.coverLabel}</div>
+                    <div className="eyebrow justify-center">
+                      <InlineEditable
+                        value={tripSettings.coverLabel}
+                        onSave={(value) => setTripSettings((current) => ({ ...current, coverLabel: value }))}
+                        ariaLabel="Cover label"
+                      />
+                    </div>
                     <div className="mt-4 font-display text-3xl sm:text-4xl md:text-5xl whitespace-pre-line" style={{ color: 'var(--ink)' }}>
-                      {tripSettings.coverHeadline}
+                      <InlineEditable
+                        value={tripSettings.coverHeadline}
+                        onSave={(value) => setTripSettings((current) => ({ ...current, coverHeadline: value }))}
+                        className="whitespace-pre-line"
+                        ariaLabel="Cover headline"
+                      />
                     </div>
                   </div>
                 </div>
               )}
               <div className="flex items-center justify-between px-2 pt-3 pb-1">
                 <span className="font-display-italic text-lg" style={{ color: 'var(--ink)' }}>
-                  {coverStatusLabel}
+                  <InlineEditable
+                    value={coverStatusLabel}
+                    onSave={(value) => setTripSettings((current) => ({
+                      ...current,
+                      ...(displayItinerary.cities.length > 0 ? { coverStatusFilled: value } : { coverStatusEmpty: value }),
+                    }))}
+                    ariaLabel="Cover status"
+                  />
                 </span>
                 <span className="text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--ink-muted)' }}>
-                  {coverModeLabel}
+                  <InlineEditable
+                    value={coverModeLabel}
+                    onSave={(value) => setTripSettings((current) => ({
+                      ...current,
+                      ...(displayItinerary.cities.length > 0 ? { coverModeFilled: value } : { coverModeEmpty: value }),
+                    }))}
+                    ariaLabel="Cover mode"
+                  />
                 </span>
               </div>
             </div>

@@ -319,6 +319,38 @@ body {
 }
 .pill-btn:active { transform: scale(0.97); }
 
+.inline-editable {
+  border-radius: 0.35rem;
+  cursor: text;
+  touch-action: manipulation;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease;
+}
+.inline-editable:hover,
+.inline-editable:focus-visible {
+  background-color: color-mix(in srgb, var(--accent-soft) 48%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-soft) 48%, transparent);
+  outline: none;
+}
+.inline-edit-control {
+  display: block;
+  width: 100%;
+  background-color: var(--bg-elevated);
+  color: var(--ink);
+  border: 1px solid var(--accent);
+  border-radius: 0.65rem;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  line-height: inherit;
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.inline-edit-control:focus {
+  border-color: var(--accent);
+}
+.inline-edit-control.inline-editable {
+  width: 100%;
+}
+
 .pill-primary {
   background-color: var(--accent);
   color: #0F0E0D;
