@@ -1,7 +1,14 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { Currency, ExchangeRates } from '../lib/currency';
-import { fetchExchangeRates, formatCurrency, convertCurrency } from '../lib/currency';
+import {
+  convertCurrency,
+  createFallbackRates,
+  fetchExchangeRates,
+  formatCurrency,
+  formatRateLabel,
+} from '../lib/currency';
+import { isSupportedCurrency } from '../lib/currencyCatalog';
 import { useAuth } from './AuthContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
@@ -15,11 +22,16 @@ interface CurrencyContextType {
   /** Destination / trip currency. */
   tripCurrency: Currency;
   setTripCurrency: (currency: Currency) => void;
+  /** Adopts the currency pair a trip profile was created with. */
+  adoptTripCurrencies: (home: Currency, trip: Currency) => void;
   rates: ExchangeRates;
   refreshRates: () => Promise<void>;
   format: (amount: number) => string;
+  formatIn: (amount: number, currency: Currency) => string;
   convert: (amount: number, fromCurrency?: Currency) => number;
   toBase: (amount: number, fromCurrency?: Currency) => number;
+  /** e.g. "1 RM = ¥33.20" for the active home → trip pair. */
+  rateLabel: string;
 }
 
 const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined);
@@ -27,27 +39,23 @@ const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined
 const DISPLAY_KEY = 'selected-currency';
 const HOME_KEY = 'home-currency';
 const TRIP_KEY = 'trip-currency';
-const SUPPORTED: Currency[] = ['MYR', 'CNY'];
-const createInitialRates = (): ExchangeRates => ({ MYR: 1, CNY: 1.51, lastUpdated: 0, isLoading: true });
+const BASE: Currency = 'MYR';
 
 const readCurrency = (key: string, fallback: Currency): Currency => {
   const saved = localStorage.getItem(key);
-  return SUPPORTED.includes(saved as Currency) ? (saved as Currency) : fallback;
+  return saved && isSupportedCurrency(saved) ? saved.toUpperCase() : fallback;
 };
-
-const otherCurrency = (code: Currency): Currency => (code === 'MYR' ? 'CNY' : 'MYR');
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
   const cloudReadyRef = useRef(false);
-  const [currency, setCurrencyState] = useState<Currency>(() => readCurrency(DISPLAY_KEY, 'MYR'));
-  const [homeCurrency, setHomeCurrencyState] = useState<Currency>(() => readCurrency(HOME_KEY, 'MYR'));
+  const [currency, setCurrencyState] = useState<Currency>(() => readCurrency(DISPLAY_KEY, BASE));
+  const [homeCurrency, setHomeCurrencyState] = useState<Currency>(() => readCurrency(HOME_KEY, BASE));
   const [tripCurrency, setTripCurrencyState] = useState<Currency>(() => {
-    const home = readCurrency(HOME_KEY, 'MYR');
-    const trip = readCurrency(TRIP_KEY, otherCurrency(home));
-    return trip === home ? otherCurrency(home) : trip;
+    const home = readCurrency(HOME_KEY, BASE);
+    return readCurrency(TRIP_KEY, home);
   });
-  const [rates, setRates] = useState<ExchangeRates>(createInitialRates);
+  const [rates, setRates] = useState<ExchangeRates>(createFallbackRates);
 
   const persistPair = (home: Currency, trip: Currency, display?: Currency) => {
     localStorage.setItem(HOME_KEY, home);
@@ -72,17 +80,20 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   };
 
   const setHomeCurrency = (nextHome: Currency) => {
-    const nextTrip = tripCurrency === nextHome ? otherCurrency(nextHome) : tripCurrency;
-    const nextDisplay =
-      currency === nextHome || currency === nextTrip ? currency : nextHome;
-    persistPair(nextHome, nextTrip, nextDisplay);
+    if (!isSupportedCurrency(nextHome)) return;
+    persistPair(nextHome.toUpperCase(), tripCurrency, currency);
   };
 
   const setTripCurrency = (nextTrip: Currency) => {
-    const nextHome = homeCurrency === nextTrip ? otherCurrency(nextTrip) : homeCurrency;
-    const nextDisplay =
-      currency === nextHome || currency === nextTrip ? currency : nextTrip;
-    persistPair(nextHome, nextTrip, nextDisplay);
+    if (!isSupportedCurrency(nextTrip)) return;
+    persistPair(homeCurrency, nextTrip.toUpperCase(), currency);
+  };
+
+  const adoptTripCurrencies = (home: Currency, trip: Currency) => {
+    const nextHome = isSupportedCurrency(home) ? home.toUpperCase() : homeCurrency;
+    const nextTrip = isSupportedCurrency(trip) ? trip.toUpperCase() : tripCurrency;
+    if (nextHome === homeCurrency && nextTrip === tripCurrency) return;
+    persistPair(nextHome, nextTrip, nextHome);
   };
 
   useEffect(() => {
@@ -122,9 +133,11 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   };
 
   const format = (amount: number): string => formatCurrency(amount, currency);
+  const formatIn = (amount: number, target: Currency): string =>
+    formatCurrency(convertCurrency(amount, BASE, target, rates), target);
 
   const convert = (amount: number, fromCurrency?: Currency): number =>
-    convertCurrency(amount, fromCurrency || 'MYR', currency, rates);
+    convertCurrency(amount, fromCurrency || BASE, currency, rates);
 
   useEffect(() => {
     cloudReadyRef.current = false;
@@ -134,12 +147,10 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     const accountHome = localStorage.getItem(`home-currency-${user.id}`);
     const accountTrip = localStorage.getItem(`trip-currency-${user.id}`);
 
-    const nextHome = SUPPORTED.includes(accountHome as Currency) ? (accountHome as Currency) : homeCurrency;
-    let nextTrip = SUPPORTED.includes(accountTrip as Currency) ? (accountTrip as Currency) : tripCurrency;
-    if (nextTrip === nextHome) nextTrip = otherCurrency(nextHome);
-    const nextDisplay = SUPPORTED.includes(accountDisplay as Currency)
-      && (accountDisplay === nextHome || accountDisplay === nextTrip)
-      ? (accountDisplay as Currency)
+    const nextHome = accountHome && isSupportedCurrency(accountHome) ? accountHome.toUpperCase() : homeCurrency;
+    const nextTrip = accountTrip && isSupportedCurrency(accountTrip) ? accountTrip.toUpperCase() : tripCurrency;
+    const nextDisplay = accountDisplay && (accountDisplay === nextHome || accountDisplay === nextTrip)
+      ? accountDisplay
       : nextHome;
     persistPair(nextHome, nextTrip, nextDisplay);
 
@@ -152,14 +163,12 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     void supabase.from('user_preferences').select('currency').eq('user_id', user.id).maybeSingle().then(({ data, error }) => {
       if (!mounted) return;
       if (error) console.error('Failed to load cloud currency preference:', error);
-      if (SUPPORTED.includes(data?.currency as Currency)) {
-        const cloudCurrency = data!.currency as Currency;
-        // Cloud only stores display currency today — keep home/trip local, snap display if valid.
-        if (cloudCurrency === homeCurrency || cloudCurrency === tripCurrency) {
-          setCurrencyState(cloudCurrency);
-          localStorage.setItem(DISPLAY_KEY, cloudCurrency);
-          localStorage.setItem(`selected-currency-${user.id}`, cloudCurrency);
-        }
+      const cloudCurrency = typeof data?.currency === 'string' ? data.currency.toUpperCase() : null;
+      // Cloud only stores display currency today — keep home/trip local, snap display if valid.
+      if (cloudCurrency && (cloudCurrency === nextHome || cloudCurrency === nextTrip)) {
+        setCurrencyState(cloudCurrency);
+        localStorage.setItem(DISPLAY_KEY, cloudCurrency);
+        localStorage.setItem(`selected-currency-${user.id}`, cloudCurrency);
       }
       cloudReadyRef.current = true;
     });
@@ -188,7 +197,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   }, [currency, homeCurrency, tripCurrency, user?.id, isDemoUser, isLocalTestUser]);
 
   const toBase = (amount: number, fromCurrency: Currency = currency): number =>
-    convertCurrency(amount, fromCurrency, 'MYR', rates);
+    convertCurrency(amount, fromCurrency, BASE, rates);
 
   return (
     <CurrencyContext.Provider
@@ -199,11 +208,14 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         setHomeCurrency,
         tripCurrency,
         setTripCurrency,
+        adoptTripCurrencies,
         rates,
         refreshRates,
         format,
+        formatIn,
         convert,
         toBase,
+        rateLabel: formatRateLabel(homeCurrency, tripCurrency, rates),
       }}
     >
       {children}

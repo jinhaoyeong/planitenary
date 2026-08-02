@@ -4,7 +4,10 @@ import { Archive, ArrowRight, CalendarDays, MapPin, Pencil, Plus, RefreshCw, Spa
 import { motion } from 'framer-motion';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { createBlankItinerary, toTripSummary, type TripSummary } from '../lib/trips';
+import { useCurrency } from '../contexts/CurrencyContext';
+import { createBlankItinerary, createItineraryFromProfile, toTripSummary, type TripSummary } from '../lib/trips';
+import { TripCreateWizard } from './TripCreateWizard';
+import type { TripProfile } from '../lib/tripProfile';
 import type { Itinerary } from '../data';
 
 interface TripDashboardProps {
@@ -27,11 +30,13 @@ const readLocalTrips = (userId: string): TripSummary[] => {
 
 export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
+  const { homeCurrency } = useCurrency();
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shelf, setShelf] = useState<'active' | 'archived'>('active');
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const localOnly = isDemoUser || isLocalTestUser || !isSupabaseConfigured();
 
@@ -95,18 +100,21 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     onOpenTrip(data?.data as Itinerary || createBlankItinerary(summary.id));
   };
 
-  const createTrip = async () => {
+  const createTrip = async (profile?: TripProfile) => {
     if (!user || creating) return;
     setCreating(true);
     setError(null);
-    const itinerary = createBlankItinerary();
+    const itinerary = profile ? createItineraryFromProfile(profile) : createBlankItinerary();
     const summary = toTripSummary(itinerary);
+    // Cache locally either way so the handbook opens with its identity intact
+    // before any cloud round trip completes.
+    localStorage.setItem(`itinerary-${user.id}-${itinerary.id}`, JSON.stringify(itinerary));
 
     if (localOnly) {
       const next = [summary, ...readLocalTrips(user.id)];
       persistLocalTrips(next);
-      localStorage.setItem(`itinerary-${user.id}-${itinerary.id}`, JSON.stringify(itinerary));
       setTrips(next);
+      setWizardOpen(false);
       onOpenTrip(itinerary);
       setCreating(false);
       return;
@@ -115,11 +123,11 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     const { error: registryError } = await supabase.from('trip_registry').insert({
       id: itinerary.id,
       user_id: user.id,
-      title: itinerary.name,
-      description: itinerary.description,
+      title: summary.title,
+      description: summary.description,
       status: 'active',
-      day_count: 0,
-      city_count: 0,
+      day_count: summary.dayCount,
+      city_count: summary.cityCount,
     });
     const { error: itineraryError } = await supabase.from('itineraries').insert({
       id: itinerary.id,
@@ -131,6 +139,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       console.error('Failed to create trip:', registryError || itineraryError);
     } else {
       setTrips((current) => [summary, ...current]);
+      setWizardOpen(false);
       onOpenTrip(itinerary);
     }
     setCreating(false);
@@ -274,7 +283,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
               type="button"
               className="pill-btn pill-primary accent-button w-full inline-flex items-center justify-center gap-2 min-h-11"
               style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
-              onClick={() => void createTrip()}
+              onClick={() => setWizardOpen(true)}
               disabled={creating}
             >
               {creating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -293,14 +302,14 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
           {shelf === 'active' ? <>
             <Sparkles className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
             <h2 className="font-display text-3xl">Your first trip starts here.</h2>
-            <p className="max-w-md mx-auto mt-3" style={{ color: 'var(--ink-muted)' }}>Create a blank handbook for dates, places, ideas, costs, and memories.</p>
+            <p className="max-w-md mx-auto mt-3" style={{ color: 'var(--ink-muted)' }}>Tell the app where and when you are going, and it writes the handbook around it.</p>
             <button
               type="button"
               className="pill-btn pill-primary mt-6"
               style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
-              onClick={() => void createTrip()}
+              onClick={() => setWizardOpen(true)}
             >
-              Create a blank trip
+              Plan a new trip
             </button>
           </> : <>
             <Archive className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
@@ -371,6 +380,14 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       <div className="mt-10 flex items-center gap-2 text-xs" style={{ color: 'var(--ink-muted)' }}>
         <Archive className="w-4 h-4" /> Legacy trips remain preserved separately until you choose to import them.
       </div>
+
+      <TripCreateWizard
+        open={wizardOpen}
+        busy={creating}
+        defaultHomeCurrency={homeCurrency}
+        onCancel={() => setWizardOpen(false)}
+        onCreate={(profile) => void createTrip(profile)}
+      />
     </main>
   );
 }

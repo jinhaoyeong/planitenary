@@ -8,6 +8,9 @@ import { clsx } from 'clsx';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { useAuth } from '../contexts/AuthContext';
 import { BudgetCurrencyToggle } from './CurrencySelector';
+import { convertCurrency } from '../lib/currency';
+import { currencyMeta } from '../lib/currencyCatalog';
+import { resolveDuration, sanitizeTripProfile } from '../lib/tripProfile';
 
 interface BudgetItem {
   id: string;
@@ -300,8 +303,13 @@ const BudgetCard = ({
 export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
   const [activeView, setActiveView] = React.useState<'budget' | 'expenses'>('budget');
-  const { currency, convert, rates } = useCurrency();
-  const currencySymbol = currency === 'MYR' ? 'RM' : '¥';
+  const { currency, convert, toBase, rates } = useCurrency();
+  const currencySymbol = currencyMeta(currency).symbol;
+  const tripProfile = React.useMemo(() => sanitizeTripProfile(itinerary.tripProfile), [itinerary.tripProfile]);
+  const plannedDays = React.useMemo(() => {
+    if (tripProfile) return resolveDuration(tripProfile).days;
+    return itinerary.days.length;
+  }, [tripProfile, itinerary.days.length]);
   const [customBudget, setCustomBudget] = React.useState<CustomBudget>(createDefaultBudget(0, 0, 0, {
     transport: { details: [] },
     food: { details: [] },
@@ -487,7 +495,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const updateRange = (category: BudgetCategoryKey, type: 'min' | 'max', value: string) => {
     const numValue = parseInt(value) || 0;
     // Convert from selected currency back to MYR for storage
-    const valueInMYR = currency === 'CNY' ? Math.round(numValue / rates.CNY) : numValue;
+    const valueInMYR = Math.round(toBase(numValue));
     setCustomBudget(prev => ({
       ...prev,
       [category]: {
@@ -524,7 +532,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       id: Date.now().toString(),
       description: expenseDraft.description,
       amountMYR: expenseDraft.amountMYR,
-      amountCNY: expenseDraft.amountMYR * rates.CNY,
+      amountCNY: convertCurrency(expenseDraft.amountMYR, 'MYR', 'CNY', rates),
       paidBy: expenseDraft.paidBy as 'You' | 'Travel partner',
       category: expenseDraft.category as BudgetCategoryKey | 'general',
       date: new Date().toISOString(),
@@ -553,7 +561,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
 
   const getExpensesTotal = () => {
     const expenses = customBudget.expenses || [];
-    return expenses.reduce((sum, e) => sum + (currency === 'CNY' ? e.amountCNY : e.amountMYR), 0);
+    return expenses.reduce((sum, e) => sum + convert(e.amountMYR, 'MYR'), 0);
   };
 
   const deleteCustomItem = (category: BudgetCategoryKey, id: string) => {
@@ -669,6 +677,16 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const totalMin = flightsRange.min + accommodationRange.min + transportationRange.min + foodRange.min + activitiesRange.min + miscRange.min;
   const totalMax = flightsRange.max + accommodationRange.max + transportationRange.max + foodRange.max + activitiesRange.max + miscRange.max;
 
+  const spentTotal = getExpensesTotal();
+  const plannedCeiling = convert(totalMax, 'MYR');
+  const dailyAverage = plannedDays > 0
+    ? Math.round(convert(Math.round((totalMin + totalMax) / 2), 'MYR') / plannedDays)
+    : 0;
+  const remainingBudget = plannedCeiling - spentTotal;
+  const budgetTierLabel = tripProfile
+    ? `${tripProfile.budgetTier.replace('-', ' ').replace(/^./, (character) => character.toUpperCase())} trip`
+    : 'Mid-range comfort';
+
   return (
     <div className="space-y-6 md:space-y-8 pb-20">
 
@@ -759,11 +777,37 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
 
             <div className="flex flex-col sm:flex-row justify-center gap-3 md:gap-4 text-xs md:text-sm font-medium">
               <span className="bg-slate-50 dark:bg-slate-800 px-3 md:px-4 py-1.5 rounded-xl flex items-center justify-center gap-2 border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300">
-                <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" /> {itinerary.days.length} {itinerary.days.length === 1 ? 'Day' : 'Days'}
+                <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" /> {plannedDays} {plannedDays === 1 ? 'Day' : 'Days'}
               </span>
               <span className="bg-slate-50 dark:bg-slate-800 px-3 md:px-4 py-1.5 rounded-xl flex items-center justify-center gap-2 border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300">
-                <CreditCard className="w-4 h-4 text-slate-400 dark:text-slate-500" /> Mid-range Comfort
+                <CreditCard className="w-4 h-4 text-slate-400 dark:text-slate-500" /> {budgetTierLabel}
               </span>
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
+              <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div className="eyebrow m-0">Daily average</div>
+                <div className="mt-1 text-lg font-bold" style={{ color: 'var(--ink)' }}>
+                  {plannedDays > 0
+                    ? `${currencySymbol}${dailyAverage.toLocaleString()}`
+                    : 'Add dates'}
+                </div>
+              </div>
+              <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div className="eyebrow m-0">Spent so far</div>
+                <div className="mt-1 text-lg font-bold" style={{ color: 'var(--ink)' }}>
+                  {currencySymbol}{Math.round(spentTotal).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-2xl px-4 py-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div className="eyebrow m-0">Remaining</div>
+                <div
+                  className="mt-1 text-lg font-bold"
+                  style={{ color: remainingBudget < 0 ? 'var(--accent)' : 'var(--ink)' }}
+                >
+                  {currencySymbol}{Math.round(remainingBudget).toLocaleString()}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -820,7 +864,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                   <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                     <div className="text-right">
                       <div className="font-bold text-slate-900 dark:text-white text-sm sm:text-base">
-                        {currencySymbol} {(currency === 'CNY' ? expense.amountCNY : expense.amountMYR).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {currencySymbol} {convert(expense.amountMYR, 'MYR').toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </div>
                     <button 
@@ -1096,7 +1140,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       // If user is in CNY mode, convert input back to MYR for storage
-                      const amountMYR = currency === 'CNY' ? val / rates.CNY : val;
+                      const amountMYR = toBase(val);
                       setExpenseDraft(prev => ({ ...prev, amountMYR }));
                     }}
                     placeholder="0.00"

@@ -1,14 +1,10 @@
 import { Loader2, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useCurrency } from '../contexts/CurrencyContext';
+import { CURRENCIES, currencyMeta } from '../lib/currencyCatalog';
 import type { Currency } from '../lib/currency';
 
-const CURRENCY_OPTIONS: Array<{ code: Currency; label: string; short: string }> = [
-  { code: 'MYR', label: 'Malaysian Ringgit', short: 'RM' },
-  { code: 'CNY', label: 'Chinese Yuan', short: '¥' },
-];
-
-function OptionButtons({
+function CurrencySelect({
   value,
   onChange,
   ariaLabel,
@@ -18,31 +14,18 @@ function OptionButtons({
   ariaLabel: string;
 }) {
   return (
-    <div
-      className="flex w-full rounded-full p-1 gap-1"
-      style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-      role="group"
+    <select
+      className="editorial-input w-full"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
       aria-label={ariaLabel}
     >
-      {CURRENCY_OPTIONS.map((option) => {
-        const selected = value === option.code;
-        return (
-          <button
-            key={option.code}
-            type="button"
-            onClick={() => onChange(option.code)}
-            className="flex-1 min-h-10 rounded-full text-sm font-semibold transition-colors"
-            style={{
-              backgroundColor: selected ? 'var(--accent)' : 'transparent',
-              color: selected ? 'var(--accent-ink)' : 'var(--ink)',
-            }}
-            aria-pressed={selected}
-          >
-            {option.code}
-          </button>
-        );
-      })}
-    </div>
+      {CURRENCIES.map((option) => (
+        <option key={option.code} value={option.code}>
+          {option.code} — {option.name}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -55,10 +38,11 @@ export function CurrencyPairSettings() {
     setTripCurrency,
     rates,
     refreshRates,
+    rateLabel,
   } = useCurrency();
 
-  const homeMeta = CURRENCY_OPTIONS.find((item) => item.code === homeCurrency);
-  const tripMeta = CURRENCY_OPTIONS.find((item) => item.code === tripCurrency);
+  const homeMeta = currencyMeta(homeCurrency);
+  const tripMeta = currencyMeta(tripCurrency);
 
   return (
     <div className="space-y-5">
@@ -67,18 +51,18 @@ export function CurrencyPairSettings() {
           <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
             Home currency
           </label>
-          <OptionButtons value={homeCurrency} onChange={setHomeCurrency} ariaLabel="Home currency" />
+          <CurrencySelect value={homeCurrency} onChange={setHomeCurrency} ariaLabel="Home currency" />
           <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-            {homeMeta?.label} ({homeMeta?.short})
+            {homeMeta.name} ({homeMeta.symbol})
           </p>
         </div>
         <div className="space-y-2">
           <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
             Trip currency
           </label>
-          <OptionButtons value={tripCurrency} onChange={setTripCurrency} ariaLabel="Trip currency" />
+          <CurrencySelect value={tripCurrency} onChange={setTripCurrency} ariaLabel="Trip currency" />
           <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-            {tripMeta?.label} ({tripMeta?.short})
+            {tripMeta.name} ({tripMeta.symbol})
           </p>
         </div>
       </div>
@@ -88,13 +72,9 @@ export function CurrencyPairSettings() {
         style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
       >
         <div>
-          <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>
-            {homeCurrency === 'MYR'
-              ? `1 MYR = ${rates.CNY.toFixed(2)} CNY`
-              : `1 CNY = ${(1 / Math.max(rates.CNY, 0.0001)).toFixed(2)} MYR`}
-          </p>
+          <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{rateLabel}</p>
           <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>
-            Used when switching views on the wallet.
+            New trips set this pair automatically from the destination.
           </p>
         </div>
         <button
@@ -113,17 +93,15 @@ export function CurrencyPairSettings() {
 
 /** Budget page: compact home/trip display toggle with quiet rate text. */
 export function BudgetCurrencyToggle() {
-  const { currency, setCurrency, homeCurrency, tripCurrency, rates } = useCurrency();
+  const { currency, setCurrency, homeCurrency, tripCurrency, rates, rateLabel } = useCurrency();
 
-  const options: Array<{ code: Currency; role: 'Home' | 'Trip' }> = [
-    { code: homeCurrency, role: 'Home' },
-    { code: tripCurrency, role: 'Trip' },
-  ];
-
-  const rateLabel =
-    homeCurrency === 'MYR'
-      ? `1 MYR = ${rates.CNY.toFixed(2)} CNY`
-      : `1 CNY = ${(1 / Math.max(rates.CNY, 0.0001)).toFixed(2)} MYR`;
+  const options: Array<{ code: Currency; role: 'Home' | 'Trip' }> =
+    homeCurrency === tripCurrency
+      ? [{ code: homeCurrency, role: 'Home' }]
+      : [
+          { code: homeCurrency, role: 'Home' },
+          { code: tripCurrency, role: 'Trip' },
+        ];
 
   return (
     <div className="flex flex-col items-center gap-2">

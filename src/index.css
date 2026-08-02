@@ -212,6 +212,21 @@ body {
   filter: invert(92%) hue-rotate(180deg) brightness(90%) contrast(88%) sepia(10%);
 }
 
+/* Numbered city stops on the generated trip route */
+.trip-route-stop span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 6px 16px rgba(15, 14, 13, 0.28);
+}
+
 /* Radius scale — generous editorial feel */
 .rounded-md  { border-radius: 0.75rem; }
 .rounded-lg  { border-radius: 1rem; }

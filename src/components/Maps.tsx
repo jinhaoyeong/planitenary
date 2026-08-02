@@ -3,8 +3,10 @@ import type { Itinerary, Activity, ActivityType } from '../data';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, Plus, Calendar, Clock, Tag, X, Save, ExternalLink } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { lookupCityCenter } from '../lib/destinations';
+import { destinationPoints, sanitizeTripProfile } from '../lib/tripProfile';
 
 // Fix for default marker icons in React Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -133,14 +135,34 @@ const cityCenters: Record<string, [number, number]> = {
   'Chengdu': [30.5728, 104.0668],
 };
 
-// Component to recenter map when locations change
-const MapUpdater = ({ center }: { center: [number, number] }) => {
+/** Fits the view to everything on the trip: destinations first, pins second. */
+const MapViewport = ({ points, fallbackCenter }: { points: [number, number][]; fallbackCenter: [number, number] }) => {
   const map = useMap();
+  const signature = points.map((point) => point.join(',')).join('|');
+
   useEffect(() => {
-    map.setView(center, 13);
-  }, [center, map]);
+    if (points.length > 1) {
+      map.fitBounds(L.latLngBounds(points), { padding: [48, 48], maxZoom: 12 });
+    } else if (points.length === 1) {
+      map.setView(points[0], 12);
+    } else {
+      map.setView(fallbackCenter, 2);
+    }
+    // Points are compared by value through `signature`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, map]);
+
   return null;
 };
+
+/** Numbered stop marker for the generated city route. */
+const routeStopIcon = (index: number, accent: string) =>
+  L.divIcon({
+    className: 'trip-route-stop',
+    html: `<span style="background:${accent}">${index + 1}</span>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
 
 export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
   const [selectedCity, setSelectedCity] = useState<string>('All Cities');
@@ -379,7 +401,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
     if (found) return locationCoordinates[found];
 
     // 4. Fallback to city center with offset
-    const center = cityCenters[city] || [35.8617, 104.1954];
+    const center = cityCenters[city] || lookupCityCenter(city) || [35.8617, 104.1954];
     // Deterministic offset based on name string length to keep markers stable but separated
     const offset = (activity.name.length % 10) * 0.002;
     return [center[0] + offset, center[1] + offset];
@@ -419,15 +441,42 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
     return cityMatch && typeMatch;
   });
 
-  // Calculate center
-  const mapCenter: [number, number] = useMemo(() => {
-    if (filteredLocations.length > 0) {
-      // Return the coordinates of the first filtered location
-      return filteredLocations[0].coords;
+  // Destinations captured when the trip was created drive the default view.
+  const tripStops = useMemo(() => {
+    const profile = sanitizeTripProfile(itinerary.tripProfile);
+    if (profile) {
+      const points = destinationPoints(profile);
+      if (points.length > 0) return points;
     }
-    // Default to first city in itinerary if no locations found
-    return cityCenters[itinerary.cities[0]] || [20, 0];
-  }, [filteredLocations, itinerary]);
+    return itinerary.cities
+      .map((city) => {
+        const point = cityCenters[city] || lookupCityCenter(city);
+        return point ? { city, point } : null;
+      })
+      .filter((entry): entry is { city: string; point: [number, number] } => entry !== null);
+  }, [itinerary.tripProfile, itinerary.cities]);
+
+  const viewportPoints = useMemo<[number, number][]>(() => {
+    const pinPoints = filteredLocations.map((location) => location.coords);
+    const stopPoints = tripStops.map((stop) => stop.point);
+    return pinPoints.length > 0 ? [...pinPoints, ...stopPoints] : stopPoints;
+  }, [filteredLocations, tripStops]);
+
+  const routeLine = useMemo<[number, number][]>(
+    () => (tripStops.length > 1 ? tripStops.map((stop) => stop.point) : []),
+    [tripStops],
+  );
+
+  const mapCenter: [number, number] = useMemo(() => {
+    if (filteredLocations.length > 0) return filteredLocations[0].coords;
+    if (tripStops.length > 0) return tripStops[0].point;
+    return [20, 0];
+  }, [filteredLocations, tripStops]);
+
+  const routeAccent = useMemo(() => {
+    if (typeof window === 'undefined') return '#EE4D87';
+    return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#EE4D87';
+  }, []);
 
   return (
     <div className="space-y-6 md:space-y-8 pb-20">
@@ -570,7 +619,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
       >
         <MapContainer 
           center={mapCenter} 
-          zoom={filteredLocations.length > 0 || itinerary.cities.length > 0 ? 13 : 2}
+          zoom={filteredLocations.length > 0 || tripStops.length > 0 ? 12 : 2}
           scrollWheelZoom={false} 
           style={{ height: "100%", width: "100%" }}
         >
@@ -578,8 +627,26 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <MapUpdater center={mapCenter} />
-          
+          <MapViewport points={viewportPoints} fallbackCenter={mapCenter} />
+
+          {routeLine.length > 1 && (
+            <Polyline
+              positions={routeLine}
+              pathOptions={{ color: routeAccent, weight: 3, opacity: 0.75, dashArray: '6 8' }}
+            />
+          )}
+
+          {tripStops.map((stop, index) => (
+            <Marker key={`stop-${stop.city}-${index}`} position={stop.point} icon={routeStopIcon(index, routeAccent)}>
+              <Popup>
+                <div className="min-w-[160px]">
+                  <h3 className="font-bold text-slate-800 text-sm mb-1">{stop.city}</h3>
+                  <p className="text-xs text-slate-500">Stop {index + 1} of {tripStops.length}</p>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
           {filteredLocations.map((item, idx) => (
             <Marker 
               key={idx} 
