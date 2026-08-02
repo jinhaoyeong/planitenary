@@ -43,6 +43,10 @@ export interface Itinerary {
   name: string;
   cities: string[];
   description: string;
+  /** Structured trip identity captured at creation; drives generated copy. */
+  tripProfile?: unknown;
+  /** Handbook brand shown in the top nav, e.g. "Kyoto Journal". */
+  brandTitle?: string;
   /** Labels shown in the scrolling navigation strip on the home view. */
   marqueeItems?: string[];
   heroEyebrow?: string;
@@ -54,6 +58,12 @@ export interface Itinerary {
   coverLabel?: string;
   coverYear?: string;
   heroDayBadge?: string;
+  /** Unit under the hero badge number, e.g. "days" or "weeks". */
+  heroDayBadgeUnit?: string;
+  /** Generated copy for the itinerary overview. */
+  overviewEyebrow?: string;
+  overviewDescription?: string;
+  searchPlaceholder?: string;
   days: DayPlan[];
 }
 

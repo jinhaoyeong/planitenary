@@ -1447,14 +1447,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
           <input
             type="text"
             className="editorial-input block w-full" style={{ paddingLeft: '2.75rem' }}
-            placeholder="Search itinerary, phrases, locations..."
+            placeholder={customItinerary.searchPlaceholder || 'Search itinerary, phrases, locations...'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
 
         <div className="text-center space-y-4">
-          <span className="eyebrow">The itinerary · day by day</span>
+          <span className="eyebrow">{customItinerary.overviewEyebrow || 'The itinerary · day by day'}</span>
           {isEditingMode && isTitleEditing ? (
             <div className="flex items-center justify-center gap-2">
               <input
@@ -1494,7 +1494,13 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
           )}
 
           <p className="text-base md:text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-            A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
+            {customItinerary.overviewDescription ? (
+              customItinerary.overviewDescription
+            ) : (
+              <>
+                A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
+              </>
+            )}
           </p>
 
           {isEditingMode && selectedDay === null && (

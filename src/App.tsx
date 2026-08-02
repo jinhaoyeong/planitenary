@@ -30,6 +30,8 @@ import { getAllPhotosForItinerary, restorePhotosForItinerary } from './lib/photo
 import { Marquee } from './components/ui/Marquee';
 import { Pets } from './components/Pets';
 import { hapticMedium } from './lib/haptics';
+import { sanitizeTripProfile } from './lib/tripProfile';
+import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
 
@@ -165,9 +167,8 @@ const sanitizeDay = (value: unknown, fallback: DayPlan, index: number): DayPlan 
   const activityFallbacks = fallback.activities.length > 0
     ? fallback.activities
     : [{ time: '09:00', name: 'Untitled activity', description: '', type: 'other' as ActivityType }];
-  const sourceActivities = Array.isArray(source.activities) && source.activities.length > 0
-    ? source.activities
-    : activityFallbacks;
+  // An explicitly empty day is valid (generated trip skeletons start blank).
+  const sourceActivities = Array.isArray(source.activities) ? source.activities : activityFallbacks;
 
   return {
     day: index + 1,
@@ -198,8 +199,17 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     ? source.secondaryButtonTab as typeof VALID_HOME_TABS[number]
     : fallback.secondaryButtonTab || 'maps';
 
+  const optionalText = (value: unknown, fallbackValue?: string) =>
+    typeof value === 'string' && value.trim() ? value.trim() : fallbackValue;
+
   return {
     id: fallback.id,
+    tripProfile: sanitizeTripProfile(source.tripProfile) ?? sanitizeTripProfile(fallback.tripProfile) ?? undefined,
+    brandTitle: optionalText(source.brandTitle, fallback.brandTitle),
+    heroDayBadgeUnit: optionalText(source.heroDayBadgeUnit, fallback.heroDayBadgeUnit),
+    overviewEyebrow: optionalText(source.overviewEyebrow, fallback.overviewEyebrow),
+    overviewDescription: optionalText(source.overviewDescription, fallback.overviewDescription),
+    searchPlaceholder: optionalText(source.searchPlaceholder, fallback.searchPlaceholder),
     name: typeof source.name === 'string' && source.name.trim() ? source.name : fallback.name,
     description: typeof source.description === 'string' && source.description.trim() ? source.description : fallback.description,
     marqueeItems: sanitizedMarqueeItems?.length ? sanitizedMarqueeItems : (fallback.marqueeItems || DEFAULT_MARQUEE_ITEMS),
@@ -257,6 +267,8 @@ function App() {
   });
 
   const { theme, toggleTheme } = useTheme();
+  const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
+  useTripIdentityTheme(customItinerary?.tripProfile, theme);
 
   useEffect(() => {
     setSelectedTripId(isDemoUser ? 'cq-cd' : null);
@@ -277,7 +289,6 @@ function App() {
     });
   };
 
-  const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
   const itinerarySyncReadyRef = useRef(false);
   const hasLocalItineraryRef = useRef(false);
   const remoteItineraryLoadedRef = useRef(false);
@@ -288,6 +299,9 @@ function App() {
     [isDemoUser, demoItinerary, activeItineraryId],
   );
   const displayItinerary = customItinerary || activeItinerary;
+  const brandWords = (displayItinerary.brandTitle || 'Travel Handbook').trim().split(/\s+/);
+  const brandAccent = brandWords[brandWords.length - 1];
+  const brandLead = brandWords.slice(0, -1).join(' ');
   const itineraryStorageKey = isDemoUser
     ? `itinerary-demo-${activeItineraryId}`
     : `itinerary-${user?.id ?? 'account'}-${activeItineraryId}`;
@@ -980,7 +994,8 @@ function App() {
               </button>
             )}
             <span className="font-display text-xl sm:text-2xl md:text-3xl leading-none tracking-tight truncate" style={{ color: 'var(--ink)' }}>
-              Travel <span className="font-display-italic" style={{ color: 'var(--accent)' }}>Handbook</span>
+              {brandLead && `${brandLead} `}
+              <span className="font-display-italic" style={{ color: 'var(--accent)' }}>{brandAccent}</span>
             </span>
           </div>
 
@@ -1222,7 +1237,7 @@ function App() {
                 onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
                 title={isHomeHeroEditing ? 'Click to edit' : undefined}
               >{displayItinerary.heroDayBadge || displayItinerary.days.length}</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">days</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{displayItinerary.heroDayBadgeUnit || 'days'}</span>
             </motion.div>
           </motion.div>
         </div>
