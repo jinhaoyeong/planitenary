@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ArrowRight,
   CalendarDays,
-  Check,
   Coins,
   Loader2,
   MapPin,
@@ -15,6 +14,7 @@ import {
 import { geocodePlace, findCountry, listCountries } from '../lib/destinations';
 import { CURRENCIES } from '../lib/currencyCatalog';
 import { buildTripIdentity } from '../lib/tripIdentity';
+import { OptionChips } from './ui/OptionChips';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -27,7 +27,6 @@ import {
   resolveDuration,
   suggestedCurrency,
   type BudgetTier,
-  type OptionMeta,
   type TripDestination,
   type TripProfile,
 } from '../lib/tripProfile';
@@ -48,46 +47,6 @@ const STEPS = [
   { id: 'practical', title: 'How will you travel?', hint: 'Budget, transport, and where you stay.' },
   { id: 'identity', title: 'Your handbook identity', hint: 'Generated from everything above.' },
 ] as const;
-
-function ChipGroup<T extends string>({
-  options,
-  selected,
-  onToggle,
-  columns = 2,
-}: {
-  options: OptionMeta<T>[];
-  selected: T[];
-  onToggle: (id: T) => void;
-  columns?: number;
-}) {
-  return (
-    <div className={`grid gap-2 ${columns === 3 ? 'sm:grid-cols-3 grid-cols-2' : 'sm:grid-cols-2 grid-cols-1'}`}>
-      {options.map((option) => {
-        const active = selected.includes(option.id);
-        return (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => onToggle(option.id)}
-            className="text-left rounded-2xl px-4 py-3 transition-colors min-h-16"
-            style={{
-              backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg)',
-              border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-              color: 'var(--ink)',
-            }}
-            aria-pressed={active}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold">{option.label}</span>
-              {active && <Check className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />}
-            </span>
-            <span className="mt-1 block text-xs" style={{ color: 'var(--ink-muted)' }}>{option.hint}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 export function TripCreateWizard({
   open,
@@ -395,7 +354,7 @@ export function TripCreateWizard({
           )}
 
           {step.id === 'type' && (
-            <ChipGroup
+            <OptionChips
               options={TRIP_TYPE_OPTIONS}
               selected={profile.tripTypes}
               onToggle={(id) => toggle('tripTypes', id)}
@@ -406,7 +365,7 @@ export function TripCreateWizard({
             <>
               <div>
                 <div className="eyebrow mb-3">Travel style</div>
-                <ChipGroup
+                <OptionChips
                   options={TRAVEL_STYLE_OPTIONS}
                   selected={profile.styles}
                   onToggle={(id) => toggle('styles', id)}
@@ -414,7 +373,7 @@ export function TripCreateWizard({
               </div>
               <div>
                 <div className="eyebrow mb-3">Mood</div>
-                <ChipGroup
+                <OptionChips
                   options={MOOD_OPTIONS}
                   selected={profile.moods}
                   onToggle={(id) => toggle('moods', id)}
@@ -451,7 +410,7 @@ export function TripCreateWizard({
               </div>
               <div>
                 <div className="eyebrow mb-3">Getting around</div>
-                <ChipGroup
+                <OptionChips
                   options={TRANSPORT_OPTIONS}
                   selected={profile.transport}
                   onToggle={(id) => toggle('transport', id)}
@@ -459,7 +418,7 @@ export function TripCreateWizard({
               </div>
               <div>
                 <div className="eyebrow mb-3">Where you stay</div>
-                <ChipGroup
+                <OptionChips
                   options={STAY_OPTIONS}
                   selected={profile.stays}
                   onToggle={(id) => toggle('stays', id)}

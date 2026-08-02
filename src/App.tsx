@@ -1294,7 +1294,12 @@ function App() {
             {activeTab === 'documents' && <Documents itineraryId={activeItineraryId} />}
             {activeTab === 'photos' && <PhotoWall itinerary={customItinerary || activeItinerary} />}
             {activeTab === 'settings' && (
-              <AppSettingsPanel showPets={showPets} onTogglePets={togglePets} />
+              <AppSettingsPanel
+                showPets={showPets}
+                onTogglePets={togglePets}
+                itinerary={customItinerary || activeItinerary}
+                onItineraryChange={handleItineraryChange}
+              />
             )}
             {activeTab === 'profile' && <ProfilePanel onEditHomeHero={beginHomeHeroEditing} />}
           </motion.div>

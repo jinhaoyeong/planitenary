@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { Coins, Download, ImagePlus, Link2, PawPrint, Plus, Trash2, Upload } from 'lucide-react';
+import { Coins, Compass, Download, ImagePlus, Link2, PawPrint, Plus, Trash2, Upload } from 'lucide-react';
 import {
   createPetId,
   DEFAULT_PETS,
@@ -13,13 +13,17 @@ import {
   type PetDefinition,
 } from '../lib/petPack';
 import { CurrencyPairSettings } from './CurrencySelector';
+import { TripIdentityPanel } from './TripIdentityPanel';
+import type { Itinerary } from '../data';
 
 interface AppSettingsPanelProps {
   showPets: boolean;
   onTogglePets: () => void;
+  itinerary?: Itinerary;
+  onItineraryChange?: (itinerary: Itinerary) => void;
 }
 
-export function AppSettingsPanel({ showPets, onTogglePets }: AppSettingsPanelProps) {
+export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItineraryChange }: AppSettingsPanelProps) {
   const [pets, setPets] = useState<PetDefinition[]>(() => loadPetPack());
   const [name, setName] = useState('');
   const [spriteUrl, setSpriteUrl] = useState('');
@@ -136,6 +140,27 @@ export function AppSettingsPanel({ showPets, onTogglePets }: AppSettingsPanelPro
           Set wallet currencies and optional extras. Pet packs stay on this device and can be exported anytime.
         </p>
       </div>
+
+      {itinerary && onItineraryChange && (
+        <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
+          <div className="flex items-start gap-3">
+            <div
+              className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+              style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+            >
+              <Compass className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="eyebrow">Trip identity</div>
+              <h3 className="font-display text-2xl sm:text-3xl mt-2">What this journey is about.</h3>
+              <p className="mt-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
+                Everything the handbook writes, maps, and colours comes from this profile. Change it any time.
+              </p>
+            </div>
+          </div>
+          <TripIdentityPanel itinerary={itinerary} onItineraryChange={onItineraryChange} />
+        </div>
+      )}
 
       <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
         <div className="flex items-start gap-3">
