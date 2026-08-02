@@ -1,5 +1,5 @@
 import type { DayPhoto } from '../data';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, getSupabaseUserId } from './supabase';
 
 const DB_NAME = 'china-trip-photos';
 const DB_VERSION = 1;
@@ -48,6 +48,7 @@ interface StoredPhoto {
 // Database record for Supabase
 interface PhotoRecord {
   id: string;
+  user_id: string;
   itinerary_id: string;
   day_number: number;
   caption?: string;
@@ -146,9 +147,11 @@ const uploadPhotoToStorage = async (
   file: File | Blob
 ): Promise<string | null> => {
   if (!isSupabaseConfigured()) return null;
+  const userId = await getSupabaseUserId();
+  if (!userId) return null;
 
   const extension = file.type.split('/')[1] || 'jpg';
-  const path = `${itineraryId}/${dayNumber}/${photoId}.${extension}`;
+  const path = `${userId}/${itineraryId}/${dayNumber}/${photoId}.${extension}`;
 
   const { error } = await supabase.storage
     .from(PHOTOS_BUCKET)
@@ -185,7 +188,10 @@ const deletePhotoFromStorage = async (storagePath: string): Promise<void> => {
 const upsertPhotoRecord = async (record: PhotoRecord): Promise<boolean> => {
   if (!isSupabaseConfigured()) return false;
 
-  const { error } = await supabase.from(PHOTOS_TABLE).upsert(record);
+  const userId = await getSupabaseUserId();
+  if (!userId) return false;
+
+  const { error } = await supabase.from(PHOTOS_TABLE).upsert({ ...record, user_id: userId });
   if (error) {
     // Table might not exist, silently fail
     if (error.code === '42P01' || error.code === '42703' || error.code === '42501') {
@@ -205,11 +211,14 @@ const deletePhotoRecord = async (
   photoId: string
 ): Promise<void> => {
   if (!isSupabaseConfigured()) return;
+  const userId = await getSupabaseUserId();
+  if (!userId) return;
 
   const { error } = await supabase
     .from(PHOTOS_TABLE)
     .delete()
     .eq('id', photoId)
+    .eq('user_id', userId)
     .eq('itinerary_id', itineraryId)
     .eq('day_number', dayNumber);
 
@@ -224,12 +233,15 @@ export const fetchPhotoRecords = async (
   dayNumber: number
 ): Promise<PhotoRecord[]> => {
   if (!isSupabaseConfigured()) return [];
+  const userId = await getSupabaseUserId();
+  if (!userId) return [];
 
   const { data, error } = await supabase
     .from(PHOTOS_TABLE)
     .select('*')
     .eq('itinerary_id', itineraryId)
     .eq('day_number', dayNumber)
+    .eq('user_id', userId)
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -287,6 +299,7 @@ export const savePhoto = async (
     if (storagePath) {
       await upsertPhotoRecord({
         id: photoId,
+        user_id: (await getSupabaseUserId()) || '',
         itinerary_id: itineraryId,
         day_number: dayNumber,
         caption,

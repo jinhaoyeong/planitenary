@@ -2,6 +2,39 @@ import type { DayPhoto, Itinerary } from '../data';
 
 const HISTORY_LIMIT = 30;
 
+interface LocalTripEntry {
+  id: string;
+  updatedAt: string;
+}
+
+const getLocalTripsKey = (userId: string) => `local-trips-${userId}`;
+
+const readLocalTrips = (userId: string): LocalTripEntry[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(getLocalTripsKey(userId)) || '[]') as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is LocalTripEntry =>
+      Boolean(entry && typeof entry === 'object' && typeof (entry as LocalTripEntry).id === 'string')
+    );
+  } catch {
+    return [];
+  }
+};
+
+export const listLocalTrips = (userId: string): LocalTripEntry[] =>
+  readLocalTrips(userId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+export const upsertLocalTrip = (userId: string, itinerary: Pick<Itinerary, 'id'>) => {
+  const entries = readLocalTrips(userId).filter((entry) => entry.id !== itinerary.id);
+  entries.push({ id: itinerary.id, updatedAt: new Date().toISOString() });
+  localStorage.setItem(getLocalTripsKey(userId), JSON.stringify(entries));
+};
+
+export const removeLocalTrip = (userId: string, tripId: string) => {
+  const entries = readLocalTrips(userId).filter((entry) => entry.id !== tripId);
+  localStorage.setItem(getLocalTripsKey(userId), JSON.stringify(entries));
+};
+
 interface StorageHistoryEntry {
   savedAt: string;
   raw: string;
@@ -117,37 +150,6 @@ export const saveToStorage = <T>(key: string, value: T) => {
   localStorage.setItem(key, serialized);
 };
 
-interface LocalTripIndexEntry {
-  id: string;
-  updatedAt: string;
-}
-
-const getLocalTripIndexKey = (ownerId: string) => `travel-handbook-trip-index-${ownerId}`;
-
-export const listLocalTrips = (ownerId: string): LocalTripIndexEntry[] => {
-  const raw = localStorage.getItem(getLocalTripIndexKey(ownerId));
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw) as LocalTripIndexEntry[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item) => typeof item?.id === 'string' && typeof item?.updatedAt === 'string');
-  } catch {
-    return [];
-  }
-};
-
-export const upsertLocalTrip = (ownerId: string, itinerary: Itinerary) => {
-  const current = listLocalTrips(ownerId).filter((item) => item.id !== itinerary.id);
-  const next = [{ id: itinerary.id, updatedAt: new Date().toISOString() }, ...current];
-  localStorage.setItem(getLocalTripIndexKey(ownerId), JSON.stringify(next));
-};
-
-export const removeLocalTrip = (ownerId: string, itineraryId: string) => {
-  const next = listLocalTrips(ownerId).filter((item) => item.id !== itineraryId);
-  localStorage.setItem(getLocalTripIndexKey(ownerId), JSON.stringify(next));
-};
-
 export const writeRawToStorage = (key: string, raw: string | null, options?: { preserveCurrent?: boolean }) => {
   const preserveCurrent = options?.preserveCurrent ?? true;
   const currentRaw = localStorage.getItem(key);
@@ -180,7 +182,7 @@ export const forceRestoreTripData = (itineraryId: string) => {
   const keys = [
     `itinerary-${itineraryId}`,
     `budget-${itineraryId}`,
-    'checklist-data',
+    `checklist-data-${itineraryId}`,
     `drafts-${itineraryId}`
   ];
   return keys.reduce((count, key) => count + (forceRestoreFromBackup(key) ? 1 : 0), 0);
@@ -203,7 +205,7 @@ export interface RestoreDatasetPreview {
 const getTripStorageKeyMap = (itineraryId: string): Record<RestoreDatasetId, string> => ({
   itinerary: `itinerary-${itineraryId}`,
   budget: `budget-${itineraryId}`,
-  checklist: 'checklist-data',
+  checklist: `checklist-data-${itineraryId}`,
   drafts: `drafts-${itineraryId}`,
   photos: `photos-${itineraryId}`
 });

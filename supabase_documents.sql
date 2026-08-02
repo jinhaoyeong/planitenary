@@ -61,3 +61,15 @@ create policy "trip_documents_storage_update" on storage.objects
   for update using (bucket_id = 'trip-documents');
 create policy "trip_documents_storage_delete" on storage.objects
   for delete using (bucket_id = 'trip-documents');
+
+-- Authenticated ownership used by the current app.
+alter table public.trip_documents
+  add column if not exists user_id uuid references auth.users on delete cascade;
+alter table public.trip_documents enable row level security;
+drop policy if exists "trip_documents_select_all" on public.trip_documents;
+drop policy if exists "trip_documents_insert_all" on public.trip_documents;
+drop policy if exists "trip_documents_update_all" on public.trip_documents;
+drop policy if exists "trip_documents_delete_all" on public.trip_documents;
+create policy "Users can only access their own trip documents" on public.trip_documents
+  for all to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);

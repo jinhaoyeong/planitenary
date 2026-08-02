@@ -2,16 +2,13 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Shuffle, Star } from 'lucide-react';
-import { ThemedSelect } from './ui/ThemedSelect';
-import type { Itinerary, Activity, ActivityType, DayPhoto, DayPlan } from '../data';
+import { itineraries } from '../data';
+import type { Itinerary, Activity, ActivityType, DayPhoto } from '../data';
 import { clsx } from 'clsx';
-import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 import { getPhotos, subscribeToPhotoChanges, syncAllPhotosFromRemote } from '../lib/photoStorage';
 import { PhotoGallery } from './PhotoGallery';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
-import { applyTemplate } from '../lib/tripSettings';
-import type { TripAppSettings } from '../lib/tripSettings';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -27,7 +24,7 @@ const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
 ];
 
 type MoodReaction = 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
-type MoodVoter = 'traveler1' | 'traveler2';
+type MoodVoter = 'ahhao' | 'belle';
 
 const REACTION_OPTIONS: { id: MoodReaction; label: string }[] = [
   { id: 'see_first', label: 'See First' },
@@ -52,9 +49,6 @@ const REACTION_EMOJI: Record<MoodReaction, string> = {
 };
 
 const RATING_OPTIONS = Array.from({ length: 11 }, (_, index) => index);
-
-const toDateInputValue = (value: string) =>
-  /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
 
 const normalizeActivityRating = (rating?: number) => {
   if (typeof rating !== 'number' || Number.isNaN(rating)) return undefined;
@@ -260,12 +254,13 @@ const getCityChineseLabel = (cityLabel: string) => {
 const getBaiduQueryBank = (cityLabel: string, mode: FoodPickerMode) => {
   const cityKey = cityLabel.trim().toLowerCase();
   const match = Object.keys(BAIDU_BAIKE_QUERY_BANK).find((key) => cityKey.includes(key) || key.includes(cityKey));
-  return match ? BAIDU_BAIKE_QUERY_BANK[match]?.[mode] || [] : BAIDU_BAIKE_QUERY_BANK.chongqing?.[mode] || [];
+  return match ? BAIDU_BAIKE_QUERY_BANK[match]?.[mode] || [] : [];
 };
 
 const discoverFoodCandidates = async (cityLabel: string, mode: FoodPickerMode) => {
   const cityChinese = getCityChineseLabel(cityLabel);
   const bank = getBaiduQueryBank(cityLabel, mode);
+  if (bank.length === 0) return [];
   
   // Add 10 real Baidu live lookups per spin
   const baikeQueries = shuffleItems(bank).slice(0, 10);
@@ -315,7 +310,7 @@ const discoverFoodCandidates = async (cityLabel: string, mode: FoodPickerMode) =
 const ActivityIcon = ({ type }: { type: string }) => {
   switch (type) {
     case 'food': return <Utensils className="w-4 h-4 text-orange-500" />;
-    case 'sight': return <Camera className="w-4 h-4 text-blue-500" />;
+    case 'sight': return <Camera className="w-4 h-4 text-rose-500" />;
     case 'culture': return <Landmark className="w-4 h-4 text-purple-500" />;
     case 'walk': return <Footprints className="w-4 h-4 text-green-500" />;
     case 'travel': return <Train className="w-4 h-4" style={{ color: 'var(--ink-muted)' }} />;
@@ -327,12 +322,11 @@ const ActivityIcon = ({ type }: { type: string }) => {
   }
 };
 
-const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: { 
+const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: { 
   activity: Activity; 
   isEditing: boolean;
   onEdit?: (updated: Activity) => void;
   onDelete?: () => void;
-  settings: TripAppSettings;
 }) => {
   const [editedActivity, setEditedActivity] = useState(activity);
   const [showIconPicker, setShowIconPicker] = useState(false);
@@ -341,10 +335,10 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
   const [isMoodOpen, setIsMoodOpen] = useState(false);
   const [isRatingOpen, setIsRatingOpen] = useState(false);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
-  const [activeVoter, setActiveVoter] = useState<MoodVoter>('traveler1');
+  const [activeVoter, setActiveVoter] = useState<MoodVoter>('ahhao');
   const [moodDraft, setMoodDraft] = useState<NonNullable<Activity['moodVotes']>>({
-    traveler1: activity.moodVotes?.traveler1,
-    traveler2: activity.moodVotes?.traveler2,
+    ahhao: activity.moodVotes?.ahhao,
+    belle: activity.moodVotes?.belle,
     comment: activity.moodVotes?.comment,
     commentBy: activity.moodVotes?.commentBy,
   });
@@ -391,12 +385,12 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
   const updateMoodVotes = (next: NonNullable<Activity['moodVotes']>) => {
     const normalizedComment = next.comment?.trim();
     const normalizedVotes: NonNullable<Activity['moodVotes']> = {
-      traveler1: next.traveler1,
-      traveler2: next.traveler2,
+      ahhao: next.ahhao,
+      belle: next.belle,
       comment: normalizedComment || undefined,
       commentBy: normalizedComment ? next.commentBy : undefined,
     };
-    const hasMoodValue = Boolean(normalizedVotes.traveler1 || normalizedVotes.traveler2 || normalizedVotes.comment);
+    const hasMoodValue = Boolean(normalizedVotes.ahhao || normalizedVotes.belle || normalizedVotes.comment);
     onEdit?.({
       ...activity,
       moodVotes: hasMoodValue ? normalizedVotes : undefined,
@@ -405,8 +399,8 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
 
   const openMoodBoard = () => {
     setMoodDraft({
-      traveler1: activity.moodVotes?.traveler1,
-      traveler2: activity.moodVotes?.traveler2,
+      ahhao: activity.moodVotes?.ahhao,
+      belle: activity.moodVotes?.belle,
       comment: activity.moodVotes?.comment,
       commentBy: activity.moodVotes?.commentBy,
     });
@@ -585,8 +579,8 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
   };
 
   const moodVotes = activity.moodVotes || {};
-  const reactionA = moodVotes.traveler1;
-  const reactionB = moodVotes.traveler2;
+  const reactionA = moodVotes.ahhao;
+  const reactionB = moodVotes.belle;
   const hasConflict = Boolean(reactionA && reactionB && reactionA !== reactionB);
   const activityRating = normalizeActivityRating(activity.rating);
   const editedActivityRating = normalizeActivityRating(editedActivity.rating);
@@ -764,9 +758,13 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(editedActivity.name + ' ' + (editedActivity.location || ''))}`}
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-colors"
+              style={{
+                backgroundColor: 'var(--bg)',
+                color: 'var(--accent)',
+              }}
             >
-              <ExternalLink className="w-3.5 h-3.5" /> {settings.labels.openMapLabel}
+              <ExternalLink className="w-3.5 h-3.5" /> Google Maps
             </a>
             <a 
               href={`https://www.google.com/search?q=${encodeURIComponent(editedActivity.name + ' ' + (editedActivity.location || ''))}&tbm=isch`}
@@ -774,7 +772,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
               rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
             >
-              <Camera className="w-3.5 h-3.5" /> {settings.labels.activityPhotosLabel}
+              <Camera className="w-3.5 h-3.5" /> Photos
             </a>
           </div>
         )}
@@ -784,7 +782,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
             onClick={onDelete}
             className="px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"
           >
-            {settings.labels.deleteActivityLabel}
+            Delete
           </button>
           <button
             onClick={() => onEdit?.({ ...editedActivity, rating: normalizeActivityRating(editedActivity.rating) })}
@@ -804,12 +802,16 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.name + ' ' + (activity.location || ''))}`}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${actionButtonClass} bg-slate-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-100 dark:hover:border-blue-900/50`}
+        className={actionButtonClass}
+        style={{
+          backgroundColor: 'var(--bg)',
+          color: 'var(--accent)',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <ExternalLink className="w-3 h-3 shrink-0" />
         <span className="max-w-xs ml-1.5 md:max-w-0 md:ml-0 md:overflow-hidden md:group-hover/btn:max-w-xs md:group-hover/btn:ml-1.5 transition-all duration-300 ease-in-out whitespace-nowrap">
-          {settings.labels.openMapLabel}
+          Map
         </span>
       </a>
       <a
@@ -821,7 +823,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
       >
         <Camera className="w-3 h-3 shrink-0" />
         <span className="max-w-xs ml-1.5 md:max-w-0 md:ml-0 md:overflow-hidden md:group-hover/btn:max-w-xs md:group-hover/btn:ml-1.5 transition-all duration-300 ease-in-out whitespace-nowrap">
-          {settings.labels.activityPhotosLabel}
+          Photos
         </span>
       </a>
       <button
@@ -931,13 +933,13 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
             {reactionA && (
               <span className={clsx("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold", getMoodReactionTone(reactionA))}>
                 <span>{REACTION_EMOJI[reactionA]}</span>
-                <span>Traveler 1</span>
+                <span>You</span>
               </span>
             )}
             {reactionB && (
               <span className={clsx("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold", getMoodReactionTone(reactionB))}>
                 <span>{REACTION_EMOJI[reactionB]}</span>
-                <span>Traveler 2</span>
+                <span>Travel partner</span>
               </span>
             )}
             {reactionA && reactionB && (
@@ -949,7 +951,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white/90 dark:bg-slate-700 text-slate-700 dark:text-slate-200 max-w-[220px]">
                 <MessageSquare className="w-3 h-3 shrink-0" />
                 <span className="truncate">
-                  {activity.moodVotes.commentBy === 'traveler2' ? 'Traveler 2' : 'Traveler 1'}: {activity.moodVotes.comment}
+                  {activity.moodVotes.commentBy === 'belle' ? 'Travel partner' : 'You'}: {activity.moodVotes.comment}
                 </span>
               </span>
             )}
@@ -1066,7 +1068,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
           className="absolute left-3 right-3 top-3 z-30 rounded-2xl border border-rose-200/70 dark:border-rose-700/60 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-3 shadow-xl"
         >
           <div className="flex items-center justify-between gap-2 mb-2">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Shared Mood Board</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Couple Sync Mood Board</span>
             <button
               type="button"
               onClick={() => setIsMoodOpen(false)}
@@ -1078,17 +1080,17 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
           <div className="grid grid-cols-2 gap-2 mb-2">
             <button
               type="button"
-              onClick={() => setActiveVoter('traveler1')}
-              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'traveler1' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
+              onClick={() => setActiveVoter('ahhao')}
+              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'ahhao' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
             >
-              Traveler 1
+              You
             </button>
             <button
               type="button"
-              onClick={() => setActiveVoter('traveler2')}
-              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'traveler2' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
+              onClick={() => setActiveVoter('belle')}
+              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'belle' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
             >
-              Traveler 2
+              Travel partner
             </button>
           </div>
           <div className="mb-2 rounded-2xl bg-slate-100 dark:bg-slate-800 px-2 py-1.5 flex flex-wrap items-center gap-1.5">
@@ -1122,7 +1124,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
             <input
               value={moodDraft.comment || ''}
               onChange={(e) => setMoodDraft((current) => ({ ...current, comment: e.target.value, commentBy: activeVoter }))}
-              placeholder={`Add comment as ${activeVoter === 'traveler1' ? 'Traveler 1' : 'Traveler 2'}...`}
+              placeholder={`Add a note as ${activeVoter === 'ahhao' ? 'You' : 'Travel partner'}...`}
               className="editorial-input is-compact flex-1"
             />
             <button
@@ -1143,14 +1145,9 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, settings }: {
   );
 };
 
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
-
-// ... (existing imports)
-
-export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, settings }: {
+export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }: { 
   itinerary: Itinerary;
   onItineraryChange?: (itinerary: Itinerary) => void;
-  settings: TripAppSettings;
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newActivity, setNewActivity] = useState<Partial<Activity>>({
@@ -1194,100 +1191,27 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   const [editingActivityIndex, setEditingActivityIndex] = useState<number | null>(null);
   const [isTitleEditing, setIsTitleEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
+  const [editedDescription, setEditedDescription] = useState('');
+  const [editedCities, setEditedCities] = useState('');
+  const [editedMarqueeItems, setEditedMarqueeItems] = useState('');
   const [editingDateIndex, setEditingDateIndex] = useState<number | null>(null);
   const [editedDate, setEditedDate] = useState('');
   const [editingCityIndex, setEditingCityIndex] = useState<number | null>(null);
   const [editedCity, setEditedCity] = useState('');
-  const itinerarySyncReadyRef = useRef(false);
-  const hasLocalItineraryRef = useRef(false);
-
   // Photo Gallery State
   const [galleryDay, setGalleryDay] = useState<number | null>(null);
   const [dayPhotos, setDayPhotos] = useState<Record<number, DayPhoto[]>>({});
-  const labels = settings.labels;
 
-  // Initialize state with lazy loading from localStorage
-  const [customItinerary, setCustomItinerary] = useState<Itinerary>(() => {
-    try {
-      return loadFromStorage<Itinerary>(`itinerary-${initialItinerary.id}`) || initialItinerary;
-    } catch (e) {
-      console.error("Failed to load itinerary", e);
-      return initialItinerary;
-    }
-  });
+  // Use the prop as the source of truth; parent handles persistence and Supabase sync
+  const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
 
-  // Sync with Supabase on mount / itinerary change
+  // Sync internal state when parent prop changes (from Supabase realtime or other sources)
   useEffect(() => {
-    itinerarySyncReadyRef.current = false;
-    hasLocalItineraryRef.current = false;
-    if (!isSupabaseConfigured()) return;
+    setCustomItinerary(initialItinerary);
+  }, [initialItinerary]);
 
-    const fetchItinerary = async () => {
-      const { data, error } = await supabase
-        .from('itineraries')
-        .select('data')
-        .eq('id', initialItinerary.id)
-        .single();
-
-      if (data && data.data) {
-        setCustomItinerary(data.data);
-        onItineraryChange?.(data.data);
-        saveToStorage(`itinerary-${initialItinerary.id}`, data.data);
-        hasLocalItineraryRef.current = true;
-        itinerarySyncReadyRef.current = true;
-      } else if (error && error.code === 'PGRST116') {
-        itinerarySyncReadyRef.current = true;
-      } else if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching itinerary:', error);
-      }
-    };
-
-    fetchItinerary();
-
-    // Real-time subscription
-    const subscription = supabase
-      .channel('itineraries')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'itineraries', filter: `id=eq.${initialItinerary.id}` }, (payload) => {
-        if (payload.new && payload.new.data) {
-          const newData = payload.new.data as Itinerary;
-          setCustomItinerary((prev) => {
-            const isDifferent = JSON.stringify(newData) !== JSON.stringify(prev);
-            if (!isDifferent) return prev;
-            onItineraryChange?.(newData);
-            saveToStorage(`itinerary-${initialItinerary.id}`, newData);
-            return newData;
-          });
-        }
-      })
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [initialItinerary.id, onItineraryChange]);
-
+  // Reset selection states when itinerary id changes
   useEffect(() => {
-    if (!isSupabaseConfigured()) {
-      itinerarySyncReadyRef.current = true;
-    }
-  }, []);
-
-  // Handle switching between different itineraries (GZ-SZ vs CQ-CD)
-  useEffect(() => {
-    // When the prop ID changes, we need to load the data for THAT specific itinerary
-    try {
-      const saved = loadFromStorage<Itinerary>(`itinerary-${initialItinerary.id}`);
-      if (saved) {
-        setCustomItinerary(saved);
-        hasLocalItineraryRef.current = true;
-      } else {
-        setCustomItinerary(initialItinerary);
-      }
-    } catch (e) {
-      console.error("Failed to switch itinerary", e);
-      setCustomItinerary(initialItinerary);
-    }
-    // Reset selection states
     setSelectedDay(null);
     setEditingActivityIndex(null);
     setGalleryDay(null);
@@ -1345,32 +1269,25 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     };
   }, [customItinerary.id]);
 
-  // Persist changes whenever customItinerary updates
-  useEffect(() => {
-    if (!itinerarySyncReadyRef.current) return;
-    saveToStorage(`itinerary-${customItinerary.id}`, customItinerary);
-    if (!hasLocalItineraryRef.current && JSON.stringify(customItinerary) === JSON.stringify(initialItinerary)) return;
-    hasLocalItineraryRef.current = true;
-    // Notify parent component about changes
-    onItineraryChange?.(customItinerary);
 
-    // Sync to Supabase
-    if (isSupabaseConfigured()) {
-      const syncToSupabase = async () => {
-        const { error } = await supabase
-          .from('itineraries')
-          .upsert({ id: customItinerary.id, data: customItinerary, updated_at: new Date().toISOString() });
-        
-        if (error) console.error('Error syncing itinerary:', error);
-      };
-      
-      // Debounce logic
-      const timeoutId = setTimeout(syncToSupabase, 1000);
-      return () => clearTimeout(timeoutId);
+  const getDayIndexByNumber = (dayNumber: number | null) => {
+    if (dayNumber === null) return -1;
+    return customItinerary.days.findIndex((day) => day.day === dayNumber);
+  };
+
+  const handleUpdateActivity = (dayNumber: number, activityIndex: number, updated: Activity) => {
+    const dayIndex = getDayIndexByNumber(dayNumber);
+    if (dayIndex < 0) {
+      setEditingActivityIndex(null);
+      return;
     }
-  }, [customItinerary, onItineraryChange]);
 
-  const handleUpdateActivity = (dayIndex: number, activityIndex: number, updated: Activity) => {
+    const targetDay = customItinerary.days[dayIndex];
+    if (!targetDay || activityIndex < 0 || activityIndex >= targetDay.activities.length) {
+      setEditingActivityIndex(null);
+      return;
+    }
+
     const updatedTime = normalizeTimeInput(updated.time) || '09:00';
     const updatedDays = customItinerary.days.map((day, idx) => {
       if (idx !== dayIndex) return day;
@@ -1382,12 +1299,22 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
         activities: sortActivitiesByTime(updatedActivities)
       };
     });
-    setCustomItinerary({ ...customItinerary, days: updatedDays });
+    const updatedItinerary = { ...customItinerary, days: updatedDays };
+    setCustomItinerary(updatedItinerary);
+    onItineraryChange?.(updatedItinerary);
     setEditingActivityIndex(null);
   };
 
   const confirmAddActivity = () => {
     if (!newActivity.name) return;
+    const targetDayNumber = customItinerary.days.some((day) => day.day === dayForModal)
+      ? dayForModal
+      : (customItinerary.days[0]?.day ?? null);
+    if (targetDayNumber === null) {
+      setShowAddModal(false);
+      return;
+    }
+
     const normalizedTime = normalizeTimeInput(newActivity.time) || '09:00';
 
     const activityToAdd: Activity = {
@@ -1401,7 +1328,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     };
 
     const updatedDays = customItinerary.days.map(day => {
-      if (day.day === dayForModal) { // Use dayForModal instead of selectedDay
+      if (day.day === targetDayNumber) {
         return {
           ...day,
           activities: sortActivitiesByTime([...day.activities, activityToAdd])
@@ -1418,8 +1345,20 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     setSearchResults([]);
   };
 
-  const handleDeleteActivity = (dayIndex: number, activityIndex: number) => {
-    if (window.confirm(labels.deleteActivityConfirm)) {
+  const handleDeleteActivity = (dayNumber: number, activityIndex: number) => {
+    const dayIndex = getDayIndexByNumber(dayNumber);
+    if (dayIndex < 0) {
+      setEditingActivityIndex(null);
+      return;
+    }
+
+    const targetDay = customItinerary.days[dayIndex];
+    if (!targetDay || activityIndex < 0 || activityIndex >= targetDay.activities.length) {
+      setEditingActivityIndex(null);
+      return;
+    }
+
+    if (window.confirm('Delete this activity?')) {
       const updatedDays = customItinerary.days.map((day, idx) => {
         if (idx !== dayIndex) return day;
         return {
@@ -1427,15 +1366,19 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           activities: day.activities.filter((_, activityIdx) => activityIdx !== activityIndex)
         };
       });
-      setCustomItinerary({ ...customItinerary, days: updatedDays });
+      const updatedItinerary = { ...customItinerary, days: updatedDays };
+      setCustomItinerary(updatedItinerary);
+      onItineraryChange?.(updatedItinerary);
       setEditingActivityIndex(null);
     }
   };
 
-  const handleAddActivity = (dayIndex: number) => {
+  const handleAddActivity = (dayNumber: number) => {
     // Open modal with default values for this day
-    const day = customItinerary.days[dayIndex].day;
-    setDayForModal(day);
+    const targetDayNumber = customItinerary.days.some((day) => day.day === dayNumber)
+      ? dayNumber
+      : (customItinerary.days[0]?.day ?? 1);
+    setDayForModal(targetDayNumber);
     setNewActivity({
       name: '',
       location: '',
@@ -1449,7 +1392,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
 
   const resetToDefault = () => {
     if (window.confirm('Reset all changes to default itinerary? This cannot be undone.')) {
-      setCustomItinerary(initialItinerary);
+      const defaultItinerary = itineraries.find(i => i.id === initialItinerary.id) || initialItinerary;
+      setCustomItinerary(defaultItinerary);
+      onItineraryChange?.(defaultItinerary);
       localStorage.removeItem(`itinerary-${initialItinerary.id}`);
       setIsEditingMode(false);
     }
@@ -1469,19 +1414,43 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     );
   }, [customItinerary, searchQuery]);
 
-  const currentDayIndex = selectedDay === null ? -1 : selectedDay - 1;
+  const currentDayIndex = getDayIndexByNumber(selectedDay);
   const currentDay = currentDayIndex >= 0 ? customItinerary.days[currentDayIndex] : null;
   const totalDays = customItinerary.days.length;
 
+  useEffect(() => {
+    const firstDayNumber = customItinerary.days[0]?.day ?? null;
+
+    if (selectedDay !== null && getDayIndexByNumber(selectedDay) < 0) {
+      setSelectedDay(firstDayNumber);
+      setEditingActivityIndex(null);
+    }
+
+    if (getDayIndexByNumber(dayForModal) < 0 && firstDayNumber !== null) {
+      setDayForModal(firstDayNumber);
+    }
+
+    if (galleryDay !== null && getDayIndexByNumber(galleryDay) < 0) {
+      setGalleryDay(firstDayNumber);
+    }
+  }, [customItinerary.days, selectedDay, dayForModal, galleryDay]);
+
+  useEffect(() => {
+    if (!currentDay || editingActivityIndex === null) return;
+    if (editingActivityIndex < 0 || editingActivityIndex >= currentDay.activities.length) {
+      setEditingActivityIndex(null);
+    }
+  }, [currentDay, editingActivityIndex]);
+
   const swipeHandlers = useSwipe({
     onSwipeLeft: () => {
-      if (selectedDay !== null && selectedDay < totalDays) {
-        setSelectedDay(selectedDay + 1);
+      if (currentDayIndex >= 0 && currentDayIndex < totalDays - 1) {
+        setSelectedDay(customItinerary.days[currentDayIndex + 1].day);
       }
     },
     onSwipeRight: () => {
-      if (selectedDay !== null && selectedDay > 1) {
-        setSelectedDay(selectedDay - 1);
+      if (currentDayIndex > 0) {
+        setSelectedDay(customItinerary.days[currentDayIndex - 1].day);
       }
     },
   });
@@ -1704,10 +1673,38 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     setIsTitleEditing(false);
   };
 
+  const handleOverviewDetailsSave = () => {
+    const name = customItinerary.name.trim() || 'Untitled trip';
+    const description = editedDescription.trim() || 'Add a short description for this trip.';
+    const cities = Array.from(new Set(
+      editedCities
+        .split(',')
+        .map((city) => city.trim())
+        .filter(Boolean),
+    ));
+    const marqueeItems = Array.from(new Set(
+      editedMarqueeItems
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ));
+    const updatedItinerary = {
+      ...customItinerary,
+      name,
+      description,
+      cities,
+      marqueeItems,
+    };
+    setCustomItinerary(updatedItinerary);
+    onItineraryChange?.(updatedItinerary);
+  };
+
   const handleDateEdit = (dayIndex: number) => {
     setEditingDateIndex(null);
+    const targetDay = customItinerary.days[dayIndex];
+    if (!targetDay) return;
     if (!editedDate.trim()) return;
-    if (customItinerary.days[dayIndex].date === editedDate) return;
+    if (targetDay.date === editedDate) return;
     
     const updatedDays = customItinerary.days.map((day, idx) => 
       idx === dayIndex ? { ...day, date: editedDate } : day
@@ -1717,28 +1714,12 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     onItineraryChange?.(updatedItinerary);
   };
 
-  const handleAddDay = () => {
-    const nextDay = customItinerary.days.length + 1;
-    const newDay: DayPlan = {
-      day: nextDay,
-      date: 'Add date',
-      city: 'Add city',
-      title: nextDay === 1 ? 'Plan your first day' : `Plan your day ${nextDay}`,
-      activities: []
-    };
-    const updatedItinerary = {
-      ...customItinerary,
-      days: [...customItinerary.days, newDay]
-    };
-    setCustomItinerary(updatedItinerary);
-    onItineraryChange?.(updatedItinerary);
-    setIsEditingMode(true);
-  };
-
   const handleCityEdit = (dayIndex: number) => {
     setEditingCityIndex(null);
+    const targetDay = customItinerary.days[dayIndex];
+    if (!targetDay) return;
     if (!editedCity.trim()) return;
-    if (customItinerary.days[dayIndex].city === editedCity) return;
+    if (targetDay.city === editedCity) return;
     
     const updatedDays = customItinerary.days.map((day, idx) => 
       idx === dayIndex ? { ...day, city: editedCity } : day
@@ -1789,14 +1770,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           <input
             type="text"
             className="editorial-input block w-full" style={{ paddingLeft: '2.75rem' }}
-            placeholder={labels.searchPlaceholder}
+            placeholder="Search itinerary, phrases, locations..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
 
         <div className="text-center space-y-4">
-          <span className="eyebrow">{labels.overviewEyebrow}</span>
+          <span className="eyebrow">The itinerary · day by day</span>
           {isEditingMode && isTitleEditing ? (
             <div className="flex items-center justify-center gap-2">
               <input
@@ -1825,38 +1806,75 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               style={{ color: 'var(--ink)' }}
               onClick={() => {
                 if (isEditingMode) {
-                  setEditedTitle(customItinerary.name || `${customItinerary.days.length}-Day Trip`);
+                  setEditedTitle(customItinerary.name || `${customItinerary.days.length}-Day Adventure`);
                   setIsTitleEditing(true);
                 }
               }}
             >
-            {customItinerary.name || `${customItinerary.days.length}-${labels.daysLabel}`}
+              {customItinerary.name || `${customItinerary.days.length}-Day Adventure`}
               {isEditingMode && <Edit2 className="w-5 h-5 opacity-50" />}
             </h2>
           )}
 
           <p className="text-base md:text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-            {customItinerary.cities.length > 0
-              ? applyTemplate(labels.overviewIntroFilled, { cities: customItinerary.cities.join(' & ') })
-              : labels.overviewIntroEmpty}
+            A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
           </p>
+
+          {isEditingMode && selectedDay === null && (
+            <div className="mx-auto mt-5 max-w-2xl rounded-2xl border p-4 text-left" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                  Trip description
+                  <textarea
+                    value={editedDescription}
+                    onChange={(event) => setEditedDescription(event.target.value)}
+                    rows={3}
+                    className="editorial-input mt-1 w-full resize-y text-sm normal-case tracking-normal"
+                    placeholder="Describe the feeling or purpose of this trip."
+                  />
+                </label>
+                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                  Cities or regions
+                  <input
+                    value={editedCities}
+                    onChange={(event) => setEditedCities(event.target.value)}
+                    className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
+                    placeholder="Lisbon, Porto, Sintra"
+                  />
+                  <span className="mt-1 block text-xs normal-case tracking-normal" style={{ color: 'var(--ink-muted)' }}>Separate multiple places with commas.</span>
+                </label>
+                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                  Scrolling strip labels
+                  <input
+                    value={editedMarqueeItems}
+                    onChange={(event) => setEditedMarqueeItems(event.target.value)}
+                    className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
+                    placeholder="Travel Handbook, Plans, Notes, Maps, Photos"
+                  />
+                  <span className="mt-1 block text-xs normal-case tracking-normal" style={{ color: 'var(--ink-muted)' }}>Use commas to separate the labels shown in the marquee.</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleOverviewDetailsSave}
+                  className="pill-btn pill-primary sm:col-span-2 justify-self-center"
+                >
+                  Save trip details
+                </button>
+              </div>
+            </div>
+          )}
           
           <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mt-4">
             <button
-              type="button"
-              onClick={handleAddDay}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-3xl text-sm font-medium transition-all"
-              style={{
-                color: 'var(--ink)',
-                backgroundColor: 'var(--bg-elevated)',
-                border: '1px solid var(--border)'
+              onClick={() => {
+                const nextEditingMode = !isEditingMode;
+                if (nextEditingMode) {
+                  setEditedDescription(customItinerary.description);
+                  setEditedCities(customItinerary.cities.join(', '));
+                  setEditedMarqueeItems((customItinerary.marqueeItems || ['Travel Handbook', 'Plans', 'Notes', 'Maps', 'Photos']).join(', '));
+                }
+                setIsEditingMode(nextEditingMode);
               }}
-            >
-              <Plus className="w-4 h-4" />
-              Add day
-            </button>
-            <button
-              onClick={() => setIsEditingMode(!isEditingMode)}
               className={clsx(
                 "w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-3xl text-sm font-medium transition-all",
                 isEditingMode 
@@ -1865,7 +1883,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               )}
             >
               {isEditingMode ? <Save className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
-              {isEditingMode ? labels.doneCustomizing : labels.customizePlan}
+              {isEditingMode ? 'Done Customizing' : 'Customize Plan'}
             </button>
             
             {isEditingMode && (
@@ -1874,7 +1892,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-3xl text-sm font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 transition-all"
               >
                 <RefreshCw className="w-4 h-4" />
-                {labels.resetPlan}
+                Reset
               </button>
             )}
           </div>
@@ -1943,12 +1961,12 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                               <div className="flex items-center gap-1.5">
                                 <input
                                   autoFocus
-                                  type="date"
+                                  type="text"
                                   value={editedDate}
                                   onChange={(e) => setEditedDate(e.target.value)}
                                   onKeyDown={(e) => e.key === 'Enter' && handleDateEdit(index)}
-                                  aria-label={`Choose date for day ${day.day}`}
-                                  className="editorial-input is-compact w-32 md:w-36" style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em' }}
+                                  placeholder="e.g. Apr 23"
+                                  className="editorial-input is-compact w-16 md:w-24" style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}
                                 />
                                 <button 
                                   onClick={() => handleDateEdit(index)}
@@ -1965,7 +1983,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                                 )}
                                 onClick={() => {
                                   if (isEditingMode) {
-                                    setEditedDate(toDateInputValue(day.date));
+                                    setEditedDate(day.date);
                                     setEditingDateIndex(index);
                                   }
                                 }}
@@ -2034,7 +2052,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                             )}
                             <div className="text-[11px] md:text-xs bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg group-hover:bg-rose-50 dark:group-hover:bg-rose-900/30 group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors shrink-0 flex items-center gap-1.5">
                               <Utensils className="w-3 h-3" />
-                              {day.activities.length} {labels.spotsSuffix}
+                              {day.activities.length} spots
                             </div>
                           </div>
 
@@ -2066,7 +2084,22 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   }
 
   if (!currentDay) {
-    return null;
+    return (
+      <div className="space-y-4 rounded-3xl border p-6 text-center" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }}>
+        <div className="text-sm font-medium" style={{ color: 'var(--ink-muted)' }}>
+          This day is no longer available. Returning to the overview keeps the itinerary safe.
+        </div>
+        <div className="flex justify-center">
+          <button
+            onClick={() => setSelectedDay(null)}
+            className="px-4 py-2 rounded-3xl text-sm font-medium"
+            style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+          >
+            Back to Overview
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -2077,7 +2110,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           onClick={() => setSelectedDay(null)}
           className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-medium px-4 py-2 rounded-3xl hover:bg-white dark:hover:bg-slate-800"
         >
-          <ChevronLeft className="w-5 h-5" /> {labels.backToOverview}
+          <ChevronLeft className="w-5 h-5" /> Back to Overview
         </button>
 
         <div className="flex items-center gap-2">
@@ -2091,7 +2124,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           )}
         >
           {isEditingMode ? <Save className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
-          <span className="hidden sm:inline">{isEditingMode ? labels.doneCustomizing : labels.customizePlan}</span>
+          <span className="hidden sm:inline">{isEditingMode ? 'Done' : 'Customize'}</span>
         </button>
 
         <button
@@ -2099,7 +2132,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           className="flex items-center gap-2 px-3 md:px-4 py-2 rounded-3xl text-sm font-medium bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-500/50 hover:text-rose-500 transition-all"
         >
           <ImageIcon className="w-4 h-4" />
-          <span className="hidden sm:inline">{labels.photosButton}</span>
+          <span className="hidden sm:inline">Photos</span>
           {dayPhotos[selectedDay!] && dayPhotos[selectedDay!].length > 0 && (
             <span className="w-5 h-5 rounded-full bg-rose-500 text-white text-xs flex items-center justify-center">
               {dayPhotos[selectedDay!].length}
@@ -2128,8 +2161,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="font-bold text-slate-800 dark:text-slate-100">Food Ideas</h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Collect inspiration for dishes and places you may want to try.</p>
+                  <h3 className="font-bold text-slate-800 dark:text-slate-100">Must-Try Food Picker</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Chooses China-first sources first, then falls back only if needed.</p>
                 </div>
                 <button
                   type="button"
@@ -2249,7 +2282,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 w-full px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-xs font-bold text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
                     >
-                      View source ideas
+                      🔴 View on Rednote / 小红书
                     </a>
                   </div>
                 </div>
@@ -2282,21 +2315,19 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             className={clsx(
               "w-24 md:w-32 p-2 md:p-3 rounded-3xl border transition-all text-center group relative overflow-hidden",
               selectedDay === day.day
-                ? "shadow-lg scale-105"
-                : "hover:-translate-y-0.5"
+                ? "bg-slate-900 dark:bg-rose-600 text-white border-slate-900 dark:border-rose-600 shadow-lg scale-105"
+                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-rose-200 dark:hover:border-rose-500/50 hover:-translate-y-0.5"
             )}
-            style={{
-              backgroundColor: selectedDay === day.day ? 'var(--bg-elevated)' : 'color-mix(in srgb, var(--bg-elevated) 72%, var(--bg))',
-              borderColor: selectedDay === day.day ? 'var(--accent)' : 'var(--border)',
-              color: 'var(--ink)',
-              boxShadow: selectedDay === day.day ? '0 12px 30px -18px color-mix(in srgb, var(--accent) 65%, transparent)' : undefined,
-            }}
           >
             <div className={clsx("text-[10px] md:text-xs font-bold uppercase tracking-wider mb-0.5 md:mb-1 opacity-70")}>
               {day.date}
             </div>
             <div className="font-extrabold text-base md:text-xl mb-0.5 md:mb-1">
-              <span style={{ color: 'var(--accent)' }}>{labels.dayLabel}</span> {day.day}
+              <span className={clsx(
+                selectedDay === day.day 
+                  ? "text-rose-400 dark:text-white" 
+                  : "text-rose-400"
+              )}>Day</span> {day.day}
             </div>
             <div className="text-[10px] md:text-xs truncate font-medium opacity-80">
               {day.city}
@@ -2319,16 +2350,15 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           <div
             className="p-5 md:p-8 rounded-3xl shadow-sm border relative overflow-hidden"
             style={{
-              background: 'linear-gradient(135deg, var(--bg-elevated), color-mix(in srgb, var(--bg) 82%, var(--bg-elevated)))',
+              background: 'linear-gradient(135deg, var(--bg-elevated) 0%, color-mix(in srgb, var(--bg) 70%, var(--bg-elevated)) 100%)',
               borderColor: 'var(--border)',
-              color: 'var(--ink)',
             }}
           >
             <div className="absolute top-0 right-0 p-4 md:p-8 opacity-5 pointer-events-none">
               <MapPin className="w-20 h-20 md:w-32 md:h-32 text-slate-900 dark:text-white" />
             </div>
             <div className="relative z-10">
-              <div className="text-[10px] md:text-xs font-bold text-rose-500 uppercase tracking-widest mb-1 md:mb-2">{labels.currentLocationLabel}</div>
+              <div className="text-[10px] md:text-xs font-bold text-rose-500 uppercase tracking-widest mb-1 md:mb-2">Current Location</div>
               
               {isEditingMode && isTitleEditing ? (
                 <div className="flex items-center gap-2 mb-2 md:mb-3">
@@ -2375,7 +2405,13 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           </div>
 
           {routeRealityChecks.length > 0 && (
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 p-4 md:p-5 space-y-2">
+            <div
+              className="rounded-3xl border p-4 md:p-5 space-y-2"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                borderColor: 'var(--border)',
+              }}
+            >
               <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100">
                 <div className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800">
                   <Train className="w-4 h-4 text-rose-500" />
@@ -2387,12 +2423,16 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 {routeRealityChecks.map((check, index) => (
                   <div
                     key={`${check.fromName}-${check.toName}-${index}`}
-                    className={clsx(
-                      "rounded-2xl border px-3 py-2 text-xs md:text-sm",
-                      check.isWarning
-                        ? "border-amber-300 bg-amber-50/70 dark:border-amber-700 dark:bg-amber-900/20"
-                        : "border-slate-200 bg-slate-50/70 dark:border-slate-700 dark:bg-slate-800/60"
-                    )}
+                    className={clsx("rounded-2xl border px-3 py-2 text-xs md:text-sm")}
+                    style={check.isWarning
+                      ? {
+                          borderColor: 'color-mix(in srgb, var(--warn) 40%, var(--border))',
+                          backgroundColor: 'color-mix(in srgb, var(--warn) 10%, var(--bg-elevated))',
+                        }
+                      : {
+                          borderColor: 'var(--border)',
+                          backgroundColor: 'color-mix(in srgb, var(--bg) 70%, var(--bg-elevated))',
+                        }}
                   >
                     <div className="font-semibold text-slate-700 dark:text-slate-200">
                       {check.fromName} → {check.toName}
@@ -2432,9 +2472,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 <ActivityItem 
                   activity={activity} 
                   isEditing={isEditingMode && editingActivityIndex === originalIndex}
-                  onEdit={(updated) => handleUpdateActivity(currentDayIndex, originalIndex, updated)}
-                  onDelete={() => handleDeleteActivity(currentDayIndex, originalIndex)}
-                  settings={settings}
+                  onEdit={(updated) => handleUpdateActivity(currentDay.day, originalIndex, updated)}
+                  onDelete={() => handleDeleteActivity(currentDay.day, originalIndex)}
                 />
                 
                 {isEditingMode && editingActivityIndex !== originalIndex && (
@@ -2450,7 +2489,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
 
             {isEditingMode && (
               <button
-                onClick={() => handleAddActivity(currentDayIndex)}
+                onClick={() => handleAddActivity(currentDay.day)}
                 className="w-full py-4 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-3xl flex items-center justify-center gap-2 text-slate-400 dark:text-slate-500 hover:border-rose-300 hover:text-rose-500 transition-all"
               >
                 <Plus className="w-5 h-5" />
@@ -2465,18 +2504,17 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
+            <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-950/70"
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
               onClick={() => setShowAddModal(false)}
             />
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 12 }}
-              transition={{ duration: 0.18 }}
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl p-6 relative z-10 border border-slate-100 dark:border-slate-800"
             >
               <button 
@@ -2605,7 +2643,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Category</label>
                   <div className="relative">
-                    <ThemedSelect
+                    <select
                       value={newActivity.type}
                       onChange={(e) => setNewActivity({...newActivity, type: e.target.value as ActivityType})}
                       className="editorial-select w-full"
@@ -2613,7 +2651,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                       {ICON_OPTIONS.map(opt => (
                         <option key={opt.id} value={opt.id}>{opt.label}</option>
                       ))}
-                    </ThemedSelect>
+                    </select>
                   </div>
                 </div>
 
@@ -2634,7 +2672,11 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                       href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(newActivity.name + ' ' + (newActivity.location || ''))}`}
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-colors"
+                      style={{
+                        backgroundColor: 'var(--bg)',
+                        color: 'var(--accent)',
+                      }}
                     >
                       <ExternalLink className="w-3.5 h-3.5" /> Preview Map
                     </a>

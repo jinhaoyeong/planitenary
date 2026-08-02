@@ -1,95 +1,73 @@
-# Travel Handbook
+# React + TypeScript + Vite
 
-A mobile-first travel handbook app built with React, TypeScript, Vite, and Capacitor.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-The handbook-style experience is restored, but the seeded personal trip content has been removed. The app now starts with a blank editable trip so you can build your own itinerary from scratch.
+Currently, two official plugins are available:
 
-## Stack
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-- React + TypeScript
-- Vite + PWA support
-- Tailwind CSS v4
-- Framer Motion
-- Capacitor for native iOS and Android packaging
+## React Compiler
 
-## Local development
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-```bash
-npm install
-npm run dev
+## Expanding the ESLint configuration
+
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+
+```js
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+
+      // Remove tseslint.configs.recommended and replace with this
+      tseslint.configs.recommendedTypeChecked,
+      // Alternatively, use this for stricter rules
+      tseslint.configs.strictTypeChecked,
+      // Optionally, add this for stylistic rules
+      tseslint.configs.stylisticTypeChecked,
+
+      // Other configs...
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
 ```
 
-## Production web build
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 
-```bash
-npm run build
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+      // Enable lint rules for React
+      reactX.configs['recommended-typescript'],
+      // Enable lint rules for React DOM
+      reactDom.configs.recommended,
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
 ```
-
-## Vercel deployment
-
-Import the GitHub repository into Vercel. The included `vercel.json` uses the Vite build command, publishes `dist`, and rewrites client-side routes to `index.html`.
-
-Add these variables in Vercel Project Settings → Environment Variables:
-
-```text
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
-VITE_SUPABASE_AUTH_REDIRECT_URL
-```
-
-Use `.env.example` as the variable-name reference. Never commit `.env.local`, Supabase service-role keys, build output, dependencies, or `.vercel` state.
-
-In Supabase Authentication → URL Configuration, add the Vercel production URL to the redirect allow list.
-
-### Account security (2FA)
-
-In the Supabase dashboard:
-
-1. Enable Multi-factor authentication (TOTP) under Authentication → MFA / Multi-factor.
-2. Optionally enable password, email, and phone change notification emails under Authentication → Emails.
-
-In the app, cloud accounts are required to enroll an authenticator after sign-in (Demo Mode skips this). Sign-in then requires a 6-digit TOTP code, and password / email / phone changes require the current password plus that code.
-
-Enabling TOTP in the Supabase dashboard only turns the feature on for the project — each user still enrolls from the app setup screen.
-
-### Password recovery
-
-Forgot-password requests first call the `check-user-email` Supabase Edge Function. The function uses `SUPABASE_SERVICE_ROLE_KEY` only on the server to confirm that the email belongs to an Auth user; the key is never exposed to the browser. The reset email is sent only when the lookup returns `exists: true`.
-
-Deploy it from the repository root:
-
-```bash
-supabase functions deploy check-user-email --no-verify-jwt
-```
-
-The function runtime provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Keep the service-role key out of all `VITE_*` variables and frontend code.
-
-The branded recovery email is in `supabase/templates/recovery.html`. For a hosted Supabase project, copy it into Authentication → Email Templates → Reset Password and use the subject `Reset your Travel Handbook password`. Local Supabase CLI runs use `supabase/config.toml`.
-
-## Native mobile setup
-
-Install dependencies first:
-
-```bash
-npm install
-```
-
-Sync the web build into Capacitor:
-
-```bash
-npm run cap:sync
-```
-
-Open the native projects:
-
-```bash
-npm run cap:ios
-npm run cap:android
-```
-
-## Before publishing
-
-- Change `appId` and `appName` in `capacitor.config.ts`
-- Replace the placeholder app icons in `public/`
-- Customize the handbook screens in `src/App.tsx`
-- Review permissions, splash screens, and store metadata in Xcode and Android Studio

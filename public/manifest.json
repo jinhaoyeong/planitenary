@@ -1,7 +1,7 @@
 {
   "name": "Travel Handbook",
-  "short_name": "Handbook",
-  "description": "A customizable travel handbook app that starts with a blank trip",
+  "short_name": "Travel Handbook",
+  "description": "Custom travel handbook for our China 2026 trip",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

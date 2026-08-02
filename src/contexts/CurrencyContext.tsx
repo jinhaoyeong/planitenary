@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { Currency, ExchangeRates } from '../lib/currency';
-import { SUPPORTED_CURRENCIES, createInitialRates, fetchExchangeRates, formatCurrency, convertCurrency } from '../lib/currency';
+import { fetchExchangeRates, formatCurrency, convertCurrency } from '../lib/currency';
 import { useAuth } from './AuthContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
@@ -18,6 +18,8 @@ interface CurrencyContextType {
 const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined);
 
 const CURRENCY_STORAGE_KEY = 'selected-currency';
+const SUPPORTED_CURRENCIES: Array<{ code: Currency }> = [{ code: 'MYR' }, { code: 'CNY' }];
+const createInitialRates = (): ExchangeRates => ({ MYR: 1, CNY: 1.51, lastUpdated: 0, isLoading: true });
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
@@ -70,7 +72,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshRates = async () => {
-    const newRates = await fetchExchangeRates(true);
+    const newRates = await fetchExchangeRates();
     setRates(newRates);
   };
 

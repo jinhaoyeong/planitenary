@@ -17,6 +17,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { SkeletonCard } from './ui/Skeleton';
+import { useAuth } from '../contexts/AuthContext';
+import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 
 const BUCKET = 'trip-documents';
 
@@ -29,12 +31,27 @@ export interface TripDocumentRow {
   mime_type: string;
   created_at: string;
   updated_at: string;
+  trip_id?: string | null;
 }
 
 function publicUrlForPath(path: string): string {
+  if (path.startsWith('data:') || path.startsWith('blob:') || path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
+
+const readLocalFile = (file: File): Promise<ParsedFile> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve({
+    path: typeof reader.result === 'string' ? reader.result : '',
+    name: file.name,
+    type: file.type || 'application/octet-stream',
+  });
+  reader.onerror = () => reject(reader.error ?? new Error(`Could not read ${file.name}.`));
+  reader.readAsDataURL(file);
+});
 
 function isImageMime(mime: string): boolean {
   return mime.startsWith('image/');
@@ -86,7 +103,8 @@ export function parseDocumentData(row: TripDocumentRow): DocumentData {
   return { category, files };
 }
 
-export const Documents = () => {
+export const Documents = ({ itineraryId = 'default' }: { itineraryId?: string }) => {
+  const { user, isDemoUser, isLocalTestUser } = useAuth();
   const [rows, setRows] = useState<TripDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -109,7 +127,10 @@ export const Documents = () => {
   // Custom categories added during this session that aren't yet saved to DB
   const [sessionCategories, setSessionCategories] = useState<string[]>([]);
 
-  const configured = isSupabaseConfigured();
+  const localMode = isDemoUser || isLocalTestUser;
+  const configured = isSupabaseConfigured() && Boolean(user) && !localMode;
+  const canUseDocuments = configured || localMode;
+  const localStorageKey = `documents-${isDemoUser ? 'demo' : user?.id ?? 'local'}-${itineraryId}`;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -138,6 +159,12 @@ export const Documents = () => {
   }, [rows]);
 
   const fetchRows = useCallback(async () => {
+    if (localMode) {
+      setRows(loadFromStorage<TripDocumentRow[]>(localStorageKey) || []);
+      setLoading(false);
+      setFetchError(null);
+      return;
+    }
     if (!configured) {
       setLoading(false);
       return;
@@ -146,6 +173,8 @@ export const Documents = () => {
     const { data, error } = await supabase
       .from('trip_documents')
       .select('*')
+      .eq('user_id', user!.id)
+      .eq('trip_id', itineraryId)
       .order('created_at', { ascending: false });
     if (error) {
       console.error(error);
@@ -155,7 +184,7 @@ export const Documents = () => {
       setRows((data as TripDocumentRow[]) || []);
     }
     setLoading(false);
-  }, [configured]);
+  }, [configured, localMode, localStorageKey]);
 
   useEffect(() => {
     void fetchRows();
@@ -208,17 +237,19 @@ export const Documents = () => {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!configured || !title.trim()) return;
+    if (!canUseDocuments || !title.trim()) return;
     
     setSaving(true);
     try {
       const uploadedFiles: ParsedFile[] = [];
 
-      // If new files were selected, upload them
-      if (files.length > 0) {
+      // Demo/local accounts keep attachments on this device as data URLs.
+      if (localMode && files.length > 0) {
+        uploadedFiles.push(...await Promise.all(files.map(readLocalFile)));
+      } else if (files.length > 0) {
         for (const file of files) {
           const safeName = file.name.replace(/[^\w.-]/g, '_').slice(0, 120) || 'attachment';
-          const path = `${crypto.randomUUID()}/${safeName}`;
+          const path = `${user?.id}/${crypto.randomUUID()}/${safeName}`;
 
           const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
             cacheControl: '3600',
@@ -258,9 +289,27 @@ export const Documents = () => {
         setSessionCategories(prev => [...prev, newCategoryName.trim()]);
       }
 
-      if (editingRow) {
+      const nextRow: TripDocumentRow = {
+        id: editingRow?.id ?? crypto.randomUUID(),
+        title: title.trim(),
+        description: description.trim(),
+        storage_path: JSON.stringify(docData),
+        file_name: finalFiles.length === 1 ? finalFiles[0].name : (finalFiles.length === 0 || !finalFiles[0].path ? 'No files' : `${finalFiles.length} files`),
+        mime_type: finalFiles.length === 1 ? finalFiles[0].type : 'application/json',
+        created_at: editingRow?.created_at ?? new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      if (localMode) {
+        const nextRows = editingRow
+          ? rows.map(row => row.id === editingRow.id ? nextRow : row)
+          : [nextRow, ...rows];
+        saveToStorage(localStorageKey, nextRows);
+        setRows(nextRows);
+      } else if (editingRow) {
         const { error: updErr } = await supabase.from('trip_documents')
-          .update({
+        .update({
+            trip_id: itineraryId,
             title: title.trim(),
             description: description.trim(),
             storage_path: JSON.stringify(docData),
@@ -268,7 +317,9 @@ export const Documents = () => {
             mime_type: finalFiles.length === 1 ? finalFiles[0].type : 'application/json',
             updated_at: new Date().toISOString(),
           })
-          .eq('id', editingRow.id);
+          .eq('id', editingRow.id)
+          .eq('user_id', user!.id)
+          .eq('trip_id', itineraryId);
 
         if (updErr) {
           window.alert(updErr.message || 'Could not update document.');
@@ -286,6 +337,8 @@ export const Documents = () => {
 
       } else {
         const { error: insErr } = await supabase.from('trip_documents').insert({
+          user_id: user?.id,
+          trip_id: itineraryId,
           title: title.trim(),
           description: description.trim(),
           storage_path: JSON.stringify(docData),
@@ -311,23 +364,34 @@ export const Documents = () => {
   };
 
   const handleDelete = async (row: TripDocumentRow) => {
-    if (!configured) return;
-    const ok = window.confirm(`Remove “${row.title}” for everyone?`);
+    if (!canUseDocuments) return;
+    const ok = window.confirm(`${localMode ? 'Remove' : 'Remove for everyone'} “${row.title}”?`);
     if (!ok) return;
     setDeletingId(row.id);
     try {
-      const parsedFiles = parseDocumentData(row).files;
-      if (parsedFiles.length > 0 && parsedFiles[0].path) {
-        await supabase.storage.from(BUCKET).remove(parsedFiles.map(f => f.path));
-      }
-      
-      const { error } = await supabase.from('trip_documents').delete().eq('id', row.id);
-      if (error) {
-        window.alert(error.message || 'Delete failed.');
-        return;
+      if (localMode) {
+        const nextRows = rows.filter(item => item.id !== row.id);
+        saveToStorage(localStorageKey, nextRows);
+        setRows(nextRows);
+      } else {
+        const parsedFiles = parseDocumentData(row).files;
+        if (parsedFiles.length > 0 && parsedFiles[0].path) {
+          await supabase.storage.from(BUCKET).remove(parsedFiles.map(f => f.path));
+        }
+
+        const { error } = await supabase
+          .from('trip_documents')
+          .delete()
+          .eq('id', row.id)
+          .eq('user_id', user!.id)
+          .eq('trip_id', itineraryId);
+        if (error) {
+          window.alert(error.message || 'Delete failed.');
+          return;
+        }
+        await fetchRows();
       }
       setViewer((v) => (v?.row.id === row.id ? null : v));
-      await fetchRows();
     } finally {
       setDeletingId(null);
     }
@@ -380,7 +444,7 @@ export const Documents = () => {
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Hotel booking, rail pass, visa copy"
+            placeholder="e.g. Train tickets — city to city"
             className="w-full rounded-xl px-3 py-3 text-base border outline-none focus:ring-2 transition-shadow"
             style={{
               backgroundColor: 'var(--bg)',
@@ -400,7 +464,7 @@ export const Documents = () => {
                 autoFocus
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="e.g. Planning, Tickets, Hotel"
+                placeholder="e.g. Visas, Itinerary..."
                 className="w-full rounded-xl px-3 py-3 text-base border outline-none focus:ring-2 transition-shadow"
                 style={{
                   backgroundColor: 'var(--bg)',
@@ -611,7 +675,7 @@ export const Documents = () => {
     </motion.form>
   );
 
-  if (!configured) {
+  if (!canUseDocuments) {
     return (
       <div className="max-w-2xl mx-auto px-1">
         <div
@@ -625,7 +689,7 @@ export const Documents = () => {
                 Documents
               </h2>
               <p className="mt-2 text-sm md:text-base leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                Add your Supabase URL and anon key in <code className="text-xs">.env</code>, then run{' '}
+                Add your Supabase URL and anon key in <code className="text-xs">.env.local</code>, then run{' '}
                 <code className="text-xs">supabase_documents.sql</code> in the Supabase SQL editor to
                 create the table, bucket, and sync rules. After that, PDFs and images you upload here
                 stay in sync for both of you.
@@ -641,7 +705,7 @@ export const Documents = () => {
     <div className="max-w-3xl mx-auto px-1 pb-8">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
         <div>
-          <span className="eyebrow">Shared with both of you</span>
+          <span className="eyebrow">{localMode ? 'Saved on this device' : 'Shared with both of you'}</span>
           <h2 className="mt-2 font-display text-3xl md:text-4xl" style={{ color: 'var(--ink)' }}>
             Documents
           </h2>

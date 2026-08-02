@@ -1,6 +1,24 @@
 -- Enable the UUID extension
 create extension if not exists "uuid-ossp";
 
+-- Photo metadata used by the current app.
+create table if not exists public.day_photos (
+  id text primary key,
+  itinerary_id text not null,
+  day_number integer not null,
+  caption text,
+  storage_path text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  user_id uuid references auth.users on delete cascade
+);
+alter table public.day_photos add column if not exists user_id uuid references auth.users on delete cascade;
+alter table public.day_photos enable row level security;
+drop policy if exists "Users can only access their own day photos" on public.day_photos;
+create policy "Users can only access their own day photos" on public.day_photos
+  for all to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
 -- Create itineraries table
 create table if not exists public.itineraries (
   id text primary key,

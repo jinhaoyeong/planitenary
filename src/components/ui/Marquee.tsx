@@ -1,33 +1,57 @@
+import {
+  motion,
+  useScroll,
+  useTransform,
+  useVelocity,
+  useSpring,
+  useReducedMotion,
+} from 'framer-motion';
+
 interface Props {
   items: string[];
   separator?: string;
+  onItemChange?: (index: number, value: string) => void;
 }
 
-export const Marquee = ({ items, separator = '✦' }: Props) => {
-  const safeItems = items.map((item) => item.trim()).filter(Boolean).slice(0, 16);
-  // Four copies keep the -50% loop seamless without the DOM cost of the old ten-copy track.
-  const multiplied = Array.from({ length: 4 }).flatMap(() => safeItems);
+export const Marquee = ({ items, separator = '✦', onItemChange }: Props) => {
+  // Triple the items to ensure there is always enough content to scroll infinitely without gap
+  const tripled = [...items, ...items, ...items];
+  const reduce = useReducedMotion();
 
-  if (safeItems.length === 0) return null;
+  const { scrollY } = useScroll();
+  const scrollVelocity = useVelocity(scrollY);
+  const smoothVelocity = useSpring(scrollVelocity, { damping: 50, stiffness: 400 });
+  const skew = useTransform(smoothVelocity, [-1500, 0, 1500], [-5, 0, 5]);
+
+  if (!items || items.length === 0) return null;
 
   return (
     <div
-      className="marquee-strip relative w-full overflow-hidden bg-[color:var(--bg)]"
+      className="relative w-full overflow-hidden border-y bg-[color:var(--bg)] py-4"
+      style={{ borderColor: 'var(--ink)' }}
     >
-      <span className="sr-only">Travel Handbook highlights: {safeItems.join(', ')}</span>
-      <div className="marquee-scroll">
-        <div className="marquee-track flex whitespace-nowrap w-max" aria-hidden="true">
-          {multiplied.map((item, idx) => (
+      <motion.div
+        className="will-change-transform"
+        style={reduce ? undefined : { skewX: skew }}
+      >
+        <div className="flex whitespace-nowrap animate-marquee w-max">
+          {tripled.map((item, idx) => (
             <span
               key={idx}
-              className="marquee-item inline-flex items-center font-display text-[color:var(--ink)]"
+              className="inline-flex items-center gap-6 px-6 font-display text-2xl sm:text-3xl md:text-4xl text-[color:var(--ink)]"
             >
-              <span className="marquee-label">{item}</span>
-              <span aria-hidden="true" className="marquee-separator text-[color:var(--accent)]">{separator}</span>
+              <span
+                contentEditable={Boolean(onItemChange)}
+                suppressContentEditableWarning
+                className={onItemChange ? 'cursor-text rounded px-1 outline-none focus:bg-white/10' : undefined}
+                onBlur={onItemChange ? (event) => onItemChange(idx % items.length, event.currentTarget.textContent || '') : undefined}
+                title={onItemChange ? 'Click to edit' : undefined}
+              >{item}</span>
+              <span className="text-[color:var(--accent)]">{separator}</span>
             </span>
           ))}
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };

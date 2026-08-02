@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { Itinerary, Activity, ActivityType } from '../data';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, Plus, Calendar, Clock, Tag, X, Save, ExternalLink } from 'lucide-react';
-import { ThemedSelect } from './ui/ThemedSelect';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -427,7 +426,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
       return filteredLocations[0].coords;
     }
     // Default to first city in itinerary if no locations found
-    return cityCenters[itinerary.cities[0]] || [35.8617, 104.1954];
+    return cityCenters[itinerary.cities[0]] || [20, 0];
   }, [filteredLocations, itinerary]);
 
   return (
@@ -452,7 +451,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search for places to add (e.g. 'City Museum')..."
+            placeholder="Search for places to add (e.g. 'City museum')..."
             className="editorial-input" style={{ paddingLeft: '3rem', paddingRight: '1rem' }}
           />
           <Search className="absolute left-4 top-3.5 w-5 h-5 text-slate-400" />
@@ -571,7 +570,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
       >
         <MapContainer 
           center={mapCenter} 
-          zoom={13} 
+          zoom={filteredLocations.length > 0 || itinerary.cities.length > 0 ? 13 : 2}
           scrollWheelZoom={false} 
           style={{ height: "100%", width: "100%" }}
         >
@@ -714,7 +713,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Category</label>
-                    <ThemedSelect
+                    <select
                       value={editActivity.type}
                       onChange={(e) => setEditActivity({ ...editActivity, type: e.target.value as ActivityType })}
                       className="editorial-select"
@@ -727,7 +726,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                       <option value="nightlife">Nightlife</option>
                       <option value="cafe">Cafe</option>
                       <option value="other">Other</option>
-                    </ThemedSelect>
+                    </select>
                   </div>
                 </div>
 
@@ -852,7 +851,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Select Day</label>
                     <div className="relative">
-                      <ThemedSelect
+                      <select
                         value={selectedDay}
                         onChange={(e) => setSelectedDay(Number(e.target.value))}
                         className="editorial-select"
@@ -860,7 +859,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                         {itinerary.days.map(day => (
                           <option key={day.day} value={day.day}>Day {day.day} - {day.city}</option>
                         ))}
-                      </ThemedSelect>
+                      </select>
                       <Calendar className="absolute right-3 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
                     </div>
                   </div>
@@ -882,7 +881,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Category</label>
                   <div className="relative">
-                    <ThemedSelect
+                    <select
                       value={newActivity.type}
                       onChange={(e) => setNewActivity({...newActivity, type: e.target.value as ActivityType})}
                       className="editorial-select"
@@ -895,7 +894,7 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
                       <option value="nightlife">Nightlife</option>
                       <option value="cafe">Cafe</option>
                       <option value="other">Other</option>
-                    </ThemedSelect>
+                    </select>
                     <Tag className="absolute right-3 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
                   </div>
                 </div>

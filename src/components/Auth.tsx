@@ -26,6 +26,10 @@ const getAuthErrorMessage = (err: AuthError | null | undefined) => {
     return 'Connection failed. Restart the dev server after editing `.env`, then try again.';
   }
 
+  if (code === 'otp_expired' || message.toLowerCase().includes('link is invalid or has expired')) {
+    return 'This reset link has expired or was already used. Enter your email and choose Forgot password to request a new link.';
+  }
+
   if (code === 'over_email_send_rate_limit' || message.toLowerCase().includes('rate limit')) {
     return 'Too many signup emails were requested. Wait a few minutes, or use a different email while testing.';
   }
@@ -56,6 +60,7 @@ export const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState<string | null>(null);
   const [localFallbackMessage, setLocalFallbackMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -92,6 +97,7 @@ export const Auth = () => {
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
+    setPendingConfirmationEmail(null);
     setLocalFallbackMessage(null);
     setLoading(true);
 
@@ -146,8 +152,14 @@ export const Auth = () => {
           },
         });
         if (error) throw error;
+        if (!data.user) {
+          throw new Error('Supabase did not return a user for this signup request. Please try again.');
+        }
         if (data.user && !data.session) {
-          setSuccessMessage('Account created. Check your inbox to verify your email, then come back here to sign in.');
+          setPendingConfirmationEmail(email.trim().toLowerCase());
+          setSuccessMessage('Signup request accepted. If this email already has an account, use Sign in. Otherwise, check your inbox or use Resend verification email.');
+        } else if (data.session) {
+          setSuccessMessage('Account created and signed in.');
         }
       }
     } catch (err: unknown) {
@@ -169,6 +181,27 @@ export const Auth = () => {
     }
   };
 
+  const handleResendConfirmation = async () => {
+    if (!pendingConfirmationEmail || !supabaseReady) return;
+    setError(null);
+    setSuccessMessage(null);
+    setLoading(true);
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email: pendingConfirmationEmail,
+        options: { emailRedirectTo: getAuthRedirectUrl() },
+      });
+      if (resendError) throw resendError;
+      setSuccessMessage('A new verification email was requested. Check spam or promotions if it does not appear shortly.');
+    } catch (err: unknown) {
+      const authError = err && typeof err === 'object' ? (err as AuthError) : null;
+      setError(getAuthErrorMessage(authError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleForgotPassword = async () => {
     setError(null);
     setSuccessMessage(null);
@@ -184,26 +217,19 @@ export const Auth = () => {
     }
     setLoading(true);
     try {
-      const { data: lookup, error: lookupError } = await supabase.functions.invoke('check-user-email', {
-        body: { email: normalizedEmail },
-      });
-
-      if (lookupError) throw lookupError;
-      if (!lookup?.exists) {
-        setError('No account was found for this email. Please enter a real account email and try again.');
-        return;
-      }
-
+      // Supabase intentionally returns a neutral response here. Avoid a client-side
+      // account-existence lookup: it can fail independently and creates an
+      // unnecessary user-enumeration surface before recovery even starts.
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
         redirectTo: getAuthRedirectUrl(),
       });
       if (resetError) throw resetError;
-      setSuccessMessage('Password reset email sent. Follow the link to choose a new password.');
+      setSuccessMessage('If an account uses this email, a password reset link is on its way. Check your inbox and spam folder, then open the link once on this device.');
     } catch (err: unknown) {
       const authError = err && typeof err === 'object' ? (err as AuthError) : null;
       setError(
-        authError?.message?.toLowerCase().includes('function') || authError?.message?.toLowerCase().includes('failed to fetch')
-          ? 'Password recovery is not available yet. Please contact support or try again later.'
+        authError?.message?.toLowerCase().includes('failed to fetch')
+          ? 'Connection failed. Check your network and try requesting a new reset link.'
           : getAuthErrorMessage(authError),
       );
     } finally {
@@ -313,7 +339,19 @@ export const Auth = () => {
             {successMessage && (
               <div role="status" className="p-4 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--accent)] text-[color:var(--ink)] text-sm flex items-start gap-3">
                 <CheckCircle2 className="w-5 h-5 shrink-0 text-[color:var(--accent)]" />
-                <span>{successMessage}</span>
+                <div className="space-y-3">
+                  <span className="block">{successMessage}</span>
+                  {pendingConfirmationEmail && (
+                    <button
+                      type="button"
+                      onClick={() => void handleResendConfirmation()}
+                      disabled={loading}
+                      className="auth-submit inline-flex min-h-0 rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-60"
+                    >
+                      {loading ? 'Sending...' : 'Resend verification email'}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -410,6 +448,7 @@ export const Auth = () => {
                 setIsLogin(!isLogin);
                 setError(null);
                 setSuccessMessage(null);
+                setPendingConfirmationEmail(null);
                 setLocalFallbackMessage(null);
               }}
               className="font-bold text-rose-500 hover:text-rose-600 transition-colors"

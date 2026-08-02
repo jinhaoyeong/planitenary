@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Plus, CheckSquare, Square, Trash2, RefreshCw, Package, ClipboardList, CalendarDays, Layers, Edit2, Save, X } from 'lucide-react';
-import { ThemedSelect } from './ui/ThemedSelect';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -27,20 +26,83 @@ const CategoryIcon = ({ category, className }: { category: Category | 'All', cla
   }
 };
 
-const initialItems: ChecklistItem[] = [];
+const initialItems: ChecklistItem[] = [
+  { id: 'pre-1', text: 'China visa / entry requirements confirmed', category: 'Pre-trip', completed: false },
+  { id: 'pre-2', text: 'Passport valid for 6+ months', category: 'Pre-trip', completed: false },
+  { id: 'pre-3', text: 'Passport scan + printed copies packed separately', category: 'Pre-trip', completed: false },
+  { id: 'pre-4', text: 'Travel insurance purchased (policy saved offline)', category: 'Pre-trip', completed: false },
+  { id: 'pre-5', text: 'Flights booked + itinerary saved offline', category: 'Pre-trip', completed: false },
+  { id: 'pre-6', text: 'Hotel bookings confirmed (address in Chinese saved)', category: 'Pre-trip', completed: false },
+  { id: 'pre-7', text: 'Bank notified + cards enabled for overseas use', category: 'Pre-trip', completed: false },
+  { id: 'pre-8', text: 'RMB cash plan (small notes for backup)', category: 'Pre-trip', completed: false },
+  { id: 'pre-9', text: 'Alipay set up + card linked', category: 'Pre-trip', completed: false },
+  { id: 'pre-10', text: 'WeChat installed + WeChat Pay set up', category: 'Pre-trip', completed: false },
+  { id: 'pre-11', text: 'Didi installed for rides', category: 'Pre-trip', completed: false },
+  { id: 'pre-12', text: 'Amap installed + offline maps downloaded', category: 'Pre-trip', completed: false },
+  { id: 'pre-13', text: 'MetroMan installed for subway planning', category: 'Pre-trip', completed: false },
+  { id: 'pre-14', text: 'Translation tool installed (offline packs if available)', category: 'Pre-trip', completed: false },
+  { id: 'pre-15', text: 'Pleco installed (offline dictionary)', category: 'Pre-trip', completed: false },
+  { id: 'pre-16', text: 'Trip.com installed (hotels/tickets)', category: 'Pre-trip', completed: false },
+  { id: 'pre-17', text: 'Train planning set (12306 / tickets / ID details)', category: 'Pre-trip', completed: false },
+  { id: 'pre-18', text: 'Connectivity plan ready (eSIM / SIM / roaming)', category: 'Pre-trip', completed: false },
+  { id: 'pre-19', text: 'Plan for Great Firewall (VPN/roaming/offline access)', category: 'Pre-trip', completed: false },
+  { id: 'pre-20', text: 'Emergency contacts + embassy info saved offline', category: 'Pre-trip', completed: false },
+  { id: 'pre-21', text: 'First-night plan ready (arrival transport + check-in time)', category: 'Pre-trip', completed: false },
 
-export const Checklist = () => {
+  { id: 'pack-1', text: 'Passport + visa packed (easy access)', category: 'Packing', completed: false },
+  { id: 'pack-2', text: 'Wallet setup: cards + some cash + spare card stored separately', category: 'Packing', completed: false },
+  { id: 'pack-3', text: 'Phone charger + backup cable', category: 'Packing', completed: false },
+  { id: 'pack-4', text: 'Power bank (carry-on) + charging cable', category: 'Packing', completed: false },
+  { id: 'pack-5', text: 'Universal adapter (Type A/C/I) + multi-port USB', category: 'Packing', completed: false },
+  { id: 'pack-6', text: 'Comfortable walking shoes', category: 'Packing', completed: false },
+  { id: 'pack-7', text: 'Light rain jacket / umbrella', category: 'Packing', completed: false },
+  { id: 'pack-8', text: 'Sunscreen + hat / sunglasses', category: 'Packing', completed: false },
+  { id: 'pack-9', text: 'Basic meds (pain relief, stomach, allergy)', category: 'Packing', completed: false },
+  { id: 'pack-10', text: 'Prescription meds + prescription note', category: 'Packing', completed: false },
+  { id: 'pack-11', text: 'Tissues + wet wipes + hand sanitizer', category: 'Packing', completed: false },
+  { id: 'pack-12', text: 'Reusable water bottle', category: 'Packing', completed: false },
+  { id: 'pack-13', text: 'Deodorant / toiletries (harder to find some brands)', category: 'Packing', completed: false },
+  { id: 'pack-14', text: 'Small day bag + comfortable outfit for flights', category: 'Packing', completed: false },
+  { id: 'pack-15', text: 'Earplugs / sleep mask (hotels + trains)', category: 'Packing', completed: false },
+  { id: 'pack-16', text: 'Spare passport photo (useful for SIM/permits)', category: 'Packing', completed: false },
+
+  { id: 'day-1', text: 'Carry hotel name/address in Chinese (screenshot)', category: 'Daily', completed: false },
+  { id: 'day-2', text: 'Carry passport (or keep it safely stored if not needed)', category: 'Daily', completed: false },
+  { id: 'day-3', text: 'Check weather + AQI', category: 'Daily', completed: false },
+  { id: 'day-4', text: 'Charge devices overnight', category: 'Daily', completed: false },
+  { id: 'day-5', text: 'Top up / confirm Alipay & WeChat Pay working', category: 'Daily', completed: false },
+  { id: 'day-6', text: 'Bring tissues + hand sanitizer', category: 'Daily', completed: false },
+  { id: 'day-7', text: 'Screenshot tickets/reservations (attractions, trains)', category: 'Daily', completed: false },
+  { id: 'day-8', text: 'Plan the first/last metro ride (service end time)', category: 'Daily', completed: false },
+  { id: 'day-9', text: 'Hydrate + carry a small snack', category: 'Daily', completed: false },
+  { id: 'day-10', text: 'Back up photos/videos (cloud or external)', category: 'Daily', completed: false },
+];
+
+const genericInitialItems: ChecklistItem[] = [
+  { id: 'pre-1', text: 'Confirm travel documents and entry requirements', category: 'Pre-trip', completed: false },
+  { id: 'pre-2', text: 'Save bookings and important addresses offline', category: 'Pre-trip', completed: false },
+  { id: 'pre-3', text: 'Review transport and accommodation details', category: 'Pre-trip', completed: false },
+  { id: 'pre-4', text: 'Set a budget and payment plan', category: 'Pre-trip', completed: false },
+  { id: 'pack-1', text: 'Pack chargers, adapters, and backup power', category: 'Packing', completed: false },
+  { id: 'pack-2', text: 'Pack comfortable shoes and weather layers', category: 'Packing', completed: false },
+  { id: 'pack-3', text: 'Pack medication and everyday essentials', category: 'Packing', completed: false },
+  { id: 'day-1', text: 'Check today’s weather and opening hours', category: 'Daily', completed: false },
+  { id: 'day-2', text: 'Keep today’s tickets and directions accessible', category: 'Daily', completed: false },
+  { id: 'day-3', text: 'Back up photos and review tomorrow’s plan', category: 'Daily', completed: false },
+];
+
+export const Checklist = ({ itineraryId = 'default' }: { itineraryId?: string }) => {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
-  const cloudEnabled = Boolean(user?.id && isSupabaseConfigured() && !isDemoUser && !isLocalTestUser);
-  const checklistCloudId = user?.id ? `default-${user.id}` : 'default-local';
-  const checklistStorageKey = user?.id ? `checklist-data-${user.id}` : 'checklist-data';
-  const [items, setItems] = useState<ChecklistItem[]>(initialItems);
+  const defaultItems = useMemo(() => isDemoUser ? initialItems : genericInitialItems, [isDemoUser]);
+  const [items, setItems] = useState<ChecklistItem[]>(defaultItems);
   const [activeCategory, setActiveCategory] = useState<Category | 'All'>('All');
   const [newItemText, setNewItemText] = useState('');
   const [newItemCategory, setNewItemCategory] = useState<Category>('Packing');
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [editingCategory, setEditingCategory] = useState<Category>('Packing');
+  const checklistId = `checklist-${itineraryId}`;
+  const checklistStorageKey = `checklist-data-${itineraryId}`;
   const checklistSyncReadyRef = useRef(false);
   const hasLocalChecklistRef = useRef(false);
 
@@ -49,19 +111,20 @@ export const Checklist = () => {
     checklistSyncReadyRef.current = false;
     hasLocalChecklistRef.current = false;
     // 1. Try local storage first for instant load
-    const saved = loadFromStorage<ChecklistItem[]>(checklistStorageKey) || loadFromStorage<ChecklistItem[]>('checklist-data');
+    const saved = loadFromStorage<ChecklistItem[]>(checklistStorageKey);
     if (saved) {
       setItems(saved);
       hasLocalChecklistRef.current = true;
     }
 
     // 2. Sync with Supabase if configured
-    if (cloudEnabled) {
+    if (isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser) {
       const fetchChecklist = async () => {
         const { data, error } = await supabase
           .from('checklists')
           .select('data')
-          .eq('id', checklistCloudId)
+          .eq('user_id', user.id)
+          .eq('id', checklistId)
           .single();
 
         if (data && data.data) {
@@ -85,8 +148,8 @@ export const Checklist = () => {
 
       // Real-time subscription
       const subscription = supabase
-        .channel(`checklists-${checklistCloudId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'checklists', filter: `id=eq.${checklistCloudId}` }, (payload) => {
+        .channel(`checklists-${checklistId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'checklists', filter: `id=eq.${checklistId}` }, (payload) => {
           const nextPayload = payload.new as { data?: ChecklistItem[] } | null;
           if (nextPayload?.data) {
             const newData = nextPayload.data;
@@ -107,22 +170,22 @@ export const Checklist = () => {
       };
     }
     checklistSyncReadyRef.current = true;
-  }, [checklistCloudId, checklistStorageKey, cloudEnabled]);
+  }, [user?.id, isDemoUser, isLocalTestUser, checklistId, checklistStorageKey]);
 
   // Save changes to Supabase/LocalStorage
   useEffect(() => {
     if (!checklistSyncReadyRef.current) return;
     // Save to local storage immediately
     saveToStorage(checklistStorageKey, items);
-    if (!hasLocalChecklistRef.current && JSON.stringify(items) === JSON.stringify(initialItems)) return;
+    if (!hasLocalChecklistRef.current && JSON.stringify(items) === JSON.stringify(defaultItems)) return;
     hasLocalChecklistRef.current = true;
 
     // Sync to Supabase with debounce
-    if (cloudEnabled) {
+    if (isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser) {
       const syncToSupabase = async () => {
         const { error } = await supabase
           .from('checklists')
-          .upsert({ id: checklistCloudId, user_id: user?.id, data: items, updated_at: new Date().toISOString() });
+          .upsert({ id: checklistId, user_id: user.id, data: items, updated_at: new Date().toISOString() });
         
         if (error) console.error('Error syncing checklist:', error);
       };
@@ -130,7 +193,7 @@ export const Checklist = () => {
       const timeoutId = setTimeout(syncToSupabase, 1000);
       return () => clearTimeout(timeoutId);
     }
-  }, [items, checklistCloudId, checklistStorageKey, cloudEnabled, user?.id]);
+  }, [items, user?.id, isDemoUser, isLocalTestUser, checklistId, checklistStorageKey, defaultItems]);
 
   const categories: (Category | 'All')[] = ['All', 'Packing', 'Pre-trip', 'Daily'];
 
@@ -232,7 +295,7 @@ export const Checklist = () => {
 
       {/* Controls */}
       <div className="bg-white dark:bg-slate-900 p-5 md:p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 space-y-6 transition-colors duration-300">
-        <div className="flex flex-col xl:flex-row justify-between gap-6">
+        <div className="flex flex-col md:flex-row justify-between gap-6">
           {/* Filters */}
           <div className="space-y-3">
             <label className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Filter by Category</label>
@@ -258,34 +321,32 @@ export const Checklist = () => {
           {/* Add Item */}
           <div className="space-y-3 flex-1">
              <label className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Add Custom Item</label>
-             <div className="grid grid-cols-[minmax(0,1fr)_3rem] sm:grid-cols-[minmax(0,1fr)_10rem_3rem] gap-2 min-w-0">
+             <div className="flex flex-col sm:flex-row gap-2 min-w-0">
                <input 
                  type="text" 
                  value={newItemText}
                  onChange={(e) => setNewItemText(e.target.value)}
                  onKeyDown={(e) => e.key === 'Enter' && addItem()}
                  placeholder="Add new checklist item..."
-                 aria-label="New checklist item"
-                 className="editorial-input col-span-2 sm:col-span-1 min-w-0"
+                 className="editorial-input flex-1 min-w-0"
                />
-                 <ThemedSelect
+               <div className="flex gap-2">
+                 <select
                    value={newItemCategory}
                    onChange={(e) => setNewItemCategory(e.target.value as Category)}
-                   aria-label="Checklist item category"
-                   className="is-compact min-w-0 !w-full"
+                   className="editorial-input flex-1 sm:flex-none"
                  >
                    <option value="Packing">Packing</option>
                    <option value="Pre-trip">Pre-trip</option>
                    <option value="Daily">Daily</option>
-                 </ThemedSelect>
+                 </select>
                  <button 
-                   type="button"
                    onClick={addItem}
-                   className="h-12 w-full sm:w-12 shrink-0 inline-flex items-center justify-center bg-emerald-500 dark:bg-emerald-600 text-white rounded-3xl hover:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors"
-                   aria-label="Add checklist item"
+                   className="p-2.5 bg-emerald-500 dark:bg-emerald-600 text-white rounded-3xl hover:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors"
                  >
                    <Plus className="w-5 h-5" />
                  </button>
+               </div>
              </div>
           </div>
         </div>
@@ -348,7 +409,7 @@ export const Checklist = () => {
                       onChange={(e) => setEditingText(e.target.value)}
                       className="editorial-input is-compact"
                     />
-                    <ThemedSelect
+                    <select
                       value={editingCategory}
                       onChange={(e) => setEditingCategory(e.target.value as Category)}
                       className="editorial-input is-compact"
@@ -356,7 +417,7 @@ export const Checklist = () => {
                       <option value="Packing">Packing</option>
                       <option value="Pre-trip">Pre-trip</option>
                       <option value="Daily">Daily</option>
-                    </ThemedSelect>
+                    </select>
                     <div className="flex gap-2">
                       <button
                         onClick={() => saveEditItem(item.id)}
@@ -421,7 +482,7 @@ export const Checklist = () => {
       
       {filteredItems.length === 0 && (
          <div className="text-center py-12">
-           <p className="text-slate-400 dark:text-slate-500">No checklist items yet. Add your first one to get started.</p>
+           <p className="text-slate-400 dark:text-slate-500">No items in this category.</p>
          </div>
       )}
     </div>

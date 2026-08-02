@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { ImagePlus, Save, Trash2, UserRound } from 'lucide-react';
+import { ImagePlus, Save, Trash2, UserRound, Edit3 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -28,7 +28,7 @@ const readFileAsDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
-export function ProfilePanel() {
+export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
   const [profile, setProfile] = useState<UserProfileData>(DEFAULT_PROFILE);
   const [isSaving, setIsSaving] = useState(false);
@@ -125,6 +125,15 @@ export function ProfilePanel() {
   return (
     <section className="w-full">
       <div className="editorial-card p-4 sm:p-5 md:p-8">
+        {onEditHomeHero && (
+          <div className="mb-6 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Home hero banner</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>Edit the banner copy, buttons, cover text, day badge, and marquee directly on the home view.</p>
+            </div>
+            <button type="button" onClick={onEditHomeHero} className="pill-btn pill-primary shrink-0 justify-center"><Edit3 className="w-4 h-4" /> Edit home hero</button>
+          </div>
+        )}
         <div className="flex flex-col sm:flex-row items-start sm:items-start justify-between gap-4">
           <div>
             <div className="eyebrow">Profile</div>

@@ -7,7 +7,6 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { CurrencyProvider } from './contexts/CurrencyContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { SmoothScroll } from './components/motion/SmoothScroll'
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>

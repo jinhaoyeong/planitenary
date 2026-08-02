@@ -6,9 +6,8 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 import { clsx } from 'clsx';
 import { useCurrency } from '../contexts/CurrencyContext';
-import { CurrencySelector, CompactCurrencySelector } from './CurrencySelector';
-import { getCurrencySymbol } from '../lib/currency';
 import { useAuth } from '../contexts/AuthContext';
+import { CurrencySelector, CompactCurrencySelector } from './CurrencySelector';
 
 interface BudgetItem {
   id: string;
@@ -34,7 +33,7 @@ export interface ExpenseRecord {
   description: string;
   amountMYR: number;
   amountCNY: number;
-  paidBy: 'Traveler 1' | 'Traveler 2';
+  paidBy: 'You' | 'Travel partner';
   category: BudgetCategoryKey | 'general';
   date: string;
 }
@@ -86,22 +85,31 @@ const createDefaultBudget = (
   }
 ): CustomBudget => ({
   flights: {
-    min: 0,
-    max: 0,
-    items: []
+    min: 1200,
+    max: 2000,
+    items: [
+      { id: 'def-flight-1', label: 'Round-trip transport', cost: 'Add estimate' },
+      { id: 'def-flight-2', label: 'Baggage & extras', cost: 'Add estimate' }
+    ]
   },
   accommodation: {
-    min: 0,
-    max: 0,
-    items: []
+    min: 1500,
+    max: 3000,
+    items: [
+      { id: 'def-acc-1', label: 'Average nightly rate', cost: 'Add estimate' },
+      { id: 'def-acc-2', label: 'Number of nights', cost: 'Add estimate' }
+    ]
   },
-  transportation: { min: transportMYR, max: transportMYR, items: costs.transport.details },
-  food: { min: foodMYR, max: foodMYR, items: costs.food.details },
-  activities: { min: activitiesMYR, max: activitiesMYR, items: costs.activities.details },
+  transportation: { min: transportMYR + 200, max: transportMYR + 500, items: costs.transport.details },
+  food: { min: foodMYR + 500, max: foodMYR + 1000, items: costs.food.details },
+  activities: { min: activitiesMYR, max: activitiesMYR + 300, items: costs.activities.details },
   misc: {
-    min: 0,
-    max: 0,
-    items: []
+    min: 500,
+    max: 1000,
+    items: [
+      { id: 'def-misc-1', label: 'eSIM / Roaming', cost: 'RM 80' },
+      { id: 'def-misc-2', label: 'Souvenirs', cost: 'RM 300' }
+    ]
   },
   expenses: []
 });
@@ -291,10 +299,9 @@ const BudgetCard = ({
 
 export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
-  const cloudEnabled = Boolean(user?.id && isSupabaseConfigured() && !isDemoUser && !isLocalTestUser);
   const [activeView, setActiveView] = React.useState<'budget' | 'expenses'>('budget');
-  const { currency, convert, toBase, rates } = useCurrency();
-  const currencySymbol = getCurrencySymbol(currency);
+  const { currency, convert, rates } = useCurrency();
+  const currencySymbol = currency === 'MYR' ? 'RM' : '¥';
   const [customBudget, setCustomBudget] = React.useState<CustomBudget>(createDefaultBudget(0, 0, 0, {
     transport: { details: [] },
     food: { details: [] },
@@ -325,7 +332,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
             const values = matches.map(parseFloat);
             // Cost in itinerary is in RMB
             const costInRMB = values.reduce((a, b) => a + b, 0) / values.length;
-            const costInMYR = toBase(costInRMB, 'CNY');
+            const costInMYR = convert(costInRMB, 'MYR');
 
             const item = { id: `auto-${day.day}-${i}`, label: activity.name, cost: activity.cost };
             if (activity.type === 'travel') {
@@ -348,7 +355,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       food: { total: foodCost, details: foodDetails },
       activities: { total: activityCost, details: activityDetails }
     };
-  }, [itinerary, toBase]);
+  }, [itinerary, convert]);
 
   const transportMYR = Math.ceil(costs.transport.total);
   const foodMYR = Math.ceil(costs.food.total);
@@ -378,11 +385,12 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       hasLocalBudgetRef.current = true;
     }
 
-    if (cloudEnabled) {
+    if (isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser) {
       const fetchBudget = async () => {
         const { data, error } = await supabase
           .from('budgets')
           .select('data, updated_at')
+          .eq('user_id', user.id)
           .eq('id', itinerary.id)
           .single();
 
@@ -448,7 +456,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
     setTimeout(() => {
       budgetSyncReadyRef.current = true;
     }, 100);
-  }, [itinerary.id, transportMYR, foodMYR, activitiesMYR, costs]); // Explicitly include dependencies
+  }, [itinerary.id, transportMYR, foodMYR, activitiesMYR, costs, user?.id, isDemoUser, isLocalTestUser]); // Explicitly include dependencies
 
   useEffect(() => {
     if (!budgetSyncReadyRef.current) return;
@@ -463,23 +471,23 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
     persistBudgetToStorage(itinerary.id, customBudget, updatedAt);
     hasLocalBudgetRef.current = true;
     
-    if (cloudEnabled) {
+    if (isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser) {
       const syncToSupabase = async () => {
         const { error } = await supabase
           .from('budgets')
-          .upsert({ id: itinerary.id, user_id: user?.id, data: customBudget, updated_at: updatedAt });
+          .upsert({ id: itinerary.id, user_id: user.id, data: customBudget, updated_at: updatedAt });
         
         if (error) console.error('Error syncing budget:', error);
       };
       const timeout = setTimeout(syncToSupabase, 1000);
       return () => clearTimeout(timeout);
     }
-  }, [customBudget, itinerary.id, cloudEnabled, user?.id]);
+  }, [customBudget, itinerary.id, user?.id, isDemoUser, isLocalTestUser]);
 
   const updateRange = (category: BudgetCategoryKey, type: 'min' | 'max', value: string) => {
     const numValue = parseInt(value) || 0;
     // Convert from selected currency back to MYR for storage
-    const valueInMYR = Math.round(toBase(numValue));
+    const valueInMYR = currency === 'CNY' ? Math.round(numValue / rates.CNY) : numValue;
     setCustomBudget(prev => ({
       ...prev,
       [category]: {
@@ -505,7 +513,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const [expenseDraft, setExpenseDraft] = React.useState<Partial<ExpenseRecord>>({
     description: '',
     amountMYR: 0,
-    paidBy: 'Traveler 1',
+    paidBy: 'You',
     category: 'general',
   });
   
@@ -516,8 +524,8 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       id: Date.now().toString(),
       description: expenseDraft.description,
       amountMYR: expenseDraft.amountMYR,
-      amountCNY: expenseDraft.amountMYR * rates.values.CNY,
-      paidBy: expenseDraft.paidBy as 'Traveler 1' | 'Traveler 2',
+      amountCNY: expenseDraft.amountMYR * rates.CNY,
+      paidBy: expenseDraft.paidBy as 'You' | 'Travel partner',
       category: expenseDraft.category as BudgetCategoryKey | 'general',
       date: new Date().toISOString(),
     };
@@ -531,7 +539,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
     setExpenseDraft({
       description: '',
       amountMYR: 0,
-      paidBy: 'Traveler 1',
+      paidBy: 'You',
       category: 'general',
     });
   };
@@ -545,7 +553,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
 
   const getExpensesTotal = () => {
     const expenses = customBudget.expenses || [];
-    return expenses.reduce((sum, expense) => sum + convert(expense.amountMYR, 'MYR'), 0);
+    return expenses.reduce((sum, e) => sum + (currency === 'CNY' ? e.amountCNY : e.amountMYR), 0);
   };
 
   const deleteCustomItem = (category: BudgetCategoryKey, id: string) => {
@@ -676,10 +684,12 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
           </h2>
           <p className="mt-5 max-w-2xl mx-auto text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
             {activeView === 'budget'
-              ? `Plan the budget for ${itinerary.cities.length > 0 ? itinerary.cities.join(' & ') : 'your trip'}.`
-              : 'Track expenses as your trip takes shape.'}
+              ? (itinerary.cities.length > 0
+                ? `A gentle estimate for ${itinerary.cities.join(' & ')}.`
+                : 'Add destinations to shape your first estimate.')
+              : "Real-time expense tracking while we're on the road."}
             <span className="block text-sm mt-1 font-display-italic">
-              shown in {currencySymbol} ({currency})
+              {currency === 'CNY' ? 'shown in ¥ (CNY)' : 'shown in RM (MYR)'}
             </span>
           </p>
 
@@ -755,15 +765,15 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
               {currencySymbol}{convert(totalMax, 'MYR').toLocaleString()}
             </div>
             <div className="text-base md:text-lg mt-6 mb-8" style={{ color: 'var(--ink-muted)' }}>
-              A flexible budget range based on the current handbook details.
+              A flexible range that adapts as you add destinations and plans.
             </div>
 
             <div className="flex flex-col sm:flex-row justify-center gap-3 md:gap-4 text-xs md:text-sm font-medium">
               <span className="bg-slate-50 dark:bg-slate-800 px-3 md:px-4 py-1.5 rounded-xl flex items-center justify-center gap-2 border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300">
-                <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" /> {itinerary.days.length} Day{itinerary.days.length === 1 ? '' : 's'}
+                <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" /> {itinerary.days.length} {itinerary.days.length === 1 ? 'Day' : 'Days'}
               </span>
               <span className="bg-slate-50 dark:bg-slate-800 px-3 md:px-4 py-1.5 rounded-xl flex items-center justify-center gap-2 border-2 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300">
-                <CreditCard className="w-4 h-4 text-slate-400 dark:text-slate-500" /> Editable starter
+                <CreditCard className="w-4 h-4 text-slate-400 dark:text-slate-500" /> Mid-range Comfort
               </span>
             </div>
           </div>
@@ -821,7 +831,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                   <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                     <div className="text-right">
                       <div className="font-bold text-slate-900 dark:text-white text-sm sm:text-base">
-                        {currencySymbol} {convert(expense.amountMYR, 'MYR').toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {currencySymbol} {(currency === 'CNY' ? expense.amountCNY : expense.amountMYR).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </div>
                     <button 
@@ -854,7 +864,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
           <BudgetCard
             title="Flights"
             range={`${currencySymbol} ${convert(flightsRange.min, 'MYR').toLocaleString()} - ${currencySymbol} ${convert(flightsRange.max, 'MYR').toLocaleString()}`}
-            description="Add your expected flights or leave this empty until plans are confirmed."
+            description="Add your own transport estimate and adjust it as your plans become clearer."
             icon={Plane}
             color="text-slate-900"
             percentage={35}
@@ -877,7 +887,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
           <BudgetCard
             title="Accommodation"
             range={`${currencySymbol} ${convert(accommodationRange.min, 'MYR').toLocaleString()} - ${currencySymbol} ${convert(accommodationRange.max, 'MYR').toLocaleString()}`}
-            description="10 nights in 3-4 star hotels or premium Airbnbs. Approx RM 150-300 per night."
+            description="Add lodging estimates for hotels, rentals, or any other stay."
             icon={Hotel}
             color="text-slate-900"
             percentage={25}
@@ -900,7 +910,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
           <BudgetCard
             title="Transportation"
             range={`${currencySymbol} ${convert(transportationRange.min, 'MYR').toLocaleString()} - ${currencySymbol} ${convert(transportationRange.max, 'MYR').toLocaleString()}`}
-            description="Intercity high-speed trains, Metro, and Didi rides."
+            description="Add transfers, local transit, rides, or other transport costs."
             icon={Train}
             color="text-slate-900"
             percentage={15}
@@ -1084,7 +1094,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                   <input
                     value={expenseDraft.description || ''}
                     onChange={(e) => setExpenseDraft(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="e.g., Hotpot Dinner"
+            placeholder="e.g., Dinner reservation"
                     className="editorial-input"
                   />
                 </div>
@@ -1093,11 +1103,11 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                   <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Amount ({currencySymbol})</label>
                   <input
                     type="number"
-                    value={expenseDraft.amountMYR ? convert(expenseDraft.amountMYR, 'MYR') : ''}
+                    value={expenseDraft.amountMYR || ''}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       // If user is in CNY mode, convert input back to MYR for storage
-                      const amountMYR = toBase(val);
+                      const amountMYR = currency === 'CNY' ? val / rates.CNY : val;
                       setExpenseDraft(prev => ({ ...prev, amountMYR }));
                     }}
                     placeholder="0.00"

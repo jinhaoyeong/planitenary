@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ActivityType, Itinerary } from '../data';
 import { Plus, Link as LinkIcon, Trash2, CheckCircle2, Edit2, Save, X, ExternalLink, BookOpen, ImagePlus } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { ThemedSelect } from './ui/ThemedSelect';
+import { useAuth } from '../contexts/AuthContext';
 
 type DraftItem = {
   id: string;
@@ -116,7 +116,7 @@ const filesToDataUrls = async (fileList: FileList | null): Promise<string[]> => 
   return dataUrls.filter(Boolean);
 };
 
-const uploadScreenshotsToSupabase = async (fileList: FileList | null, itineraryId: string): Promise<string[]> => {
+const uploadScreenshotsToSupabase = async (fileList: FileList | null, itineraryId: string, userId?: string): Promise<string[]> => {
   if (!fileList || fileList.length === 0) return [];
   const selectedFiles = Array.from(fileList)
     .filter((file) => file.type.startsWith('image/'))
@@ -125,14 +125,14 @@ const uploadScreenshotsToSupabase = async (fileList: FileList | null, itineraryI
 
   if (selectedFiles.length === 0) return [];
 
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !userId) {
     return filesToDataUrls(fileList);
   }
 
   const uploadedUrls: string[] = [];
   for (const file of selectedFiles) {
     const extension = file.name.split('.').pop() || 'jpg';
-    const path = `${itineraryId}/${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}.${extension}`;
+    const path = `${userId}/${itineraryId}/${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}.${extension}`;
     const { error } = await supabase.storage.from(SCREENSHOT_BUCKET).upload(path, file, {
       upsert: false,
       contentType: file.type
@@ -159,6 +159,7 @@ export const Draft = ({
   itinerary: Itinerary;
   onItineraryChange?: (itinerary: Itinerary) => void;
 }) => {
+  const { user, isDemoUser, isLocalTestUser } = useAuth();
   const [name, setName] = useState('');
   const [link, setLink] = useState('');
   const [note, setNote] = useState('');
@@ -239,6 +240,7 @@ export const Draft = ({
     },
     updated_at: item.updatedAt || new Date().toISOString(),
     client_id: clientIdRef.current
+    ,user_id: user?.id
   });
 
   const fromDraftRecord = (record: { id: string; data: Record<string, unknown> | null; updated_at: string | null }): DraftItem => ({
@@ -263,7 +265,7 @@ export const Draft = ({
   });
 
   const upsertDraftRemote = async (item: DraftItem) => {
-    if (!isSupabaseConfigured() || !isDraftSyncAvailable) return;
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser || !isDraftSyncAvailable) return;
     const { error } = await supabase.from('draft_items').upsert(toDraftRecord(item));
     if (error) {
       if (error.code === '42P01' || error.code === '42703' || error.code === '42501') {
@@ -275,8 +277,13 @@ export const Draft = ({
   };
 
   const deleteDraftRemote = async (id: string) => {
-    if (!isSupabaseConfigured() || !isDraftSyncAvailable) return;
-    const { error } = await supabase.from('draft_items').delete().eq('id', id).eq('itinerary_id', itinerary.id);
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser || !isDraftSyncAvailable) return;
+    const { error } = await supabase
+      .from('draft_items')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .eq('itinerary_id', itinerary.id);
     if (error) {
       if (error.code === '42P01' || error.code === '42703' || error.code === '42501') {
         setIsDraftSyncAvailable(false);
@@ -287,7 +294,7 @@ export const Draft = ({
   };
 
   useEffect(() => {
-    if (!isSupabaseConfigured() || !isDraftSyncAvailable) return;
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser || !isDraftSyncAvailable) return;
 
     let active = true;
 
@@ -295,6 +302,7 @@ export const Draft = ({
       const { data, error } = await supabase
         .from('draft_items')
         .select('*')
+        .eq('user_id', user.id)
         .eq('itinerary_id', itinerary.id)
         .order('updated_at', { ascending: false });
 
@@ -358,10 +366,10 @@ export const Draft = ({
       clearInterval(pollId);
       channel.unsubscribe();
     };
-  }, [itinerary.id, isDraftSyncAvailable]);
+  }, [itinerary.id, isDraftSyncAvailable, user?.id, isDemoUser, isLocalTestUser]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured() || !useItineraryDraftStore) return;
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser || !useItineraryDraftStore) return;
     let active = true;
     fallbackHydratedRef.current = false;
 
@@ -369,6 +377,7 @@ export const Draft = ({
       const { data, error } = await supabase
         .from('itineraries')
         .select('data')
+        .eq('user_id', user.id)
         .eq('id', fallbackDraftStoreId)
         .single();
 
@@ -420,23 +429,23 @@ export const Draft = ({
       clearInterval(pollId);
       channel.unsubscribe();
     };
-  }, [fallbackDraftStoreId, itinerary.id, useItineraryDraftStore]);
+  }, [fallbackDraftStoreId, itinerary.id, useItineraryDraftStore, user?.id, isDemoUser, isLocalTestUser]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured() || !useItineraryDraftStore || !fallbackHydratedRef.current) return;
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser || !useItineraryDraftStore || !fallbackHydratedRef.current) return;
     const timeoutId = setTimeout(async () => {
       const payload = {
         items: drafts.map((item) => stripInlineMediaFromDraft(item))
       };
       const { error } = await supabase
         .from('itineraries')
-        .upsert({ id: fallbackDraftStoreId, data: payload, updated_at: new Date().toISOString() });
+        .upsert({ id: fallbackDraftStoreId, user_id: user.id, data: payload, updated_at: new Date().toISOString() });
       if (error) {
         console.error('Error syncing fallback drafts:', error);
       }
     }, 300);
     return () => clearTimeout(timeoutId);
-  }, [drafts, fallbackDraftStoreId, useItineraryDraftStore]);
+  }, [drafts, fallbackDraftStoreId, useItineraryDraftStore, user?.id, isDemoUser, isLocalTestUser]);
 
   const updateDraftPreview = async (id: string, linkValue: string) => {
     const normalized = toSafeHttpLink(linkValue);
@@ -594,14 +603,14 @@ export const Draft = ({
   };
 
   const addScreenshotsToNewDraft = async (fileList: FileList | null) => {
-    const uploadedUrls = await uploadScreenshotsToSupabase(fileList, itinerary.id);
+    const uploadedUrls = await uploadScreenshotsToSupabase(fileList, itinerary.id, user?.id);
     if (uploadedUrls.length === 0) return;
     setScreenshots((prev) => [...prev, ...uploadedUrls].slice(0, MAX_SCREENSHOTS));
   };
 
   const addScreenshotsToEditingDraft = async (fileList: FileList | null) => {
     if (!editingDraft) return;
-    const uploadedUrls = await uploadScreenshotsToSupabase(fileList, itinerary.id);
+    const uploadedUrls = await uploadScreenshotsToSupabase(fileList, itinerary.id, user?.id);
     if (uploadedUrls.length === 0) return;
     setEditingDraft((prev) => {
       if (!prev) return prev;
@@ -664,7 +673,7 @@ export const Draft = ({
           Scraps &amp; <span className="font-display-italic" style={{ color: 'var(--accent)' }}>shortlists.</span>
         </h2>
         <p className="max-w-2xl mx-auto text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-          A loose pile of places we spotted on Rednote, TikTok, and friends' maps. Pin, tag, and pull the good ones into the itinerary.
+          A loose pile of places you discover along the way. Pin, tag, and pull the good ones into the itinerary.
         </p>
       </div>
       <div className="editorial-card p-5 md:p-7 space-y-4">
@@ -679,10 +688,10 @@ export const Draft = ({
           <input
             value={link}
             onChange={(e) => setLink(e.target.value)}
-            placeholder="Link (Google Maps, TikTok, Rednote, etc.)"
+            placeholder="Link (Google Maps, website, social post, etc.)"
             className="editorial-input"
           />
-          <ThemedSelect
+          <select
             value={day}
             onChange={(e) => setDay(Number(e.target.value))}
             className="editorial-input"
@@ -692,17 +701,15 @@ export const Draft = ({
                 Day {plan.day} · {plan.city}
               </option>
             ))}
-          </ThemedSelect>
+          </select>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input
-              type="time"
               value={time}
               onChange={(e) => setTime(e.target.value)}
-              step={900}
-              aria-label="Draft time"
+              placeholder="Time (optional)"
               className="editorial-input"
             />
-            <ThemedSelect
+            <select
               value={type}
               onChange={(e) => setType(e.target.value as ActivityType)}
               className="editorial-input"
@@ -712,7 +719,7 @@ export const Draft = ({
                   {option.label}
                 </option>
               ))}
-            </ThemedSelect>
+            </select>
           </div>
         </div>
         <textarea
@@ -786,7 +793,7 @@ export const Draft = ({
                     placeholder="Link"
                     className="editorial-input"
                   />
-                  <ThemedSelect
+                  <select
                     value={editingDraft.day}
                     onChange={(e) => setEditingDraft((prev) => (prev ? { ...prev, day: Number(e.target.value) } : prev))}
                     className="editorial-input"
@@ -796,17 +803,15 @@ export const Draft = ({
                         Day {plan.day} · {plan.city}
                       </option>
                     ))}
-                  </ThemedSelect>
+                  </select>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <input
-                      type="time"
                       value={editingDraft.time}
                       onChange={(e) => setEditingDraft((prev) => (prev ? { ...prev, time: e.target.value } : prev))}
-                      step={900}
-                      aria-label="Draft time"
+                      placeholder="Time (optional)"
                       className="editorial-input"
                     />
-                    <ThemedSelect
+                    <select
                       value={editingDraft.type}
                       onChange={(e) => setEditingDraft((prev) => (prev ? { ...prev, type: e.target.value as ActivityType } : prev))}
                       className="editorial-input"
@@ -816,7 +821,7 @@ export const Draft = ({
                           {option.label}
                         </option>
                       ))}
-                    </ThemedSelect>
+                    </select>
                   </div>
                 </div>
                 <textarea

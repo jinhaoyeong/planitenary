@@ -61,6 +61,26 @@ const createLocalTestUser = (email: string): User =>
     user_metadata: { localTest: true },
   }) as User;
 
+export const hasAuthCallbackUrl = () => {
+  if (typeof window === 'undefined') return false;
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const queryParams = new URLSearchParams(window.location.search);
+  return Boolean(
+    hashParams.get('type') === 'recovery' ||
+    queryParams.get('type') === 'recovery' ||
+    hashParams.get('error') ||
+    queryParams.get('error') ||
+    hashParams.get('error_code') ||
+    queryParams.get('error_code') ||
+    hashParams.get('error_description') ||
+    queryParams.get('error_description') ||
+    hashParams.get('access_token') ||
+    queryParams.get('access_token') ||
+    hashParams.get('code') ||
+    queryParams.get('code'),
+  );
+};
+
 const hasPasswordRecoveryUrl = () => {
   if (typeof window === 'undefined') return false;
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -147,7 +167,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const hasDemoSession = localStorage.getItem(DEMO_STORAGE_KEY) === 'true';
-    if (hasDemoSession) {
+    const hasAuthCallback = hasAuthCallbackUrl();
+    if (hasDemoSession && !hasAuthCallback) {
       setSession(null);
       setUser(createDemoUser());
       setIsDemoUser(true);
@@ -160,7 +181,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV && !hasAuthCallback) {
       const localSessionEmail = localStorage.getItem(LOCAL_AUTH_SESSION_KEY);
       if (localSessionEmail) {
         setSession(null);

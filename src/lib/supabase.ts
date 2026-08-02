@@ -31,6 +31,13 @@ export const isSupabaseConfigured = () => {
   return hasSupabaseConfig;
 };
 
+export const getSupabaseUserId = async (): Promise<string | null> => {
+  if (!hasSupabaseConfig) return null;
+  const { data, error } = await supabase.auth.getUser();
+  if (error) return null;
+  return data.user?.id ?? null;
+};
+
 const trimRedirectUrl = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim().replace(/^['"]|['"]$/g, '');
   return trimmed || undefined;
@@ -76,5 +83,12 @@ const resolveRedirectUrl = (value: string | undefined, currentOrigin?: string): 
 export const getAuthRedirectUrl = (): string | undefined => {
   const currentOrigin =
     typeof window !== 'undefined' && window.location?.origin ? window.location.origin : undefined;
-  return resolveRedirectUrl(configuredAuthRedirectUrl, currentOrigin);
+  const configured = trimRedirectUrl(configuredAuthRedirectUrl);
+  const configuredIsLocalhost = Boolean(
+    configured && /^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(configured),
+  );
+  const currentIsDeployed = Boolean(
+    currentOrigin && !/^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?$/i.test(currentOrigin),
+  );
+  return resolveRedirectUrl(configuredIsLocalhost && currentIsDeployed ? currentOrigin : configured, currentOrigin);
 };

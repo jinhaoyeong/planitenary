@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { itineraries } from './data';
-import type { Itinerary, DayPhoto } from './data';
+import type { Itinerary, DayPhoto, Activity, ActivityType, DayPlan } from './data';
 import { ItineraryView } from './components/ItineraryView';
 import { Draft } from './components/Handbook';
 import { Budget } from './components/Budget';
@@ -8,39 +8,56 @@ import { Maps } from './components/Maps';
 import { Checklist } from './components/Checklist';
 import { Documents } from './components/Documents';
 import { PhotoWall } from './components/PhotoWall';
+import { ProfilePanel } from './components/ProfilePanel';
+import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
+import { Auth } from './components/Auth';
+import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, SlidersHorizontal, ChevronLeft, LogOut, UserRound, MoreHorizontal } from 'lucide-react';
-import { motion, AnimatePresence, animate, useScroll, useSpring, useReducedMotion } from 'framer-motion';
+import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, Shuffle, PawPrint, FileText, Image as ImageIcon, LogOut, LayoutDashboard, UserRound, Save } from 'lucide-react';
+import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
 import { GrainOverlay } from './components/motion/GrainOverlay';
 import { useTheme } from './contexts/ThemeContext';
+import { hasAuthCallbackUrl, useAuth } from './contexts/AuthContext';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { loadFromStorage, saveToStorage, writeRawToStorage, getRestorePreview, restoreSelectedTripData, createRestoreSnapshot, restoreLastSnapshot, upsertLocalTrip } from './lib/storageResilience';
+import { loadFromStorage, saveToStorage, writeRawToStorage, getRestorePreview, restoreSelectedTripData, createRestoreSnapshot, restoreLastSnapshot } from './lib/storageResilience';
 import type { RestoreDatasetId, RestoreDatasetPreview } from './lib/storageResilience';
 import { getAllPhotosForItinerary, restorePhotosForItinerary } from './lib/photoStorage';
 import { Marquee } from './components/ui/Marquee';
-import { ThemedSelect } from './components/ui/ThemedSelect';
+import { Pets } from './components/Pets';
 import { hapticMedium } from './lib/haptics';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
-import { useAuth } from './contexts/AuthContext';
-import { Auth } from './components/Auth';
-import { Dashboard } from './components/Dashboard';
-import { SettingsPanel } from './components/SettingsPanel';
-import { ProfilePanel } from './components/ProfilePanel';
-import { SecurityPanel } from './components/SecurityPanel';
-import { PasswordResetScreen } from './components/PasswordResetScreen';
-import { DEFAULT_TRIP_SETTINGS, applyTemplate, buildTripThemeStyle, getThemeForMode, mergeTripSettings } from './lib/tripSettings';
-import type { TripAppSettings } from './lib/tripSettings';
-import {
-  applyShellThemeToDocument,
-  loadShellTheme,
-  saveShellTheme,
-  shellThemeFromTripSettings,
-} from './lib/shellTheme';
-import type { ShellThemePalettes } from './lib/shellTheme';
+import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
+
+const heroImages = {
+  'cq-cd': cqCdHero
+};
+
+// Regular accounts start from a genuinely blank handbook. Demo Mode alone
+// receives the rich sample itinerary from data.ts.
+const emptyItinerary: Itinerary = {
+  id: 'pending-trip',
+  name: 'New Trip',
+  cities: [],
+  description: 'Start with a blank travel handbook and shape every day your way.',
+  marqueeItems: ['Travel Handbook', 'Plans', 'Notes', 'Maps', 'Photos'],
+  heroEyebrow: 'A personalized travel starter',
+  primaryButtonLabel: 'Open the itinerary',
+  primaryButtonTab: 'itinerary',
+  secondaryButtonLabel: 'See the map',
+  secondaryButtonTab: 'maps',
+  coverHeadline: 'Add a cover when your story takes shape.',
+  coverLabel: 'Custom cover',
+  coverYear: String(new Date().getFullYear()),
+  heroDayBadge: '0',
+  days: [],
+};
+
+const DEFAULT_MARQUEE_ITEMS = ['Travel Handbook', 'Plans', 'Notes', 'Maps', 'Photos'];
+const VALID_HOME_TABS = ['itinerary', 'maps', 'draft', 'budget', 'checklist', 'documents', 'photos', 'profile'] as const;
 
 interface CloudBackupSnapshot {
   kind: 'trip-backup-v1';
@@ -68,91 +85,126 @@ interface CloudBackupVersion {
   summaryText: string;
 }
 
-interface InlineEditableProps {
-  value: string;
-  onSave: (value: string) => void;
-  className?: string;
-  multiline?: boolean;
-  ariaLabel: string;
-}
+const VALID_ACTIVITY_TYPES: ActivityType[] = ['food', 'sight', 'culture', 'walk', 'nature', 'travel', 'flight', 'cafe', 'shop', 'nightlife', 'other'];
 
-function InlineEditable({ value, onSave, className, multiline = false, ariaLabel }: InlineEditableProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const lastTapRef = useRef(0);
-
-  useEffect(() => {
-    if (!isEditing) setDraft(value);
-  }, [value, isEditing]);
-
-  const beginEditing = () => {
-    setDraft(value);
-    setIsEditing(true);
-  };
-
-  const commit = () => {
-    const nextValue = draft.trim();
-    if (nextValue && nextValue !== value) onSave(nextValue);
-    setIsEditing(false);
-  };
-
-  const cancel = () => {
-    setDraft(value);
-    setIsEditing(false);
-  };
-
-  const handleTouchEnd = (event: React.TouchEvent<HTMLSpanElement>) => {
-    const now = Date.now();
-    if (now - lastTapRef.current < 350) {
-      event.preventDefault();
-      beginEditing();
-    }
-    lastTapRef.current = now;
-  };
-
-  if (isEditing) {
-    const sharedProps = {
-      autoFocus: true,
-      value: draft,
-      onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(event.target.value),
-      onBlur: commit,
-      onClick: (event: React.MouseEvent<HTMLInputElement | HTMLTextAreaElement>) => event.stopPropagation(),
-      onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        if (event.key === 'Escape') cancel();
-        if (event.key === 'Enter' && !multiline) commit();
-      },
-      'aria-label': ariaLabel,
-      className: clsx('inline-edit-control', className),
-    };
-
-    return multiline ? <textarea {...sharedProps} rows={3} /> : <input {...sharedProps} type="text" />;
+const normalizeStoredTime = (value: unknown, fallback = '09:00') => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return fallback;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return fallback;
   }
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
 
-  return (
-    <span
-      className={clsx('inline-editable', className)}
-      onDoubleClick={beginEditing}
-      onTouchEnd={handleTouchEnd}
-      onClick={(event) => event.stopPropagation()}
-      tabIndex={0}
-      title="Double-tap to edit"
-      aria-label={`${ariaLabel}. Double-tap to edit.`}
-    >
-      {value}
-    </span>
-  );
-}
+const sanitizeActivity = (value: unknown, fallback: Activity): Activity => {
+  const source = value && typeof value === 'object' ? value as Partial<Activity> : {};
+  const type = typeof source.type === 'string' && VALID_ACTIVITY_TYPES.includes(source.type as ActivityType)
+    ? source.type as ActivityType
+    : fallback.type;
+  const coordinates = Array.isArray(source.coordinates)
+    && source.coordinates.length === 2
+    && source.coordinates.every((coord) => typeof coord === 'number' && Number.isFinite(coord))
+      ? [source.coordinates[0], source.coordinates[1]] as [number, number]
+      : undefined;
+  const rating = typeof source.rating === 'number' && Number.isFinite(source.rating)
+    ? Math.max(0, Math.min(10, Math.round(source.rating)))
+    : undefined;
+  const moodVotes = source.moodVotes && typeof source.moodVotes === 'object'
+    ? {
+        ahhao: source.moodVotes.ahhao,
+        belle: source.moodVotes.belle,
+        comment: typeof source.moodVotes.comment === 'string' && source.moodVotes.comment.trim() ? source.moodVotes.comment.trim() : undefined,
+        commentBy: source.moodVotes.commentBy,
+      }
+    : undefined;
+  const voiceNote = source.voiceNote
+    && typeof source.voiceNote === 'object'
+    && typeof source.voiceNote.dataUrl === 'string'
+    && source.voiceNote.dataUrl
+    && typeof source.voiceNote.durationSec === 'number'
+    && Number.isFinite(source.voiceNote.durationSec)
+    && typeof source.voiceNote.createdAt === 'string'
+      ? {
+          dataUrl: source.voiceNote.dataUrl,
+          durationSec: Math.max(1, Math.min(300, Math.round(source.voiceNote.durationSec))),
+          createdAt: source.voiceNote.createdAt,
+        }
+      : undefined;
 
-const createStarterItinerary = (id: string): Itinerary => ({
-  ...itineraries[0],
-  id,
-  cities: [...itineraries[0].cities],
-  days: itineraries[0].days.map((day) => ({
-    ...day,
-    activities: [...day.activities],
-    photos: day.photos ? [...day.photos] : undefined,
-  })),
-});
+  return {
+    time: normalizeStoredTime(source.time, fallback.time),
+    name: typeof source.name === 'string' && source.name.trim() ? source.name.trim() : fallback.name,
+    description: typeof source.description === 'string' ? source.description : fallback.description,
+    type,
+    location: typeof source.location === 'string' ? source.location : undefined,
+    cost: typeof source.cost === 'string' ? source.cost : undefined,
+    rating,
+    coordinates,
+    moodVotes,
+    voiceNote,
+  };
+};
+
+const sanitizeDay = (value: unknown, fallback: DayPlan, index: number): DayPlan => {
+  const source = value && typeof value === 'object' ? value as Partial<DayPlan> : {};
+  const activityFallbacks = fallback.activities.length > 0
+    ? fallback.activities
+    : [{ time: '09:00', name: 'Untitled activity', description: '', type: 'other' as ActivityType }];
+  const sourceActivities = Array.isArray(source.activities) && source.activities.length > 0
+    ? source.activities
+    : activityFallbacks;
+
+  return {
+    day: index + 1,
+    date: typeof source.date === 'string' && source.date.trim() ? source.date : fallback.date,
+    city: typeof source.city === 'string' && source.city.trim() ? source.city : fallback.city,
+    title: typeof source.title === 'string' && source.title.trim() ? source.title : fallback.title,
+    activities: sourceActivities.map((activity, activityIndex) =>
+      sanitizeActivity(activity, activityFallbacks[activityIndex] || activityFallbacks[activityFallbacks.length - 1])
+    ),
+    photos: Array.isArray(source.photos) ? source.photos : fallback.photos,
+  };
+};
+
+const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
+  const source = value && typeof value === 'object' ? value as Partial<Itinerary> : {};
+  const sourceDays = Array.isArray(source.days) && source.days.length > 0 ? source.days : fallback.days;
+  const sanitizedDays = sourceDays.map((day, index) => sanitizeDay(day, fallback.days[index] || fallback.days[fallback.days.length - 1], index));
+  const sanitizedCities = Array.isArray(source.cities)
+    ? source.cities.filter((city): city is string => typeof city === 'string' && city.trim().length > 0)
+    : [];
+  const sanitizedMarqueeItems = Array.isArray(source.marqueeItems)
+    ? Array.from(new Set(source.marqueeItems.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())))
+    : undefined;
+  const primaryButtonTab = typeof source.primaryButtonTab === 'string' && VALID_HOME_TABS.includes(source.primaryButtonTab as typeof VALID_HOME_TABS[number])
+    ? source.primaryButtonTab as typeof VALID_HOME_TABS[number]
+    : fallback.primaryButtonTab || 'itinerary';
+  const secondaryButtonTab = typeof source.secondaryButtonTab === 'string' && VALID_HOME_TABS.includes(source.secondaryButtonTab as typeof VALID_HOME_TABS[number])
+    ? source.secondaryButtonTab as typeof VALID_HOME_TABS[number]
+    : fallback.secondaryButtonTab || 'maps';
+
+  return {
+    id: fallback.id,
+    name: typeof source.name === 'string' && source.name.trim() ? source.name : fallback.name,
+    description: typeof source.description === 'string' && source.description.trim() ? source.description : fallback.description,
+    marqueeItems: sanitizedMarqueeItems?.length ? sanitizedMarqueeItems : (fallback.marqueeItems || DEFAULT_MARQUEE_ITEMS),
+    heroEyebrow: typeof source.heroEyebrow === 'string' && source.heroEyebrow.trim() ? source.heroEyebrow.trim() : (fallback.heroEyebrow || 'A personalized travel starter'),
+    primaryButtonLabel: typeof source.primaryButtonLabel === 'string' && source.primaryButtonLabel.trim() ? source.primaryButtonLabel.trim() : (fallback.primaryButtonLabel || 'Open the itinerary'),
+    primaryButtonTab,
+    secondaryButtonLabel: typeof source.secondaryButtonLabel === 'string' && source.secondaryButtonLabel.trim() ? source.secondaryButtonLabel.trim() : (fallback.secondaryButtonLabel || 'See the map'),
+    secondaryButtonTab,
+    coverHeadline: typeof source.coverHeadline === 'string' && source.coverHeadline.trim() ? source.coverHeadline.trim() : (fallback.coverHeadline || 'Add a cover when your story takes shape.'),
+    coverLabel: typeof source.coverLabel === 'string' && source.coverLabel.trim() ? source.coverLabel.trim() : (fallback.coverLabel || 'Custom cover'),
+    coverYear: typeof source.coverYear === 'string' && source.coverYear.trim() ? source.coverYear.trim() : (fallback.coverYear || String(new Date().getFullYear())),
+    heroDayBadge: typeof source.heroDayBadge === 'string' && source.heroDayBadge.trim() ? source.heroDayBadge.trim() : (fallback.heroDayBadge || String(sanitizedDays.length)),
+    cities: sanitizedCities.length > 0 ? Array.from(new Set(sanitizedCities)) : Array.from(new Set(sanitizedDays.map((day) => day.city).filter(Boolean))),
+    days: sanitizedDays,
+  };
+};
 
 function App() {
   const {
@@ -165,11 +217,15 @@ function App() {
     isPasswordRecovery,
     signOut,
   } = useAuth();
-  const [activeItineraryId, setActiveItineraryId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'settings' | 'account'>('itinerary');
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(() => isDemoUser ? 'cq-cd' : null);
+  const activeItineraryId = isDemoUser ? 'cq-cd' : (selectedTripId ?? 'pending-trip');
+  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'profile'>('itinerary');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isUtilityMenuOpen, setIsUtilityMenuOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('hasVisited'));
+  const [showPets, setShowPets] = useState(() => {
+    const stored = localStorage.getItem('showPets');
+    return stored !== null ? stored === 'true' : true;
+  });
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [restorePreview, setRestorePreview] = useState<RestoreDatasetPreview[]>([]);
   const [selectedRestoreIds, setSelectedRestoreIds] = useState<RestoreDatasetId[]>([]);
@@ -181,68 +237,110 @@ function App() {
   const [isCloudBackupsLoading, setIsCloudBackupsLoading] = useState(false);
   const [isCloudBackupSaving, setIsCloudBackupSaving] = useState(false);
   const [isCloudBackupRestoring, setIsCloudBackupRestoring] = useState(false);
+  const [isHomeHeroEditing, setIsHomeHeroEditing] = useState(false);
+  const [heroDraft, setHeroDraft] = useState({
+    eyebrow: '', headline: '', description: '', marqueeItems: [] as string[],
+    primaryLabel: '', primaryTab: 'itinerary' as typeof activeTab,
+    secondaryLabel: '', secondaryTab: 'maps' as typeof activeTab,
+    coverHeadline: '', coverLabel: '', coverYear: '', dayBadge: '',
+  });
 
   const { theme, toggleTheme } = useTheme();
-  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
-    if (!isMenuOpen) return;
-    const handleMenuKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsMenuOpen(false);
-    };
-    window.addEventListener('keydown', handleMenuKeyDown);
-    return () => window.removeEventListener('keydown', handleMenuKeyDown);
-  }, [isMenuOpen]);
+    setSelectedTripId(isDemoUser ? 'cq-cd' : null);
+    setCustomItinerary(null);
+  }, [user?.id, isDemoUser]);
 
   const handleStart = () => {
     setShowWelcome(false);
     localStorage.setItem('hasVisited', 'true');
   };
 
+  const togglePets = () => {
+    setShowPets(prev => {
+      const next = !prev;
+      localStorage.setItem('showPets', next.toString());
+      return next;
+    });
+  };
+
   const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
-  const [tripSettings, setTripSettings] = useState<TripAppSettings>(DEFAULT_TRIP_SETTINGS);
-  const [shellTheme, setShellTheme] = useState<ShellThemePalettes>(() => loadShellTheme(null));
   const itinerarySyncReadyRef = useRef(false);
   const hasLocalItineraryRef = useRef(false);
   const remoteItineraryLoadedRef = useRef(false);
-  const settingsHydratedRef = useRef(false);
-  const settingsCloudReadyRef = useRef(false);
 
-  const activeItinerary = activeItineraryId ? itineraries.find((i) => i.id === activeItineraryId) ?? itineraries[0] : itineraries[0];
-  const displayItinerary = customItinerary || activeItinerary;
-
-  useEffect(() => {
-    document.title = displayItinerary.name || 'Travel Handbook';
-  }, [displayItinerary.name]);
-
-  // Load account shell theme (used by Dashboard and other outer pages).
-  useEffect(() => {
-    setShellTheme(loadShellTheme(user?.id));
-  }, [user?.id]);
-
-  // Keep document CSS variables in sync so outside pages react after Save.
-  useEffect(() => {
-    applyShellThemeToDocument(shellTheme, theme);
-  }, [shellTheme, theme]);
-
-  const persistShellTheme = useCallback(
-    (settings: TripAppSettings) => {
-      const palettes = shellThemeFromTripSettings(settings);
-      // Write both keys so Dashboard still resolves if auth id timing differs.
-      saveShellTheme(user?.id, palettes);
-      saveShellTheme(null, palettes);
-      setShellTheme(palettes);
-      applyShellThemeToDocument(palettes, theme);
-    },
-    [theme, user?.id],
+  const demoItinerary = itineraries.find((i) => i.id === activeItineraryId) ?? itineraries[0];
+  const activeItinerary = useMemo(
+    () => isDemoUser ? demoItinerary : { ...emptyItinerary, id: activeItineraryId },
+    [isDemoUser, demoItinerary, activeItineraryId],
   );
+  const displayItinerary = customItinerary || activeItinerary;
+  const itineraryStorageKey = isDemoUser
+    ? `itinerary-demo-${activeItineraryId}`
+    : `itinerary-${user?.id ?? 'account'}-${activeItineraryId}`;
+  const handleItineraryChange = (nextItinerary: Itinerary) => {
+    setCustomItinerary(sanitizeItinerary(nextItinerary, activeItinerary));
+  };
 
-  const returnToDashboard = useCallback(() => {
-    // Push the current trip's saved palette to the Dashboard shell before leaving.
-    persistShellTheme(tripSettings);
-    setActiveItineraryId(null);
-  }, [persistShellTheme, tripSettings]);
-  const settingsStorageKey = activeItineraryId ? `trip-settings-${activeItineraryId}` : '';
+  const commitHeroText = (field: keyof Itinerary, value: string) => {
+    if (!isHomeHeroEditing) return;
+    const draftField = field === 'name' ? 'headline' : field === 'heroEyebrow' ? 'eyebrow' : field === 'coverHeadline' ? 'coverHeadline' : field === 'coverLabel' ? 'coverLabel' : field === 'coverYear' ? 'coverYear' : field === 'heroDayBadge' ? 'dayBadge' : field === 'description' ? 'description' : field === 'primaryButtonLabel' ? 'primaryLabel' : field === 'secondaryButtonLabel' ? 'secondaryLabel' : null;
+    if (draftField) setHeroDraft((draft) => ({ ...draft, [draftField]: value }));
+  };
+
+  const commitMarqueeItem = (index: number, value: string) => {
+    if (!isHomeHeroEditing) return;
+    const items = [...heroDraft.marqueeItems];
+    items[index] = value.trim() || items[index];
+    setHeroDraft((draft) => ({ ...draft, marqueeItems: items }));
+  };
+
+  const beginHomeHeroEditing = () => {
+    setHeroDraft({
+      eyebrow: displayItinerary.heroEyebrow || 'A personalized travel starter',
+      headline: displayItinerary.name,
+      description: displayItinerary.description,
+      marqueeItems: [...(displayItinerary.marqueeItems || DEFAULT_MARQUEE_ITEMS)],
+      primaryLabel: displayItinerary.primaryButtonLabel || 'Open the itinerary',
+      primaryTab: displayItinerary.primaryButtonTab || 'itinerary',
+      secondaryLabel: displayItinerary.secondaryButtonLabel || 'See the map',
+      secondaryTab: displayItinerary.secondaryButtonTab || 'maps',
+      coverHeadline: displayItinerary.coverHeadline || 'Add a cover when your story takes shape.',
+      coverLabel: displayItinerary.coverLabel || 'Custom cover',
+      coverYear: displayItinerary.coverYear || String(new Date().getFullYear()),
+      dayBadge: String(displayItinerary.days.length),
+    });
+    setIsHomeHeroEditing(true);
+    setActiveTab('itinerary');
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0);
+  };
+
+  const saveHomeHero = () => {
+    const next = sanitizeItinerary({
+      ...displayItinerary,
+      name: heroDraft.headline,
+      description: heroDraft.description,
+      marqueeItems: heroDraft.marqueeItems,
+      heroEyebrow: heroDraft.eyebrow,
+      primaryButtonLabel: heroDraft.primaryLabel,
+      primaryButtonTab: heroDraft.primaryTab,
+      secondaryButtonLabel: heroDraft.secondaryLabel,
+      secondaryButtonTab: heroDraft.secondaryTab,
+      coverHeadline: heroDraft.coverHeadline,
+      coverLabel: heroDraft.coverLabel,
+      coverYear: heroDraft.coverYear,
+      heroDayBadge: heroDraft.dayBadge,
+    }, activeItinerary);
+    handleItineraryChange(next);
+    setIsHomeHeroEditing(false);
+  };
+
+
+  const handleOpenTrip = (trip: Itinerary) => {
+    setSelectedTripId(trip.id);
+    setCustomItinerary(trip);
+  };
 
   // Scroll-driven motion
   const { scrollYProgress: pageProgress } = useScroll();
@@ -251,104 +349,57 @@ function App() {
   // Pull-to-refresh — re-fetch itinerary from Supabase on mobile
   const { pulling, pullDistance, refreshing, progress: pullProgress } = usePullToRefresh({
     onRefresh: async () => {
-      if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser || !activeItineraryId) return;
+      if (!isSupabaseConfigured() || isDemoUser || !user) return;
+      if (!selectedTripId) return;
       const { data } = await supabase
         .from('itineraries')
         .select('data')
+        .eq('user_id', user.id)
         .eq('id', activeItineraryId)
         .single();
       if (data?.data) {
-        setCustomItinerary(data.data as Itinerary);
-        saveToStorage(`itinerary-${activeItineraryId}`, data.data);
+        const sanitized = sanitizeItinerary(data.data, activeItinerary);
+        setCustomItinerary(sanitized);
+        saveToStorage(itineraryStorageKey, sanitized);
       }
     },
   });
 
   useEffect(() => {
-    if (!activeItineraryId) return;
     itinerarySyncReadyRef.current = false;
     remoteItineraryLoadedRef.current = false;
     hasLocalItineraryRef.current = false;
-    const storageKey = `itinerary-${activeItineraryId}`;
+    const storageKey = itineraryStorageKey;
     try {
       const recovered = loadFromStorage<Itinerary>(storageKey);
       if (recovered) {
-        setCustomItinerary(recovered);
+        setCustomItinerary(sanitizeItinerary(recovered, activeItinerary));
         hasLocalItineraryRef.current = true;
+      } else if (isDemoUser) {
+        // Keep edits made before account-scoped storage was introduced.
+        const legacyDemoData = loadFromStorage<Itinerary>(`itinerary-${activeItineraryId}`);
+        if (legacyDemoData) {
+          setCustomItinerary(sanitizeItinerary(legacyDemoData, activeItinerary));
+          hasLocalItineraryRef.current = true;
+        } else {
+          setCustomItinerary(activeItinerary);
+        }
       } else {
-        setCustomItinerary(createStarterItinerary(activeItineraryId));
+        setCustomItinerary(activeItinerary);
       }
     } catch (e) {
       console.error("Failed to load itinerary", e);
-      setCustomItinerary(createStarterItinerary(activeItineraryId));
+      setCustomItinerary(activeItinerary);
     }
-  }, [activeItineraryId, activeItinerary]);
+  }, [activeItineraryId, activeItinerary, isDemoUser, itineraryStorageKey, selectedTripId]);
 
   useEffect(() => {
-    if (!settingsStorageKey) return;
-    const storedSettings = loadFromStorage<TripAppSettings>(settingsStorageKey);
-    setTripSettings(mergeTripSettings(storedSettings));
-    settingsHydratedRef.current = true;
-  }, [settingsStorageKey]);
-
-  useEffect(() => {
-    if (!settingsHydratedRef.current || !settingsStorageKey) return;
-    saveToStorage(settingsStorageKey, tripSettings);
-  }, [settingsStorageKey, tripSettings]);
-
-  useEffect(() => {
-    settingsCloudReadyRef.current = false;
-    if (!settingsStorageKey || !activeItineraryId || !user?.id) return;
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
-      settingsCloudReadyRef.current = true;
+    if (!isSupabaseConfigured() || isDemoUser || !user) {
+      itinerarySyncReadyRef.current = true;
+      remoteItineraryLoadedRef.current = true;
       return;
     }
-    let mounted = true;
-    const hydrateCloudSettings = async () => {
-      const { data, error } = await supabase
-        .from('trip_settings')
-        .select('data')
-        .eq('id', activeItineraryId)
-        .maybeSingle();
-      if (!mounted) return;
-      if (error) console.error('Failed to load cloud trip settings:', error);
-      if (data?.data) {
-        const cloudSettings = mergeTripSettings(data.data as Partial<TripAppSettings>);
-        setTripSettings(cloudSettings);
-        saveToStorage(settingsStorageKey, cloudSettings);
-      } else if (!error) {
-        const localSettings = mergeTripSettings(loadFromStorage<TripAppSettings>(settingsStorageKey));
-        const { error: saveError } = await supabase.from('trip_settings').upsert({
-          id: activeItineraryId,
-          user_id: user.id,
-          data: localSettings,
-          updated_at: new Date().toISOString(),
-        });
-        if (saveError) console.error('Failed to create cloud trip settings:', saveError);
-      }
-      settingsCloudReadyRef.current = true;
-    };
-    void hydrateCloudSettings();
-    return () => { mounted = false; };
-  }, [activeItineraryId, settingsStorageKey, user?.id, isDemoUser, isLocalTestUser]);
-
-  useEffect(() => {
-    if (!settingsCloudReadyRef.current || !activeItineraryId || !user?.id) return;
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) return;
-    const timeoutId = window.setTimeout(async () => {
-      const { error } = await supabase.from('trip_settings').upsert({
-        id: activeItineraryId,
-        user_id: user.id,
-        data: tripSettings,
-        updated_at: new Date().toISOString(),
-      });
-      if (error) console.error('Failed to save cloud trip settings:', error);
-    }, 700);
-    return () => window.clearTimeout(timeoutId);
-  }, [tripSettings, activeItineraryId, user?.id, isDemoUser, isLocalTestUser]);
-
-  useEffect(() => {
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser || !activeItineraryId) return;
+    if (!selectedTripId) return;
     let isMounted = true;
     itinerarySyncReadyRef.current = false;
     remoteItineraryLoadedRef.current = false;
@@ -357,15 +408,17 @@ function App() {
       const { data, error } = await supabase
         .from('itineraries')
         .select('data')
+        .eq('user_id', user.id)
         .eq('id', activeItineraryId)
         .single();
 
       if (!isMounted) return;
 
       if (data?.data) {
-        setCustomItinerary(data.data as Itinerary);
+        const sanitized = sanitizeItinerary(data.data, activeItinerary);
+        setCustomItinerary(sanitized);
         hasLocalItineraryRef.current = true;
-        saveToStorage(`itinerary-${activeItineraryId}`, data.data);
+        saveToStorage(itineraryStorageKey, sanitized);
       } else if (error && error.code !== 'PGRST116') {
         console.error('Error fetching itinerary:', error);
       }
@@ -383,11 +436,12 @@ function App() {
         (payload) => {
           const nextData = payload.new && 'data' in payload.new ? (payload.new.data as Itinerary | undefined) : undefined;
           if (!nextData) return;
+          const sanitized = sanitizeItinerary(nextData, activeItinerary);
           hasLocalItineraryRef.current = true;
           setCustomItinerary((prev) => {
-            if (prev && JSON.stringify(prev) === JSON.stringify(nextData)) return prev;
-            saveToStorage(`itinerary-${activeItineraryId}`, nextData);
-            return nextData;
+            if (prev && JSON.stringify(prev) === JSON.stringify(sanitized)) return prev;
+            saveToStorage(itineraryStorageKey, sanitized);
+            return sanitized;
           });
         }
       )
@@ -397,47 +451,48 @@ function App() {
       isMounted = false;
       channel.unsubscribe();
     };
-  }, [activeItineraryId]);
+  }, [activeItineraryId, activeItinerary, isDemoUser, itineraryStorageKey, user, selectedTripId]);
 
   useEffect(() => {
     const itineraryToSync = customItinerary;
-    if (!itineraryToSync || !activeItineraryId) return;
+    if (!itineraryToSync || !itinerarySyncReadyRef.current || !remoteItineraryLoadedRef.current) return;
 
-    saveToStorage(`itinerary-${itineraryToSync.id}`, itineraryToSync);
-    if (user?.id) {
-      upsertLocalTrip(user.id, itineraryToSync);
-    }
-
-    if (!itinerarySyncReadyRef.current || !remoteItineraryLoadedRef.current) return;
+    saveToStorage(itineraryStorageKey, itineraryToSync);
     if (!hasLocalItineraryRef.current && JSON.stringify(itineraryToSync) === JSON.stringify(activeItinerary)) return;
     hasLocalItineraryRef.current = true;
 
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) return;
+    if (!isSupabaseConfigured() || isDemoUser || !user) return;
 
     const timeoutId = setTimeout(async () => {
       const { error } = await supabase
         .from('itineraries')
-        .upsert({ 
-          id: itineraryToSync.id, 
-          data: itineraryToSync, 
-          updated_at: new Date().toISOString(),
-          user_id: user?.id 
-        });
+        .upsert({ id: itineraryToSync.id, user_id: user.id, data: itineraryToSync, updated_at: new Date().toISOString() });
       if (error) {
         console.error('Error syncing itinerary:', error);
+        return;
       }
+      const { error: registryError } = await supabase.from('trip_registry').upsert({
+        id: itineraryToSync.id,
+        user_id: user.id,
+        title: itineraryToSync.name || 'Untitled trip',
+        description: itineraryToSync.description || '',
+        status: 'active',
+        day_count: itineraryToSync.days.length,
+        city_count: itineraryToSync.cities.length,
+        updated_at: new Date().toISOString(),
+      });
+      if (registryError) console.error('Error syncing trip registry:', registryError);
     }, 800);
 
     return () => clearTimeout(timeoutId);
-  }, [customItinerary, activeItinerary, activeItineraryId, isDemoUser, isLocalTestUser, user?.id]);
+  }, [customItinerary, activeItinerary, itineraryStorageKey, isDemoUser, user]);
 
   useEffect(() => {
-    if (!activeItineraryId) return;
-    const key = `itinerary-${activeItineraryId}`;
+    const key = itineraryStorageKey;
     const onStorage = (event: StorageEvent) => {
       if (event.key !== key || !event.newValue) return;
       try {
-        const incoming = JSON.parse(event.newValue) as Itinerary;
+        const incoming = sanitizeItinerary(JSON.parse(event.newValue), activeItinerary);
         setCustomItinerary((prev) => {
           if (prev && JSON.stringify(prev) === JSON.stringify(incoming)) return prev;
           return incoming;
@@ -448,7 +503,7 @@ function App() {
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [activeItineraryId]);
+  }, [activeItineraryId, activeItinerary, itineraryStorageKey]);
 
   const handleTabChange = (newTab: typeof activeTab) => {
     hapticMedium();
@@ -510,31 +565,44 @@ function App() {
     }, 50); // 50ms delay lets the new tab's DOM render first so heights are accurate
   };
 
+  const openFoodPicker = () => {
+    try {
+      sessionStorage.setItem('pending-food-picker-open', '1');
+    } catch {
+    }
+    const triggerFoodPickerOpen = (delayMs = 0) => {
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('open-food-picker'));
+      }, delayMs);
+    };
+    if (activeTab !== 'itinerary') {
+      setActiveTab('itinerary');
+      triggerFoodPickerOpen(180);
+      triggerFoodPickerOpen(450);
+      triggerFoodPickerOpen(800);
+      return;
+    }
+    triggerFoodPickerOpen(0);
+  };
+
   const tabs = [
-    { id: 'itinerary', label: tripSettings.labels.itineraryTab, icon: Calendar },
-    { id: 'maps', label: tripSettings.labels.mapsTab, icon: Map },
-    { id: 'draft', label: tripSettings.labels.draftTab, icon: BookOpen },
-    { id: 'budget', label: tripSettings.labels.budgetTab, icon: Wallet },
-    { id: 'checklist', label: tripSettings.labels.checklistTab, icon: CheckSquare },
-    { id: 'documents', label: tripSettings.labels.documentsTab, icon: FileText },
-    { id: 'photos', label: tripSettings.labels.photosTab, icon: ImageIcon },
+    { id: 'itinerary', label: 'Itinerary', icon: Calendar },
+    { id: 'maps', label: 'Maps', icon: Map },
+    { id: 'draft', label: 'Draft', icon: BookOpen },
+    { id: 'budget', label: 'Budget', icon: Wallet },
+    { id: 'checklist', label: 'Checklist', icon: CheckSquare },
+    { id: 'documents', label: 'Documents', icon: FileText },
+    { id: 'photos', label: 'Photo Wall', icon: ImageIcon },
+    { id: 'profile', label: 'Profile', icon: UserRound },
   ] as const;
 
   /** Documents only appear in the hamburger Quick Menu on small screens, not the bottom pill. */
-  const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos');
-
-  const handleSaveTripSettings = (nextItinerary: Itinerary, nextSettings: TripAppSettings) => {
-    setCustomItinerary(nextItinerary);
-    setTripSettings(nextSettings);
-    // Persist palettes for Dashboard / outer pages only after Save.
-    persistShellTheme(nextSettings);
-  };
+  const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos' && tab.id !== 'profile');
 
   const buildCloudSnapshot = async (): Promise<CloudBackupSnapshot> => {
-    if (!activeItineraryId) throw new Error('No active itinerary');
-    const itineraryData = loadFromStorage<Itinerary>(`itinerary-${activeItineraryId}`) || customItinerary || activeItinerary;
+    const itineraryData = loadFromStorage<Itinerary>(itineraryStorageKey) || customItinerary || activeItinerary;
     const budgetData = loadFromStorage<Record<string, unknown>>(`budget-${activeItineraryId}`);
-    const checklistData = loadFromStorage<unknown[]>('checklist-data');
+    const checklistData = loadFromStorage<unknown[]>(`checklist-data-${activeItineraryId}`);
     const draftsData = loadFromStorage<unknown[]>(`drafts-${activeItineraryId}`);
     const photosByDay = await getAllPhotosForItinerary(activeItineraryId);
     const photoCount = Object.values(photosByDay).reduce<number>((count, dayPhotos) => count + dayPhotos.length, 0);
@@ -550,7 +618,7 @@ function App() {
         photoCount,
       },
       datasets: {
-        itinerary: itineraryData || null,
+        itinerary: itineraryData ? sanitizeItinerary(itineraryData, activeItinerary) : null,
         budget: budgetData || null,
         checklist: checklistData || null,
         drafts: draftsData || null,
@@ -560,8 +628,7 @@ function App() {
   };
 
   const saveCloudBackupVersion = async () => {
-    if (!activeItineraryId) return false;
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser) {
       window.alert('Cloud backup needs Supabase to be configured.');
       return false;
     }
@@ -571,7 +638,7 @@ function App() {
       const backupId = `backup-${activeItineraryId}-${Date.now()}`;
       const { error } = await supabase
         .from('itineraries')
-        .upsert({ id: backupId, user_id: user?.id, data: snapshot, updated_at: snapshot.createdAt });
+        .upsert({ id: backupId, user_id: user.id, data: snapshot, updated_at: snapshot.createdAt });
       if (error) {
         window.alert('Unable to save cloud backup version.');
         return false;
@@ -583,8 +650,7 @@ function App() {
   };
 
   const loadCloudBackupVersions = async () => {
-    if (!activeItineraryId) return;
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser) {
       setCloudBackups([]);
       setSelectedCloudBackupId('');
       return;
@@ -594,6 +660,7 @@ function App() {
       const { data, error } = await supabase
         .from('itineraries')
         .select('id,data,updated_at')
+        .eq('user_id', user.id)
         .like('id', `backup-${activeItineraryId}-%`)
         .order('updated_at', { ascending: false });
       if (error) {
@@ -625,7 +692,6 @@ function App() {
   };
 
   const openRestoreModal = async () => {
-    if (!activeItineraryId) return;
     const preview = await getRestorePreview(activeItineraryId);
     setRestorePreview(preview);
     setSelectedRestoreIds(preview.filter((item) => item.hasBackup).map((item) => item.id));
@@ -640,23 +706,33 @@ function App() {
   };
 
   const pushRestoredDataToCloud = async (datasetIds: RestoreDatasetId[]) => {
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser || !activeItineraryId) return;
+    if (!isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser) return;
     if (datasetIds.includes('itinerary')) {
-      const itineraryData = loadFromStorage<Itinerary>(`itinerary-${activeItineraryId}`);
+      const itineraryData = loadFromStorage<Itinerary>(itineraryStorageKey);
       if (itineraryData) {
-        await supabase.from('itineraries').upsert({ id: activeItineraryId, data: itineraryData, updated_at: new Date().toISOString(), user_id: user?.id });
+        await supabase.from('itineraries').upsert({ id: activeItineraryId, user_id: user.id, data: itineraryData, updated_at: new Date().toISOString() });
+        await supabase.from('trip_registry').upsert({
+          id: activeItineraryId,
+          user_id: user.id,
+          title: itineraryData.name || 'Untitled trip',
+          description: itineraryData.description || '',
+          status: 'active',
+          day_count: itineraryData.days?.length || 0,
+          city_count: itineraryData.cities?.length || 0,
+          updated_at: new Date().toISOString(),
+        });
       }
     }
     if (datasetIds.includes('budget')) {
       const budgetData = loadFromStorage<Record<string, unknown>>(`budget-${activeItineraryId}`);
       if (budgetData) {
-        await supabase.from('budgets').upsert({ id: activeItineraryId, user_id: user?.id, data: budgetData, updated_at: new Date().toISOString() });
+        await supabase.from('budgets').upsert({ id: activeItineraryId, user_id: user.id, data: budgetData, updated_at: new Date().toISOString() });
       }
     }
     if (datasetIds.includes('checklist')) {
-      const checklistData = loadFromStorage<unknown[]>('checklist-data');
+      const checklistData = loadFromStorage<unknown[]>(`checklist-data-${activeItineraryId}`);
       if (checklistData) {
-        await supabase.from('checklists').upsert({ id: `default-${user?.id}`, user_id: user?.id, data: checklistData, updated_at: new Date().toISOString() });
+        await supabase.from('checklists').upsert({ id: `checklist-${activeItineraryId}`, user_id: user.id, data: checklistData, updated_at: new Date().toISOString() });
       }
     }
     if (datasetIds.includes('drafts')) {
@@ -664,13 +740,12 @@ function App() {
       if (draftsData) {
         await supabase
           .from('itineraries')
-          .upsert({ id: `drafts-${activeItineraryId}`, user_id: user?.id, data: { items: draftsData }, updated_at: new Date().toISOString() });
+          .upsert({ id: `drafts-${activeItineraryId}`, user_id: user.id, data: { items: draftsData }, updated_at: new Date().toISOString() });
       }
     }
   };
 
   const handleRestoreBackup = async () => {
-    if (!activeItineraryId) return;
     if (selectedRestoreIds.length === 0) {
       window.alert('Select at least one dataset to restore.');
       return;
@@ -707,12 +782,11 @@ function App() {
   };
 
   const handleRestoreCloudBackup = async () => {
-    if (!activeItineraryId) return;
     if (!selectedCloudBackupId) {
       window.alert('Select a cloud backup version first.');
       return;
     }
-    if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
+    if (!isSupabaseConfigured() || !user) {
       window.alert('Cloud restore needs Supabase to be configured.');
       return;
     }
@@ -724,6 +798,7 @@ function App() {
       const { data, error } = await supabase
         .from('itineraries')
         .select('data')
+        .eq('user_id', user.id)
         .eq('id', selectedCloudBackupId)
         .single();
       if (error || !data?.data) {
@@ -736,9 +811,9 @@ function App() {
         return;
       }
       const keyMap = {
-        itinerary: `itinerary-${activeItineraryId}`,
+        itinerary: itineraryStorageKey,
         budget: `budget-${activeItineraryId}`,
-        checklist: 'checklist-data',
+        checklist: `checklist-data-${activeItineraryId}`,
         drafts: `drafts-${activeItineraryId}`,
         photos: `photos-${activeItineraryId}`,
       };
@@ -764,7 +839,6 @@ function App() {
   };
 
   const handleUndoRestore = async () => {
-    if (!activeItineraryId) return;
     const ok = await restoreLastSnapshot(activeItineraryId);
     if (!ok) {
       window.alert('No restore snapshot found yet.');
@@ -775,14 +849,16 @@ function App() {
   };
 
   if (isLoading) {
-    return <div className="min-h-screen bg-[color:var(--bg)] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" /></div>;
+    return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}><div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" /></div>;
   }
 
   if (isPasswordRecovery && user) {
     return <PasswordResetScreen />;
   }
 
-  if (showWelcome) {
+  // The welcome page is the public front door. Auth owns the next step until
+  // a real, local-test, or demo session is available.
+  if (showWelcome && !hasAuthCallbackUrl()) {
     return <WelcomeScreen onStart={handleStart} />;
   }
 
@@ -790,33 +866,16 @@ function App() {
     return <Auth />;
   }
 
-  const isCloudAccount = Boolean(user && isSupabaseConfigured() && !isDemoUser && !isLocalTestUser);
-  if (isCloudAccount && !mfaStatusReady) {
-    return <div className="min-h-screen bg-[color:var(--bg)] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" /></div>;
-  }
-  if (!activeItineraryId) {
-    const dashboardPalette = theme === 'light' ? shellTheme.light : shellTheme.dark;
-    const dashboardThemeStyle = buildTripThemeStyle(dashboardPalette, theme);
-    return (
-      <div
-        key={`dashboard-theme-${theme}-${dashboardPalette.bg}-${dashboardPalette.accent}`}
-        style={{ ...dashboardThemeStyle, backgroundColor: 'var(--bg)', color: 'var(--ink)', minHeight: '100svh' }}
-      >
-        <Dashboard onSelectTrip={setActiveItineraryId} />
-      </div>
-    );
+  if (isSupabaseConfigured() && !isDemoUser && !isLocalTestUser && !mfaStatusReady) {
+    return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}><div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" /></div>;
   }
 
-  const tripThemeStyle = buildTripThemeStyle(getThemeForMode(tripSettings, theme), theme);
-
-  const coverStatusLabel =
-    displayItinerary.cities.length > 0
-      ? applyTemplate(tripSettings.coverStatusFilled, { cities: displayItinerary.cities.join(' · ') })
-      : tripSettings.coverStatusEmpty;
-  const coverModeLabel = displayItinerary.cities.length > 0 ? tripSettings.coverModeFilled : tripSettings.coverModeEmpty;
+  if (!selectedTripId) {
+    return <TripDashboard onOpenTrip={handleOpenTrip} />;
+  }
 
   return (
-    <div className="min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden" style={{ ...tripThemeStyle, backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
+    <div className="min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
 
       {/* Scroll progress bar */}
       <motion.div
@@ -856,16 +915,13 @@ function App() {
       )}
 
       {/* Grain + Custom cursor — desktop only, self-gated */}
-      {tripSettings.immersiveEffects && <GrainOverlay />}
-      {tripSettings.immersiveEffects && <CustomCursor />}
+      <GrainOverlay />
+      <CustomCursor />
 
       {/* Global Overlays */}
       <InstallPrompt />
       <ReloadPrompt />
-      <AnimatePresence>
-        {showWelcome && <WelcomeScreen onStart={handleStart} />}
-      </AnimatePresence>
-
+      {showPets && <Pets />}
       {/* Top Nav — editorial minimal */}
       <header
         className="sticky top-0 z-40 backdrop-blur-md"
@@ -873,31 +929,30 @@ function App() {
           backgroundColor: 'color-mix(in srgb, var(--bg) 85%, transparent)',
           borderBottom: '1px solid var(--border)',
           paddingTop: 'env(safe-area-inset-top)',
+          willChange: 'transform',
         }}
       >
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-2 sm:gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 shrink min-w-0">
-            <button 
-              onClick={returnToDashboard}
-              className="header-control inline-flex min-h-11 min-w-11 items-center justify-center p-2 -ml-2 rounded-xl text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              aria-label="Back to Dashboard"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
-              <span className="font-display text-lg sm:text-2xl leading-none tracking-tight whitespace-nowrap" style={{ color: 'var(--ink)' }}>
-                Travel <span className="font-display-italic" style={{ color: 'var(--accent)' }}>Handbook</span>
-              </span>
-              <span className="hidden sm:inline max-w-[10rem] truncate border-l pl-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--ink-muted)', borderColor: 'var(--border)' }}>
-                {displayItinerary.name || 'New Trip'}
-              </span>
-            </div>
+            {!isDemoUser && (
+              <button
+                onClick={() => { setSelectedTripId(null); setCustomItinerary(null); }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-full text-xs font-semibold shrink-0"
+                style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
+                aria-label="Back to trips"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">All trips</span>
+              </button>
+            )}
+            <span className="font-display text-xl sm:text-2xl md:text-3xl leading-none tracking-tight truncate" style={{ color: 'var(--ink)' }}>
+              Travel <span className="font-display-italic" style={{ color: 'var(--accent)' }}>Handbook</span>
+            </span>
           </div>
 
           <motion.nav 
-            aria-label="Trip sections"
-            initial={reduceMotion ? false : 'hidden'}
-            animate={reduceMotion ? undefined : 'visible'}
+            initial="hidden"
+            animate="visible"
             variants={{
               hidden: { opacity: 0 },
               visible: {
@@ -914,9 +969,8 @@ function App() {
                   hidden: { opacity: 0, y: -10 },
                   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } }
                 }}
-                onClick={() => handleTabChange(tab.id)}
-                aria-current={activeTab === tab.id ? 'page' : undefined}
-                className="header-nav-link relative min-h-11 px-3 lg:px-4 py-2 text-sm font-semibold tracking-tight transition-colors"
+                onClick={() => handleTabChange(tab.id as any)}
+                className="relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors"
                 style={{ color: activeTab === tab.id ? 'var(--ink)' : 'var(--ink-muted)' }}
               >
                 {tab.label}
@@ -931,68 +985,74 @@ function App() {
             ))}
           </motion.nav>
 
-          <div className="relative flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <motion.button
-              onClick={() => handleTabChange('settings')}
-              className="header-control hidden md:inline-flex min-h-11 min-w-11 items-center justify-center p-2 rounded-full"
-              style={{
-                color: activeTab === 'settings' ? 'var(--accent)' : 'var(--ink)',
-                border: '1px solid var(--border)',
-                backgroundColor: activeTab === 'settings' ? 'var(--bg-elevated)' : 'transparent',
-              }}
-              aria-label="Open handbook settings"
-              whileTap={{ scale: 0.9 }}
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-            </motion.button>
-            <motion.button
-              type="button"
-              className="header-control hidden md:inline-flex min-h-11 min-w-11 items-center justify-center p-2 rounded-full"
+              onClick={openRestoreModal}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
               style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              aria-label={isUtilityMenuOpen ? 'Close account and utility menu' : 'Open account and utility menu'}
-              aria-expanded={isUtilityMenuOpen}
-              aria-controls="header-utility-menu"
-              onClick={() => setIsUtilityMenuOpen((open) => !open)}
-              whileTap={{ scale: 0.9 }}
+              whileTap={{ scale: 0.95 }}
+              whileHover={{ y: -1 }}
+              aria-label="Restore backup"
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Restore</span>
             </motion.button>
-            <AnimatePresence>
-              {isUtilityMenuOpen && (
-                <motion.div
-                  id="header-utility-menu"
-                  role="menu"
-                  aria-label="Account and utility actions"
-                  initial={reduceMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={reduceMotion ? undefined : { opacity: 0, y: -4, scale: 0.98 }}
-                  className="header-utility-menu absolute right-0 top-[calc(100%+0.75rem)] z-50 min-w-48 rounded-2xl p-2 shadow-xl"
-                  style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-                >
-                  <button role="menuitem" className="header-menu-item" onClick={() => { handleTabChange('account'); setIsUtilityMenuOpen(false); }}>
-                    <UserRound className="w-4 h-4" /> Account settings
-                  </button>
-                  <button role="menuitem" className="header-menu-item" onClick={() => { openRestoreModal(); setIsUtilityMenuOpen(false); }}>
-                    <RefreshCw className="w-4 h-4" /> Restore backup
-                  </button>
-                  <button role="menuitem" className="header-menu-item" onClick={() => { toggleTheme(); setIsUtilityMenuOpen(false); }}>
-                    {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />} Change theme
-                  </button>
-                  <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
-                  <button role="menuitem" className="header-menu-item" onClick={() => { void signOut(); setIsUtilityMenuOpen(false); }}>
-                    <LogOut className="w-4 h-4" /> Sign out
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
             <motion.button
-              className="header-control md:hidden inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center p-2 rounded-full leading-none"
+              onClick={openFoodPicker}
+              className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
+              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
+              whileTap={{ scale: 0.95 }}
+              aria-label="Food picker"
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              <span>Food Picker</span>
+            </motion.button>
+            <motion.button
+              onClick={togglePets}
+              className="hidden md:inline-flex p-2 rounded-full"
+              style={{ color: showPets ? 'var(--accent)' : 'var(--ink-muted)', border: '1px solid var(--border)' }}
+              aria-label="Toggle pets"
+              title="Toggle Pets"
+              whileTap={{ scale: 0.9, rotate: 12 }}
+            >
+              <PawPrint className="w-4 h-4" />
+            </motion.button>
+            <motion.button
+              onClick={toggleTheme}
+              className="p-2 rounded-full"
+              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
+              aria-label="Toggle theme"
+              whileTap={{ scale: 0.9, rotate: -12 }}
+            >
+              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </motion.button>
+            <motion.button
+              onClick={() => handleTabChange('profile')}
+              className="hidden sm:inline-flex p-2 rounded-full"
+              style={{ color: activeTab === 'profile' ? 'var(--accent)' : 'var(--ink)', border: '1px solid var(--border)' }}
+              whileTap={{ scale: 0.9 }}
+              aria-label="Open profile settings"
+              title="Profile settings"
+            >
+              <UserRound className="w-4 h-4" />
+            </motion.button>
+            <motion.button
+              onClick={() => void signOut()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
+              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
+              whileTap={{ scale: 0.95 }}
+              aria-label={isDemoUser ? 'Exit Demo Mode' : 'Sign out'}
+              title={isDemoUser ? 'Exit Demo Mode' : 'Sign out'}
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isDemoUser ? 'Exit demo' : 'Sign out'}</span>
+            </motion.button>
+            <motion.button
+              className="md:hidden p-2 rounded-full"
               style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               whileTap={{ scale: 0.9 }}
               aria-label="Menu"
-              aria-expanded={isMenuOpen}
-              aria-controls="mobile-quick-menu"
             >
               {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </motion.button>
@@ -1001,31 +1061,39 @@ function App() {
       </header>
 
       {/* Hero — split editorial layout */}
-      <section className="max-w-7xl mx-auto px-3 sm:px-6 md:px-10 pt-8 md:pt-20 pb-8 md:pb-16">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-20 pb-8 md:pb-16">
+        {isHomeHeroEditing && (
+          <div className="flex justify-end gap-2 mb-5">
+            <button type="button" onClick={() => setIsHomeHeroEditing(false)} className="pill-btn pill-ghost">Cancel</button>
+            <button type="button" onClick={saveHomeHero} className="pill-btn pill-primary"><Save className="w-4 h-4" /> Save banner</button>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 items-center">
           {/* Left copy */}
           <div className="md:col-span-7">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}>
-              <InlineEditable
-                value={tripSettings.heroEyebrow}
-                onSave={(value) => setTripSettings((current) => ({ ...current, heroEyebrow: value }))}
-                className="eyebrow"
-                ariaLabel="Hero eyebrow"
-              />
+              <span
+                className="eyebrow cursor-text rounded px-1 outline-none focus:bg-white/10"
+                contentEditable={isHomeHeroEditing}
+                suppressContentEditableWarning
+                onBlur={(event) => commitHeroText('heroEyebrow', event.currentTarget.textContent || '')}
+                title="Click to edit"
+              >{displayItinerary.heroEyebrow || 'A personalized travel starter'}</span>
             </motion.div>
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-5 font-display text-[clamp(2.8rem,12vw,4.6rem)] sm:text-6xl md:text-[5.5rem] lg:text-[6.5rem] leading-[0.95] tracking-tight whitespace-pre-line"
+              className="mt-6 font-display text-5xl sm:text-6xl md:text-[5.5rem] lg:text-[6.5rem] leading-[0.95] tracking-tight"
               style={{ color: 'var(--ink)' }}
             >
-              <InlineEditable
-                value={tripSettings.heroHeadline}
-                onSave={(value) => setTripSettings((current) => ({ ...current, heroHeadline: value }))}
-                className="whitespace-pre-line"
-                ariaLabel="Hero headline"
-              />
+              <span
+                contentEditable={isHomeHeroEditing}
+                suppressContentEditableWarning
+                className="cursor-text rounded px-1 outline-none focus:bg-white/10"
+                onBlur={(event) => commitHeroText('name', event.currentTarget.textContent || '')}
+                title="Click to edit"
+              >{displayItinerary.name || 'Your next trip'}</span>
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 16 }}
@@ -1034,20 +1102,13 @@ function App() {
               className="mt-6 max-w-xl text-base md:text-lg leading-relaxed"
               style={{ color: 'var(--ink-muted)' }}
             >
-              <InlineEditable
-                value={displayItinerary.description || tripSettings.heroDescription}
-                onSave={(value) => {
-                  if (displayItinerary.description) {
-                    const nextItinerary = { ...displayItinerary, description: value };
-                    setCustomItinerary(nextItinerary);
-                  } else {
-                    setTripSettings((current) => ({ ...current, heroDescription: value }));
-                  }
-                }}
-                className="block"
-                multiline
-                ariaLabel="Hero description"
-              />
+              <span
+                contentEditable={isHomeHeroEditing}
+                suppressContentEditableWarning
+                className="cursor-text rounded px-1 outline-none focus:bg-white/10"
+                onBlur={(event) => commitHeroText('description', event.currentTarget.textContent || '')}
+                title="Click to edit"
+              >{displayItinerary.description}</span>
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 16 }}
@@ -1055,19 +1116,25 @@ function App() {
               transition={{ delay: 0.3, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
               className="mt-8 flex flex-wrap items-center gap-3"
             >
-              <button onClick={() => handleTabChange('itinerary')} className="pill-btn pill-primary">
-                <InlineEditable
-                  value={tripSettings.heroPrimaryCta}
-                  onSave={(value) => setTripSettings((current) => ({ ...current, heroPrimaryCta: value }))}
-                  ariaLabel="Primary button label"
-                />
+              <button onClick={() => handleTabChange(displayItinerary.primaryButtonTab || 'itinerary')} className="pill-btn pill-primary">
+                <span
+                  contentEditable={isHomeHeroEditing}
+                  suppressContentEditableWarning
+                  className="cursor-text rounded px-1 outline-none focus:bg-black/10"
+                  onClick={(event) => event.stopPropagation()}
+                  onBlur={(event) => commitHeroText('primaryButtonLabel', event.currentTarget.textContent || '')}
+                  title="Click text to edit"
+                >{displayItinerary.primaryButtonLabel || 'Open the itinerary'}</span>
               </button>
-              <button onClick={() => handleTabChange('maps')} className="pill-btn pill-ghost">
-                <InlineEditable
-                  value={tripSettings.heroSecondaryCta}
-                  onSave={(value) => setTripSettings((current) => ({ ...current, heroSecondaryCta: value }))}
-                  ariaLabel="Secondary button label"
-                />
+              <button onClick={() => handleTabChange(displayItinerary.secondaryButtonTab || 'maps')} className="pill-btn pill-ghost">
+                <span
+                  contentEditable={isHomeHeroEditing}
+                  suppressContentEditableWarning
+                  className="cursor-text rounded px-1 outline-none focus:bg-white/10"
+                  onClick={(event) => event.stopPropagation()}
+                  onBlur={(event) => commitHeroText('secondaryButtonLabel', event.currentTarget.textContent || '')}
+                  title="Click text to edit"
+                >{displayItinerary.secondaryButtonLabel || 'See the map'}</span>
               </button>
             </motion.div>
           </div>
@@ -1083,66 +1150,43 @@ function App() {
               className="editorial-card p-3 md:p-4 rotate-[-2deg]"
               style={{ backgroundColor: 'var(--bg-elevated)' }}
             >
-              {tripSettings.coverImage ? (
-                <div className="relative overflow-hidden rounded-2xl">
+              <div className="relative overflow-hidden rounded-2xl">
+                {displayItinerary.cities.length > 0 ? (
                   <img
-                    src={tripSettings.coverImage}
-                    alt={displayItinerary.name || 'Trip cover'}
-                    className="w-full h-[220px] sm:h-[280px] md:h-[420px] object-cover"
+                    src={heroImages[activeItineraryId as keyof typeof heroImages] || cqCdHero}
+                    alt={displayItinerary.cities.join(' & ')}
+                    className="w-full h-[280px] md:h-[420px] object-cover"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
-                  <div className="absolute top-5 left-5 eyebrow justify-center bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm text-white">
-                    <InlineEditable
-                      value={tripSettings.coverLabel}
-                      onSave={(value) => setTripSettings((current) => ({ ...current, coverLabel: value }))}
-                      ariaLabel="Cover label"
-                    />
+                ) : (
+                  <div className="w-full h-[280px] md:h-[420px] flex items-center justify-center text-center px-8" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink-muted)' }}>
+                    <span
+                      className="font-display-italic text-3xl cursor-text rounded px-1 outline-none focus:bg-white/10"
+                      contentEditable={isHomeHeroEditing}
+                      suppressContentEditableWarning
+                      onBlur={(event) => commitHeroText('coverHeadline', event.currentTarget.textContent || '')}
+                      title="Click to edit"
+                    >{displayItinerary.coverHeadline || 'Add a cover when your story takes shape.'}</span>
                   </div>
-                </div>
-              ) : (
-                <div
-                  className="relative overflow-hidden rounded-2xl w-full h-[220px] sm:h-[280px] md:h-[420px] flex items-center justify-center text-center px-6"
-                  style={{ background: 'linear-gradient(135deg, var(--accent-soft), color-mix(in srgb, var(--bg-elevated) 60%, var(--accent-soft)))' }}
-                >
-                  <div>
-                    <div className="eyebrow justify-center">
-                      <InlineEditable
-                        value={tripSettings.coverLabel}
-                        onSave={(value) => setTripSettings((current) => ({ ...current, coverLabel: value }))}
-                        ariaLabel="Cover label"
-                      />
-                    </div>
-                    <div className="mt-4 font-display text-3xl sm:text-4xl md:text-5xl whitespace-pre-line" style={{ color: 'var(--ink)' }}>
-                      <InlineEditable
-                        value={tripSettings.coverHeadline}
-                        onSave={(value) => setTripSettings((current) => ({ ...current, coverHeadline: value }))}
-                        className="whitespace-pre-line"
-                        ariaLabel="Cover headline"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
               <div className="flex items-center justify-between px-2 pt-3 pb-1">
                 <span className="font-display-italic text-lg" style={{ color: 'var(--ink)' }}>
-                  <InlineEditable
-                    value={coverStatusLabel}
-                    onSave={(value) => setTripSettings((current) => ({
-                      ...current,
-                      ...(displayItinerary.cities.length > 0 ? { coverStatusFilled: value } : { coverStatusEmpty: value }),
-                    }))}
-                    ariaLabel="Cover status"
-                  />
+                  <span
+                    contentEditable={isHomeHeroEditing}
+                    suppressContentEditableWarning
+                    className="cursor-text rounded px-1 outline-none focus:bg-white/10"
+                    onBlur={(event) => commitHeroText('coverLabel', event.currentTarget.textContent || '')}
+                    title="Click to edit"
+                  >{displayItinerary.coverLabel || displayItinerary.cities.join(' · ')}</span>
                 </span>
                 <span className="text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--ink-muted)' }}>
-                  <InlineEditable
-                    value={coverModeLabel}
-                    onSave={(value) => setTripSettings((current) => ({
-                      ...current,
-                      ...(displayItinerary.cities.length > 0 ? { coverModeFilled: value } : { coverModeEmpty: value }),
-                    }))}
-                    ariaLabel="Cover mode"
-                  />
+                  <span
+                    contentEditable={isHomeHeroEditing}
+                    suppressContentEditableWarning
+                    className="cursor-text rounded px-1 outline-none focus:bg-white/10"
+                    onBlur={(event) => commitHeroText('coverYear', event.currentTarget.textContent || '')}
+                    title="Click to edit"
+                  >{displayItinerary.coverYear || new Date().getFullYear()}</span>
                 </span>
               </div>
             </div>
@@ -1151,11 +1195,17 @@ function App() {
               initial={{ scale: 0, rotate: -10 }}
               animate={{ scale: 1, rotate: 8 }}
               transition={{ delay: 0.5, type: 'spring', stiffness: 180, damping: 12 }}
-              className="absolute -top-4 -right-2 sm:-top-6 sm:-right-4 md:-top-8 md:-right-6 w-20 h-20 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
+              className="absolute -top-6 -right-4 md:-top-8 md:-right-6 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
               style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
             >
-              <span className="font-display text-2xl sm:text-3xl md:text-4xl leading-none">{displayItinerary.days.length}</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{tripSettings.labels.daysLabel}</span>
+              <span
+                className="font-display text-3xl md:text-4xl leading-none cursor-text rounded px-1 outline-none focus:bg-black/10"
+                contentEditable={isHomeHeroEditing}
+                suppressContentEditableWarning
+                onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
+                title={isHomeHeroEditing ? 'Click to edit' : undefined}
+              >{displayItinerary.heroDayBadge || displayItinerary.days.length}</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">days</span>
             </motion.div>
           </motion.div>
         </div>
@@ -1163,21 +1213,12 @@ function App() {
 
       {/* Marquee strip */}
       <Marquee
-        items={
-          displayItinerary.cities.length > 0
-            ? [...displayItinerary.cities, ...(tripSettings.marqueeItems.length > 0 ? tripSettings.marqueeItems : DEFAULT_TRIP_SETTINGS.marqueeItems)]
-            : (tripSettings.marqueeItems.length > 0 ? tripSettings.marqueeItems : DEFAULT_TRIP_SETTINGS.marqueeItems)
-        }
+        items={displayItinerary.marqueeItems?.length ? displayItinerary.marqueeItems : DEFAULT_MARQUEE_ITEMS}
+        onItemChange={isHomeHeroEditing ? (index, value) => commitMarqueeItem(index, value) : undefined}
       />
 
       {/* Main Content Area */}
-      <main
-        id="main-content"
-        className={clsx(
-          'mx-auto px-3 sm:px-6 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10',
-          activeTab === 'settings' ? 'max-w-[1500px]' : activeTab === 'account' ? 'max-w-[1200px]' : 'max-w-7xl'
-        )}
-      >
+      <main id="main-content" className="max-w-7xl mx-auto px-4 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10">
         
         {/* Tab Content Wrapper with Glass Effect for overlapping sections */}
         <AnimatePresence mode="wait">
@@ -1191,30 +1232,22 @@ function App() {
           >
             {activeTab === 'itinerary' && (
               <ItineraryView 
-                itinerary={displayItinerary} 
-                onItineraryChange={setCustomItinerary}
-                settings={tripSettings}
+                itinerary={customItinerary || activeItinerary} 
+                onItineraryChange={handleItineraryChange}
               />
             )}
-            {activeTab === 'maps' && <Maps itinerary={displayItinerary} onItineraryChange={setCustomItinerary} />}
+            {activeTab === 'maps' && <Maps itinerary={customItinerary || activeItinerary} onItineraryChange={handleItineraryChange} />}
             {activeTab === 'draft' && (
               <Draft
-                itinerary={displayItinerary}
-                onItineraryChange={setCustomItinerary}
+                itinerary={customItinerary || activeItinerary}
+                onItineraryChange={handleItineraryChange}
               />
             )}
-            {activeTab === 'budget' && <Budget itinerary={displayItinerary} />}
-            {activeTab === 'checklist' && <Checklist />}
-            {activeTab === 'documents' && <Documents />}
-            {activeTab === 'photos' && <PhotoWall itinerary={displayItinerary} />}
-            {activeTab === 'settings' && (
-              <SettingsPanel
-                itinerary={displayItinerary}
-                settings={tripSettings}
-                onSave={handleSaveTripSettings}
-              />
-            )}
-            {activeTab === 'account' && <div className="space-y-6"><SecurityPanel /><ProfilePanel /></div>}
+            {activeTab === 'budget' && <Budget itinerary={customItinerary || activeItinerary} />}
+            {activeTab === 'checklist' && <Checklist itineraryId={activeItineraryId} />}
+            {activeTab === 'documents' && <Documents itineraryId={activeItineraryId} />}
+            {activeTab === 'photos' && <PhotoWall itinerary={customItinerary || activeItinerary} />}
+            {activeTab === 'profile' && <ProfilePanel onEditHomeHero={beginHomeHeroEditing} />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -1222,9 +1255,9 @@ function App() {
       <AnimatePresence>
         {showRestoreModal && (
           <motion.div
-            initial={reduceMotion ? false : { opacity: 0 }}
+            initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={reduceMotion ? undefined : { opacity: 0 }}
+            exit={{ opacity: 0 }}
             className="fixed inset-0 z-[70] flex items-center justify-center p-4"
           >
             <button className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" onClick={() => setShowRestoreModal(false)} />
@@ -1295,7 +1328,7 @@ function App() {
                   transition={{ duration: 0.25 }}
                 >
                   <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Cloud Backup Versions</div>
-                  <ThemedSelect
+                  <select
                     value={selectedCloudBackupId}
                     onChange={(e) => setSelectedCloudBackupId(e.target.value)}
                     disabled={isCloudBackupsLoading || cloudBackups.length === 0}
@@ -1310,7 +1343,7 @@ function App() {
                         </option>
                       ))
                     )}
-                  </ThemedSelect>
+                  </select>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <motion.button
                       onClick={handleCloudBackupNow}
@@ -1368,20 +1401,19 @@ function App() {
             return (
               <motion.button
                 key={tab.id}
-                onClick={() => handleTabChange(tab.id)}
-                className="header-nav-link relative flex-1 flex min-h-11 flex-col items-center justify-center py-1.5 rounded-full min-w-0"
+                onClick={() => handleTabChange(tab.id as any)}
+                className="relative flex-1 flex flex-col items-center justify-center py-1.5 rounded-full min-w-0"
                 whileTap={{ scale: 0.9 }}
                 aria-label={tab.label}
-                aria-current={active ? 'page' : undefined}
               >
                 <div
-                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-colors shrink-0 leading-none"
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-colors shrink-0"
                   style={{
                     backgroundColor: active ? 'var(--accent)' : 'transparent',
                     color: active ? 'var(--accent-ink)' : 'var(--ink-muted)',
                   }}
                 >
-                  <tab.icon className="w-5 h-5 shrink-0" strokeWidth={active ? 2.5 : 2} />
+                  <tab.icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
                 </div>
               </motion.button>
             );
@@ -1397,17 +1429,13 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            id="mobile-quick-menu"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Quick menu"
             className="fixed inset-0 z-40 md:hidden flex items-start justify-center px-4 pt-[calc(5rem+env(safe-area-inset-top))]"
             onClick={() => setIsMenuOpen(false)}
           >
             <motion.div
-              initial={reduceMotion ? false : { opacity: 0, y: -10, scale: 0.98 }}
+              initial={{ opacity: 0, y: -10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={reduceMotion ? undefined : { opacity: 0, y: -8, scale: 0.98 }}
+              exit={{ opacity: 0, y: -8, scale: 0.98 }}
               className="w-full max-w-sm rounded-3xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl p-4 space-y-3"
               onClick={(e) => e.stopPropagation()}
             >
@@ -1436,7 +1464,7 @@ function App() {
                   <button
                     key={tab.id}
                     onClick={() => {
-                      handleTabChange(tab.id);
+                      handleTabChange(tab.id as any);
                       setIsMenuOpen(false);
                     }}
                     className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 p-3 rounded-xl flex flex-col items-center gap-2 transition-colors border border-slate-200 dark:border-slate-700"
@@ -1445,29 +1473,6 @@ function App() {
                     <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{tab.label}</span>
                   </button>
                 ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    handleTabChange('settings');
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <SlidersHorizontal className="w-4 h-4 text-rose-500" />
-                  Handbook
-                </button>
-                <button
-                  onClick={() => {
-                    handleTabChange('account');
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <UserRound className="w-4 h-4 text-rose-500" />
-                  Account
-                </button>
               </div>
 
               <button
@@ -1480,30 +1485,32 @@ function App() {
                 <RefreshCw className="w-4 h-4" />
                 Restore Backup Data
               </button>
+              <button
+                onClick={() => {
+                  openFoodPicker();
+                  setIsMenuOpen(false);
+                }}
+                className="w-full px-4 py-2.5 bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-700 text-rose-700 dark:text-rose-300 rounded-xl text-sm font-semibold hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors flex items-center justify-center gap-2"
+              >
+                <Shuffle className="w-4 h-4" />
+                Open Food Picker
+              </button>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    toggleTheme();
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                  Theme
-                </button>
-
-                <button
-                  onClick={() => {
-                    void signOut();
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full px-4 py-2.5 bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-700 text-rose-700 dark:text-rose-300 rounded-xl text-sm font-semibold hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors flex items-center justify-center gap-2"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign Out
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  togglePets();
+                  setIsMenuOpen(false);
+                }}
+                className={clsx(
+                  "w-full px-4 py-2.5 border rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2",
+                  showPets 
+                    ? "bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                    : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+                )}
+              >
+                <PawPrint className="w-4 h-4" />
+                {showPets ? 'Hide Pets' : 'Show Pets'}
+              </button>
             </motion.div>
           </motion.div>
         )}

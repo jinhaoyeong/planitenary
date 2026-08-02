@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSwipe } from '../hooks/useSwipe';
 import { X, ChevronLeft, ChevronRight, Trash2, Plus, ImagePlus, Edit3, Check, Camera } from 'lucide-react';
-import { ThemedSelect } from './ui/ThemedSelect';
 import type { Itinerary, DayPhoto } from '../data';
 import { getAllPhotosForItinerary, savePhoto, deletePhoto, updatePhotoCaption, subscribeToPhotoChanges } from '../lib/photoStorage';
 import { clsx } from 'clsx';
@@ -395,7 +394,7 @@ export function PhotoWall({ itinerary }: Props) {
                 <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                   Which day?
                 </label>
-                <ThemedSelect
+                <select
                   value={selectedDayNumber}
                   onChange={(e) => setSelectedDayNumber(Number(e.target.value))}
                   className="editorial-input w-full bg-transparent border rounded-xl px-3 py-2"
@@ -406,7 +405,7 @@ export function PhotoWall({ itinerary }: Props) {
                       Day {day.day} — {day.date} · {day.city}
                     </option>
                   ))}
-                </ThemedSelect>
+                </select>
               </div>
 
               {/* Activity selector (optional) */}
