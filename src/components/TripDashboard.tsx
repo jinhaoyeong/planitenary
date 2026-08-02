@@ -220,7 +220,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       style={{
         color: 'var(--ink)',
         backgroundColor: 'var(--bg)',
-        paddingTop: 'max(1.25rem, env(safe-area-inset-top))',
+        paddingTop: 'max(1.25rem, var(--app-safe-top))',
       }}
     >
       <div className="flex flex-col gap-5 mb-8 md:mb-10 w-full max-w-xl ml-1 sm:ml-2">

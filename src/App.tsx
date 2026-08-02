@@ -873,7 +873,7 @@ function App() {
             style={{
               backgroundColor: 'color-mix(in srgb, var(--bg) 85%, transparent)',
               borderBottom: '1px solid var(--border)',
-              paddingTop: 'env(safe-area-inset-top)',
+              paddingTop: 'var(--app-safe-top)',
             }}
           >
             <div className="max-w-6xl mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
@@ -962,7 +962,7 @@ function App() {
         style={{
           backgroundColor: 'color-mix(in srgb, var(--bg) 85%, transparent)',
           borderBottom: '1px solid var(--border)',
-          paddingTop: 'env(safe-area-inset-top)',
+          paddingTop: 'var(--app-safe-top)',
           willChange: 'transform',
         }}
       >
@@ -1411,7 +1411,7 @@ function App() {
 
       {/* Mobile Bottom Nav — cream pill with pink active circle */}
       {!isMenuOpen && (
-      <div className="md:hidden fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 right-4 z-50">
+      <div className="md:hidden fixed bottom-[calc(1rem+var(--app-safe-bottom))] left-4 right-4 z-50">
         <nav
           className="flex justify-between items-center p-2 rounded-full"
           style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lift)' }}
@@ -1449,7 +1449,7 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 md:hidden flex items-start justify-center px-4 pt-[calc(5rem+env(safe-area-inset-top))]"
+            className="fixed inset-0 z-40 md:hidden flex items-start justify-center px-4 pt-[calc(5rem+var(--app-safe-top))]"
             onClick={() => setIsMenuOpen(false)}
           >
             <motion.div

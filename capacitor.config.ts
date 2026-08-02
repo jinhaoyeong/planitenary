@@ -14,6 +14,11 @@ const config: CapacitorConfig = {
       style: 'LIGHT',
       backgroundColor: '#FAF7F2',
     },
+    SystemBars: {
+      // Keep CSS safe-area insets so the web UI draws edge-to-edge under the bars.
+      insetsHandling: 'css',
+      style: 'LIGHT',
+    },
   },
 };
 

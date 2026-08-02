@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
-import { syncAppChrome } from '../lib/nativeChrome';
+import { applyThemeClass, syncAppChrome } from '../lib/nativeChrome';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 type Theme = 'light' | 'dark';
@@ -13,43 +13,39 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+const readInitialTheme = (): Theme => {
+  const savedTheme = localStorage.getItem('theme') as Theme | null;
+  if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+};
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
   const cloudReadyRef = useRef(false);
+  const manualThemeAtRef = useRef(0);
   const [theme, setTheme] = useState<Theme>(() => {
-    // 1. Prioritize user's manual selection from localStorage
-    const savedTheme = localStorage.getItem('theme') as Theme;
-    if (savedTheme) {
-      return savedTheme;
-    }
-    // 2. Fallback to system preference
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const initial = readInitialTheme();
+    // Paint before first paint of children whenever possible.
+    applyThemeClass(initial);
+    return initial;
   });
 
-  // Listener for system theme changes
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    
+
     const handleChange = (e: MediaQueryListEvent) => {
-      // Only follow system if user hasn't manually overridden it
       if (!localStorage.getItem('theme')) {
         setTheme(e.matches ? 'dark' : 'light');
       }
     };
 
-    // Modern browsers use addEventListener
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
   useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove('light', 'dark');
-    root.classList.add(theme);
-    root.style.colorScheme = theme;
+    applyThemeClass(theme);
 
-    // Meta tags alone often wait for a cold start on mobile. Sync web chrome
-    // and the Capacitor StatusBar so icon contrast updates with the theme.
     const applyChrome = () => {
       void syncAppChrome(theme);
     };
@@ -69,26 +65,52 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     cloudReadyRef.current = false;
     if (!user) return;
+
     const accountKey = `theme-${user.id}`;
+    const globalTheme = localStorage.getItem('theme') as Theme | null;
     const accountTheme = localStorage.getItem(accountKey) as Theme | null;
-    if (accountTheme === 'light' || accountTheme === 'dark') setTheme(accountTheme);
+    // Prefer the most recent manual global preference so a toggle isn't undone
+    // after sign-in / cloud fetch.
+    const preferred =
+      globalTheme === 'light' || globalTheme === 'dark'
+        ? globalTheme
+        : accountTheme === 'light' || accountTheme === 'dark'
+          ? accountTheme
+          : null;
+    if (preferred) setTheme(preferred);
 
     if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
       cloudReadyRef.current = true;
       return;
     }
+
     let mounted = true;
     void supabase.from('user_preferences').select('theme').eq('user_id', user.id).maybeSingle().then(({ data, error }) => {
       if (!mounted) return;
       if (error) console.error('Failed to load cloud theme preference:', error);
+
+      // Don't clobber a theme the user just toggled in this session.
+      if (Date.now() - manualThemeAtRef.current < 15_000) {
+        cloudReadyRef.current = true;
+        return;
+      }
+
       const cloudTheme = data?.theme;
       if (cloudTheme === 'light' || cloudTheme === 'dark') {
-        setTheme(cloudTheme);
-        localStorage.setItem(accountKey, cloudTheme);
+        const localOverride = localStorage.getItem('theme') as Theme | null;
+        if (localOverride === 'light' || localOverride === 'dark') {
+          // Keep local manual choice; push it up on the save effect.
+          setTheme(localOverride);
+        } else {
+          setTheme(cloudTheme);
+          localStorage.setItem(accountKey, cloudTheme);
+        }
       }
       cloudReadyRef.current = true;
     });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [user?.id, isDemoUser, isLocalTestUser]);
 
   useEffect(() => {
@@ -107,11 +129,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [theme, user?.id, isDemoUser, isLocalTestUser]);
 
   const toggleTheme = () => {
-    setTheme((prev) => {
-      const newTheme = prev === 'light' ? 'dark' : 'light';
-      localStorage.setItem('theme', newTheme);
-      return newTheme;
-    });
+    const newTheme = theme === 'light' ? 'dark' : 'light';
+    manualThemeAtRef.current = Date.now();
+    localStorage.setItem('theme', newTheme);
+    if (user) localStorage.setItem(`theme-${user.id}`, newTheme);
+    // Immediate paint — don't wait for React commit / effects.
+    void syncAppChrome(newTheme);
+    setTheme(newTheme);
   };
 
   return (

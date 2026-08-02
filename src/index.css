@@ -60,9 +60,19 @@
   --shadow-lift: 0 1px 0 rgba(0,0,0,0.3), 0 18px 40px -18px rgba(0,0,0,0.6);
 }
 
+:root {
+  /* Capacitor SystemBars polyfills --safe-area-inset-*; browsers use env(). */
+  --app-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --app-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --app-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --app-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+}
+
 html {
   background-color: var(--bg);
   color-scheme: light;
+  min-height: 100%;
+  min-height: 100dvh;
 }
 
 html.dark { color-scheme: dark; }
@@ -73,10 +83,15 @@ body {
   font-family: var(--font-sans);
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
+  min-height: 100%;
+  min-height: 100dvh;
+  margin: 0;
 }
 
 #root {
-  min-height: 100svh;
+  min-height: 100%;
+  min-height: 100dvh;
+  background-color: var(--bg);
 }
 
 /* ---------- Serif / display helpers ---------- */
