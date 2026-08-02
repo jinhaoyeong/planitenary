@@ -9,6 +9,7 @@ import {
   formatRateLabel,
 } from '../lib/currency';
 import { isSupportedCurrency } from '../lib/currencyCatalog';
+import { detectHomeCurrency } from '../lib/locale';
 import { useAuth } from './AuthContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
@@ -46,15 +47,15 @@ const readCurrency = (key: string, fallback: Currency): Currency => {
   return saved && isSupportedCurrency(saved) ? saved.toUpperCase() : fallback;
 };
 
+/** First run has no saved preference, so start from the device region. */
+const initialHomeCurrency = (): Currency => readCurrency(HOME_KEY, detectHomeCurrency(BASE));
+
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
   const cloudReadyRef = useRef(false);
-  const [currency, setCurrencyState] = useState<Currency>(() => readCurrency(DISPLAY_KEY, BASE));
-  const [homeCurrency, setHomeCurrencyState] = useState<Currency>(() => readCurrency(HOME_KEY, BASE));
-  const [tripCurrency, setTripCurrencyState] = useState<Currency>(() => {
-    const home = readCurrency(HOME_KEY, BASE);
-    return readCurrency(TRIP_KEY, home);
-  });
+  const [currency, setCurrencyState] = useState<Currency>(() => readCurrency(DISPLAY_KEY, initialHomeCurrency()));
+  const [homeCurrency, setHomeCurrencyState] = useState<Currency>(initialHomeCurrency);
+  const [tripCurrency, setTripCurrencyState] = useState<Currency>(() => readCurrency(TRIP_KEY, initialHomeCurrency()));
   const [rates, setRates] = useState<ExchangeRates>(createFallbackRates);
 
   const persistPair = (home: Currency, trip: Currency, display?: Currency) => {

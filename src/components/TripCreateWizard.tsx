@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { countryFlag, findCountry, type CountryProfile, type PlaceSuggestion } from '../lib/destinations';
 import { CURRENCIES } from '../lib/currencyCatalog';
-import { detectHomeCurrency } from '../lib/locale';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { OptionChips } from './ui/OptionChips';
 import { CountryPicker } from './ui/CountryPicker';
@@ -58,8 +57,9 @@ export function TripCreateWizard({
   onCancel,
   onCreate,
 }: TripCreateWizardProps) {
-  // The device region gives a better default than a hard-coded currency.
-  const detectedHomeCurrency = useMemo(() => detectHomeCurrency(defaultHomeCurrency), [defaultHomeCurrency]);
+  // Already resolved upstream: a saved preference if there is one, otherwise
+  // the device region.
+  const detectedHomeCurrency = defaultHomeCurrency;
   const [stepIndex, setStepIndex] = useState(0);
   const [profile, setProfile] = useState<TripProfile>(() => createEmptyProfile(detectedHomeCurrency));
   const [countryCode, setCountryCode] = useState('');
@@ -423,7 +423,7 @@ export function TripCreateWizard({
                     ))}
                   </select>
                   <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                    Detected from your device.
+                    What you spend back home.
                   </p>
                 </div>
                 <div className="space-y-2">
