@@ -4,8 +4,8 @@
   "description": "Custom travel handbook for our China 2026 trip",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#F43F5E",
+  "background_color": "#FAF7F2",
+  "theme_color": "#FAF7F2",
   "icons": [
     {
       "src": "/apple-touch-icon.png",

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { ImagePlus, Save, Trash2, UserRound, Edit3 } from 'lucide-react';
+import { ImagePlus, LogOut, Save, Trash2, UserRound, Edit3 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { SecurityPanel } from './SecurityPanel';
@@ -30,10 +30,11 @@ const readFileAsDataUrl = (file: File) =>
   });
 
 export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }) {
-  const { user, isDemoUser, isLocalTestUser } = useAuth();
+  const { user, isDemoUser, isLocalTestUser, signOut } = useAuth();
   const [profile, setProfile] = useState<UserProfileData>(DEFAULT_PROFILE);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -121,6 +122,17 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
 
     setStatus('Profile saved.');
     setIsSaving(false);
+  };
+
+  const handleSignOut = async () => {
+    const label = isDemoUser ? 'Exit demo mode and return to the sign-in screen?' : 'Sign out of Travel Handbook?';
+    if (!window.confirm(label)) return;
+    setIsSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      setIsSigningOut(false);
+    }
   };
 
   return (
@@ -266,6 +278,32 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
       </div>
 
       <SecurityPanel />
+
+      <div className="editorial-card p-4 sm:p-5 md:p-8">
+        <div className="eyebrow">Account</div>
+        <h2 className="font-display text-3xl sm:text-4xl mt-4 leading-[0.95]" style={{ color: 'var(--ink)' }}>
+          {isDemoUser ? 'Exit demo mode.' : 'Sign out.'}
+        </h2>
+        <p className="mt-3 max-w-2xl text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
+          {isDemoUser
+            ? 'Leave demo mode and return to the welcome screen. Demo trip data stays on this device.'
+            : 'Sign out of this device. Your trip data stays saved to your account.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => void handleSignOut()}
+          disabled={isSigningOut}
+          className="pill-btn mt-6 w-full sm:w-auto justify-center"
+          style={{
+            color: 'var(--accent)',
+            backgroundColor: 'var(--accent-soft)',
+            border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+          }}
+        >
+          <LogOut className="w-4 h-4" />
+          {isSigningOut ? 'Signing out...' : isDemoUser ? 'Exit demo' : 'Sign out'}
+        </button>
+      </div>
     </section>
   );
 }

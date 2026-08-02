@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
+import { syncAppChrome } from '../lib/nativeChrome';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 type Theme = 'light' | 'dark';
@@ -47,14 +48,22 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     root.classList.add(theme);
     root.style.colorScheme = theme;
 
-    // Keep browser chrome and the iOS standalone status-bar area aligned with
-    // the in-app theme. Static `prefers-color-scheme` metadata is not enough
-    // when the user switches themes inside the app.
-    const themeColor = theme === 'dark' ? '#14110F' : '#FAF7F2';
-    const themeColorMeta = window.document.querySelector<HTMLMetaElement>('meta#theme-color');
-    if (themeColorMeta) themeColorMeta.content = themeColor;
-    const statusBarMeta = window.document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]');
-    if (statusBarMeta) statusBarMeta.content = theme === 'dark' ? 'black-translucent' : 'default';
+    // Meta tags alone often wait for a cold start on mobile. Sync web chrome
+    // and the Capacitor StatusBar so icon contrast updates with the theme.
+    const applyChrome = () => {
+      void syncAppChrome(theme);
+    };
+    applyChrome();
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') applyChrome();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', applyChrome);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', applyChrome);
+    };
   }, [theme]);
 
   useEffect(() => {

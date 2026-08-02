@@ -13,7 +13,7 @@ export default defineConfig({
         name: 'Ah Hao & Belle - China Trip',
         short_name: 'Ah Hao & Belle',
         description: 'Custom travel handbook for our China 2026 trip',
-        theme_color: '#EE4D87',
+        theme_color: '#FAF7F2',
         background_color: '#FAF7F2',
         display: 'standalone',
         start_url: '/',

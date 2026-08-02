@@ -15,7 +15,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, Shuffle, PawPrint, FileText, Image as ImageIcon, LogOut, LayoutDashboard, UserRound, Save } from 'lucide-react';
+import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, Shuffle, PawPrint, FileText, Image as ImageIcon, LayoutDashboard, UserRound, Save } from 'lucide-react';
 import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
@@ -215,7 +215,6 @@ function App() {
     needsMfaVerification,
     mfaStatusReady,
     isPasswordRecovery,
-    signOut,
   } = useAuth();
   const [selectedTripId, setSelectedTripId] = useState<string | null>(() => isDemoUser ? 'cq-cd' : null);
   const activeItineraryId = isDemoUser ? 'cq-cd' : (selectedTripId ?? 'pending-trip');
@@ -1028,24 +1027,13 @@ function App() {
             </motion.button>
             <motion.button
               onClick={() => handleTabChange('profile')}
-              className="hidden sm:inline-flex p-2 rounded-full"
+              className="inline-flex p-2 rounded-full"
               style={{ color: activeTab === 'profile' ? 'var(--accent)' : 'var(--ink)', border: '1px solid var(--border)' }}
               whileTap={{ scale: 0.9 }}
               aria-label="Open profile settings"
               title="Profile settings"
             >
               <UserRound className="w-4 h-4" />
-            </motion.button>
-            <motion.button
-              onClick={() => void signOut()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              whileTap={{ scale: 0.95 }}
-              aria-label={isDemoUser ? 'Exit Demo Mode' : 'Sign out'}
-              title={isDemoUser ? 'Exit Demo Mode' : 'Sign out'}
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isDemoUser ? 'Exit demo' : 'Sign out'}</span>
             </motion.button>
             <motion.button
               className="md:hidden p-2 rounded-full"
