@@ -13,7 +13,7 @@ export const Button = ({ variant = 'primary', className, children, ...rest }: Pr
     {...rest}
     className={clsx(
       'pill-btn',
-      variant === 'primary' && 'pill-primary',
+      variant === 'primary' && 'pill-primary accent-button',
       variant === 'ghost' && 'pill-ghost',
       variant === 'soft' && 'pill-soft',
       className

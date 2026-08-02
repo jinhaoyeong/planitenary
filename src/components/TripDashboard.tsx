@@ -259,7 +259,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                   role="tab"
                   aria-selected={selected}
                   onClick={() => setShelf(option.id)}
-                  className={selected ? 'shelf-toggle-option is-selected' : 'shelf-toggle-option'}
+                  className={selected ? 'shelf-toggle-option is-selected accent-button' : 'shelf-toggle-option'}
                   style={selected ? { backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' } : undefined}
                 >
                   <span>{option.label}</span>
@@ -272,7 +272,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
           {shelf === 'active' && (
             <button
               type="button"
-              className="pill-btn pill-primary w-full inline-flex items-center justify-center gap-2 min-h-11"
+              className="pill-btn pill-primary accent-button w-full inline-flex items-center justify-center gap-2 min-h-11"
               style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
               onClick={() => void createTrip()}
               disabled={creating}
@@ -323,7 +323,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
               style={{ backgroundColor: 'var(--bg-elevated)' }}
             >
               <div className="flex items-start justify-between gap-4">
-                <span className="font-display text-5xl" style={{ color: 'var(--accent)' }}>{String(index + 1).padStart(2, '0')}</span>
+                <span className="font-display text-5xl" style={{ color: 'var(--accent)' }} data-accent-swatch="trip-number">{String(index + 1).padStart(2, '0')}</span>
                 <div className="flex items-center gap-1">
                   <span className="p-2 rounded-full" style={{ color: 'var(--ink-muted)' }}><ArrowRight className="w-5 h-5" /></span>
                 </div>

@@ -1129,7 +1129,11 @@ function App() {
               transition={{ delay: 0.3, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
               className="mt-8 flex flex-wrap items-center gap-3"
             >
-              <button onClick={() => handleTabChange(displayItinerary.primaryButtonTab || 'itinerary')} className="pill-btn pill-primary">
+              <button
+                onClick={() => handleTabChange(displayItinerary.primaryButtonTab || 'itinerary')}
+                className="pill-btn pill-primary accent-button"
+                style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+              >
                 <span
                   contentEditable={isHomeHeroEditing}
                   suppressContentEditableWarning
