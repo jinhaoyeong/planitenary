@@ -107,144 +107,143 @@ export function TotpEnrollmentCard({ setupOnly = false, onEnabled }: TotpEnrollm
 
   return (
     <div className="rounded-3xl p-4 sm:p-5" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-      <div className="flex items-start gap-3">
-        <Smartphone className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--accent)' }} />
+      <div className="flex items-center gap-3">
+        <Smartphone className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} />
         <div className="min-w-0 flex-1">
-          <h3 className="font-display text-2xl">Two-factor authentication</h3>
-          <p className="text-sm mt-2" style={{ color: 'var(--ink-muted)' }}>
-            Use an authenticator app (Google Authenticator, 1Password, Authy) for sign-in and sensitive account changes.
-          </p>
-
-          {!cloudAccount && (
-            <div className="mt-4 rounded-2xl px-3 py-2 text-sm" style={{ background: 'var(--accent-soft)', color: 'var(--ink)' }}>
-              2FA is only available on cloud accounts. Sign out of Demo / local test mode, then sign in with your email and password.
-            </div>
-          )}
-
-          {status && (
-            <div className="mt-4 rounded-2xl p-3 text-sm" style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)' }}>
-              {status}
-            </div>
-          )}
-
-          {mfaLoading ? (
-            <p className="text-sm mt-4" style={{ color: 'var(--ink-muted)' }}>Checking authenticator status…</p>
-          ) : mfaEnabled ? (
-            <div className="mt-4 space-y-3">
-              <div className="rounded-2xl px-3 py-2 text-sm font-medium" style={{ background: 'var(--accent-soft)', color: 'var(--ink)' }}>
-                Authenticator app is enabled on this account.
-              </div>
-              {!setupOnly && (
-                <>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={disableCode}
-                    onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="editorial-input"
-                    placeholder="Code to disable 2FA"
-                    disabled={!cloudAccount || busy !== null}
-                  />
-                  <button
-                    disabled={!cloudAccount || !factorId || !TOTP_CODE_PATTERN.test(disableCode) || busy !== null}
-                    className="pill-btn pill-soft w-full justify-center"
-                    onClick={() =>
-                      void run('disable-mfa', async () => {
-                        if (!factorId) throw new Error('No authenticator factor found.');
-                        await verifyTotpCode(factorId, disableCode);
-                        const { error } = await supabase.auth.mfa.unenroll({ factorId });
-                        if (error) throw error;
-                        setDisableCode('');
-                        setMfaEnabled(false);
-                        setFactorId(null);
-                        await refreshMfaStatus();
-                        return 'Two-factor authentication has been disabled.';
-                      })
-                    }
-                  >
-                    {busy === 'disable-mfa' ? 'Disabling…' : 'Disable authenticator'}
-                  </button>
-                </>
-              )}
-            </div>
-          ) : enrollDraft ? (
-            <div className="mt-4 space-y-3">
-              <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>
-                Scan this QR code in your authenticator app, then enter the 6-digit code to finish setup.
-              </p>
-              {enrollDraft.qrCode && (
-                <img
-                  src={enrollDraft.qrCode}
-                  alt="Authenticator QR code"
-                  className="mx-auto w-48 h-48 rounded-2xl bg-white p-3"
-                />
-              )}
-              <p className="text-xs break-all" style={{ color: 'var(--ink-muted)' }}>
-                Manual key: <span className="font-mono">{enrollDraft.secret}</span>
-              </p>
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
-                value={enrollCode}
-                onChange={(e) => setEnrollCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                className="editorial-input"
-                placeholder="6-digit verification code"
-              />
-              <div className="flex flex-col sm:flex-row gap-2">
-                <button
-                  disabled={!TOTP_CODE_PATTERN.test(enrollCode) || busy !== null}
-                  className="pill-btn pill-primary w-full justify-center"
-                  onClick={() =>
-                    void run('verify-mfa', async () => {
-                      await verifyTotpCode(enrollDraft.factorId, enrollCode);
-                      setEnrollDraft(null);
-                      setEnrollCode('');
-                      setMfaEnabled(true);
-                      setFactorId(enrollDraft.factorId);
-                      await refreshMfaStatus();
-                      onEnabled?.();
-                      return 'Two-factor authentication is now enabled.';
-                    })
-                  }
-                >
-                  {busy === 'verify-mfa' ? 'Verifying…' : 'Confirm and enable'}
-                </button>
-                <button
-                  disabled={busy !== null}
-                  className="pill-btn pill-soft w-full justify-center"
-                  onClick={() =>
-                    void run('cancel-mfa', async () => {
-                      await supabase.auth.mfa.unenroll({ factorId: enrollDraft.factorId });
-                      setEnrollDraft(null);
-                      setEnrollCode('');
-                      return 'Authenticator setup cancelled.';
-                    })
-                  }
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-4 space-y-3">
-              <div className="rounded-2xl px-3 py-2 text-sm" style={{ background: 'var(--accent-soft)', color: 'var(--ink)' }}>
-                This account does not have 2FA yet. Enabling TOTP in the Supabase dashboard only allows 2FA — each account must enroll an authenticator here.
-              </div>
-              <button
-                disabled={!cloudAccount || busy !== null}
-                className="pill-btn pill-primary w-full justify-center"
-                onClick={startEnrollment}
-              >
-                {busy === 'enroll-mfa' ? 'Starting…' : 'Enable authenticator app'}
-              </button>
-            </div>
-          )}
+          <h3 className="font-display text-2xl leading-none">Two-factor authentication</h3>
         </div>
+        {!mfaLoading && (
+          <span
+            className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide"
+            style={{
+              background: mfaEnabled ? 'var(--accent)' : 'var(--bg-elevated, var(--bg))',
+              color: mfaEnabled ? 'var(--accent-ink)' : 'var(--ink-muted)',
+              border: mfaEnabled ? 'none' : '1px solid var(--border)',
+            }}
+          >
+            {mfaEnabled ? 'On' : 'Off'}
+          </span>
+        )}
       </div>
+
+      {!cloudAccount && (
+        <p className="mt-3 text-sm" style={{ color: 'var(--ink-muted)' }}>
+          Available on cloud accounts only.
+        </p>
+      )}
+
+      {status && (
+        <div className="mt-3 rounded-2xl px-3 py-2 text-sm" style={{ background: 'var(--bg-elevated, var(--bg))', border: '1px solid var(--border)' }}>
+          {status}
+        </div>
+      )}
+
+      {mfaLoading ? (
+        <p className="text-sm mt-4" style={{ color: 'var(--ink-muted)' }}>Loading…</p>
+      ) : mfaEnabled ? (
+        !setupOnly && (
+          <div className="mt-4 space-y-3">
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={disableCode}
+              onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              className="editorial-input"
+              placeholder="Authenticator code"
+              disabled={!cloudAccount || busy !== null}
+            />
+            <button
+              disabled={!cloudAccount || !factorId || !TOTP_CODE_PATTERN.test(disableCode) || busy !== null}
+              className="pill-btn pill-soft w-full justify-center"
+              onClick={() =>
+                void run('disable-mfa', async () => {
+                  if (!factorId) throw new Error('No authenticator factor found.');
+                  await verifyTotpCode(factorId, disableCode);
+                  const { error } = await supabase.auth.mfa.unenroll({ factorId });
+                  if (error) throw error;
+                  setDisableCode('');
+                  setMfaEnabled(false);
+                  setFactorId(null);
+                  await refreshMfaStatus();
+                  return '2FA disabled.';
+                })
+              }
+            >
+              {busy === 'disable-mfa' ? 'Disabling…' : 'Disable 2FA'}
+            </button>
+          </div>
+        )
+      ) : enrollDraft ? (
+        <div className="mt-4 space-y-3">
+          <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>
+            Scan the QR code, then enter the 6-digit code.
+          </p>
+          {enrollDraft.qrCode && (
+            <img
+              src={enrollDraft.qrCode}
+              alt="Authenticator QR code"
+              className="mx-auto w-48 h-48 rounded-2xl bg-white p-3"
+            />
+          )}
+          <p className="text-xs break-all" style={{ color: 'var(--ink-muted)' }}>
+            Manual key: <span className="font-mono">{enrollDraft.secret}</span>
+          </p>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={enrollCode}
+            onChange={(e) => setEnrollCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            className="editorial-input"
+            placeholder="6-digit code"
+          />
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              disabled={!TOTP_CODE_PATTERN.test(enrollCode) || busy !== null}
+              className="pill-btn pill-primary w-full justify-center"
+              onClick={() =>
+                void run('verify-mfa', async () => {
+                  await verifyTotpCode(enrollDraft.factorId, enrollCode);
+                  setEnrollDraft(null);
+                  setEnrollCode('');
+                  setMfaEnabled(true);
+                  setFactorId(enrollDraft.factorId);
+                  await refreshMfaStatus();
+                  onEnabled?.();
+                  return '2FA enabled.';
+                })
+              }
+            >
+              {busy === 'verify-mfa' ? 'Verifying…' : 'Enable'}
+            </button>
+            <button
+              disabled={busy !== null}
+              className="pill-btn pill-soft w-full justify-center"
+              onClick={() =>
+                void run('cancel-mfa', async () => {
+                  await supabase.auth.mfa.unenroll({ factorId: enrollDraft.factorId });
+                  setEnrollDraft(null);
+                  setEnrollCode('');
+                  return 'Setup cancelled.';
+                })
+              }
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          disabled={!cloudAccount || busy !== null}
+          className="pill-btn pill-primary w-full justify-center mt-4"
+          onClick={startEnrollment}
+        >
+          {busy === 'enroll-mfa' ? 'Starting…' : 'Enable 2FA'}
+        </button>
+      )}
     </div>
   );
 }

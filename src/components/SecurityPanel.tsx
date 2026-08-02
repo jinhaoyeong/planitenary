@@ -113,15 +113,13 @@ export function SecurityPanel() {
     <section className="editorial-card p-4 sm:p-5 md:p-8">
       <div className="eyebrow">Account security</div>
       <h2 className="font-display text-3xl sm:text-4xl mt-4">Protect your account.</h2>
-      <p className="mt-3 text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
-        Two-factor authentication is optional. Enable it when you want an additional sign-in step. Password, email, and phone
-        updates ask you to confirm with your current password
-        {mfaEnabled ? ' and authenticator code' : ''} in a popup.
+      <p className="mt-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
+        Manage 2FA, password, email, and phone.
       </p>
 
       {!cloudAccount && (
-        <div className="mt-5 rounded-2xl p-4 text-sm" style={{ background: 'var(--accent-soft)', color: 'var(--ink)', border: '1px solid var(--border)' }}>
-          Security changes are available for cloud accounts. Demo and local test accounts remain device-only — sign in with email/password to manage 2FA.
+        <div className="mt-4 rounded-2xl px-3 py-2 text-sm" style={{ background: 'var(--accent-soft)', color: 'var(--ink)', border: '1px solid var(--border)' }}>
+          Sign in with a cloud account to change these settings.
         </div>
       )}
       {status && (
