@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { Plus, LogOut, Calendar, MapPin, Loader2, RefreshCw, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Calendar, MapPin, Loader2, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Itinerary } from '../data';
 import { itineraries } from '../data';
@@ -16,7 +16,7 @@ interface TripItem {
 }
 
 export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void }) => {
-  const { user, signOut, isDemoUser, isLocalTestUser } = useAuth();
+  const { user, isDemoUser, isLocalTestUser } = useAuth();
   const [trips, setTrips] = useState<TripItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -164,14 +164,6 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
                 : `Welcome back, ${user.email}. Select a trip or start a new one.`}
             </p>
           </div>
-          <button
-            onClick={signOut}
-            className="flex w-full sm:w-auto justify-center items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
-            style={{ color: 'var(--accent)', backgroundColor: 'var(--accent-soft)' }}
-          >
-            <LogOut className="w-4 h-4" />
-            Sign Out
-          </button>
         </header>
 
         {error && (

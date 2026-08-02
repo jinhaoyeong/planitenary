@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { MouseEvent } from 'react';
-import { Archive, ArrowRight, CalendarDays, MapPin, Pencil, Plus, RefreshCw, Sparkles, RotateCcw } from 'lucide-react';
+import type { KeyboardEvent, MouseEvent } from 'react';
+import { Archive, ArrowRight, CalendarDays, MapPin, Pencil, Plus, RefreshCw, Sparkles, RotateCcw, UserRound } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,6 +9,7 @@ import type { Itinerary } from '../data';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
+  onOpenProfile: () => void;
 }
 
 const localTripsKey = (userId: string) => `trip-registry-${userId}`;
@@ -24,7 +25,7 @@ const readLocalTrips = (userId: string): TripSummary[] => {
   }
 };
 
-export function TripDashboard({ onOpenTrip }: TripDashboardProps) {
+export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,6 +187,7 @@ export function TripDashboard({ onOpenTrip }: TripDashboardProps) {
       const next = trips.map((item) => item.id === trip.id ? { ...item, status: 'active' as const, updatedAt: new Date().toISOString() } : item);
       persistLocalTrips(next);
       setTrips(next);
+      setShelf('active');
       return;
     }
     const { error: restoreError } = await supabase
@@ -198,13 +200,36 @@ export function TripDashboard({ onOpenTrip }: TripDashboardProps) {
       return;
     }
     setTrips((current) => current.map((item) => item.id === trip.id ? { ...item, status: 'active' as const, updatedAt: new Date().toISOString() } : item));
+    setShelf('active');
+  };
+
+  const onCardKeyDown = (event: KeyboardEvent<HTMLElement>, trip: TripSummary) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      void openTrip(trip);
+    }
   };
 
   const visibleTrips = trips.filter((trip) => trip.status === shelf);
+  const activeCount = trips.filter((trip) => trip.status === 'active').length;
+  const archivedCount = trips.filter((trip) => trip.status === 'archived').length;
 
   return (
-    <main className="min-h-[70vh] max-w-6xl mx-auto px-4 sm:px-6 md:px-10 py-10 md:py-16" style={{ color: 'var(--ink)' }}>
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+    <main className="min-h-screen max-w-6xl mx-auto px-4 sm:px-6 md:px-10 py-6 md:py-16" style={{ color: 'var(--ink)', backgroundColor: 'var(--bg)' }}>
+      <div className="flex items-center justify-end mb-6 md:mb-8">
+        <button
+          type="button"
+          onClick={onOpenProfile}
+          className="inline-flex p-2.5 rounded-full"
+          style={{ color: 'var(--ink)', border: '1px solid var(--border)', backgroundColor: 'var(--bg-elevated)' }}
+          aria-label="Open profile settings"
+          title="Profile settings"
+        >
+          <UserRound className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-6 mb-8 md:mb-10">
         <div>
           <p className="eyebrow">Your travel shelf</p>
           <h1 className="font-display text-5xl md:text-7xl leading-none mt-4">Choose a trip.</h1>
@@ -212,25 +237,48 @@ export function TripDashboard({ onOpenTrip }: TripDashboardProps) {
             Keep each journey in its own handbook, then shape the details at your own pace.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          <div className="inline-flex rounded-full p-1" style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }} aria-label="Trip shelf filter">
-            {(['active', 'archived'] as const).map((option) => (
+
+        <div
+          className="grid grid-cols-2 w-full rounded-full p-1 gap-1"
+          style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+          role="tablist"
+          aria-label="Trip shelf filter"
+        >
+          {([
+            { id: 'active' as const, label: 'Active trips', count: activeCount },
+            { id: 'archived' as const, label: 'Archived', count: archivedCount },
+          ]).map((option) => {
+            const selected = shelf === option.id;
+            return (
               <button
-                key={option}
+                key={option.id}
                 type="button"
-                onClick={() => setShelf(option)}
-                className="pill-btn justify-center !min-h-0 px-3 py-2 text-xs"
-                style={shelf === option ? { backgroundColor: 'var(--accent)', color: 'var(--accent-ink, var(--bg))' } : { color: 'var(--ink-muted)' }}
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setShelf(option.id)}
+                className="w-full rounded-full px-3 py-2.5 text-xs sm:text-sm font-semibold transition-colors"
+                style={selected
+                  ? { backgroundColor: 'var(--accent)', color: '#FFFFFF' }
+                  : { backgroundColor: 'transparent', color: 'var(--ink-muted)' }}
               >
-                {option === 'active' ? 'Active trips' : 'Archived'}
+                {option.label}
+                <span className="ml-1.5 tabular-nums opacity-80">({option.count})</span>
               </button>
-            ))}
-          </div>
-          <button className="pill-btn pill-primary inline-flex items-center justify-center gap-2" onClick={() => void createTrip()} disabled={creating}>
+            );
+          })}
+        </div>
+
+        {shelf === 'active' && (
+          <button
+            type="button"
+            className="pill-btn pill-primary w-full sm:w-auto inline-flex items-center justify-center gap-2"
+            onClick={() => void createTrip()}
+            disabled={creating}
+          >
             {creating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             Create new trip
           </button>
-        </div>
+        )}
       </div>
 
       {error && <div className="mb-6 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'var(--accent)', color: 'var(--ink)' }} role="alert">{error}</div>}
@@ -243,7 +291,7 @@ export function TripDashboard({ onOpenTrip }: TripDashboardProps) {
             <Sparkles className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
             <h2 className="font-display text-3xl">Your first trip starts here.</h2>
             <p className="max-w-md mx-auto mt-3" style={{ color: 'var(--ink-muted)' }}>Create a blank handbook for dates, places, ideas, costs, and memories.</p>
-            <button className="pill-btn pill-primary mt-6" onClick={() => void createTrip()}>Create a blank trip</button>
+            <button type="button" className="pill-btn pill-primary mt-6" onClick={() => void createTrip()}>Create a blank trip</button>
           </> : <>
             <Archive className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
             <h2 className="font-display text-3xl">No archived trips.</h2>
@@ -253,7 +301,17 @@ export function TripDashboard({ onOpenTrip }: TripDashboardProps) {
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {visibleTrips.map((trip, index) => (
-            <motion.button key={trip.id} whileHover={{ y: -4 }} whileTap={{ scale: 0.99 }} onClick={() => void openTrip(trip)} className="text-left editorial-card p-6" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+            <motion.div
+              key={trip.id}
+              whileHover={{ y: -4 }}
+              whileTap={{ scale: 0.99 }}
+              role="button"
+              tabIndex={0}
+              onClick={() => void openTrip(trip)}
+              onKeyDown={(event) => onCardKeyDown(event, trip)}
+              className="text-left editorial-card p-6 cursor-pointer"
+              style={{ backgroundColor: 'var(--bg-elevated)' }}
+            >
               <div className="flex items-start justify-between gap-4">
                 <span className="font-display text-5xl" style={{ color: 'var(--accent)' }}>{String(index + 1).padStart(2, '0')}</span>
                 <div className="flex items-center gap-1">
@@ -267,20 +325,35 @@ export function TripDashboard({ onOpenTrip }: TripDashboardProps) {
                 <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {trip.cityCount} cities</span>
               </div>
               <div className="flex gap-2 mt-5 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-                <span role="button" tabIndex={0} onClick={(event) => void renameTrip(event, trip)} className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
+                <button
+                  type="button"
+                  onClick={(event) => void renameTrip(event, trip)}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold"
+                  style={{ color: 'var(--ink-muted)' }}
+                >
                   <Pencil className="w-3.5 h-3.5" /> Rename
-                </span>
+                </button>
                 {shelf === 'active' ? (
-                  <span role="button" tabIndex={0} onClick={(event) => void archiveTrip(event, trip)} className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
+                  <button
+                    type="button"
+                    onClick={(event) => void archiveTrip(event, trip)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold"
+                    style={{ color: 'var(--ink-muted)' }}
+                  >
                     <Archive className="w-3.5 h-3.5" /> Archive
-                  </span>
+                  </button>
                 ) : (
-                  <span role="button" tabIndex={0} onClick={(event) => void restoreTrip(event, trip)} className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
+                  <button
+                    type="button"
+                    onClick={(event) => void restoreTrip(event, trip)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold"
+                    style={{ color: 'var(--ink-muted)' }}
+                  >
                     <RotateCcw className="w-3.5 h-3.5" /> Restore
-                  </span>
+                  </button>
                 )}
               </div>
-            </motion.button>
+            </motion.div>
           ))}
         </div>
       )}

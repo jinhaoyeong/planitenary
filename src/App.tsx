@@ -229,6 +229,7 @@ function App() {
   const [selectedTripId, setSelectedTripId] = useState<string | null>(() => isDemoUser ? 'cq-cd' : null);
   const activeItineraryId = isDemoUser ? 'cq-cd' : (selectedTripId ?? 'pending-trip');
   const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'profile'>('itinerary');
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('hasVisited'));
   const [showPets, setShowPets] = useState(() => {
@@ -259,6 +260,7 @@ function App() {
   useEffect(() => {
     setSelectedTripId(isDemoUser ? 'cq-cd' : null);
     setCustomItinerary(null);
+    setShowAccountSettings(false);
   }, [user?.id, isDemoUser]);
 
   const handleStart = () => {
@@ -347,6 +349,7 @@ function App() {
 
 
   const handleOpenTrip = (trip: Itinerary) => {
+    setShowAccountSettings(false);
     setSelectedTripId(trip.id);
     setCustomItinerary(trip);
   };
@@ -880,7 +883,47 @@ function App() {
   }
 
   if (!selectedTripId) {
-    return <TripDashboard onOpenTrip={handleOpenTrip} />;
+    if (showAccountSettings) {
+      return (
+        <div className="min-h-screen" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
+          <header
+            className="sticky top-0 z-40 backdrop-blur-md"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--bg) 85%, transparent)',
+              borderBottom: '1px solid var(--border)',
+              paddingTop: 'env(safe-area-inset-top)',
+            }}
+          >
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAccountSettings(false)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-full text-xs font-semibold"
+                style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
+                aria-label="Back to trips"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                <span>All trips</span>
+              </button>
+              <span className="font-display text-xl sm:text-2xl leading-none tracking-tight" style={{ color: 'var(--ink)' }}>
+                Profile <span className="font-display-italic" style={{ color: 'var(--accent)' }}>settings</span>
+              </span>
+              <span className="w-10" aria-hidden="true" />
+            </div>
+          </header>
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 md:px-10 py-8 md:py-12">
+            <ProfilePanel />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <TripDashboard
+        onOpenTrip={handleOpenTrip}
+        onOpenProfile={() => setShowAccountSettings(true)}
+      />
+    );
   }
 
   return (
