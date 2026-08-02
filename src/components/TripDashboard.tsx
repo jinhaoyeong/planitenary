@@ -215,33 +215,39 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
   const archivedCount = trips.filter((trip) => trip.status === 'archived').length;
 
   return (
-    <main className="min-h-screen max-w-6xl mx-auto px-4 sm:px-6 md:px-10 py-6 md:py-16" style={{ color: 'var(--ink)', backgroundColor: 'var(--bg)' }}>
-      <div className="flex items-center justify-end mb-6 md:mb-8">
-        <button
-          type="button"
-          onClick={onOpenProfile}
-          className="inline-flex p-2.5 rounded-full"
-          style={{ color: 'var(--ink)', border: '1px solid var(--border)', backgroundColor: 'var(--bg-elevated)' }}
-          aria-label="Open profile settings"
-          title="Profile settings"
-        >
-          <UserRound className="w-5 h-5" />
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-5 mb-8 md:mb-10">
-        <div>
-          <p className="eyebrow">Your travel shelf</p>
-          <h1 className="font-display text-5xl md:text-7xl leading-none mt-4">Choose a trip.</h1>
-          <p className="mt-5 max-w-xl text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-            Keep each journey in its own handbook, then shape the details at your own pace.
-          </p>
+    <main
+      className="min-h-screen max-w-6xl mx-auto px-5 sm:px-6 md:px-10 pb-10 md:pb-16"
+      style={{
+        color: 'var(--ink)',
+        backgroundColor: 'var(--bg)',
+        paddingTop: 'max(1.25rem, env(safe-area-inset-top))',
+      }}
+    >
+      <div className="flex flex-col gap-5 mb-8 md:mb-10 w-full max-w-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 pt-1">
+            <p className="eyebrow">Your travel shelf</p>
+            <h1 className="font-display text-5xl md:text-7xl leading-none mt-3">Choose a trip.</h1>
+            <p className="mt-4 text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+              Keep each journey in its own handbook, then shape the details at your own pace.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            className="inline-flex p-2.5 rounded-full shrink-0"
+            style={{ color: 'var(--ink)', border: '1px solid var(--border)', backgroundColor: 'var(--bg-elevated)' }}
+            aria-label="Open profile settings"
+            title="Profile settings"
+          >
+            <UserRound className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="flex flex-col gap-3 w-full max-w-xl">
+        <div className="flex flex-col gap-3 w-full">
           <div className="shelf-toggle" role="tablist" aria-label="Trip shelf filter">
             {([
-              { id: 'active' as const, label: 'Active trips', count: activeCount },
+              { id: 'active' as const, label: 'Active', count: activeCount },
               { id: 'archived' as const, label: 'Archived', count: archivedCount },
             ]).map((option) => {
               const selected = shelf === option.id;
