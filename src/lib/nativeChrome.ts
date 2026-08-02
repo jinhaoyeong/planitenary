@@ -66,6 +66,7 @@ export function syncWebChrome(theme: AppTheme) {
   });
 
   upsertMeta('meta[name="apple-mobile-web-app-status-bar-style"]', {
+    id: 'apple-status-bar',
     name: 'apple-mobile-web-app-status-bar-style',
     content: theme === 'dark' ? 'black-translucent' : 'default',
   });

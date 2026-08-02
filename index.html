@@ -7,7 +7,7 @@
     <link rel="manifest" href="/manifest.json" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta id="apple-status-bar" name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Travel Handbook" />
     <meta id="theme-color" name="theme-color" content="#FAF7F2" />
     <meta name="color-scheme" content="light dark" />
@@ -27,6 +27,8 @@
           document.documentElement.style.backgroundColor = color;
           var themeMeta = document.getElementById('theme-color');
           if (themeMeta) themeMeta.setAttribute('content', color);
+          var statusBarMeta = document.getElementById('apple-status-bar');
+          if (statusBarMeta) statusBarMeta.setAttribute('content', theme === 'dark' ? 'black-translucent' : 'default');
         } catch (e) {}
       })();
     </script>
