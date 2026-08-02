@@ -9,13 +9,14 @@ import { Checklist } from './components/Checklist';
 import { Documents } from './components/Documents';
 import { PhotoWall } from './components/PhotoWall';
 import { ProfilePanel } from './components/ProfilePanel';
+import { AppSettingsPanel } from './components/AppSettingsPanel';
 import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, Shuffle, PawPrint, FileText, Image as ImageIcon, LayoutDashboard, UserRound, Save } from 'lucide-react';
+import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, LayoutDashboard, UserRound, Settings, Save } from 'lucide-react';
 import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
@@ -57,7 +58,7 @@ const emptyItinerary: Itinerary = {
 };
 
 const DEFAULT_MARQUEE_ITEMS = ['Travel Handbook', 'Plans', 'Notes', 'Maps', 'Photos'];
-const VALID_HOME_TABS = ['itinerary', 'maps', 'draft', 'budget', 'checklist', 'documents', 'photos', 'profile'] as const;
+const VALID_HOME_TABS = ['itinerary', 'maps', 'draft', 'budget', 'checklist', 'documents', 'photos', 'profile', 'settings'] as const;
 
 interface CloudBackupSnapshot {
   kind: 'trip-backup-v1';
@@ -228,13 +229,13 @@ function App() {
   } = useAuth();
   const [selectedTripId, setSelectedTripId] = useState<string | null>(() => isDemoUser ? 'cq-cd' : null);
   const activeItineraryId = isDemoUser ? 'cq-cd' : (selectedTripId ?? 'pending-trip');
-  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'profile'>('itinerary');
+  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'profile' | 'settings'>('itinerary');
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('hasVisited'));
   const [showPets, setShowPets] = useState(() => {
     const stored = localStorage.getItem('showPets');
-    return stored !== null ? stored === 'true' : true;
+    return stored !== null ? stored === 'true' : false;
   });
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [restorePreview, setRestorePreview] = useState<RestoreDatasetPreview[]>([]);
@@ -577,26 +578,6 @@ function App() {
     }, 50); // 50ms delay lets the new tab's DOM render first so heights are accurate
   };
 
-  const openFoodPicker = () => {
-    try {
-      sessionStorage.setItem('pending-food-picker-open', '1');
-    } catch {
-    }
-    const triggerFoodPickerOpen = (delayMs = 0) => {
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('open-food-picker'));
-      }, delayMs);
-    };
-    if (activeTab !== 'itinerary') {
-      setActiveTab('itinerary');
-      triggerFoodPickerOpen(180);
-      triggerFoodPickerOpen(450);
-      triggerFoodPickerOpen(800);
-      return;
-    }
-    triggerFoodPickerOpen(0);
-  };
-
   const tabs = [
     { id: 'itinerary', label: 'Itinerary', icon: Calendar },
     { id: 'maps', label: 'Maps', icon: Map },
@@ -605,11 +586,12 @@ function App() {
     { id: 'checklist', label: 'Checklist', icon: CheckSquare },
     { id: 'documents', label: 'Documents', icon: FileText },
     { id: 'photos', label: 'Photo Wall', icon: ImageIcon },
+    { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'profile', label: 'Profile', icon: UserRound },
   ] as const;
 
-  /** Documents only appear in the hamburger Quick Menu on small screens, not the bottom pill. */
-  const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos' && tab.id !== 'profile');
+  /** Documents/settings/profile appear in the hamburger Quick Menu on small screens, not the bottom pill. */
+  const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos' && tab.id !== 'profile' && tab.id !== 'settings');
 
   const buildCloudSnapshot = async (): Promise<CloudBackupSnapshot> => {
     const itineraryData = loadFromStorage<Itinerary>(itineraryStorageKey) || customItinerary || activeItinerary;
@@ -1050,26 +1032,6 @@ function App() {
               <span className="hidden md:inline">Restore</span>
             </motion.button>
             <motion.button
-              onClick={openFoodPicker}
-              className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              whileTap={{ scale: 0.95 }}
-              aria-label="Food picker"
-            >
-              <Shuffle className="w-3.5 h-3.5" />
-              <span>Food Picker</span>
-            </motion.button>
-            <motion.button
-              onClick={togglePets}
-              className="hidden md:inline-flex p-2 rounded-full"
-              style={{ color: showPets ? 'var(--accent)' : 'var(--ink-muted)', border: '1px solid var(--border)' }}
-              aria-label="Toggle pets"
-              title="Toggle Pets"
-              whileTap={{ scale: 0.9, rotate: 12 }}
-            >
-              <PawPrint className="w-4 h-4" />
-            </motion.button>
-            <motion.button
               onClick={toggleTheme}
               className="p-2 rounded-full"
               style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
@@ -1077,6 +1039,16 @@ function App() {
               whileTap={{ scale: 0.9, rotate: -12 }}
             >
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </motion.button>
+            <motion.button
+              onClick={() => handleTabChange('settings')}
+              className="inline-flex p-2 rounded-full"
+              style={{ color: activeTab === 'settings' ? 'var(--accent)' : 'var(--ink)', border: '1px solid var(--border)' }}
+              whileTap={{ scale: 0.9 }}
+              aria-label="Open app settings"
+              title="App settings"
+            >
+              <Settings className="w-4 h-4" />
             </motion.button>
             <motion.button
               onClick={() => handleTabChange('profile')}
@@ -1288,6 +1260,9 @@ function App() {
             {activeTab === 'checklist' && <Checklist itineraryId={activeItineraryId} />}
             {activeTab === 'documents' && <Documents itineraryId={activeItineraryId} />}
             {activeTab === 'photos' && <PhotoWall itinerary={customItinerary || activeItinerary} />}
+            {activeTab === 'settings' && (
+              <AppSettingsPanel showPets={showPets} onTogglePets={togglePets} />
+            )}
             {activeTab === 'profile' && <ProfilePanel onEditHomeHero={beginHomeHeroEditing} />}
           </motion.div>
         </AnimatePresence>
@@ -1525,32 +1500,6 @@ function App() {
               >
                 <RefreshCw className="w-4 h-4" />
                 Restore Backup Data
-              </button>
-              <button
-                onClick={() => {
-                  openFoodPicker();
-                  setIsMenuOpen(false);
-                }}
-                className="w-full px-4 py-2.5 bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-700 text-rose-700 dark:text-rose-300 rounded-xl text-sm font-semibold hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors flex items-center justify-center gap-2"
-              >
-                <Shuffle className="w-4 h-4" />
-                Open Food Picker
-              </button>
-
-              <button
-                onClick={() => {
-                  togglePets();
-                  setIsMenuOpen(false);
-                }}
-                className={clsx(
-                  "w-full px-4 py-2.5 border rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2",
-                  showPets 
-                    ? "bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-                    : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
-                )}
-              >
-                <PawPrint className="w-4 h-4" />
-                {showPets ? 'Hide Pets' : 'Show Pets'}
               </button>
             </motion.div>
           </motion.div>

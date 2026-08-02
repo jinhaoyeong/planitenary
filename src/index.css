@@ -358,6 +358,36 @@ body {
   display: inline-block;
 }
 
+.editorial-toggle {
+  position: relative;
+  width: 3rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--ink) 8%, var(--bg));
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+  padding: 0;
+  cursor: pointer;
+}
+.editorial-toggle[data-checked='true'] {
+  background-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--ink));
+}
+.editorial-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 9999px;
+  background-color: var(--bg-elevated);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 18%, transparent);
+  transition: transform 0.18s ease;
+}
+.editorial-toggle[data-checked='true'] .editorial-toggle-thumb {
+  transform: translateX(1.2rem);
+}
+
 /* Hand-drawn-style checkbox */
 .editorial-checkbox {
   width: 1.5rem;

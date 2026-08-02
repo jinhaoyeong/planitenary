@@ -47,9 +47,9 @@ export interface Itinerary {
   marqueeItems?: string[];
   heroEyebrow?: string;
   primaryButtonLabel?: string;
-  primaryButtonTab?: 'itinerary' | 'maps' | 'draft' | 'budget' | 'checklist' | 'documents' | 'photos' | 'profile';
+  primaryButtonTab?: 'itinerary' | 'maps' | 'draft' | 'budget' | 'checklist' | 'documents' | 'photos' | 'profile' | 'settings';
   secondaryButtonLabel?: string;
-  secondaryButtonTab?: 'itinerary' | 'maps' | 'draft' | 'budget' | 'checklist' | 'documents' | 'photos' | 'profile';
+  secondaryButtonTab?: 'itinerary' | 'maps' | 'draft' | 'budget' | 'checklist' | 'documents' | 'photos' | 'profile' | 'settings';
   coverHeadline?: string;
   coverLabel?: string;
   coverYear?: string;
