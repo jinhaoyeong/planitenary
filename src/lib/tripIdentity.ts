@@ -256,13 +256,13 @@ export function buildTripIdentity(profile: TripProfile, context: IdentityContext
     ? `Search ${formatList([...searchTargets, 'anything else'], 'or')}…`
     : 'Search itinerary, phrases, locations...';
 
-  const marqueeItems = [
+  const marqueeItems = Array.from(new Set([
     brandTitle,
-    cities[0] ? titleCase(cities[0]) : 'Plans',
-    seasonWord ? capitalize(seasonWord) : 'Notes',
+    ...cities.slice(0, 2).map(titleCase),
+    type ? titleCase(TYPE_NOUNS[type]) : 'Plans',
     'Maps',
     'Photos',
-  ];
+  ]));
 
   const tagline = anchor
     ? capitalize(`a ${moodAdjective || 'memorable'} ${typeNoun} through ${anchor}.`)

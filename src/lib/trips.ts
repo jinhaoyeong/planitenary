@@ -58,7 +58,7 @@ export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
       ? city ? `Arrive in ${city}` : 'Arrival day'
       : isLast
         ? city ? `Last morning in ${city}` : 'Departure day'
-        : city ? `${city} day ${index + 1}` : `Day ${index + 1}`;
+        : city ? `Day ${index + 1} in ${city}` : `Day ${index + 1}`;
 
     return { day: index + 1, date, city, title, activities: [] } satisfies DayPlan;
   });
