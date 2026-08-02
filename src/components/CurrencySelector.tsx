@@ -161,13 +161,3 @@ export function BudgetCurrencyToggle() {
     </div>
   );
 }
-
-/** @deprecated Prefer CurrencyPairSettings or BudgetCurrencyToggle. */
-export function CurrencySelector() {
-  return <CurrencyPairSettings />;
-}
-
-/** @deprecated Prefer BudgetCurrencyToggle. */
-export function CompactCurrencySelector() {
-  return <BudgetCurrencyToggle />;
-}
