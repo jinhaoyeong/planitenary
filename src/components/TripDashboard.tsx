@@ -229,7 +229,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
         </button>
       </div>
 
-      <div className="flex flex-col gap-6 mb-8 md:mb-10">
+      <div className="flex flex-col gap-5 mb-8 md:mb-10">
         <div>
           <p className="eyebrow">Your travel shelf</p>
           <h1 className="font-display text-5xl md:text-7xl leading-none mt-4">Choose a trip.</h1>
@@ -238,47 +238,41 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
           </p>
         </div>
 
-        <div
-          className="grid grid-cols-2 w-full rounded-full p-1 gap-1"
-          style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-          role="tablist"
-          aria-label="Trip shelf filter"
-        >
-          {([
-            { id: 'active' as const, label: 'Active trips', count: activeCount },
-            { id: 'archived' as const, label: 'Archived', count: archivedCount },
-          ]).map((option) => {
-            const selected = shelf === option.id;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => setShelf(option.id)}
-                className="w-full rounded-full px-3 py-2.5 text-xs sm:text-sm font-semibold transition-colors"
-                style={selected
-                  ? { backgroundColor: 'var(--accent)', color: '#FFFFFF' }
-                  : { backgroundColor: 'transparent', color: 'var(--ink-muted)' }}
-              >
-                {option.label}
-                <span className="ml-1.5 tabular-nums opacity-80">({option.count})</span>
-              </button>
-            );
-          })}
-        </div>
+        <div className="flex flex-col gap-3 w-full max-w-xl">
+          <div className="shelf-toggle" role="tablist" aria-label="Trip shelf filter">
+            {([
+              { id: 'active' as const, label: 'Active trips', count: activeCount },
+              { id: 'archived' as const, label: 'Archived', count: archivedCount },
+            ]).map((option) => {
+              const selected = shelf === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => setShelf(option.id)}
+                  className={selected ? 'shelf-toggle-option is-selected' : 'shelf-toggle-option'}
+                >
+                  <span>{option.label}</span>
+                  <span className="shelf-toggle-count">{option.count}</span>
+                </button>
+              );
+            })}
+          </div>
 
-        {shelf === 'active' && (
-          <button
-            type="button"
-            className="pill-btn pill-primary w-full sm:w-auto inline-flex items-center justify-center gap-2"
-            onClick={() => void createTrip()}
-            disabled={creating}
-          >
-            {creating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Create new trip
-          </button>
-        )}
+          {shelf === 'active' && (
+            <button
+              type="button"
+              className="pill-btn pill-primary w-full inline-flex items-center justify-center gap-2 min-h-11"
+              onClick={() => void createTrip()}
+              disabled={creating}
+            >
+              {creating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Create new trip
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <div className="mb-6 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: 'var(--accent)', color: 'var(--ink)' }} role="alert">{error}</div>}
