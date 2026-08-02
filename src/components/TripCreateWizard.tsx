@@ -13,6 +13,7 @@ import {
 import { countryFlag, findCountry, type CountryProfile, type PlaceSuggestion } from '../lib/destinations';
 import { CURRENCIES } from '../lib/currencyCatalog';
 import { buildTripIdentity } from '../lib/tripIdentity';
+import { MAX_GENERATED_DAYS } from '../lib/trips';
 import { OptionChips } from './ui/OptionChips';
 import { CountryPicker } from './ui/CountryPicker';
 import { CitySearchInput } from './ui/CitySearchInput';
@@ -29,7 +30,9 @@ import {
   describeDestination,
   destinationCurrencies,
   destinationFromPlace,
+  manualDestination,
   nightsBetween,
+  sanitizeTripProfile,
   resolveDuration,
   suggestedCurrency,
   type BudgetTier,
@@ -43,6 +46,49 @@ interface TripCreateWizardProps {
   onCancel: () => void;
   onCreate: (profile: TripProfile) => void;
 }
+
+const DRAFT_KEY = 'trip-wizard-draft-v1';
+
+interface WizardDraft {
+  stepIndex: number;
+  profile: TripProfile;
+  countryCode: string;
+  countryName: string;
+  currencyTouched: boolean;
+  savedAt: string;
+}
+
+/**
+ * Answers survive an accidental close. Nothing is created until the last step,
+ * so the draft is the only record of the work in progress.
+ */
+const readDraft = (): WizardDraft | null => {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<WizardDraft>;
+    const profile = sanitizeTripProfile(parsed.profile);
+    if (!profile) return null;
+    return {
+      stepIndex: typeof parsed.stepIndex === 'number' ? parsed.stepIndex : 0,
+      profile,
+      countryCode: typeof parsed.countryCode === 'string' ? parsed.countryCode : '',
+      countryName: typeof parsed.countryName === 'string' ? parsed.countryName : '',
+      currencyTouched: parsed.currencyTouched === true,
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const clearDraft = () => localStorage.removeItem(DRAFT_KEY);
+
+/** True once the traveller has actually answered something worth keeping. */
+const isWorthSaving = (draft: Omit<WizardDraft, 'savedAt'>) =>
+  draft.stepIndex > 0
+  || draft.profile.destinations.length > 0
+  || draft.countryCode.length > 0;
 
 const STEPS = [
   { id: 'where', title: 'Where are you going?', hint: 'Add every city you plan to visit.' },
@@ -68,18 +114,21 @@ export function TripCreateWizard({
   const [countryCode, setCountryCode] = useState('');
   const [countryName, setCountryName] = useState('');
   const [currencyTouched, setCurrencyTouched] = useState(false);
+  const [resumedDraft, setResumedDraft] = useState(false);
 
-  // Reset while rendering rather than in an effect, so reopening never shows
-  // the previous trip's answers for a frame.
+  // Restore while rendering rather than in an effect, so reopening never shows
+  // a blank form for a frame before the draft arrives.
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
-      setStepIndex(0);
-      setProfile(createEmptyProfile(detectedHomeCurrency));
-      setCountryCode('');
-      setCountryName('');
-      setCurrencyTouched(false);
+      const draft = readDraft();
+      setStepIndex(draft?.stepIndex ?? 0);
+      setProfile(draft?.profile ?? createEmptyProfile(detectedHomeCurrency));
+      setCountryCode(draft?.countryCode ?? '');
+      setCountryName(draft?.countryName ?? '');
+      setCurrencyTouched(draft?.currencyTouched ?? false);
+      setResumedDraft(draft !== null);
     }
   }
 
@@ -91,6 +140,23 @@ export function TripCreateWizard({
       document.body.style.overflow = previous;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const draft = { stepIndex, profile, countryCode, countryName, currencyTouched };
+    if (!isWorthSaving(draft)) return;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+  }, [open, stepIndex, profile, countryCode, countryName, currencyTouched]);
+
+  const startOver = () => {
+    clearDraft();
+    setStepIndex(0);
+    setProfile(createEmptyProfile(detectedHomeCurrency));
+    setCountryCode('');
+    setCountryName('');
+    setCurrencyTouched(false);
+    setResumedDraft(false);
+  };
 
   const update = (patch: Partial<TripProfile>) => setProfile((current) => ({ ...current, ...patch }));
 
@@ -105,11 +171,16 @@ export function TripCreateWizard({
   const selectCountry = (country: CountryProfile) => {
     setCountryCode(country.code);
     setCountryName(country.name);
-    // Keep already-added cities pointing at the newly chosen country.
+    // Stops that already know their own country are left alone, so switching
+    // country to add a second leg does not rewrite the first one. Only stops
+    // with no country of their own are re-derived, which also refreshes their
+    // id, currency and time zone.
     setProfile((current) => ({
       ...current,
       destinations: current.destinations.map((destination) =>
-        destination.country ? destination : { ...destination, country: country.name },
+        destination.country
+          ? destination
+          : { ...manualDestination(destination.city, country.name), lat: destination.lat, lng: destination.lng },
       ),
     }));
   };
@@ -138,6 +209,7 @@ export function TripCreateWizard({
 
   const duration = resolveDuration(profile);
   const nights = nightsBetween(profile.startDate, profile.endDate);
+  const datesReversed = Boolean(profile.startDate && profile.endDate && nights === null);
   const selectedCountry = useMemo(() => findCountry(countryCode), [countryCode]);
   // Cities can span countries, so the saved stops decide the currency once
   // there are any; the country picker only seeds it beforehand.
@@ -169,6 +241,7 @@ export function TripCreateWizard({
 
   const goNext = () => {
     if (isLast) {
+      clearDraft();
       onCreate(resolvedProfile);
       return;
     }
@@ -221,6 +294,24 @@ export function TripCreateWizard({
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+          {resumedDraft && (
+            <div
+              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3"
+              style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
+            >
+              <p className="text-sm">
+                Picked up where you left off. Your earlier answers are still here.
+              </p>
+              <button
+                type="button"
+                onClick={startOver}
+                className="text-sm font-semibold underline underline-offset-4"
+              >
+                Start over
+              </button>
+            </div>
+          )}
+
           {step.id === 'where' && (
             <>
               <div className="space-y-2">
@@ -336,17 +427,37 @@ export function TripCreateWizard({
                 </div>
               )}
 
+              {datesReversed && (
+                <p className="text-sm" style={{ color: 'var(--accent)' }}>
+                  The end date is before the start date. Fix either one and the days will add up again.
+                </p>
+              )}
+
               <div
                 className="rounded-2xl px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1"
                 style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
               >
-                <span><strong>{duration.days}</strong> days</span>
-                <span><strong>{duration.nights}</strong> nights</span>
+                {duration.days > 0 ? (
+                  <>
+                    <span><strong>{duration.days}</strong> {duration.days === 1 ? 'day' : 'days'}</span>
+                    <span><strong>{duration.nights}</strong> {duration.nights === 1 ? 'night' : 'nights'}</span>
+                  </>
+                ) : (
+                  // Never show "0 days": an undated trip simply has no duration yet.
+                  <span>Dates not set — you can add them later.</span>
+                )}
                 {identity.summaryChips.includes('Spring') || identity.summaryChips.includes('Summer')
                   || identity.summaryChips.includes('Autumn') || identity.summaryChips.includes('Winter') ? (
                   <span>Season detected</span>
                 ) : null}
               </div>
+
+              {duration.days > MAX_GENERATED_DAYS && (
+                <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+                  That is a long trip. The first {MAX_GENERATED_DAYS} days are created now; add the rest
+                  from the itinerary when you get there.
+                </p>
+              )}
             </>
           )}
 

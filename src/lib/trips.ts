@@ -53,8 +53,12 @@ const cityForDay = (cities: string[], dayIndex: number, totalDays: number) => {
   return cities[Math.min(cities.length - 1, Math.floor(dayIndex / perCity))];
 };
 
+/** Guards against a mistyped year turning into thousands of day cards. */
+export const MAX_GENERATED_DAYS = 90;
+
 export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
-  const { days } = resolveDuration(profile);
+  const { days: requested } = resolveDuration(profile);
+  const days = Math.min(requested, MAX_GENERATED_DAYS);
   if (days <= 0) return [];
 
   const cities = destinationCities(profile);

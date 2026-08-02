@@ -1688,6 +1688,12 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                             {day.title}
                           </h3>
 
+                          {day.activities.length === 0 && (
+                            <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>
+                              No plans yet.
+                            </p>
+                          )}
+
                           <div 
                             className={clsx(
                               "mt-auto pt-4 flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 border-t border-slate-50 dark:border-slate-800",
@@ -1733,10 +1739,27 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                                 {isEditingMode && <Edit2 className="w-3 h-3 opacity-50" />}
                               </div>
                             )}
-                            <div className="text-[11px] md:text-xs bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg group-hover:bg-rose-50 dark:group-hover:bg-rose-900/30 group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors shrink-0 flex items-center gap-1.5">
-                              <Utensils className="w-3 h-3" />
-                              {day.activities.length} spots
-                            </div>
+                            {/* A generated day is a date and a place, not an
+                                empty list: say so and offer the next step. */}
+                            {day.activities.length === 0 ? (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleAddActivity(day.day);
+                                }}
+                                className="text-[11px] md:text-xs px-2 py-1 rounded-lg shrink-0 flex items-center gap-1.5 font-semibold"
+                                style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+                              >
+                                <Plus className="w-3 h-3" />
+                                Add your first activity
+                              </button>
+                            ) : (
+                              <div className="text-[11px] md:text-xs bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg group-hover:bg-rose-50 dark:group-hover:bg-rose-900/30 group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors shrink-0 flex items-center gap-1.5">
+                                <Utensils className="w-3 h-3" />
+                                {day.activities.length} {day.activities.length === 1 ? 'spot' : 'spots'}
+                              </div>
+                            )}
                           </div>
 
                           {/* Decorative hover gradient */}
