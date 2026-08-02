@@ -71,6 +71,7 @@
 html {
   background-color: var(--bg);
   color-scheme: light;
+  scrollbar-gutter: stable;
   min-height: 100%;
   min-height: 100dvh;
 }
@@ -286,7 +287,6 @@ body {
 /* Solid accent fills — match trip "01" / day-badge pink exactly (no pastel mix). */
 .pill-primary,
 .accent-button,
-.shelf-toggle-option.is-selected,
 .auth-submit {
   background-color: var(--accent-button) !important;
   background-image: none !important;
@@ -315,6 +315,7 @@ body {
   background-color: color-mix(in srgb, var(--ink) 4%, var(--bg));
 }
 .shelf-toggle-option {
+  position: relative;
   flex: 1 1 0;
   display: inline-flex;
   align-items: center;
@@ -336,6 +337,40 @@ body {
 .shelf-toggle-option.is-selected {
   box-shadow: none;
 }
+
+@media (min-width: 1280px) {
+  .app-header-inner {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1fr) auto minmax(14rem, 1fr);
+    align-items: center;
+    column-gap: 1.5rem;
+  }
+
+  .app-brand {
+    display: block;
+    max-width: 15rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .app-primary-nav {
+    justify-self: center;
+    gap: 0.125rem;
+  }
+
+  .app-header-inner > :last-child {
+    justify-self: end;
+  }
+}
+.shelf-toggle-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 9999px;
+  background-color: var(--accent-button);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent);
+}
 .shelf-toggle-option:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -345,6 +380,240 @@ body {
   font-variant-numeric: tabular-nums;
   opacity: 0.72;
   font-weight: 500;
+}
+
+/* ---------- Trip dashboard layout ---------- */
+.trip-dashboard {
+  width: 100%;
+}
+
+.trip-dashboard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+}
+
+.trip-dashboard-intro {
+  max-width: 46rem;
+}
+
+.trip-dashboard-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.trip-grid {
+  align-items: stretch;
+}
+
+.trip-card {
+  display: flex;
+  min-height: 19.5rem;
+  flex-direction: column;
+}
+
+.trip-card > div:last-child {
+  margin-top: auto;
+}
+
+.trip-card-actions {
+  position: relative;
+  column-gap: 0.9rem;
+  row-gap: 0.25rem;
+  padding-top: 1.75rem;
+}
+
+.trip-card-actions::before {
+  content: '';
+  position: absolute;
+  top: 1.25rem;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: var(--border);
+}
+
+.trip-card-action {
+  min-height: 2.75rem;
+  padding-inline: 0.25rem;
+  border-radius: 0.5rem;
+  transition: color 0.16s ease, background-color 0.16s ease;
+}
+
+.trip-card-action:hover {
+  background-color: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+@media (max-width: 420px) {
+  .trip-card-actions {
+    column-gap: 0.5rem;
+  }
+}
+
+/* ---------- Desktop trip creation wizard ---------- */
+.wizard-dialog {
+  max-height: 100dvh;
+}
+
+.wizard-dialog-content {
+  overscroll-behavior: contain;
+}
+
+.settings-choice-section {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  background-color: color-mix(in srgb, var(--ink) 3%, var(--bg-elevated));
+}
+
+.settings-choice-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3.5rem;
+  padding: 0.875rem 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-choice-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-choice-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.settings-choice-chevron {
+  transition: transform 0.2s ease;
+}
+
+.settings-choice-section[open] .settings-choice-chevron {
+  transform: rotate(180deg);
+}
+
+.settings-choice-section > .grid {
+  padding: 0 1rem 1rem;
+}
+
+@media (min-width: 768px) {
+  .wizard-dialog {
+    width: min(56rem, calc(100vw - 3rem));
+    max-width: 56rem;
+    max-height: min(52rem, calc(100dvh - 2rem));
+  }
+
+  .wizard-dialog-header {
+    padding: 1.5rem 2rem 1.25rem;
+  }
+
+  .wizard-dialog-header h2 {
+    font-size: 2.25rem;
+  }
+
+  .wizard-dialog-content {
+    padding: 1.75rem 2rem 2rem;
+  }
+
+  .wizard-dialog-footer {
+    padding: 1.25rem 2rem 1.5rem;
+  }
+
+  .country-picker-menu {
+    max-height: min(28rem, 48dvh);
+  }
+}
+
+.country-picker-results {
+  display: block;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.country-picker-row {
+  min-height: 3.25rem;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.country-picker-row:hover {
+  background-color: color-mix(in srgb, var(--accent) 9%, var(--bg-elevated));
+}
+
+.country-picker-search {
+  background-color: color-mix(in srgb, var(--ink) 3%, var(--bg-elevated));
+}
+
+.country-picker-menu {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+@media (max-width: 767px) {
+  .country-picker-results {
+    max-height: min(22rem, 42dvh);
+  }
+}
+
+@media (min-width: 768px) {
+  .country-picker-results {
+    max-height: min(23rem, 40dvh);
+  }
+}
+
+@media (min-width: 1024px) {
+  .trip-dashboard-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+    align-items: end;
+    column-gap: 4rem;
+    row-gap: 2rem;
+  }
+
+  .trip-dashboard-hero > .flex.items-center {
+    grid-column: 1 / -1;
+  }
+
+  .trip-dashboard-intro {
+    padding-bottom: 0.25rem;
+  }
+
+  .trip-dashboard-actions {
+    align-self: end;
+  }
+
+  .trip-grid {
+    gap: 1.25rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .trip-dashboard-hero {
+    column-gap: 6rem;
+  }
+
+  .trip-card {
+    min-height: 20rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .trip-dashboard {
+    padding-left: max(1.25rem, var(--app-safe-left));
+    padding-right: max(1.25rem, var(--app-safe-right));
+  }
+
+  .trip-card {
+    min-height: 18rem;
+  }
 }
 
 /* Auth form primary action: keep the button shape visible in both modes. */

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { MapPin, Wand2, X } from 'lucide-react';
+import { ChevronDown, MapPin, Wand2, X } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { findCountry, type PlaceSuggestion } from '../lib/destinations';
 import { CitySearchInput } from './ui/CitySearchInput';
@@ -145,23 +145,35 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         </p>
       </div>
 
-      <div>
-        <div className="eyebrow mb-3">Trip type</div>
+      <details className="settings-choice-section">
+        <summary className="settings-choice-summary">
+          <span className="eyebrow m-0">Trip type</span>
+          <span className="settings-choice-meta">{profile.tripTypes.length} selected <ChevronDown className="settings-choice-chevron w-4 h-4" /></span>
+        </summary>
         <OptionChips options={TRIP_TYPE_OPTIONS} selected={profile.tripTypes} onToggle={(id) => toggle('tripTypes', id)} />
-      </div>
+      </details>
 
-      <div>
-        <div className="eyebrow mb-3">Travel style</div>
+      <details className="settings-choice-section">
+        <summary className="settings-choice-summary">
+          <span className="eyebrow m-0">Travel style</span>
+          <span className="settings-choice-meta">{profile.styles.length} selected <ChevronDown className="settings-choice-chevron w-4 h-4" /></span>
+        </summary>
         <OptionChips options={TRAVEL_STYLE_OPTIONS} selected={profile.styles} onToggle={(id) => toggle('styles', id)} />
-      </div>
+      </details>
 
-      <div>
-        <div className="eyebrow mb-3">Mood</div>
+      <details className="settings-choice-section">
+        <summary className="settings-choice-summary">
+          <span className="eyebrow m-0">Mood</span>
+          <span className="settings-choice-meta">{profile.moods.length} selected <ChevronDown className="settings-choice-chevron w-4 h-4" /></span>
+        </summary>
         <OptionChips options={MOOD_OPTIONS} selected={profile.moods} onToggle={(id) => toggle('moods', id)} />
-      </div>
+      </details>
 
-      <div>
-        <div className="eyebrow mb-3">Budget</div>
+      <details className="settings-choice-section">
+        <summary className="settings-choice-summary">
+          <span className="eyebrow m-0">Budget</span>
+          <span className="settings-choice-meta">Selected <ChevronDown className="settings-choice-chevron w-4 h-4" /></span>
+        </summary>
         <OptionChips
           options={BUDGET_OPTIONS}
           selected={[profile.budgetTier]}
@@ -169,17 +181,23 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
           single
           columns={3}
         />
-      </div>
+      </details>
 
-      <div>
-        <div className="eyebrow mb-3">Getting around</div>
+      <details className="settings-choice-section">
+        <summary className="settings-choice-summary">
+          <span className="eyebrow m-0">Getting around</span>
+          <span className="settings-choice-meta">{profile.transport.length} selected <ChevronDown className="settings-choice-chevron w-4 h-4" /></span>
+        </summary>
         <OptionChips options={TRANSPORT_OPTIONS} selected={profile.transport} onToggle={(id) => toggle('transport', id)} />
-      </div>
+      </details>
 
-      <div>
-        <div className="eyebrow mb-3">Where you stay</div>
+      <details className="settings-choice-section">
+        <summary className="settings-choice-summary">
+          <span className="eyebrow m-0">Where you stay</span>
+          <span className="settings-choice-meta">{profile.stays.length} selected <ChevronDown className="settings-choice-chevron w-4 h-4" /></span>
+        </summary>
         <OptionChips options={STAY_OPTIONS} selected={profile.stays} onToggle={(id) => toggle('stays', id)} />
-      </div>
+      </details>
 
       <div className="space-y-2">
         <ToggleRow

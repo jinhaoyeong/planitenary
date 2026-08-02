@@ -37,6 +37,7 @@ import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
+import defaultTravelHero from './assets/default-travel-hero.jpg';
 
 const heroImages = {
   'cq-cd': cqCdHero
@@ -672,6 +673,7 @@ function App() {
 
   /** Documents/settings/profile appear in the hamburger Quick Menu on small screens, not the bottom pill. */
   const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos' && tab.id !== 'profile' && tab.id !== 'settings');
+  const desktopTabs = tabs.filter((tab) => tab.id !== 'settings' && tab.id !== 'profile');
 
   const buildCloudSnapshot = async (): Promise<CloudBackupSnapshot> => {
     const itineraryData = loadFromStorage<Itinerary>(itineraryStorageKey) || customItinerary || activeItinerary;
@@ -1046,7 +1048,7 @@ function App() {
           willChange: 'transform',
         }}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
+        <div className="app-header-inner max-w-7xl mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 shrink min-w-0">
             {!isDemoUser && (
               <button
@@ -1059,7 +1061,7 @@ function App() {
                 <span className="hidden sm:inline">All trips</span>
               </button>
             )}
-            <span className="font-display text-xl sm:text-2xl md:text-3xl leading-none tracking-tight truncate" style={{ color: 'var(--ink)' }}>
+            <span className="app-brand font-display text-xl sm:text-2xl md:text-3xl leading-none tracking-tight" style={{ color: 'var(--ink)' }}>
               {brandLead && `${brandLead} `}
               <span className="font-display-italic" style={{ color: 'var(--accent)' }}>{brandAccent}</span>
             </span>
@@ -1075,9 +1077,9 @@ function App() {
                 transition: { staggerChildren: 0.05, delayChildren: 0.1 }
               }
             }}
-            className="hidden md:flex items-center gap-1"
+            className="app-primary-nav hidden xl:flex items-center gap-1"
           >
-            {tabs.map(tab => (
+            {desktopTabs.map(tab => (
               <motion.button
                 key={tab.id}
                 variants={{
@@ -1110,7 +1112,7 @@ function App() {
               aria-label="Restore backup"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Restore</span>
+              <span className="hidden xl:inline">Restore</span>
             </motion.button>
             <motion.button
               onClick={toggleTheme}
@@ -1142,7 +1144,7 @@ function App() {
               <UserRound className="w-4 h-4" />
             </motion.button>
             <motion.button
-              className="md:hidden p-2 rounded-full"
+              className="xl:hidden p-2 rounded-full"
               style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               whileTap={{ scale: 0.9 }}
@@ -1251,7 +1253,7 @@ function App() {
               <div className="relative overflow-hidden rounded-2xl">
                 {displayItinerary.cities.length > 0 ? (
                   <img
-                    src={heroImages[activeItineraryId as keyof typeof heroImages] || cqCdHero}
+                    src={heroImages[activeItineraryId as keyof typeof heroImages] || defaultTravelHero}
                     alt={displayItinerary.cities.join(' & ')}
                     className="w-full h-[280px] md:h-[420px] object-cover"
                   />
@@ -1537,7 +1539,7 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 md:hidden flex items-start justify-center px-4 pt-[calc(5rem+var(--app-safe-top))]"
+            className="fixed inset-0 z-40 xl:hidden flex items-start justify-center px-4 pt-[calc(5rem+var(--app-safe-top))]"
             onClick={() => setIsMenuOpen(false)}
           >
             <motion.div

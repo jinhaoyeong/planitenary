@@ -259,7 +259,7 @@ export function TripCreateWizard({
       />
 
       <div
-        className="relative z-10 w-full sm:max-w-2xl flex flex-col sm:rounded-[1.75rem] overflow-hidden"
+        className="wizard-dialog relative z-10 w-full sm:max-w-2xl flex flex-col sm:rounded-[1.75rem] overflow-hidden"
         style={{
           backgroundColor: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
@@ -268,7 +268,7 @@ export function TripCreateWizard({
           paddingBottom: 'var(--app-safe-bottom)',
         }}
       >
-        <header className="px-5 pt-5 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <header className="wizard-dialog-header px-5 pt-5 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="eyebrow">Step {stepIndex + 1} of {STEPS.length}</div>
@@ -293,7 +293,7 @@ export function TripCreateWizard({
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+        <div className="wizard-dialog-content flex-1 overflow-y-auto px-5 py-5 space-y-5">
           {resumedDraft && (
             <div
               className="flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3"
@@ -644,7 +644,7 @@ export function TripCreateWizard({
           )}
         </div>
 
-        <footer className="px-5 py-4 flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--border)' }}>
+        <footer className="wizard-dialog-footer px-5 py-4 flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--border)' }}>
           <button
             type="button"
             className="pill-btn pill-ghost"

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import { countryFlag, findCountry, searchCountries, type CountryProfile } from '../../lib/destinations';
 
@@ -15,7 +16,10 @@ interface CountryPickerProps {
 export function CountryPicker({ value, onChange, placeholder = 'Choose a country' }: CountryPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const selected = useMemo(() => findCountry(value), [value]);
@@ -23,8 +27,14 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
 
   useEffect(() => {
     if (!open) return;
+    const updateMenuPosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuPosition({ top: rect.bottom + 8, left: rect.left, width: rect.width });
+    };
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!containerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
@@ -32,11 +42,16 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('touchstart', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    updateMenuPosition();
     window.setTimeout(() => searchRef.current?.focus(), 30);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('touchstart', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
     };
   }, [open]);
 
@@ -50,6 +65,7 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
     <div className="relative" ref={containerRef}>
       <button
         type="button"
+        ref={triggerRef}
         onClick={() => setOpen((current) => !current)}
         className="editorial-input w-full flex items-center justify-between gap-2 text-left"
         aria-haspopup="listbox"
@@ -64,12 +80,20 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
         <ChevronDown className="w-4 h-4 shrink-0" style={{ color: 'var(--ink-muted)' }} />
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
-          className="absolute z-30 mt-2 w-full rounded-2xl overflow-hidden"
-          style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lift)' }}
+          ref={menuRef}
+          className="country-picker-menu fixed z-[120] rounded-2xl overflow-hidden"
+          style={{
+            top: menuPosition.top,
+            left: menuPosition.left,
+            width: menuPosition.width,
+            backgroundColor: 'var(--bg-elevated)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-lift)',
+          }}
         >
-          <div className="relative p-2" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="country-picker-search relative p-2" style={{ borderBottom: '1px solid var(--border)' }}>
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--ink-muted)' }} />
             <input
               ref={searchRef}
@@ -92,7 +116,11 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
             )}
           </div>
 
-          <ul className="max-h-64 overflow-y-auto py-1" role="listbox">
+          <ul
+            className="country-picker-results max-h-64 overflow-y-auto py-1"
+            style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch', overscrollBehaviorY: 'contain' }}
+            role="listbox"
+          >
             {results.length === 0 && (
               <li className="px-4 py-3 text-sm" style={{ color: 'var(--ink-muted)' }}>
                 No match. You can still type cities directly.
@@ -105,7 +133,7 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
                   <button
                     type="button"
                     onClick={() => select(country)}
-                    className="w-full text-left px-4 py-3 flex items-center gap-3 min-h-12"
+                    className="country-picker-row w-full text-left px-4 py-3 flex items-center gap-3 min-h-12"
                     style={{ backgroundColor: active ? 'var(--accent-soft)' : 'transparent', color: 'var(--ink)' }}
                     role="option"
                     aria-selected={active}
@@ -119,7 +147,8 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
               );
             })}
           </ul>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
