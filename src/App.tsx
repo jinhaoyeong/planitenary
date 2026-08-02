@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { itineraries } from './data';
 import type { Itinerary, DayPhoto, Activity, ActivityType, DayPlan } from './data';
 import { ItineraryView } from './components/ItineraryView';
@@ -32,6 +32,8 @@ import { Marquee } from './components/ui/Marquee';
 import { Pets } from './components/Pets';
 import { hapticMedium } from './lib/haptics';
 import { sanitizeTripProfile } from './lib/tripProfile';
+import { markManualFieldEdits, sanitizeFieldSources } from './lib/identityFields';
+import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
@@ -56,7 +58,6 @@ const emptyItinerary: Itinerary = {
   coverHeadline: 'Add a cover when your story takes shape.',
   coverLabel: 'Custom cover',
   coverYear: String(new Date().getFullYear()),
-  heroDayBadge: '0',
   days: [],
 };
 
@@ -216,8 +217,8 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
   return {
     id: fallback.id,
     tripProfile: sanitizeTripProfile(source.tripProfile) ?? sanitizeTripProfile(fallback.tripProfile) ?? undefined,
+    fieldSources: sanitizeFieldSources(source.fieldSources) ?? sanitizeFieldSources(fallback.fieldSources),
     brandTitle: optionalText(source.brandTitle, fallback.brandTitle),
-    heroDayBadgeUnit: optionalText(source.heroDayBadgeUnit, fallback.heroDayBadgeUnit),
     overviewEyebrow: optionalText(source.overviewEyebrow, fallback.overviewEyebrow),
     overviewDescription: optionalText(source.overviewDescription, fallback.overviewDescription),
     searchPlaceholder: optionalText(source.searchPlaceholder, fallback.searchPlaceholder),
@@ -232,7 +233,14 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     coverHeadline: typeof source.coverHeadline === 'string' && source.coverHeadline.trim() ? source.coverHeadline.trim() : (fallback.coverHeadline || 'Add a cover when your story takes shape.'),
     coverLabel: typeof source.coverLabel === 'string' && source.coverLabel.trim() ? source.coverLabel.trim() : (fallback.coverLabel || 'Custom cover'),
     coverYear: typeof source.coverYear === 'string' && source.coverYear.trim() ? source.coverYear.trim() : (fallback.coverYear || String(new Date().getFullYear())),
-    heroDayBadge: typeof source.heroDayBadge === 'string' && source.heroDayBadge.trim() ? source.heroDayBadge.trim() : (fallback.heroDayBadge || String(sanitizedDays.length)),
+    // Empty string means "no badge" and must survive sanitisation; falling
+    // back to days.length would resurrect a stale count after dates are cleared.
+    heroDayBadge: typeof source.heroDayBadge === 'string'
+      ? source.heroDayBadge.trim()
+      : (typeof fallback.heroDayBadge === 'string' ? fallback.heroDayBadge : undefined),
+    heroDayBadgeUnit: typeof source.heroDayBadgeUnit === 'string'
+      ? source.heroDayBadgeUnit.trim()
+      : optionalText(fallback.heroDayBadgeUnit),
     cities: sanitizedCities.length > 0 ? Array.from(new Set(sanitizedCities)) : Array.from(new Set(sanitizedDays.map((day) => day.city).filter(Boolean))),
     days: sanitizedDays,
   };
@@ -278,7 +286,7 @@ function App() {
   });
 
   const { theme, toggleTheme } = useTheme();
-  const { adoptTripCurrencies } = useCurrency();
+  const { bindTrip } = useCurrency();
   const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
   useTripIdentityTheme(customItinerary?.tripProfile, theme);
 
@@ -287,12 +295,39 @@ function App() {
     () => sanitizeTripProfile(customItinerary?.tripProfile),
     [customItinerary?.tripProfile],
   );
+
+  // Currency edits are written back into the profile, which is the only place
+  // the pair is stored. Opening a trip reads it; it never rewrites it.
+  const persistTripCurrencies = useCallback(
+    ({ homeCurrency, tripCurrency }: { homeCurrency: string; tripCurrency: string }) => {
+      setCustomItinerary((previous) => {
+        if (!previous) return previous;
+        const profile = sanitizeTripProfile(previous.tripProfile);
+        if (!profile) return previous;
+        if (profile.homeCurrency === homeCurrency && profile.tripCurrency === tripCurrency) return previous;
+        return { ...previous, tripProfile: { ...profile, homeCurrency, tripCurrency } };
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!activeTripProfile) return;
-    adoptTripCurrencies(activeTripProfile.homeCurrency, activeTripProfile.tripCurrency);
-    // Adopting is idempotent; only the pair itself should retrigger it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTripProfile?.homeCurrency, activeTripProfile?.tripCurrency]);
+    if (!activeTripProfile) {
+      bindTrip(null);
+      return;
+    }
+    bindTrip({
+      tripId: activeItineraryId,
+      homeCurrency: activeTripProfile.homeCurrency,
+      tripCurrency: activeTripProfile.tripCurrency,
+      persist: persistTripCurrencies,
+    });
+  }, [
+    activeTripProfile,
+    activeItineraryId,
+    bindTrip,
+    persistTripCurrencies,
+  ]);
 
   useEffect(() => {
     setSelectedTripId(isDemoUser ? 'cq-cd' : null);
@@ -323,6 +358,9 @@ function App() {
     [isDemoUser, demoItinerary, activeItineraryId],
   );
   const displayItinerary = customItinerary || activeItinerary;
+  const dayBadge = resolveDisplayedDayBadge(displayItinerary);
+  const dayBadgeValue = dayBadge.value;
+  const showDayBadge = dayBadge.visible || isHomeHeroEditing;
   const brandWords = (displayItinerary.brandTitle || 'Travel Handbook').trim().split(/\s+/);
   const brandAccent = brandWords[brandWords.length - 1];
   const brandLead = brandWords.slice(0, -1).join(' ');
@@ -367,20 +405,24 @@ function App() {
   };
 
   const saveHomeHero = () => {
-    const next = sanitizeItinerary({
-      ...displayItinerary,
+    // Only fields whose wording actually changed become "manual", so saving the
+    // banner never locks copy the traveller left alone.
+    const edited = markManualFieldEdits(displayItinerary, {
       name: heroDraft.headline,
       description: heroDraft.description,
-      marqueeItems: heroDraft.marqueeItems,
       heroEyebrow: heroDraft.eyebrow,
-      primaryButtonLabel: heroDraft.primaryLabel,
-      primaryButtonTab: heroDraft.primaryTab,
-      secondaryButtonLabel: heroDraft.secondaryLabel,
-      secondaryButtonTab: heroDraft.secondaryTab,
+      heroPrimaryButton: heroDraft.primaryLabel,
+      heroSecondaryButton: heroDraft.secondaryLabel,
       coverHeadline: heroDraft.coverHeadline,
       coverLabel: heroDraft.coverLabel,
       coverYear: heroDraft.coverYear,
-      heroDayBadge: heroDraft.dayBadge,
+      dayBadge: heroDraft.dayBadge,
+      marquee: heroDraft.marqueeItems.join('\n'),
+    });
+    const next = sanitizeItinerary({
+      ...edited,
+      primaryButtonTab: heroDraft.primaryTab,
+      secondaryButtonTab: heroDraft.secondaryTab,
     }, activeItinerary);
     handleItineraryChange(next);
     setIsHomeHeroEditing(false);
@@ -1246,23 +1288,25 @@ function App() {
                 </span>
               </div>
             </div>
-            {/* Sticker badge */}
-            <motion.div
-              initial={{ scale: 0, rotate: -10 }}
-              animate={{ scale: 1, rotate: 8 }}
-              transition={{ delay: 0.5, type: 'spring', stiffness: 180, damping: 12 }}
-              className="absolute -top-6 -right-4 md:-top-8 md:-right-6 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
-              style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
-            >
-              <span
-                className="font-display text-3xl md:text-4xl leading-none cursor-text rounded px-1 outline-none focus:bg-black/10"
-                contentEditable={isHomeHeroEditing}
-                suppressContentEditableWarning
-                onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
-                title={isHomeHeroEditing ? 'Click to edit' : undefined}
-              >{displayItinerary.heroDayBadge || displayItinerary.days.length}</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{displayItinerary.heroDayBadgeUnit || 'days'}</span>
-            </motion.div>
+            {/* Sticker badge — hidden until the trip has a duration */}
+            {showDayBadge && (
+              <motion.div
+                initial={{ scale: 0, rotate: -10 }}
+                animate={{ scale: 1, rotate: 8 }}
+                transition={{ delay: 0.5, type: 'spring', stiffness: 180, damping: 12 }}
+                className="absolute -top-6 -right-4 md:-top-8 md:-right-6 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
+                style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+              >
+                <span
+                  className="font-display text-3xl md:text-4xl leading-none cursor-text rounded px-1 outline-none focus:bg-black/10"
+                  contentEditable={isHomeHeroEditing}
+                  suppressContentEditableWarning
+                  onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
+                  title={isHomeHeroEditing ? 'Click to edit' : undefined}
+                >{dayBadgeValue || '—'}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{dayBadge.unit || displayItinerary.heroDayBadgeUnit || 'days'}</span>
+              </motion.div>
+            )}
           </motion.div>
         </div>
       </section>

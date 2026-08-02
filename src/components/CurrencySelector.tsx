@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw } from 'lucide-react';
+import { CloudOff, Loader2, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { CURRENCIES, currencyMeta } from '../lib/currencyCatalog';
@@ -39,6 +39,8 @@ export function CurrencyPairSettings() {
     rates,
     refreshRates,
     rateLabel,
+    rateFreshness,
+    isTripBound,
   } = useCurrency();
 
   const homeMeta = currencyMeta(homeCurrency);
@@ -73,8 +75,17 @@ export function CurrencyPairSettings() {
       >
         <div>
           <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>{rateLabel}</p>
+          <p
+            className="text-xs mt-1 inline-flex items-center gap-1.5"
+            style={{ color: rateFreshness.tone === 'offline' ? 'var(--accent)' : 'var(--ink-muted)' }}
+          >
+            {rateFreshness.tone === 'offline' && <CloudOff className="w-3.5 h-3.5" />}
+            {rateFreshness.label}
+          </p>
           <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>
-            New trips set this pair automatically from the destination.
+            {isTripBound
+              ? 'Saved with this trip. Other trips keep their own pair.'
+              : 'New trips start from this pair and can change it any time.'}
           </p>
         </div>
         <button
@@ -93,7 +104,7 @@ export function CurrencyPairSettings() {
 
 /** Budget page: compact home/trip display toggle with quiet rate text. */
 export function BudgetCurrencyToggle() {
-  const { currency, setCurrency, homeCurrency, tripCurrency, rates, rateLabel } = useCurrency();
+  const { currency, setCurrency, homeCurrency, tripCurrency, rates, rateLabel, rateFreshness } = useCurrency();
 
   const options: Array<{ code: Currency; role: 'Home' | 'Trip' }> =
     homeCurrency === tripCurrency
@@ -135,6 +146,13 @@ export function BudgetCurrencyToggle() {
       </div>
       <p className="text-[11px]" style={{ color: 'var(--ink-muted)' }}>
         {rates.isLoading ? 'Updating rate…' : rateLabel}
+      </p>
+      <p
+        className="text-[11px] inline-flex items-center gap-1"
+        style={{ color: rateFreshness.tone === 'offline' ? 'var(--accent)' : 'var(--ink-muted)' }}
+      >
+        {rateFreshness.tone === 'offline' && <CloudOff className="w-3 h-3" />}
+        {rateFreshness.label}
       </p>
     </div>
   );

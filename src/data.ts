@@ -1,3 +1,5 @@
+import type { FieldSourceMap } from './lib/identityFields';
+
 export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 'travel' | 'flight' | 'cafe' | 'shop' | 'nightlife' | 'other';
 
 export interface Activity {
@@ -64,6 +66,12 @@ export interface Itinerary {
   overviewEyebrow?: string;
   overviewDescription?: string;
   searchPlaceholder?: string;
+  /**
+   * Tracks whether each generated copy field is still app-written or has been
+   * edited by hand. Absent entries mean "unknown" and are never overwritten
+   * without a deliberate choice.
+   */
+  fieldSources?: FieldSourceMap;
   days: DayPlan[];
 }
 

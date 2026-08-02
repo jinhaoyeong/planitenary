@@ -4,7 +4,14 @@
  * from this one object instead of inventing its own defaults.
  */
 
-import { countryOrFallback, findCountry, lookupCityCenter } from './destinations';
+import {
+  countryOrFallback,
+  countryTimezone,
+  createDestinationId,
+  findCountry,
+  lookupCityCenter,
+  type PlaceSuggestion,
+} from './destinations';
 
 export type TripType =
   | 'relaxation' | 'adventure' | 'food' | 'photography' | 'luxury'
@@ -24,12 +31,24 @@ export type TransportMode = 'car' | 'train' | 'plane' | 'walking' | 'public-tran
 export type StayType = 'hotel' | 'hostel' | 'airbnb' | 'resort';
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
+/**
+ * A saved stop. Identity is a stable id rather than the city name, because
+ * city names repeat across the world: Georgetown exists in Malaysia and in
+ * Guyana, Victoria in Australia and in Canada.
+ */
 export interface TripDestination {
+  id: string;
   city: string;
   country: string;
+  countryCode?: string;
   region?: string;
   lat?: number;
   lng?: number;
+  /** Only set where a country has a single zone; geocoding does not supply it. */
+  timezone?: string;
+  currencyCode?: string;
+  provider?: 'nominatim' | 'offline' | 'manual';
+  providerPlaceId?: string;
 }
 
 export interface TripProfile {
@@ -164,6 +183,23 @@ export function resolveDuration(profile: Pick<TripProfile, 'startDate' | 'endDat
   return { days, nights: Math.max(0, days - 1) };
 }
 
+/**
+ * Duration the hero badge may honestly show. Unlike {@link resolveDuration},
+ * this never falls back to a leftover dayCount when both dates are set but
+ * invalid — an impossible range must clear the badge, not keep an old number.
+ */
+export function badgeDurationDays(profile: Pick<TripProfile, 'startDate' | 'endDate' | 'dayCount'>): number {
+  const hasStart = Boolean(profile.startDate);
+  const hasEnd = Boolean(profile.endDate);
+  if (hasStart && hasEnd) {
+    const nights = nightsBetween(profile.startDate, profile.endDate);
+    return nights !== null ? nights + 1 : 0;
+  }
+  // A single date is incomplete; only an intentional dayCount counts as undated duration.
+  if (hasStart || hasEnd) return 0;
+  return Math.max(0, Math.round(profile.dayCount || 0));
+}
+
 /** Meteorological season, flipped for the southern hemisphere. */
 export function resolveSeason(startDate: string | undefined, latitude?: number): Season | null {
   const start = parseDate(startDate);
@@ -181,9 +217,95 @@ export function resolveSeason(startDate: string | undefined, latitude?: number):
   return season;
 }
 
+/** Builds a saved stop from a search result, keeping the provider's identity. */
+export function destinationFromPlace(
+  place: PlaceSuggestion,
+  fallbackCountry?: string,
+): TripDestination {
+  const country = place.country || fallbackCountry || '';
+  const countryProfile = findCountry(place.countryCode || country);
+  return {
+    id: place.id,
+    city: place.city,
+    country: country || countryProfile?.name || '',
+    countryCode: place.countryCode || countryProfile?.code,
+    region: place.region,
+    lat: place.lat,
+    lng: place.lng,
+    timezone: place.timezone ?? countryTimezone(place.countryCode || countryProfile?.code),
+    currencyCode: place.currencyCode ?? countryProfile?.currency,
+    provider: place.provider,
+    providerPlaceId: place.providerPlaceId,
+  };
+}
+
+/** A stop typed by hand or recovered from an older record. */
+export function manualDestination(city: string, country = ''): TripDestination {
+  const countryProfile = findCountry(country);
+  const center = lookupCityCenter(city);
+  const countryCode = countryProfile?.code;
+  return {
+    id: createDestinationId({ city, countryCode }),
+    city,
+    country: country || countryProfile?.name || '',
+    countryCode,
+    lat: center?.[0],
+    lng: center?.[1],
+    timezone: countryTimezone(countryCode),
+    currencyCode: countryProfile?.currency,
+    provider: 'manual',
+  };
+}
+
+export interface CountryTally {
+  country: string;
+  countryCode?: string;
+  stops: number;
+}
+
+/**
+ * Countries in the trip, most-visited first. Ties keep the order they were
+ * added, so a two-country trip resolves predictably instead of depending on
+ * whichever stop happened to be saved first.
+ */
+export function countryBreakdown(profile: TripProfile): CountryTally[] {
+  const tallies: CountryTally[] = [];
+  for (const destination of profile.destinations) {
+    const country = destination.country?.trim();
+    if (!country) continue;
+    const existing = tallies.find(
+      (tally) => tally.country.toLowerCase() === country.toLowerCase(),
+    );
+    if (existing) {
+      existing.stops += 1;
+      existing.countryCode = existing.countryCode || destination.countryCode;
+    } else {
+      tallies.push({ country, countryCode: destination.countryCode, stops: 1 });
+    }
+  }
+  return tallies.sort((left, right) => right.stops - left.stops);
+}
+
+/** The country the handbook is themed and priced around. */
 export function primaryCountry(profile: TripProfile): string {
-  const named = profile.destinations.find((destination) => destination.country?.trim());
-  return named?.country?.trim() || '';
+  return countryBreakdown(profile)[0]?.country || '';
+}
+
+export const isMultiCountry = (profile: TripProfile): boolean =>
+  countryBreakdown(profile).length > 1;
+
+/** Every currency the trip will actually spend in, primary first. */
+export function destinationCurrencies(profile: TripProfile): string[] {
+  const codes = countryBreakdown(profile)
+    .map((tally) => findCountry(tally.countryCode || tally.country)?.currency)
+    .filter((code): code is string => Boolean(code));
+  return Array.from(new Set(codes));
+}
+
+/** "Kyoto, Kyoto Prefecture · Japan" — enough to tell two Georgetowns apart. */
+export function describeDestination(destination: TripDestination): string {
+  const place = [destination.city, destination.region].filter(Boolean).join(', ');
+  return destination.country ? `${place} · ${destination.country}` : place;
 }
 
 export function destinationCities(profile: TripProfile): string[] {
@@ -230,12 +352,34 @@ export function sanitizeTripProfile(value: unknown): TripProfile | null {
         const item = entry as Partial<TripDestination>;
         const city = typeof item.city === 'string' ? item.city.trim() : '';
         if (!city) return [];
+
+        const country = typeof item.country === 'string' ? item.country.trim() : '';
+        // Records saved before structured destinations existed carry only a
+        // city and country, so the rest is recovered from the country catalog.
+        const countryProfile = findCountry(item.countryCode || country);
+        const countryCode = item.countryCode?.toUpperCase() || countryProfile?.code;
+        const offlineCenter = lookupCityCenter(city);
+        const lat = typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : offlineCenter?.[0];
+        const lng = typeof item.lng === 'number' && Number.isFinite(item.lng) ? item.lng : offlineCenter?.[1];
+
         return [{
+          id: typeof item.id === 'string' && item.id.trim()
+            ? item.id.trim()
+            : createDestinationId({ city, countryCode, providerPlaceId: item.providerPlaceId }),
           city,
-          country: typeof item.country === 'string' ? item.country.trim() : '',
+          country: country || countryProfile?.name || '',
+          countryCode,
           region: typeof item.region === 'string' && item.region.trim() ? item.region.trim() : undefined,
-          lat: typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : undefined,
-          lng: typeof item.lng === 'number' && Number.isFinite(item.lng) ? item.lng : undefined,
+          lat,
+          lng,
+          timezone: typeof item.timezone === 'string' && item.timezone.trim()
+            ? item.timezone.trim()
+            : countryTimezone(countryCode),
+          currencyCode: typeof item.currencyCode === 'string' && item.currencyCode.trim()
+            ? item.currencyCode.trim().toUpperCase()
+            : countryProfile?.currency,
+          provider: item.provider === 'nominatim' || item.provider === 'offline' ? item.provider : 'manual',
+          providerPlaceId: typeof item.providerPlaceId === 'string' ? item.providerPlaceId : undefined,
         }];
       })
     : [];

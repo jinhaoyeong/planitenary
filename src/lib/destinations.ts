@@ -330,6 +330,50 @@ const POPULAR_CITIES: Record<string, string[]> = {
 export const popularCities = (countryCode: string | undefined): string[] =>
   (countryCode && POPULAR_CITIES[countryCode.toUpperCase()]) || [];
 
+/**
+ * IANA zones for countries that observe a single time zone. Geocoding does not
+ * return a time zone, and guessing one for a country that spans several (the
+ * United States, Australia, Brazil) would be worse than admitting we do not
+ * know, so those are deliberately absent.
+ */
+const COUNTRY_TIMEZONES: Record<string, string> = {
+  JP: 'Asia/Tokyo', KR: 'Asia/Seoul', CN: 'Asia/Shanghai', TW: 'Asia/Taipei',
+  HK: 'Asia/Hong_Kong', TH: 'Asia/Bangkok', VN: 'Asia/Ho_Chi_Minh', SG: 'Asia/Singapore',
+  MY: 'Asia/Kuala_Lumpur', PH: 'Asia/Manila', IN: 'Asia/Kolkata', NP: 'Asia/Kathmandu',
+  LK: 'Asia/Colombo', MV: 'Indian/Maldives', KH: 'Asia/Phnom_Penh', LA: 'Asia/Vientiane',
+  NZ: 'Pacific/Auckland', GB: 'Europe/London', IE: 'Europe/Dublin', FR: 'Europe/Paris',
+  IT: 'Europe/Rome', ES: 'Europe/Madrid', PT: 'Europe/Lisbon', DE: 'Europe/Berlin',
+  CH: 'Europe/Zurich', AT: 'Europe/Vienna', NL: 'Europe/Amsterdam', BE: 'Europe/Brussels',
+  GR: 'Europe/Athens', IS: 'Atlantic/Reykjavik', NO: 'Europe/Oslo', SE: 'Europe/Stockholm',
+  DK: 'Europe/Copenhagen', FI: 'Europe/Helsinki', CZ: 'Europe/Prague', PL: 'Europe/Warsaw',
+  HU: 'Europe/Budapest', TR: 'Europe/Istanbul', AE: 'Asia/Dubai', QA: 'Asia/Qatar',
+  SA: 'Asia/Riyadh', IL: 'Asia/Jerusalem', JO: 'Asia/Amman', EG: 'Africa/Cairo',
+  MA: 'Africa/Casablanca', ZA: 'Africa/Johannesburg', KE: 'Africa/Nairobi',
+  PE: 'America/Lima', AR: 'America/Argentina/Buenos_Aires',
+};
+
+/** IANA zone for a country, or undefined when the country spans several. */
+export const countryTimezone = (countryCode: string | undefined): string | undefined =>
+  countryCode ? COUNTRY_TIMEZONES[countryCode.toUpperCase()] : undefined;
+
+const slug = (value: string) =>
+  normalize(value).replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'place';
+
+/**
+ * Stable identity for a saved stop. Provider IDs are preferred; without one we
+ * fall back to a slug that still includes the country, so Georgetown in
+ * Malaysia and Georgetown in Guyana never collide.
+ */
+export function createDestinationId(parts: {
+  city: string;
+  countryCode?: string;
+  providerPlaceId?: string;
+}): string {
+  const country = (parts.countryCode || 'xx').toLowerCase();
+  const base = `place_${slug(parts.city)}_${country}`;
+  return parts.providerPlaceId ? `${base}_${parts.providerPlaceId}` : base;
+}
+
 export interface PlaceSuggestion {
   id: string;
   city: string;
@@ -338,6 +382,10 @@ export interface PlaceSuggestion {
   countryCode?: string;
   lat: number;
   lng: number;
+  provider: 'nominatim' | 'offline';
+  providerPlaceId?: string;
+  timezone?: string;
+  currencyCode?: string;
 }
 
 interface NominatimResult {
@@ -369,16 +417,41 @@ const toSuggestion = (result: NominatimResult): PlaceSuggestion | null => {
     || result.name || result.display_name.split(',')[0];
   if (!city) return null;
 
+  const countryCode = address.country_code?.toUpperCase();
+  const providerPlaceId = result.place_id !== undefined ? String(result.place_id) : undefined;
+  const countryProfile = countryCode ? findCountry(countryCode) : null;
+
   return {
-    id: String(result.place_id ?? `${lat},${lng}`),
+    id: createDestinationId({ city, countryCode, providerPlaceId }),
     city,
-    region: address.state && address.state !== city ? address.state : undefined,
-    country: address.country || '',
-    countryCode: address.country_code?.toUpperCase(),
+    region: address.state && address.state !== city ? address.state : address.county,
+    country: address.country || countryProfile?.name || '',
+    countryCode,
     lat,
     lng,
+    provider: 'nominatim',
+    providerPlaceId,
+    timezone: countryTimezone(countryCode),
+    currencyCode: countryProfile?.currency,
   };
 };
+
+/** A suggestion built from the offline table, used by quick-pick chips. */
+export function offlinePlace(city: string, countryCode?: string): PlaceSuggestion {
+  const country = countryCode ? findCountry(countryCode) : null;
+  const center = lookupCityCenter(city);
+  return {
+    id: createDestinationId({ city, countryCode: country?.code }),
+    city,
+    country: country?.name || '',
+    countryCode: country?.code,
+    lat: center?.[0] ?? country?.center[0] ?? 0,
+    lng: center?.[1] ?? country?.center[1] ?? 0,
+    provider: 'offline',
+    timezone: countryTimezone(country?.code),
+    currencyCode: country?.currency,
+  };
+}
 
 /** Offline matches so the picker still suggests something without a network. */
 function offlineSuggestions(query: string, country?: CountryProfile | null): PlaceSuggestion[] {
@@ -392,28 +465,104 @@ function offlineSuggestions(query: string, country?: CountryProfile | null): Pla
     .flatMap((key): PlaceSuggestion[] => {
       const point = CITY_CENTERS[key];
       if (!point) return [];
+      const city = key.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
       return [{
-        id: `offline-${key}`,
-        city: key.replace(/\b[a-z]/g, (letter) => letter.toUpperCase()),
+        id: createDestinationId({ city, countryCode: country?.code }),
+        city,
         country: country?.name || '',
         countryCode: country?.code,
         lat: point[0],
         lng: point[1],
+        provider: 'offline',
+        timezone: countryTimezone(country?.code),
+        currencyCode: country?.currency,
       }];
     });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Place search                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Search is backed by OpenStreetMap's Nominatim, whose usage policy allows at
+ * most one request per second per application and asks that autocomplete not
+ * hammer it. Browsers will not let us set a User-Agent, so the request carries
+ * the page's Referer instead; a small backend proxy would be the better long
+ * term home for this, and everything below is written so only the transport
+ * would need to change.
+ *
+ * Protections here: a minimum query length, an in-memory cache of recent
+ * queries, at least one second between network calls, and a silent fall back
+ * to the offline city table when the provider errors or rate-limits.
+ */
+const PLACE_PROVIDER = 'https://nominatim.openstreetmap.org/search';
+export const MIN_PLACE_QUERY_LENGTH = 3;
+const PROVIDER_MIN_INTERVAL_MS = 1100;
+const PLACE_CACHE_LIMIT = 60;
+
+const placeCache = new Map<string, PlaceSuggestion[]>();
+let lastProviderCallAt = 0;
+
+const cacheKey = (query: string, countryCode?: string) =>
+  `${(countryCode || '').toUpperCase()}|${normalize(query)}`;
+
+const rememberPlaces = (key: string, suggestions: PlaceSuggestion[]) => {
+  placeCache.set(key, suggestions);
+  if (placeCache.size > PLACE_CACHE_LIMIT) {
+    const oldest = placeCache.keys().next().value;
+    if (oldest !== undefined) placeCache.delete(oldest);
+  }
+};
+
+/** Test seam: forget cached searches and the rate-limit window. */
+export const resetPlaceCache = () => {
+  placeCache.clear();
+  lastProviderCallAt = 0;
+};
+
+const wait = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
+
+export interface PlaceSearchResult {
+  suggestions: PlaceSuggestion[];
+  /** Where the results came from, so the UI can be honest about it. */
+  source: 'provider' | 'cache' | 'offline';
+  /** Set when the provider could not be reached or refused the request. */
+  unavailable?: boolean;
 }
 
 /** Autocomplete places, optionally scoped to one country. */
 export async function searchPlaces(
   query: string,
   options: { countryCode?: string; limit?: number; signal?: AbortSignal } = {},
-): Promise<PlaceSuggestion[]> {
+): Promise<PlaceSearchResult> {
   const trimmed = query.trim();
   const country = options.countryCode ? findCountry(options.countryCode) : null;
-  if (trimmed.length < 2) return offlineSuggestions('', country);
+
+  if (trimmed.length < MIN_PLACE_QUERY_LENGTH) {
+    return { suggestions: offlineSuggestions('', country), source: 'offline' };
+  }
+
+  const key = cacheKey(trimmed, options.countryCode);
+  const cached = placeCache.get(key);
+  if (cached) return { suggestions: cached, source: 'cache' };
 
   try {
-    const url = new URL('https://nominatim.openstreetmap.org/search');
+    const sinceLastCall = Date.now() - lastProviderCallAt;
+    if (sinceLastCall < PROVIDER_MIN_INTERVAL_MS) {
+      await wait(PROVIDER_MIN_INTERVAL_MS - sinceLastCall, options.signal);
+    }
+    // A newer keystroke may have aborted this search while it waited its turn.
+    if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    const url = new URL(PLACE_PROVIDER);
     url.searchParams.set('format', 'jsonv2');
     url.searchParams.set('limit', String(options.limit ?? 6));
     url.searchParams.set('addressdetails', '1');
@@ -421,20 +570,31 @@ export async function searchPlaces(
     url.searchParams.set('q', trimmed);
     if (options.countryCode) url.searchParams.set('countrycodes', options.countryCode.toLowerCase());
 
+    lastProviderCallAt = Date.now();
     const response = await fetch(url.toString(), {
       signal: options.signal,
       headers: { Accept: 'application/json' },
     });
-    if (!response.ok) throw new Error('Place search failed');
+    if (!response.ok) throw new Error(`Place search failed (${response.status})`);
 
     const results = (await response.json()) as NominatimResult[];
     const suggestions = results
       .map(toSuggestion)
       .filter((item): item is PlaceSuggestion => item !== null);
-    return suggestions.length > 0 ? suggestions : offlineSuggestions(trimmed, country);
+
+    if (suggestions.length === 0) {
+      return { suggestions: offlineSuggestions(trimmed, country), source: 'offline' };
+    }
+
+    rememberPlaces(key, suggestions);
+    return { suggestions, source: 'provider' };
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    return offlineSuggestions(trimmed, country);
+    return {
+      suggestions: offlineSuggestions(trimmed, country),
+      source: 'offline',
+      unavailable: true,
+    };
   }
 }
 
