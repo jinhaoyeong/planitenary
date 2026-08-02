@@ -7,7 +7,7 @@ import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 import { clsx } from 'clsx';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { useAuth } from '../contexts/AuthContext';
-import { CurrencySelector, CompactCurrencySelector } from './CurrencySelector';
+import { BudgetCurrencyToggle } from './CurrencySelector';
 
 interface BudgetItem {
   id: string;
@@ -688,13 +688,10 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
                 ? `A gentle estimate for ${itinerary.cities.join(' & ')}.`
                 : 'Add destinations to shape your first estimate.')
               : "Real-time expense tracking while we're on the road."}
-            <span className="block text-sm mt-1 font-display-italic">
-              {currency === 'CNY' ? 'shown in ¥ (CNY)' : 'shown in RM (MYR)'}
-            </span>
           </p>
 
           {/* Segmented Control for Views */}
-          <div className="flex justify-center mb-6">
+          <div className="flex justify-center mb-5">
             <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl flex items-center shadow-inner inline-flex">
               <button
                 onClick={() => setActiveView('budget')}
@@ -723,21 +720,13 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
             </div>
           </div>
 
-          {/* Currency Selector and Edit Button - Separate section below title */}
-          <div className="flex flex-col sm:flex-row justify-center items-stretch sm:items-center gap-3 sm:gap-4 w-full">
-            {/* Mobile: Compact Selector | Desktop: Full Selector */}
-            <div className="sm:hidden w-full flex justify-center">
-              <CompactCurrencySelector />
-            </div>
-            <div className="hidden sm:block max-w-full overflow-x-auto">
-              <CurrencySelector />
-            </div>
-            {/* Edit Button */}
+          <div className="flex flex-col items-center gap-3">
+            <BudgetCurrencyToggle />
             {activeView === 'budget' && (
               <button
                 onClick={() => setIsEditing(!isEditing)}
                 className={clsx(
-                  "flex items-center justify-center gap-2 px-4 py-2.5 rounded-3xl text-xs font-bold transition-all border shrink-0 w-full sm:w-auto",
+                  "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-xs font-bold transition-all border",
                   isEditing
                     ? "bg-rose-500 text-white shadow-lg shadow-rose-500/30 border-rose-600"
                     : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-200 dark:hover:border-emerald-500/50 hover:text-emerald-600 dark:hover:text-emerald-400"

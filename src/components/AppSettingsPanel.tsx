@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { Download, ImagePlus, Link2, PawPrint, Plus, Trash2, Upload } from 'lucide-react';
+import { Coins, Download, ImagePlus, Link2, PawPrint, Plus, Trash2, Upload } from 'lucide-react';
 import {
   createPetId,
   DEFAULT_PETS,
@@ -12,6 +12,7 @@ import {
   subscribePetPack,
   type PetDefinition,
 } from '../lib/petPack';
+import { CurrencyPairSettings } from './CurrencySelector';
 
 interface AppSettingsPanelProps {
   showPets: boolean;
@@ -132,8 +133,27 @@ export function AppSettingsPanel({ showPets, onTogglePets }: AppSettingsPanelPro
           App preferences.
         </h2>
         <p className="mt-3 max-w-2xl text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
-          Control optional extras for your handbook. Pet packs stay on this device and can be exported anytime.
+          Set wallet currencies and optional extras. Pet packs stay on this device and can be exported anytime.
         </p>
+      </div>
+
+      <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
+        <div className="flex items-start gap-3">
+          <div
+            className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+            style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            <Coins className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="eyebrow">Currency</div>
+            <h3 className="font-display text-2xl sm:text-3xl mt-2">Home and trip money.</h3>
+            <p className="mt-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
+              Choose your local currency and the currency for where you are going. The wallet only toggles between these two.
+            </p>
+          </div>
+        </div>
+        <CurrencyPairSettings />
       </div>
 
       <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
