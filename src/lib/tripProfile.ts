@@ -183,6 +183,23 @@ export function resolveDuration(profile: Pick<TripProfile, 'startDate' | 'endDat
   return { days, nights: Math.max(0, days - 1) };
 }
 
+/**
+ * Duration the hero badge may honestly show. Unlike {@link resolveDuration},
+ * this never falls back to a leftover dayCount when both dates are set but
+ * invalid — an impossible range must clear the badge, not keep an old number.
+ */
+export function badgeDurationDays(profile: Pick<TripProfile, 'startDate' | 'endDate' | 'dayCount'>): number {
+  const hasStart = Boolean(profile.startDate);
+  const hasEnd = Boolean(profile.endDate);
+  if (hasStart && hasEnd) {
+    const nights = nightsBetween(profile.startDate, profile.endDate);
+    return nights !== null ? nights + 1 : 0;
+  }
+  // A single date is incomplete; only an intentional dayCount counts as undated duration.
+  if (hasStart || hasEnd) return 0;
+  return Math.max(0, Math.round(profile.dayCount || 0));
+}
+
 /** Meteorological season, flipped for the southern hemisphere. */
 export function resolveSeason(startDate: string | undefined, latitude?: number): Season | null {
   const start = parseDate(startDate);

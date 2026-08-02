@@ -3,8 +3,11 @@ import {
   MAX_GENERATED_DAYS,
   buildDaysFromProfile,
   createItineraryFromProfile,
+  resolveDisplayedDayBadge,
+  syncDurationDependentFields,
 } from './trips';
 import { createEmptyProfile, manualDestination, type TripProfile } from './tripProfile';
+import { effectiveFieldSource } from './identityFields';
 
 const kyoto = (overrides: Partial<TripProfile> = {}): TripProfile => ({
   ...createEmptyProfile('MYR'),
@@ -80,5 +83,118 @@ describe('createItineraryFromProfile', () => {
     expect(saved.tripCurrency).toBe('JPY');
     expect(saved.homeCurrency).toBe('MYR');
     expect(saved.destinations[0].id).toBe('place_kyoto_jp');
+  });
+});
+
+describe('duration-dependent badge sync', () => {
+  const dated = () => createItineraryFromProfile(
+    kyoto({ startDate: '2027-10-04', endDate: '2027-10-11' }),
+    'trip-dated',
+  );
+
+  it('clears the badge as soon as dates are removed', () => {
+    const itinerary = dated();
+    expect(itinerary.heroDayBadge).toBe('8');
+
+    const undatedProfile = {
+      ...(itinerary.tripProfile as TripProfile),
+      startDate: undefined,
+      endDate: undefined,
+      dayCount: 0,
+    };
+    const synced = syncDurationDependentFields(itinerary, undatedProfile);
+
+    expect(synced.heroDayBadge).toBe('');
+    expect(synced.heroDayBadgeUnit).toBe('');
+    expect(resolveDisplayedDayBadge(synced).visible).toBe(false);
+  });
+
+  it('keeps the badge absent after a round-trip through the saved profile', () => {
+    const itinerary = dated();
+    const undatedProfile = {
+      ...(itinerary.tripProfile as TripProfile),
+      startDate: undefined,
+      endDate: undefined,
+      dayCount: 0,
+    };
+    const saved = syncDurationDependentFields(itinerary, undatedProfile);
+    // Simulate reload: the stored itinerary is what display reads.
+    expect(resolveDisplayedDayBadge(saved).visible).toBe(false);
+    expect(saved.heroDayBadge).toBe('');
+  });
+
+  it('restores a generated badge when valid dates return', () => {
+    const itinerary = dated();
+    const undatedProfile = {
+      ...(itinerary.tripProfile as TripProfile),
+      startDate: undefined,
+      endDate: undefined,
+      dayCount: 0,
+    };
+    const cleared = syncDurationDependentFields(itinerary, undatedProfile);
+    const restoredProfile = {
+      ...undatedProfile,
+      startDate: '2027-10-04',
+      endDate: '2027-10-11',
+    };
+    const restored = syncDurationDependentFields(cleared, restoredProfile);
+
+    expect(restored.heroDayBadge).toBe('8');
+    expect(restored.heroDayBadgeUnit).toBe('days');
+    expect(resolveDisplayedDayBadge(restored)).toEqual({
+      value: '8',
+      unit: 'days',
+      visible: true,
+    });
+  });
+
+  it('never shows a stale badge for an invalid date range', () => {
+    const itinerary = dated();
+    const invalidProfile = {
+      ...(itinerary.tripProfile as TripProfile),
+      startDate: '2027-10-11',
+      endDate: '2027-10-04',
+    };
+    const synced = syncDurationDependentFields(itinerary, invalidProfile);
+    expect(synced.heroDayBadge).toBe('');
+    expect(resolveDisplayedDayBadge(synced).visible).toBe(false);
+  });
+
+  it('preserves manual copy fields while clearing the badge', () => {
+    const itinerary = dated();
+    const withManual = {
+      ...itinerary,
+      description: 'My personal Kyoto food journey.',
+      fieldSources: {
+        ...itinerary.fieldSources,
+        description: {
+          source: 'manual' as const,
+          generatedValue: itinerary.description,
+          generatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    };
+    const undatedProfile = {
+      ...(itinerary.tripProfile as TripProfile),
+      startDate: undefined,
+      endDate: undefined,
+      dayCount: 0,
+    };
+    const synced = syncDurationDependentFields(withManual, undatedProfile);
+
+    expect(synced.description).toBe('My personal Kyoto food journey.');
+    expect(effectiveFieldSource(synced, 'description')).toBe('manual');
+    expect(synced.heroDayBadge).toBe('');
+    expect(synced.name).toBe(itinerary.name);
+  });
+
+  it('hides a leftover stored badge when the profile has no duration', () => {
+    const leftover = {
+      ...dated(),
+      tripProfile: kyoto({ dayCount: 0 }),
+      heroDayBadge: '8',
+      heroDayBadgeUnit: 'days',
+    };
+    expect(resolveDisplayedDayBadge(leftover).visible).toBe(false);
   });
 });

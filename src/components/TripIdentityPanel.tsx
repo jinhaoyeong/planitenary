@@ -6,6 +6,7 @@ import { CitySearchInput } from './ui/CitySearchInput';
 import { ToggleRow } from './ui/ToggleRow';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { RegenerationPreview } from './RegenerationPreview';
+import { syncDurationDependentFields } from '../lib/trips';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -43,7 +44,9 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
   );
 
   const save = (next: TripProfile) => {
-    onItineraryChange({ ...itinerary, tripProfile: next });
+    // Profile is the source of truth for duration: clearing dates must clear
+    // the badge in the same write, so a reload cannot resurrect a stale "8".
+    onItineraryChange(syncDurationDependentFields({ ...itinerary, tripProfile: next }, next));
   };
 
   const update = (patch: Partial<TripProfile>) => save({ ...profile, ...patch });

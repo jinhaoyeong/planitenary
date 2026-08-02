@@ -33,6 +33,7 @@ import { Pets } from './components/Pets';
 import { hapticMedium } from './lib/haptics';
 import { sanitizeTripProfile } from './lib/tripProfile';
 import { markManualFieldEdits, sanitizeFieldSources } from './lib/identityFields';
+import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
@@ -218,7 +219,6 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     tripProfile: sanitizeTripProfile(source.tripProfile) ?? sanitizeTripProfile(fallback.tripProfile) ?? undefined,
     fieldSources: sanitizeFieldSources(source.fieldSources) ?? sanitizeFieldSources(fallback.fieldSources),
     brandTitle: optionalText(source.brandTitle, fallback.brandTitle),
-    heroDayBadgeUnit: optionalText(source.heroDayBadgeUnit, fallback.heroDayBadgeUnit),
     overviewEyebrow: optionalText(source.overviewEyebrow, fallback.overviewEyebrow),
     overviewDescription: optionalText(source.overviewDescription, fallback.overviewDescription),
     searchPlaceholder: optionalText(source.searchPlaceholder, fallback.searchPlaceholder),
@@ -233,10 +233,14 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     coverHeadline: typeof source.coverHeadline === 'string' && source.coverHeadline.trim() ? source.coverHeadline.trim() : (fallback.coverHeadline || 'Add a cover when your story takes shape.'),
     coverLabel: typeof source.coverLabel === 'string' && source.coverLabel.trim() ? source.coverLabel.trim() : (fallback.coverLabel || 'Custom cover'),
     coverYear: typeof source.coverYear === 'string' && source.coverYear.trim() ? source.coverYear.trim() : (fallback.coverYear || String(new Date().getFullYear())),
-    // A trip with no duration has no badge at all rather than a bare "0".
-    heroDayBadge: typeof source.heroDayBadge === 'string' && source.heroDayBadge.trim()
+    // Empty string means "no badge" and must survive sanitisation; falling
+    // back to days.length would resurrect a stale count after dates are cleared.
+    heroDayBadge: typeof source.heroDayBadge === 'string'
       ? source.heroDayBadge.trim()
-      : (fallback.heroDayBadge || (sanitizedDays.length > 0 ? String(sanitizedDays.length) : undefined)),
+      : (typeof fallback.heroDayBadge === 'string' ? fallback.heroDayBadge : undefined),
+    heroDayBadgeUnit: typeof source.heroDayBadgeUnit === 'string'
+      ? source.heroDayBadgeUnit.trim()
+      : optionalText(fallback.heroDayBadgeUnit),
     cities: sanitizedCities.length > 0 ? Array.from(new Set(sanitizedCities)) : Array.from(new Set(sanitizedDays.map((day) => day.city).filter(Boolean))),
     days: sanitizedDays,
   };
@@ -354,10 +358,9 @@ function App() {
     [isDemoUser, demoItinerary, activeItineraryId],
   );
   const displayItinerary = customItinerary || activeItinerary;
-  const dayBadgeValue = (
-    displayItinerary.heroDayBadge || (displayItinerary.days.length > 0 ? String(displayItinerary.days.length) : '')
-  ).trim();
-  const showDayBadge = dayBadgeValue.length > 0 || isHomeHeroEditing;
+  const dayBadge = resolveDisplayedDayBadge(displayItinerary);
+  const dayBadgeValue = dayBadge.value;
+  const showDayBadge = dayBadge.visible || isHomeHeroEditing;
   const brandWords = (displayItinerary.brandTitle || 'Travel Handbook').trim().split(/\s+/);
   const brandAccent = brandWords[brandWords.length - 1];
   const brandLead = brandWords.slice(0, -1).join(' ');
@@ -1301,7 +1304,7 @@ function App() {
                   onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
                   title={isHomeHeroEditing ? 'Click to edit' : undefined}
                 >{dayBadgeValue || '—'}</span>
-                <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{displayItinerary.heroDayBadgeUnit || 'days'}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{dayBadge.unit || displayItinerary.heroDayBadgeUnit || 'days'}</span>
               </motion.div>
             )}
           </motion.div>
