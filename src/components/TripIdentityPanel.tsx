@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
-import { MapPin, RotateCcw, Wand2, X } from 'lucide-react';
+import { useMemo } from 'react';
+import { MapPin, Wand2, X } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { findCountry, type PlaceSuggestion } from '../lib/destinations';
 import { CitySearchInput } from './ui/CitySearchInput';
 import { ToggleRow } from './ui/ToggleRow';
 import { buildTripIdentity } from '../lib/tripIdentity';
-import { applyIdentityToItinerary } from '../lib/trips';
+import { RegenerationPreview } from './RegenerationPreview';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -28,8 +28,6 @@ interface TripIdentityPanelProps {
 
 export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentityPanelProps) {
   const storedProfile = useMemo(() => sanitizeTripProfile(itinerary.tripProfile), [itinerary.tripProfile]);
-  const [status, setStatus] = useState<string | null>(null);
-
   const profile = useMemo(
     () =>
       storedProfile ?? {
@@ -41,7 +39,6 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
   );
 
   const save = (next: TripProfile) => {
-    setStatus(null);
     onItineraryChange({ ...itinerary, tripProfile: next });
   };
 
@@ -78,11 +75,6 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
     () => buildTripIdentity(profile, { plannedDays: itinerary.days.length }),
     [profile, itinerary.days.length],
   );
-
-  const regenerate = () => {
-    onItineraryChange(applyIdentityToItinerary(itinerary, profile, identity));
-    setStatus('Handbook copy regenerated from this profile.');
-  };
 
   return (
     <div className="space-y-6">
@@ -205,14 +197,7 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
           Overview: “{identity.overviewEyebrow}” · Button: “{identity.primaryButtonLabel}” · Search: “{identity.searchPlaceholder}”
         </p>
-        <button type="button" className="pill-btn pill-primary" onClick={regenerate}>
-          <RotateCcw className="w-4 h-4" />
-          Apply to my handbook
-        </button>
-        <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-          This overwrites hero and overview text. Any wording you typed yourself will be replaced.
-        </p>
-        {status && <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{status}</p>}
+        <RegenerationPreview itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
       </div>
     </div>
   );
