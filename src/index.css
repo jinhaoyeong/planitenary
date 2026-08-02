@@ -57,7 +57,10 @@
 
 html {
   background-color: var(--bg);
+  color-scheme: light;
 }
+
+html.dark { color-scheme: dark; }
 
 body {
   background-color: var(--bg);
