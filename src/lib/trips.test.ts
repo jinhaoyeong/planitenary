@@ -76,8 +76,9 @@ describe('createItineraryFromProfile', () => {
   it('keeps the trip profile, so currency and destinations have one owner', () => {
     const profile = kyoto({ tripCurrency: 'JPY', homeCurrency: 'MYR' });
     const itinerary = createItineraryFromProfile(profile, 'trip-3');
-    expect(itinerary.tripProfile?.tripCurrency).toBe('JPY');
-    expect(itinerary.tripProfile?.homeCurrency).toBe('MYR');
-    expect(itinerary.tripProfile?.destinations[0].id).toBe('place_kyoto_jp');
+    const saved = itinerary.tripProfile as TripProfile;
+    expect(saved.tripCurrency).toBe('JPY');
+    expect(saved.homeCurrency).toBe('MYR');
+    expect(saved.destinations[0].id).toBe('place_kyoto_jp');
   });
 });

@@ -1746,6 +1746,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                                 type="button"
                                 onClick={(event) => {
                                   event.stopPropagation();
+                                  // The add form lives in the day view, so open
+                                  // the day first and the modal with it.
+                                  setSelectedDay(day.day);
                                   handleAddActivity(day.day);
                                 }}
                                 className="text-[11px] md:text-xs px-2 py-1 rounded-lg shrink-0 flex items-center gap-1.5 font-semibold"
