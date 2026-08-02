@@ -216,26 +216,20 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
 
   return (
     <main
-      className="min-h-screen max-w-6xl mx-auto px-5 sm:px-6 md:px-10 pb-10 md:pb-16"
+      className="min-h-screen max-w-6xl mx-auto px-6 sm:px-8 md:px-10 pb-10 md:pb-16"
       style={{
         color: 'var(--ink)',
         backgroundColor: 'var(--bg)',
         paddingTop: 'max(1.25rem, env(safe-area-inset-top))',
       }}
     >
-      <div className="flex flex-col gap-5 mb-8 md:mb-10 w-full max-w-xl">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1 pt-1">
-            <p className="eyebrow">Your travel shelf</p>
-            <h1 className="font-display text-5xl md:text-7xl leading-none mt-3">Choose a trip.</h1>
-            <p className="mt-4 text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-              Keep each journey in its own handbook, then shape the details at your own pace.
-            </p>
-          </div>
+      <div className="flex flex-col gap-5 mb-8 md:mb-10 w-full max-w-xl ml-1 sm:ml-2">
+        <div className="flex items-center justify-between gap-3">
+          <p className="eyebrow m-0">Your travel shelf</p>
           <button
             type="button"
             onClick={onOpenProfile}
-            className="inline-flex p-2.5 rounded-full shrink-0"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full shrink-0"
             style={{ color: 'var(--ink)', border: '1px solid var(--border)', backgroundColor: 'var(--bg-elevated)' }}
             aria-label="Open profile settings"
             title="Profile settings"
@@ -244,10 +238,17 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
           </button>
         </div>
 
+        <div>
+          <h1 className="font-display text-5xl md:text-7xl leading-none">Choose a trip.</h1>
+          <p className="mt-4 text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+            Keep each journey in its own handbook, then shape the details at your own pace.
+          </p>
+        </div>
+
         <div className="flex flex-col gap-3 w-full">
           <div className="shelf-toggle" role="tablist" aria-label="Trip shelf filter">
             {([
-              { id: 'active' as const, label: 'Active', count: activeCount },
+              { id: 'active' as const, label: 'Active trips', count: activeCount },
               { id: 'archived' as const, label: 'Archived', count: archivedCount },
             ]).map((option) => {
               const selected = shelf === option.id;
@@ -259,6 +260,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                   aria-selected={selected}
                   onClick={() => setShelf(option.id)}
                   className={selected ? 'shelf-toggle-option is-selected' : 'shelf-toggle-option'}
+                  style={selected ? { backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' } : undefined}
                 >
                   <span>{option.label}</span>
                   <span className="shelf-toggle-count">{option.count}</span>
@@ -271,6 +273,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
             <button
               type="button"
               className="pill-btn pill-primary w-full inline-flex items-center justify-center gap-2 min-h-11"
+              style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
               onClick={() => void createTrip()}
               disabled={creating}
             >
@@ -291,7 +294,14 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
             <Sparkles className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
             <h2 className="font-display text-3xl">Your first trip starts here.</h2>
             <p className="max-w-md mx-auto mt-3" style={{ color: 'var(--ink-muted)' }}>Create a blank handbook for dates, places, ideas, costs, and memories.</p>
-            <button type="button" className="pill-btn pill-primary mt-6" onClick={() => void createTrip()}>Create a blank trip</button>
+            <button
+              type="button"
+              className="pill-btn pill-primary mt-6"
+              style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+              onClick={() => void createTrip()}
+            >
+              Create a blank trip
+            </button>
           </> : <>
             <Archive className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
             <h2 className="font-display text-3xl">No archived trips.</h2>
