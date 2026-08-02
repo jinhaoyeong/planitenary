@@ -114,12 +114,22 @@ const sanitizeActivity = (value: unknown, fallback: Activity): Activity => {
     ? Math.max(0, Math.min(10, Math.round(source.rating)))
     : undefined;
   const moodVotes = source.moodVotes && typeof source.moodVotes === 'object'
-    ? {
-        ahhao: source.moodVotes.ahhao,
-        belle: source.moodVotes.belle,
-        comment: typeof source.moodVotes.comment === 'string' && source.moodVotes.comment.trim() ? source.moodVotes.comment.trim() : undefined,
-        commentBy: source.moodVotes.commentBy,
-      }
+    ? (() => {
+        const raw = source.moodVotes as Record<string, unknown>;
+        const reaction = (value: unknown) =>
+          typeof value === 'string' ? value as NonNullable<Activity['moodVotes']>['self'] : undefined;
+        const self = reaction(raw.self ?? raw.ahhao);
+        const partner = reaction(raw.partner ?? raw.belle);
+        const comment = typeof raw.comment === 'string' && raw.comment.trim() ? raw.comment.trim() : undefined;
+        const rawCommentBy = raw.commentBy;
+        const commentBy =
+          rawCommentBy === 'partner' || rawCommentBy === 'belle'
+            ? 'partner' as const
+            : rawCommentBy === 'self' || rawCommentBy === 'ahhao'
+              ? 'self' as const
+              : undefined;
+        return { self, partner, comment, commentBy };
+      })()
     : undefined;
   const voiceNote = source.voiceNote
     && typeof source.voiceNote === 'object'

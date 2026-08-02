@@ -10,9 +10,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Ah Hao & Belle - China Trip',
-        short_name: 'Ah Hao & Belle',
-        description: 'Custom travel handbook for our China 2026 trip',
+        name: 'Travel Handbook',
+        short_name: 'Travel Handbook',
+        description: 'Plan and organize your trips',
         theme_color: '#FAF7F2',
         background_color: '#FAF7F2',
         display: 'standalone',

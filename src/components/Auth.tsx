@@ -435,7 +435,7 @@ export const Auth = () => {
               Enter Demo Mode
             </button>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Test login: <span className="font-semibold">{DEMO_EMAIL}</span> / <span className="font-semibold">{DEMO_PASSWORD}</span>
+              Demo Mode uses a local sample trip on this device only.
             </p>
           </form>
           )}

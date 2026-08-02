@@ -24,7 +24,7 @@ const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
 ];
 
 type MoodReaction = 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
-type MoodVoter = 'ahhao' | 'belle';
+type MoodVoter = 'self' | 'partner';
 
 const REACTION_OPTIONS: { id: MoodReaction; label: string }[] = [
   { id: 'see_first', label: 'See First' },
@@ -335,10 +335,10 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
   const [isMoodOpen, setIsMoodOpen] = useState(false);
   const [isRatingOpen, setIsRatingOpen] = useState(false);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
-  const [activeVoter, setActiveVoter] = useState<MoodVoter>('ahhao');
+  const [activeVoter, setActiveVoter] = useState<MoodVoter>('self');
   const [moodDraft, setMoodDraft] = useState<NonNullable<Activity['moodVotes']>>({
-    ahhao: activity.moodVotes?.ahhao,
-    belle: activity.moodVotes?.belle,
+    self: activity.moodVotes?.self,
+    partner: activity.moodVotes?.partner,
     comment: activity.moodVotes?.comment,
     commentBy: activity.moodVotes?.commentBy,
   });
@@ -385,12 +385,12 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
   const updateMoodVotes = (next: NonNullable<Activity['moodVotes']>) => {
     const normalizedComment = next.comment?.trim();
     const normalizedVotes: NonNullable<Activity['moodVotes']> = {
-      ahhao: next.ahhao,
-      belle: next.belle,
+      self: next.self,
+      partner: next.partner,
       comment: normalizedComment || undefined,
       commentBy: normalizedComment ? next.commentBy : undefined,
     };
-    const hasMoodValue = Boolean(normalizedVotes.ahhao || normalizedVotes.belle || normalizedVotes.comment);
+    const hasMoodValue = Boolean(normalizedVotes.self || normalizedVotes.partner || normalizedVotes.comment);
     onEdit?.({
       ...activity,
       moodVotes: hasMoodValue ? normalizedVotes : undefined,
@@ -399,8 +399,8 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
 
   const openMoodBoard = () => {
     setMoodDraft({
-      ahhao: activity.moodVotes?.ahhao,
-      belle: activity.moodVotes?.belle,
+      self: activity.moodVotes?.self,
+      partner: activity.moodVotes?.partner,
       comment: activity.moodVotes?.comment,
       commentBy: activity.moodVotes?.commentBy,
     });
@@ -579,8 +579,8 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
   };
 
   const moodVotes = activity.moodVotes || {};
-  const reactionA = moodVotes.ahhao;
-  const reactionB = moodVotes.belle;
+  const reactionA = moodVotes.self;
+  const reactionB = moodVotes.partner;
   const hasConflict = Boolean(reactionA && reactionB && reactionA !== reactionB);
   const activityRating = normalizeActivityRating(activity.rating);
   const editedActivityRating = normalizeActivityRating(editedActivity.rating);
@@ -951,7 +951,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white/90 dark:bg-slate-700 text-slate-700 dark:text-slate-200 max-w-[220px]">
                 <MessageSquare className="w-3 h-3 shrink-0" />
                 <span className="truncate">
-                  {activity.moodVotes.commentBy === 'belle' ? 'Travel partner' : 'You'}: {activity.moodVotes.comment}
+                  {activity.moodVotes.commentBy === 'partner' ? 'Travel partner' : 'You'}: {activity.moodVotes.comment}
                 </span>
               </span>
             )}
@@ -1080,15 +1080,15 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
           <div className="grid grid-cols-2 gap-2 mb-2">
             <button
               type="button"
-              onClick={() => setActiveVoter('ahhao')}
-              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'ahhao' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
+              onClick={() => setActiveVoter('self')}
+              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'self' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
             >
               You
             </button>
             <button
               type="button"
-              onClick={() => setActiveVoter('belle')}
-              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'belle' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
+              onClick={() => setActiveVoter('partner')}
+              className={clsx("px-2 py-1.5 rounded-lg text-xs font-semibold", activeVoter === 'partner' ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}
             >
               Travel partner
             </button>
@@ -1124,7 +1124,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
             <input
               value={moodDraft.comment || ''}
               onChange={(e) => setMoodDraft((current) => ({ ...current, comment: e.target.value, commentBy: activeVoter }))}
-              placeholder={`Add a note as ${activeVoter === 'ahhao' ? 'You' : 'Travel partner'}...`}
+              placeholder={`Add a note as ${activeVoter === 'self' ? 'You' : 'Travel partner'}...`}
               className="editorial-input is-compact flex-1"
             />
             <button

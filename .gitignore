@@ -10,11 +10,20 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-.env
 deps/
-*.local
 
-# Editor directories and files
+# Env / secrets — never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.keystore
+*.jks
+
+# Local / editor
+*.local
+.claude/
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -24,3 +33,11 @@ deps/
 *.njsproj
 *.sln
 *.sw?
+
+# Native iOS artifacts (not shipped in this repo)
+ios/
+TravelHandbook-iOS/
+*.xcodeproj/
+*.xcworkspace/
+Pods/
+DerivedData/

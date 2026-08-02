@@ -10,10 +10,10 @@ export interface Activity {
   rating?: number;
   coordinates?: [number, number]; // [lat, lng] for manual location search
   moodVotes?: {
-    ahhao?: 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
-    belle?: 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
+    self?: 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
+    partner?: 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
     comment?: string;
-    commentBy?: 'ahhao' | 'belle';
+    commentBy?: 'self' | 'partner';
   };
   voiceNote?: {
     dataUrl: string;
