@@ -57,7 +57,6 @@ const emptyItinerary: Itinerary = {
   coverHeadline: 'Add a cover when your story takes shape.',
   coverLabel: 'Custom cover',
   coverYear: String(new Date().getFullYear()),
-  heroDayBadge: '0',
   days: [],
 };
 
@@ -234,7 +233,10 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     coverHeadline: typeof source.coverHeadline === 'string' && source.coverHeadline.trim() ? source.coverHeadline.trim() : (fallback.coverHeadline || 'Add a cover when your story takes shape.'),
     coverLabel: typeof source.coverLabel === 'string' && source.coverLabel.trim() ? source.coverLabel.trim() : (fallback.coverLabel || 'Custom cover'),
     coverYear: typeof source.coverYear === 'string' && source.coverYear.trim() ? source.coverYear.trim() : (fallback.coverYear || String(new Date().getFullYear())),
-    heroDayBadge: typeof source.heroDayBadge === 'string' && source.heroDayBadge.trim() ? source.heroDayBadge.trim() : (fallback.heroDayBadge || String(sanitizedDays.length)),
+    // A trip with no duration has no badge at all rather than a bare "0".
+    heroDayBadge: typeof source.heroDayBadge === 'string' && source.heroDayBadge.trim()
+      ? source.heroDayBadge.trim()
+      : (fallback.heroDayBadge || (sanitizedDays.length > 0 ? String(sanitizedDays.length) : undefined)),
     cities: sanitizedCities.length > 0 ? Array.from(new Set(sanitizedCities)) : Array.from(new Set(sanitizedDays.map((day) => day.city).filter(Boolean))),
     days: sanitizedDays,
   };
@@ -325,6 +327,10 @@ function App() {
     [isDemoUser, demoItinerary, activeItineraryId],
   );
   const displayItinerary = customItinerary || activeItinerary;
+  const dayBadgeValue = (
+    displayItinerary.heroDayBadge || (displayItinerary.days.length > 0 ? String(displayItinerary.days.length) : '')
+  ).trim();
+  const showDayBadge = dayBadgeValue.length > 0 || isHomeHeroEditing;
   const brandWords = (displayItinerary.brandTitle || 'Travel Handbook').trim().split(/\s+/);
   const brandAccent = brandWords[brandWords.length - 1];
   const brandLead = brandWords.slice(0, -1).join(' ');
@@ -1252,23 +1258,25 @@ function App() {
                 </span>
               </div>
             </div>
-            {/* Sticker badge */}
-            <motion.div
-              initial={{ scale: 0, rotate: -10 }}
-              animate={{ scale: 1, rotate: 8 }}
-              transition={{ delay: 0.5, type: 'spring', stiffness: 180, damping: 12 }}
-              className="absolute -top-6 -right-4 md:-top-8 md:-right-6 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
-              style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
-            >
-              <span
-                className="font-display text-3xl md:text-4xl leading-none cursor-text rounded px-1 outline-none focus:bg-black/10"
-                contentEditable={isHomeHeroEditing}
-                suppressContentEditableWarning
-                onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
-                title={isHomeHeroEditing ? 'Click to edit' : undefined}
-              >{displayItinerary.heroDayBadge || displayItinerary.days.length}</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{displayItinerary.heroDayBadgeUnit || 'days'}</span>
-            </motion.div>
+            {/* Sticker badge — hidden until the trip has a duration */}
+            {showDayBadge && (
+              <motion.div
+                initial={{ scale: 0, rotate: -10 }}
+                animate={{ scale: 1, rotate: 8 }}
+                transition={{ delay: 0.5, type: 'spring', stiffness: 180, damping: 12 }}
+                className="absolute -top-6 -right-4 md:-top-8 md:-right-6 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
+                style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+              >
+                <span
+                  className="font-display text-3xl md:text-4xl leading-none cursor-text rounded px-1 outline-none focus:bg-black/10"
+                  contentEditable={isHomeHeroEditing}
+                  suppressContentEditableWarning
+                  onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
+                  title={isHomeHeroEditing ? 'Click to edit' : undefined}
+                >{dayBadgeValue || '—'}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{displayItinerary.heroDayBadgeUnit || 'days'}</span>
+              </motion.div>
+            )}
           </motion.div>
         </div>
       </section>
