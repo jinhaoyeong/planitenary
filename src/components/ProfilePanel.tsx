@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { ImagePlus, Save, Trash2, UserRound, Edit3 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { SecurityPanel } from './SecurityPanel';
 
 interface UserProfileData {
   displayName: string;
@@ -123,7 +124,7 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
   };
 
   return (
-    <section className="w-full">
+    <section className="w-full space-y-6">
       <div className="editorial-card p-4 sm:p-5 md:p-8">
         {onEditHomeHero && (
           <div className="mb-6 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
@@ -263,6 +264,8 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
           </div>
         </div>
       </div>
+
+      <SecurityPanel />
     </section>
   );
 }
