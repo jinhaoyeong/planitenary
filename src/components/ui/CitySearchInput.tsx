@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, MapPin, Plus, Search } from 'lucide-react';
-import { popularCities, searchPlaces, type PlaceSuggestion } from '../../lib/destinations';
+import { CloudOff, Loader2, MapPin, Plus, Search } from 'lucide-react';
+import {
+  MIN_PLACE_QUERY_LENGTH,
+  offlinePlace,
+  popularCities,
+  searchPlaces,
+  type PlaceSuggestion,
+} from '../../lib/destinations';
 
 interface CitySearchInputProps {
   /** Scopes results and quick picks to one country when known. */
   countryCode?: string;
   countryName?: string;
-  /** Cities already chosen, so they can be hidden from the suggestions. */
-  chosen: string[];
+  /** Ids of stops already chosen, so they can be hidden from the suggestions. */
+  chosenIds: string[];
   onSelect: (place: PlaceSuggestion) => void;
   placeholder?: string;
 }
+
+/** Long enough that a search only fires once a query means something. */
+const DEBOUNCE_MS = 450;
 
 /**
  * Type-ahead city search backed by OpenStreetMap. Picking a result carries
@@ -19,27 +28,33 @@ interface CitySearchInputProps {
 export function CitySearchInput({
   countryCode,
   countryName,
-  chosen,
+  chosenIds,
   onSelect,
   placeholder = 'Search a city',
 }: CitySearchInputProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlaceSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
+  const [providerDown, setProviderDown] = useState(false);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const chosenKeys = useMemo(() => new Set(chosen.map((city) => city.toLowerCase())), [chosen]);
+  const chosenKeys = useMemo(() => new Set(chosenIds), [chosenIds]);
   const quickPicks = useMemo(
-    () => popularCities(countryCode).filter((city) => !chosenKeys.has(city.toLowerCase())).slice(0, 6),
+    () =>
+      popularCities(countryCode)
+        .map((city) => offlinePlace(city, countryCode))
+        .filter((place) => !chosenKeys.has(place.id))
+        .slice(0, 6),
     [countryCode, chosenKeys],
   );
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    if (trimmed.length < MIN_PLACE_QUERY_LENGTH) {
       setResults([]);
       setLoading(false);
+      setProviderDown(false);
       return;
     }
 
@@ -48,13 +63,15 @@ export function CitySearchInput({
     const timeoutId = window.setTimeout(async () => {
       try {
         const found = await searchPlaces(trimmed, { countryCode, signal: controller.signal });
-        setResults(found.filter((place) => !chosenKeys.has(place.city.toLowerCase())));
+        if (controller.signal.aborted) return;
+        setResults(found.suggestions.filter((place) => !chosenKeys.has(place.id)));
+        setProviderDown(Boolean(found.unavailable));
       } catch {
         // Aborted by the next keystroke.
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
-    }, 350);
+    }, DEBOUNCE_MS);
 
     return () => {
       controller.abort();
@@ -81,7 +98,7 @@ export function CitySearchInput({
     setOpen(false);
   };
 
-  const showPanel = open && (loading || results.length > 0 || query.trim().length >= 2);
+  const showPanel = open && (loading || results.length > 0 || query.trim().length >= MIN_PLACE_QUERY_LENGTH);
 
   return (
     <div className="space-y-2" ref={containerRef}>
@@ -112,6 +129,15 @@ export function CitySearchInput({
             className="absolute z-30 mt-2 w-full rounded-2xl overflow-hidden"
             style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lift)' }}
           >
+            {providerDown && (
+              <p
+                className="px-4 py-2 text-xs flex items-center gap-1.5"
+                style={{ color: 'var(--ink-muted)', borderBottom: '1px solid var(--border)' }}
+              >
+                <CloudOff className="w-3.5 h-3.5" />
+                Place search is unavailable — showing well-known cities.
+              </p>
+            )}
             {results.length === 0 ? (
               <p className="px-4 py-3 text-sm" style={{ color: 'var(--ink-muted)' }}>
                 {loading ? 'Looking up places…' : 'No place found. Try a different spelling.'}
@@ -142,21 +168,19 @@ export function CitySearchInput({
         )}
       </div>
 
-      {quickPicks.length > 0 && query.trim().length < 2 && (
+      {quickPicks.length > 0 && query.trim().length < MIN_PLACE_QUERY_LENGTH && (
         <div className="flex flex-wrap gap-2">
-          {quickPicks.map((city) => (
+          {/* Adds the city outright: no network needed, no second tap. */}
+          {quickPicks.map((place) => (
             <button
-              key={city}
+              key={place.id}
               type="button"
-              onClick={() => {
-                setQuery(city);
-                setOpen(true);
-              }}
+              onClick={() => choose(place)}
               className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
               style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--ink-muted)' }}
             >
               <Plus className="w-3 h-3" />
-              {city}
+              {place.city}
             </button>
           ))}
         </div>

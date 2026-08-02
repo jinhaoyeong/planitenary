@@ -14,6 +14,9 @@ import {
   TRAVEL_STYLE_OPTIONS,
   TRIP_TYPE_OPTIONS,
   createEmptyProfile,
+  destinationFromPlace,
+  manualDestination,
+  primaryCountry,
   resolveDuration,
   sanitizeTripProfile,
   type BudgetTier,
@@ -32,7 +35,8 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
     () =>
       storedProfile ?? {
         ...createEmptyProfile(),
-        destinations: itinerary.cities.map((city) => ({ city, country: '' })),
+        // A handbook created before profiles existed still lists its cities.
+        destinations: itinerary.cities.map((city) => manualDestination(city)),
         dayCount: itinerary.days.length,
       },
     [storedProfile, itinerary.cities, itinerary.days.length],
@@ -51,25 +55,15 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
   };
 
   const addPlace = (place: PlaceSuggestion) => {
-    save({
-      ...profile,
-      destinations: [
-        ...profile.destinations,
-        {
-          city: place.city,
-          country: place.country || profile.destinations[0]?.country || '',
-          region: place.region,
-          lat: place.lat,
-          lng: place.lng,
-        },
-      ],
-    });
+    const destination = destinationFromPlace(place, profile.destinations[0]?.country);
+    if (profile.destinations.some((existing) => existing.id === destination.id)) return;
+    save({ ...profile, destinations: [...profile.destinations, destination] });
   };
 
   const removeCity = (index: number) =>
     update({ destinations: profile.destinations.filter((_, itemIndex) => itemIndex !== index) });
 
-  const countryCode = findCountry(profile.destinations[0]?.country)?.code;
+  const countryCode = findCountry(primaryCountry(profile))?.code;
   const duration = resolveDuration(profile);
   const identity = useMemo(
     () => buildTripIdentity(profile, { plannedDays: itinerary.days.length }),
@@ -111,27 +105,40 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         <CitySearchInput
           countryCode={countryCode}
           countryName={profile.destinations[0]?.country}
-          chosen={profile.destinations.map((destination) => destination.city)}
+          chosenIds={profile.destinations.map((destination) => destination.id)}
           onSelect={addPlace}
           placeholder="Add another city"
         />
         <div className="flex flex-wrap gap-2 pt-1">
           {profile.destinations.map((destination, index) => (
             <span
-              key={`${destination.city}-${index}`}
+              key={destination.id}
               className="inline-flex items-center gap-2 rounded-full pl-3 pr-2 py-1.5 text-sm"
               style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
             >
-              <MapPin className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-              {destination.city}
-              <button type="button" onClick={() => removeCity(index)} className="p-1 rounded-full" aria-label={`Remove ${destination.city}`}>
+              <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent)' }} />
+              <span className="min-w-0">
+                <span className="block leading-tight">{destination.city}</span>
+                {(destination.region || destination.country) && (
+                  <span className="block text-[11px] leading-tight" style={{ color: 'var(--ink-muted)' }}>
+                    {[destination.region, destination.country].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeCity(index)}
+                className="p-1 rounded-full shrink-0"
+                aria-label={`Remove ${destination.city}`}
+              >
                 <X className="w-3.5 h-3.5" />
               </button>
             </span>
           ))}
         </div>
         <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-          {duration.days} days · {duration.nights} nights · {profile.destinations.length} stops on the map.
+          {duration.days > 0 ? `${duration.days} days · ${duration.nights} nights · ` : 'Dates not set · '}
+          {profile.destinations.length} {profile.destinations.length === 1 ? 'stop' : 'stops'} on the map.
         </p>
       </div>
 

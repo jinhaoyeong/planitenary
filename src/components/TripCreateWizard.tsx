@@ -24,12 +24,15 @@ import {
   TRANSPORT_OPTIONS,
   TRAVEL_STYLE_OPTIONS,
   TRIP_TYPE_OPTIONS,
+  countryBreakdown,
   createEmptyProfile,
+  describeDestination,
+  destinationCurrencies,
+  destinationFromPlace,
   nightsBetween,
   resolveDuration,
   suggestedCurrency,
   type BudgetTier,
-  type TripDestination,
   type TripProfile,
 } from '../lib/tripProfile';
 
@@ -112,14 +115,14 @@ export function TripCreateWizard({
   };
 
   const addPlace = (place: PlaceSuggestion) => {
-    const destination: TripDestination = {
-      city: place.city,
-      country: place.country || countryName,
-      region: place.region,
-      lat: place.lat,
-      lng: place.lng,
-    };
-    setProfile((current) => ({ ...current, destinations: [...current.destinations, destination] }));
+    const destination = destinationFromPlace(place, countryName);
+    setProfile((current) =>
+      // Identity is the place id, so two cities that share a name are both kept
+      // while the same place added twice is not.
+      current.destinations.some((existing) => existing.id === destination.id)
+        ? current
+        : { ...current, destinations: [...current.destinations, destination] },
+    );
     // The first city can teach us the country when it was never picked.
     if (!countryCode && place.countryCode) {
       setCountryCode(place.countryCode);
@@ -136,7 +139,16 @@ export function TripCreateWizard({
   const duration = resolveDuration(profile);
   const nights = nightsBetween(profile.startDate, profile.endDate);
   const selectedCountry = useMemo(() => findCountry(countryCode), [countryCode]);
-  const autoCurrency = selectedCountry?.currency || suggestedCurrency(profile);
+  // Cities can span countries, so the saved stops decide the currency once
+  // there are any; the country picker only seeds it beforehand.
+  const autoCurrency = profile.destinations.length > 0
+    ? suggestedCurrency(profile)
+    : selectedCountry?.currency || suggestedCurrency(profile);
+  const tripCountries = useMemo(() => countryBreakdown(profile), [profile]);
+  const otherCurrencies = useMemo(
+    () => destinationCurrencies(profile).filter((code) => code !== autoCurrency),
+    [profile, autoCurrency],
+  );
 
   // Until the traveller overrides it, the trip currency simply follows the destination.
   const resolvedProfile = useMemo<TripProfile>(
@@ -231,24 +243,32 @@ export function TripCreateWizard({
                 <CitySearchInput
                   countryCode={countryCode || undefined}
                   countryName={countryName || undefined}
-                  chosen={profile.destinations.map((destination) => destination.city)}
+                  chosenIds={profile.destinations.map((destination) => destination.id)}
                   onSelect={addPlace}
                 />
 
                 <div className="flex flex-wrap gap-2 pt-1">
                   {profile.destinations.map((destination, index) => (
                     <span
-                      key={`${destination.city}-${index}`}
+                      key={destination.id}
                       className="inline-flex items-center gap-2 rounded-full pl-3 pr-2 py-1.5 text-sm"
                       style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
                     >
-                      <MapPin className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
-                      {destination.city}
+                      <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent)' }} />
+                      {/* Region and country keep two Georgetowns apart. */}
+                      <span className="min-w-0">
+                        <span className="block leading-tight">{destination.city}</span>
+                        {(destination.region || destination.country) && (
+                          <span className="block text-[11px] leading-tight" style={{ color: 'var(--ink-muted)' }}>
+                            {[destination.region, destination.country].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
+                      </span>
                       <button
                         type="button"
                         onClick={() => removeDestination(index)}
-                        className="p-1 rounded-full"
-                        aria-label={`Remove ${destination.city}`}
+                        className="p-1 rounded-full shrink-0"
+                        aria-label={`Remove ${describeDestination(destination)}`}
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -445,8 +465,17 @@ export function TripCreateWizard({
                     ))}
                   </select>
                   <p className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--ink-muted)' }}>
-                    <Coins className="w-3.5 h-3.5" /> Suggested from your destination.
+                    <Coins className="w-3.5 h-3.5" />
+                    {tripCountries.length > 1
+                      ? `Suggested from ${tripCountries[0].country}, where most of your stops are.`
+                      : 'Suggested from your destination.'}
                   </p>
+                  {otherCurrencies.length > 0 && (
+                    <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+                      You will also spend {otherCurrencies.join(', ')} on this trip. The wallet
+                      converts everything to the currency above.
+                    </p>
+                  )}
                 </div>
               </div>
 

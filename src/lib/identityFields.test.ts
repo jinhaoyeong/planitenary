@@ -15,12 +15,12 @@ import {
 } from './identityFields';
 import { buildTripIdentity } from './tripIdentity';
 import { createItineraryFromProfile } from './trips';
-import { createEmptyProfile, type TripProfile } from './tripProfile';
+import { createEmptyProfile, manualDestination, type TripProfile } from './tripProfile';
 
 const kyotoProfile = (overrides: Partial<TripProfile> = {}): TripProfile => ({
   ...createEmptyProfile('MYR'),
   destinations: [
-    { city: 'Kyoto', country: 'Japan', region: 'Kyoto Prefecture', lat: 35.0116, lng: 135.7681 },
+    { ...manualDestination('Kyoto', 'Japan'), region: 'Kyoto Prefecture' },
   ],
   startDate: '2027-10-04',
   endDate: '2027-10-11',

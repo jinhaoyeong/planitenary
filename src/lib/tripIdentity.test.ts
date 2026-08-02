@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { buildTripIdentity, copySimilarity } from './tripIdentity';
-import { createEmptyProfile, type TravelStyle, type TripProfile } from './tripProfile';
+import {
+  createEmptyProfile,
+  manualDestination,
+  type TravelStyle,
+  type TripProfile,
+} from './tripProfile';
 
 const profile = (overrides: Partial<TripProfile> = {}): TripProfile => ({
   ...createEmptyProfile('MYR'),
-  destinations: [{ city: 'Kyoto', country: 'Japan', lat: 35.0116, lng: 135.7681 }],
+  destinations: [manualDestination('Kyoto', 'Japan')],
   tripTypes: ['food'],
   styles: ['cafes', 'temples'],
   moods: ['slow-living'],
@@ -117,9 +122,9 @@ describe('copy variety', () => {
     for (const styles of styleSets) {
       const identity = buildTripIdentity(
         dated({ styles, destinations: [
-          { city: 'Kyoto', country: 'Japan' },
-          { city: 'Osaka', country: 'Japan' },
-          { city: 'Kanazawa', country: 'Japan' },
+          manualDestination('Kyoto', 'Japan'),
+          manualDestination('Osaka', 'Japan'),
+          manualDestination('Kanazawa', 'Japan'),
         ] }),
       );
       expect(identity.brandTitle.length).toBeLessThanOrEqual(28);
