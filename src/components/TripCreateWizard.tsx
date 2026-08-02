@@ -6,15 +6,18 @@ import {
   Coins,
   Loader2,
   MapPin,
-  Plus,
   Sparkles,
   Wand2,
   X,
 } from 'lucide-react';
-import { geocodePlace, findCountry, listCountries } from '../lib/destinations';
+import { countryFlag, findCountry, type CountryProfile, type PlaceSuggestion } from '../lib/destinations';
 import { CURRENCIES } from '../lib/currencyCatalog';
+import { detectHomeCurrency } from '../lib/locale';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { OptionChips } from './ui/OptionChips';
+import { CountryPicker } from './ui/CountryPicker';
+import { CitySearchInput } from './ui/CitySearchInput';
+import { ToggleRow } from './ui/ToggleRow';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -55,21 +58,27 @@ export function TripCreateWizard({
   onCancel,
   onCreate,
 }: TripCreateWizardProps) {
+  // The device region gives a better default than a hard-coded currency.
+  const detectedHomeCurrency = useMemo(() => detectHomeCurrency(defaultHomeCurrency), [defaultHomeCurrency]);
   const [stepIndex, setStepIndex] = useState(0);
-  const [profile, setProfile] = useState<TripProfile>(() => createEmptyProfile(defaultHomeCurrency));
-  const [countryInput, setCountryInput] = useState('');
-  const [cityInput, setCityInput] = useState('');
-  const [locating, setLocating] = useState(false);
+  const [profile, setProfile] = useState<TripProfile>(() => createEmptyProfile(detectedHomeCurrency));
+  const [countryCode, setCountryCode] = useState('');
+  const [countryName, setCountryName] = useState('');
   const [currencyTouched, setCurrencyTouched] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    setStepIndex(0);
-    setProfile(createEmptyProfile(defaultHomeCurrency));
-    setCountryInput('');
-    setCityInput('');
-    setCurrencyTouched(false);
-  }, [open, defaultHomeCurrency]);
+  // Reset while rendering rather than in an effect, so reopening never shows
+  // the previous trip's answers for a frame.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setStepIndex(0);
+      setProfile(createEmptyProfile(detectedHomeCurrency));
+      setCountryCode('');
+      setCountryName('');
+      setCurrencyTouched(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -90,30 +99,31 @@ export function TripCreateWizard({
     });
   };
 
-  const addDestination = async () => {
-    const city = cityInput.trim();
-    if (!city) return;
-    const country = countryInput.trim() || profile.destinations[0]?.country || '';
-    const draft: TripDestination = { city, country };
-    setProfile((current) => ({ ...current, destinations: [...current.destinations, draft] }));
-    setCityInput('');
-    setLocating(true);
+  const selectCountry = (country: CountryProfile) => {
+    setCountryCode(country.code);
+    setCountryName(country.name);
+    // Keep already-added cities pointing at the newly chosen country.
+    setProfile((current) => ({
+      ...current,
+      destinations: current.destinations.map((destination) =>
+        destination.country ? destination : { ...destination, country: country.name },
+      ),
+    }));
+  };
 
-    try {
-      const result = await geocodePlace(country ? `${city}, ${country}` : city);
-      if (result) {
-        setProfile((current) => ({
-          ...current,
-          destinations: current.destinations.map((destination) =>
-            destination.city === city && destination.lat === undefined
-              ? { ...destination, lat: result.lat, lng: result.lng, country: destination.country || result.country || '' }
-              : destination,
-          ),
-        }));
-        if (!country && result.country) setCountryInput(result.country);
-      }
-    } finally {
-      setLocating(false);
+  const addPlace = (place: PlaceSuggestion) => {
+    const destination: TripDestination = {
+      city: place.city,
+      country: place.country || countryName,
+      region: place.region,
+      lat: place.lat,
+      lng: place.lng,
+    };
+    setProfile((current) => ({ ...current, destinations: [...current.destinations, destination] }));
+    // The first city can teach us the country when it was never picked.
+    if (!countryCode && place.countryCode) {
+      setCountryCode(place.countryCode);
+      setCountryName(place.country || '');
     }
   };
 
@@ -125,18 +135,18 @@ export function TripCreateWizard({
 
   const duration = resolveDuration(profile);
   const nights = nightsBetween(profile.startDate, profile.endDate);
-  const autoCurrency = suggestedCurrency(profile);
+  const selectedCountry = useMemo(() => findCountry(countryCode), [countryCode]);
+  const autoCurrency = selectedCountry?.currency || suggestedCurrency(profile);
 
-  useEffect(() => {
-    if (currencyTouched) return;
-    if (autoCurrency && autoCurrency !== profile.tripCurrency) {
-      setProfile((current) => ({ ...current, tripCurrency: autoCurrency }));
-    }
-  }, [autoCurrency, currencyTouched, profile.tripCurrency]);
+  // Until the traveller overrides it, the trip currency simply follows the destination.
+  const resolvedProfile = useMemo<TripProfile>(
+    () => (currencyTouched ? profile : { ...profile, tripCurrency: autoCurrency }),
+    [profile, currencyTouched, autoCurrency],
+  );
 
   const identity = useMemo(
-    () => buildTripIdentity(profile, { plannedDays: duration.days }),
-    [profile, duration.days],
+    () => buildTripIdentity(resolvedProfile, { plannedDays: duration.days }),
+    [resolvedProfile, duration.days],
   );
 
   if (!open) return null;
@@ -147,7 +157,7 @@ export function TripCreateWizard({
 
   const goNext = () => {
     if (isLast) {
-      onCreate(profile);
+      onCreate(resolvedProfile);
       return;
     }
     setStepIndex((index) => Math.min(STEPS.length - 1, index + 1));
@@ -205,21 +215,11 @@ export function TripCreateWizard({
                 <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                   Country
                 </label>
-                <input
-                  className="editorial-input w-full"
-                  value={countryInput}
-                  onChange={(event) => setCountryInput(event.target.value)}
-                  placeholder="Japan"
-                  list="trip-country-options"
-                />
-                <datalist id="trip-country-options">
-                  {listCountries().map((country) => (
-                    <option key={country.code} value={country.name} />
-                  ))}
-                </datalist>
-                {findCountry(countryInput) && (
+                <CountryPicker value={countryCode} onChange={selectCountry} />
+                {selectedCountry && (
                   <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                    Currency there is {findCountry(countryInput)?.currency}.
+                    {countryFlag(selectedCountry.code)} Money there is {selectedCountry.currency}, and the handbook will
+                    pick up its colours.
                   </p>
                 )}
               </div>
@@ -228,24 +228,12 @@ export function TripCreateWizard({
                 <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                   Cities
                 </label>
-                <div className="flex gap-2">
-                  <input
-                    className="editorial-input flex-1"
-                    value={cityInput}
-                    onChange={(event) => setCityInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        void addDestination();
-                      }
-                    }}
-                    placeholder="Kyoto"
-                  />
-                  <button type="button" className="pill-btn pill-primary shrink-0" onClick={() => void addDestination()}>
-                    {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                    Add
-                  </button>
-                </div>
+                <CitySearchInput
+                  countryCode={countryCode || undefined}
+                  countryName={countryName || undefined}
+                  chosen={profile.destinations.map((destination) => destination.city)}
+                  onSelect={addPlace}
+                />
 
                 <div className="flex flex-wrap gap-2 pt-1">
                   {profile.destinations.map((destination, index) => (
@@ -268,29 +256,18 @@ export function TripCreateWizard({
                   ))}
                   {profile.destinations.length === 0 && (
                     <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                      Add at least one city so the map and copy know where you are going.
+                      Pick a city from the list so the map, route, and copy know exactly where you are going.
                     </p>
                   )}
                 </div>
               </div>
 
-              <label
-                className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
-                style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-              >
-                <span>
-                  <span className="text-sm font-semibold">Include hidden gems</span>
-                  <span className="block text-xs mt-0.5" style={{ color: 'var(--ink-muted)' }}>
-                    Lean away from the obvious stops.
-                  </span>
-                </span>
-                <input
-                  type="checkbox"
-                  className="w-5 h-5"
-                  checked={profile.hiddenGems}
-                  onChange={(event) => update({ hiddenGems: event.target.checked })}
-                />
-              </label>
+              <ToggleRow
+                label="Include hidden gems"
+                description="Lean away from the obvious stops."
+                checked={profile.hiddenGems}
+                onChange={(checked) => update({ hiddenGems: checked })}
+              />
             </>
           )}
 
@@ -445,6 +422,9 @@ export function TripCreateWizard({
                       </option>
                     ))}
                   </select>
+                  <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+                    Detected from your device.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
@@ -452,7 +432,7 @@ export function TripCreateWizard({
                   </label>
                   <select
                     className="editorial-input w-full"
-                    value={profile.tripCurrency}
+                    value={resolvedProfile.tripCurrency}
                     onChange={(event) => {
                       setCurrencyTouched(true);
                       update({ tripCurrency: event.target.value });
@@ -471,40 +451,18 @@ export function TripCreateWizard({
               </div>
 
               <div className="space-y-2">
-                <label
-                  className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
-                  style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-                >
-                  <span>
-                    <span className="text-sm font-semibold">Name the handbook after the trip</span>
-                    <span className="block text-xs mt-0.5" style={{ color: 'var(--ink-muted)' }}>
-                      Otherwise it stays “Travel Handbook”.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="w-5 h-5"
-                    checked={profile.brandAfterDestination}
-                    onChange={(event) => update({ brandAfterDestination: event.target.checked })}
-                  />
-                </label>
-                <label
-                  className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
-                  style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-                >
-                  <span>
-                    <span className="text-sm font-semibold">Use the destination’s colours</span>
-                    <span className="block text-xs mt-0.5" style={{ color: 'var(--ink-muted)' }}>
-                      Accent and highlights match where you are going.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="w-5 h-5"
-                    checked={profile.applyVisualIdentity}
-                    onChange={(event) => update({ applyVisualIdentity: event.target.checked })}
-                  />
-                </label>
+                <ToggleRow
+                  label="Name the handbook after the trip"
+                  description={`Otherwise it stays “Travel Handbook”.`}
+                  checked={profile.brandAfterDestination}
+                  onChange={(checked) => update({ brandAfterDestination: checked })}
+                />
+                <ToggleRow
+                  label="Use the destination’s colours"
+                  description="Accent and highlights match where you are going."
+                  checked={profile.applyVisualIdentity}
+                  onChange={(checked) => update({ applyVisualIdentity: checked })}
+                />
               </div>
 
               <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>

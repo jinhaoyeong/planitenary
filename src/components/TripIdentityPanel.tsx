@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Loader2, MapPin, Plus, RotateCcw, Wand2, X } from 'lucide-react';
+import { MapPin, RotateCcw, Wand2, X } from 'lucide-react';
 import type { Itinerary } from '../data';
-import { geocodePlace } from '../lib/destinations';
+import { findCountry, type PlaceSuggestion } from '../lib/destinations';
+import { CitySearchInput } from './ui/CitySearchInput';
+import { ToggleRow } from './ui/ToggleRow';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { applyIdentityToItinerary } from '../lib/trips';
 import {
@@ -26,8 +28,6 @@ interface TripIdentityPanelProps {
 
 export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentityPanelProps) {
   const storedProfile = useMemo(() => sanitizeTripProfile(itinerary.tripProfile), [itinerary.tripProfile]);
-  const [cityInput, setCityInput] = useState('');
-  const [locating, setLocating] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   const profile = useMemo(
@@ -53,29 +53,26 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
     save({ ...profile, [key]: next } as TripProfile);
   };
 
-  const addCity = async () => {
-    const city = cityInput.trim();
-    if (!city) return;
-    const country = profile.destinations[0]?.country || '';
-    setCityInput('');
-    setLocating(true);
-    try {
-      const result = await geocodePlace(country ? `${city}, ${country}` : city);
-      save({
-        ...profile,
-        destinations: [
-          ...profile.destinations,
-          { city, country: country || result?.country || '', lat: result?.lat, lng: result?.lng },
-        ],
-      });
-    } finally {
-      setLocating(false);
-    }
+  const addPlace = (place: PlaceSuggestion) => {
+    save({
+      ...profile,
+      destinations: [
+        ...profile.destinations,
+        {
+          city: place.city,
+          country: place.country || profile.destinations[0]?.country || '',
+          region: place.region,
+          lat: place.lat,
+          lng: place.lng,
+        },
+      ],
+    });
   };
 
   const removeCity = (index: number) =>
     update({ destinations: profile.destinations.filter((_, itemIndex) => itemIndex !== index) });
 
+  const countryCode = findCountry(profile.destinations[0]?.country)?.code;
   const duration = resolveDuration(profile);
   const identity = useMemo(
     () => buildTripIdentity(profile, { plannedDays: itinerary.days.length }),
@@ -119,24 +116,13 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
           Cities
         </label>
-        <div className="flex gap-2">
-          <input
-            className="editorial-input flex-1"
-            value={cityInput}
-            onChange={(event) => setCityInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                void addCity();
-              }
-            }}
-            placeholder="Add another city"
-          />
-          <button type="button" className="pill-btn pill-soft shrink-0" onClick={() => void addCity()}>
-            {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Add
-          </button>
-        </div>
+        <CitySearchInput
+          countryCode={countryCode}
+          countryName={profile.destinations[0]?.country}
+          chosen={profile.destinations.map((destination) => destination.city)}
+          onSelect={addPlace}
+          placeholder="Add another city"
+        />
         <div className="flex flex-wrap gap-2 pt-1">
           {profile.destinations.map((destination, index) => (
             <span
@@ -194,40 +180,18 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
       </div>
 
       <div className="space-y-2">
-        <label
-          className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
-          style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-        >
-          <span>
-            <span className="text-sm font-semibold">Name the handbook after the trip</span>
-            <span className="block text-xs mt-0.5" style={{ color: 'var(--ink-muted)' }}>
-              Currently “{identity.brandTitle}”.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            className="w-5 h-5"
-            checked={profile.brandAfterDestination}
-            onChange={(event) => update({ brandAfterDestination: event.target.checked })}
-          />
-        </label>
-        <label
-          className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
-          style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
-        >
-          <span>
-            <span className="text-sm font-semibold">Use the destination’s colours</span>
-            <span className="block text-xs mt-0.5" style={{ color: 'var(--ink-muted)' }}>
-              Applies as soon as you toggle it.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            className="w-5 h-5"
-            checked={profile.applyVisualIdentity}
-            onChange={(event) => update({ applyVisualIdentity: event.target.checked })}
-          />
-        </label>
+        <ToggleRow
+          label="Name the handbook after the trip"
+          description={`Currently “${identity.brandTitle}”.`}
+          checked={profile.brandAfterDestination}
+          onChange={(checked) => update({ brandAfterDestination: checked })}
+        />
+        <ToggleRow
+          label="Use the destination’s colours"
+          description="Applies as soon as you toggle it."
+          checked={profile.applyVisualIdentity}
+          onChange={(checked) => update({ applyVisualIdentity: checked })}
+        />
       </div>
 
       <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>

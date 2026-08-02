@@ -112,6 +112,28 @@ const normalize = (value: string) => value.trim().toLowerCase();
 
 export const listCountries = (): CountryProfile[] => COUNTRIES;
 
+/** Regional-indicator flag for an ISO 3166-1 alpha-2 code. */
+export function countryFlag(code: string): string {
+  if (!code || code.length !== 2) return '🌍';
+  return String.fromCodePoint(...[...code.toUpperCase()].map((letter) => 0x1f1a5 + letter.charCodeAt(0)));
+}
+
+/** Ranked country matches for the picker: prefix hits first, then contains. */
+export function searchCountries(query: string, limit = 8): CountryProfile[] {
+  const needle = normalize(query);
+  if (!needle) return COUNTRIES.slice(0, limit);
+
+  const startsWith: CountryProfile[] = [];
+  const contains: CountryProfile[] = [];
+  for (const country of COUNTRIES) {
+    const name = normalize(country.name);
+    const aliasHit = country.aliases?.some((alias) => normalize(alias).startsWith(needle));
+    if (name.startsWith(needle) || aliasHit || normalize(country.code) === needle) startsWith.push(country);
+    else if (name.includes(needle)) contains.push(country);
+  }
+  return [...startsWith, ...contains].slice(0, limit);
+}
+
 export function findCountry(query: string | undefined | null): CountryProfile | null {
   if (!query) return null;
   const needle = normalize(query);
@@ -248,6 +270,172 @@ export function lookupCityCenter(city: string): [number, number] | null {
   if (CITY_CENTERS[key]) return CITY_CENTERS[key];
   const partial = Object.keys(CITY_CENTERS).find((name) => key.includes(name) || name.includes(key));
   return partial ? CITY_CENTERS[partial] : null;
+}
+
+/** Quick-add suggestions shown as soon as a country is chosen. */
+const POPULAR_CITIES: Record<string, string[]> = {
+  JP: ['Tokyo', 'Kyoto', 'Osaka', 'Nara', 'Sapporo', 'Fukuoka'],
+  KR: ['Seoul', 'Busan', 'Jeju'],
+  CN: ['Beijing', 'Shanghai', 'Chengdu', 'Guangzhou', 'Xian'],
+  TW: ['Taipei', 'Kaohsiung'],
+  HK: ['Hong Kong'],
+  TH: ['Bangkok', 'Chiang Mai', 'Phuket'],
+  VN: ['Hanoi', 'Ho Chi Minh City', 'Da Nang', 'Hoi An'],
+  SG: ['Singapore'],
+  MY: ['Kuala Lumpur', 'Penang', 'Malacca', 'Kota Kinabalu', 'Langkawi'],
+  ID: ['Bali', 'Ubud', 'Jakarta'],
+  PH: ['Manila', 'Cebu'],
+  IN: ['Delhi', 'Mumbai', 'Jaipur'],
+  NP: ['Kathmandu'],
+  LK: ['Colombo'],
+  KH: ['Siem Reap'],
+  LA: ['Luang Prabang'],
+  AU: ['Sydney', 'Melbourne', 'Brisbane', 'Perth'],
+  NZ: ['Auckland', 'Queenstown'],
+  GB: ['London', 'Edinburgh'],
+  IE: ['Dublin'],
+  FR: ['Paris', 'Nice', 'Lyon'],
+  IT: ['Rome', 'Florence', 'Venice', 'Milan'],
+  ES: ['Barcelona', 'Madrid', 'Seville'],
+  PT: ['Lisbon', 'Porto'],
+  DE: ['Berlin', 'Munich'],
+  CH: ['Zurich', 'Interlaken', 'Lucerne', 'Zermatt'],
+  AT: ['Vienna'],
+  NL: ['Amsterdam'],
+  GR: ['Athens', 'Santorini'],
+  IS: ['Reykjavik'],
+  NO: ['Oslo', 'Bergen'],
+  SE: ['Stockholm'],
+  DK: ['Copenhagen'],
+  FI: ['Helsinki'],
+  CZ: ['Prague'],
+  PL: ['Krakow'],
+  HU: ['Budapest'],
+  TR: ['Istanbul', 'Cappadocia'],
+  AE: ['Dubai', 'Abu Dhabi'],
+  QA: ['Doha'],
+  EG: ['Cairo'],
+  MA: ['Marrakesh'],
+  ZA: ['Cape Town'],
+  KE: ['Nairobi'],
+  US: ['New York', 'San Francisco', 'Los Angeles', 'Chicago', 'Seattle'],
+  CA: ['Toronto', 'Vancouver'],
+  MX: ['Mexico City'],
+  BR: ['Rio de Janeiro'],
+  AR: ['Buenos Aires'],
+  PE: ['Cusco', 'Lima'],
+  CL: ['Santiago'],
+};
+
+export const popularCities = (countryCode: string | undefined): string[] =>
+  (countryCode && POPULAR_CITIES[countryCode.toUpperCase()]) || [];
+
+export interface PlaceSuggestion {
+  id: string;
+  city: string;
+  region?: string;
+  country: string;
+  countryCode?: string;
+  lat: number;
+  lng: number;
+}
+
+interface NominatimResult {
+  place_id?: number;
+  lat: string;
+  lon: string;
+  name?: string;
+  display_name: string;
+  address?: {
+    city?: string;
+    town?: string;
+    village?: string;
+    municipality?: string;
+    county?: string;
+    state?: string;
+    country?: string;
+    country_code?: string;
+  };
+}
+
+const toSuggestion = (result: NominatimResult): PlaceSuggestion | null => {
+  const lat = Number(result.lat);
+  const lng = Number(result.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const address = result.address || {};
+  const city =
+    address.city || address.town || address.village || address.municipality
+    || result.name || result.display_name.split(',')[0];
+  if (!city) return null;
+
+  return {
+    id: String(result.place_id ?? `${lat},${lng}`),
+    city,
+    region: address.state && address.state !== city ? address.state : undefined,
+    country: address.country || '',
+    countryCode: address.country_code?.toUpperCase(),
+    lat,
+    lng,
+  };
+};
+
+/** Offline matches so the picker still suggests something without a network. */
+function offlineSuggestions(query: string, country?: CountryProfile | null): PlaceSuggestion[] {
+  const needle = normalize(query);
+  const pool = country ? popularCities(country.code).map(normalize) : [];
+  const keys = Array.from(new Set([...pool, ...Object.keys(CITY_CENTERS)]));
+
+  return keys
+    .filter((key) => (needle ? key.includes(needle) : pool.includes(key)))
+    .slice(0, 6)
+    .flatMap((key): PlaceSuggestion[] => {
+      const point = CITY_CENTERS[key];
+      if (!point) return [];
+      return [{
+        id: `offline-${key}`,
+        city: key.replace(/\b[a-z]/g, (letter) => letter.toUpperCase()),
+        country: country?.name || '',
+        countryCode: country?.code,
+        lat: point[0],
+        lng: point[1],
+      }];
+    });
+}
+
+/** Autocomplete places, optionally scoped to one country. */
+export async function searchPlaces(
+  query: string,
+  options: { countryCode?: string; limit?: number; signal?: AbortSignal } = {},
+): Promise<PlaceSuggestion[]> {
+  const trimmed = query.trim();
+  const country = options.countryCode ? findCountry(options.countryCode) : null;
+  if (trimmed.length < 2) return offlineSuggestions('', country);
+
+  try {
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('format', 'jsonv2');
+    url.searchParams.set('limit', String(options.limit ?? 6));
+    url.searchParams.set('addressdetails', '1');
+    url.searchParams.set('featureType', 'settlement');
+    url.searchParams.set('q', trimmed);
+    if (options.countryCode) url.searchParams.set('countrycodes', options.countryCode.toLowerCase());
+
+    const response = await fetch(url.toString(), {
+      signal: options.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error('Place search failed');
+
+    const results = (await response.json()) as NominatimResult[];
+    const suggestions = results
+      .map(toSuggestion)
+      .filter((item): item is PlaceSuggestion => item !== null);
+    return suggestions.length > 0 ? suggestions : offlineSuggestions(trimmed, country);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return offlineSuggestions(trimmed, country);
+  }
 }
 
 export interface GeocodeResult {
