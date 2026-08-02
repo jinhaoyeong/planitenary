@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { itineraries } from './data';
 import type { Itinerary, DayPhoto, Activity, ActivityType, DayPlan } from './data';
 import { ItineraryView } from './components/ItineraryView';
@@ -282,7 +282,7 @@ function App() {
   });
 
   const { theme, toggleTheme } = useTheme();
-  const { adoptTripCurrencies } = useCurrency();
+  const { bindTrip } = useCurrency();
   const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
   useTripIdentityTheme(customItinerary?.tripProfile, theme);
 
@@ -291,12 +291,39 @@ function App() {
     () => sanitizeTripProfile(customItinerary?.tripProfile),
     [customItinerary?.tripProfile],
   );
+
+  // Currency edits are written back into the profile, which is the only place
+  // the pair is stored. Opening a trip reads it; it never rewrites it.
+  const persistTripCurrencies = useCallback(
+    ({ homeCurrency, tripCurrency }: { homeCurrency: string; tripCurrency: string }) => {
+      setCustomItinerary((previous) => {
+        if (!previous) return previous;
+        const profile = sanitizeTripProfile(previous.tripProfile);
+        if (!profile) return previous;
+        if (profile.homeCurrency === homeCurrency && profile.tripCurrency === tripCurrency) return previous;
+        return { ...previous, tripProfile: { ...profile, homeCurrency, tripCurrency } };
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!activeTripProfile) return;
-    adoptTripCurrencies(activeTripProfile.homeCurrency, activeTripProfile.tripCurrency);
-    // Adopting is idempotent; only the pair itself should retrigger it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTripProfile?.homeCurrency, activeTripProfile?.tripCurrency]);
+    if (!activeTripProfile) {
+      bindTrip(null);
+      return;
+    }
+    bindTrip({
+      tripId: activeItineraryId,
+      homeCurrency: activeTripProfile.homeCurrency,
+      tripCurrency: activeTripProfile.tripCurrency,
+      persist: persistTripCurrencies,
+    });
+  }, [
+    activeTripProfile,
+    activeItineraryId,
+    bindTrip,
+    persistTripCurrencies,
+  ]);
 
   useEffect(() => {
     setSelectedTripId(isDemoUser ? 'cq-cd' : null);

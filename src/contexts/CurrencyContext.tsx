@@ -1,9 +1,10 @@
-import { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type { Currency, ExchangeRates } from '../lib/currency';
+import type { Currency, ExchangeRates, RateFreshness } from '../lib/currency';
 import {
   convertCurrency,
   createFallbackRates,
+  describeRateFreshness,
   fetchExchangeRates,
   formatCurrency,
   formatRateLabel,
@@ -12,6 +13,19 @@ import { isSupportedCurrency } from '../lib/currencyCatalog';
 import { detectHomeCurrency } from '../lib/locale';
 import { useAuth } from './AuthContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
+
+/**
+ * The open trip and the callback that writes a change back into its profile.
+ * While a trip is bound its profile is the only owner of the currency pair;
+ * this context is a read-through view of it, never a second source of truth.
+ */
+export interface TripCurrencyBinding {
+  tripId: string;
+  homeCurrency: Currency;
+  tripCurrency: Currency;
+  /** Persists the pair onto the trip profile. */
+  persist: (next: { homeCurrency: Currency; tripCurrency: Currency }) => void;
+}
 
 interface CurrencyContextType {
   /** Currently displayed currency on the wallet. */
@@ -23,8 +37,10 @@ interface CurrencyContextType {
   /** Destination / trip currency. */
   tripCurrency: Currency;
   setTripCurrency: (currency: Currency) => void;
-  /** Adopts the currency pair a trip profile was created with. */
-  adoptTripCurrencies: (home: Currency, trip: Currency) => void;
+  /** Points the context at the open trip, or clears it with null. */
+  bindTrip: (binding: TripCurrencyBinding | null) => void;
+  /** True while a trip profile owns the pair. */
+  isTripBound: boolean;
   rates: ExchangeRates;
   refreshRates: () => Promise<void>;
   format: (amount: number) => string;
@@ -33,6 +49,8 @@ interface CurrencyContextType {
   toBase: (amount: number, fromCurrency?: Currency) => number;
   /** e.g. "1 RM = ¥33.20" for the active home → trip pair. */
   rateLabel: string;
+  /** Where the rate came from and when, in plain words. */
+  rateFreshness: RateFreshness;
 }
 
 const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined);
@@ -53,21 +71,41 @@ const initialHomeCurrency = (): Currency => readCurrency(HOME_KEY, detectHomeCur
 export function CurrencyProvider({ children }: { children: ReactNode }) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
   const cloudReadyRef = useRef(false);
-  const [currency, setCurrencyState] = useState<Currency>(() => readCurrency(DISPLAY_KEY, initialHomeCurrency()));
-  const [homeCurrency, setHomeCurrencyState] = useState<Currency>(initialHomeCurrency);
-  const [tripCurrency, setTripCurrencyState] = useState<Currency>(() => readCurrency(TRIP_KEY, initialHomeCurrency()));
-  const [rates, setRates] = useState<ExchangeRates>(createFallbackRates);
+  const [displayPreference, setDisplayPreference] = useState<Currency>(() => readCurrency(DISPLAY_KEY, initialHomeCurrency()));
+  // Defaults used before any trip is open, and for seeding new trips.
+  const [defaultHome, setDefaultHome] = useState<Currency>(initialHomeCurrency);
+  const [defaultTrip, setDefaultTrip] = useState<Currency>(() => readCurrency(TRIP_KEY, initialHomeCurrency()));
+  const [binding, setBinding] = useState<TripCurrencyBinding | null>(null);
+  const [rates, setRates] = useState<ExchangeRates>(() => createFallbackRates(true));
 
-  const persistPair = (home: Currency, trip: Currency, display?: Currency) => {
+  // A bound trip's profile wins; otherwise the account-level defaults apply.
+  const homeCurrency = binding?.homeCurrency ?? defaultHome;
+  const tripCurrency = binding?.tripCurrency ?? defaultTrip;
+  const currency = displayPreference === homeCurrency || displayPreference === tripCurrency
+    ? displayPreference
+    : homeCurrency;
+
+  const bindTrip = useCallback((next: TripCurrencyBinding | null) => {
+    setBinding((previous) => {
+      if (!next) return previous === null ? previous : null;
+      if (
+        previous &&
+        previous.tripId === next.tripId &&
+        previous.homeCurrency === next.homeCurrency &&
+        previous.tripCurrency === next.tripCurrency
+      ) {
+        return previous;
+      }
+      return next;
+    });
+  }, []);
+
+  const persistDefaults = (home: Currency, trip: Currency) => {
     localStorage.setItem(HOME_KEY, home);
     localStorage.setItem(TRIP_KEY, trip);
-    const nextDisplay = display && (display === home || display === trip) ? display : home;
-    localStorage.setItem(DISPLAY_KEY, nextDisplay);
-    setHomeCurrencyState(home);
-    setTripCurrencyState(trip);
-    setCurrencyState(nextDisplay);
+    setDefaultHome(home);
+    setDefaultTrip(trip);
     if (user) {
-      localStorage.setItem(`selected-currency-${user.id}`, nextDisplay);
       localStorage.setItem(`home-currency-${user.id}`, home);
       localStorage.setItem(`trip-currency-${user.id}`, trip);
     }
@@ -75,26 +113,28 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
 
   const setCurrency = (newCurrency: Currency) => {
     if (newCurrency !== homeCurrency && newCurrency !== tripCurrency) return;
-    setCurrencyState(newCurrency);
+    setDisplayPreference(newCurrency);
     localStorage.setItem(DISPLAY_KEY, newCurrency);
     if (user) localStorage.setItem(`selected-currency-${user.id}`, newCurrency);
   };
 
-  const setHomeCurrency = (nextHome: Currency) => {
-    if (!isSupportedCurrency(nextHome)) return;
-    persistPair(nextHome.toUpperCase(), tripCurrency, currency);
+  const setHomeCurrency = (value: Currency) => {
+    if (!isSupportedCurrency(value)) return;
+    const nextHome = value.toUpperCase();
+    // Home currency is a property of the traveller, so it also updates the
+    // default that future trips start from.
+    persistDefaults(nextHome, binding ? defaultTrip : tripCurrency);
+    binding?.persist({ homeCurrency: nextHome, tripCurrency: binding.tripCurrency });
   };
 
-  const setTripCurrency = (nextTrip: Currency) => {
-    if (!isSupportedCurrency(nextTrip)) return;
-    persistPair(homeCurrency, nextTrip.toUpperCase(), currency);
-  };
-
-  const adoptTripCurrencies = (home: Currency, trip: Currency) => {
-    const nextHome = isSupportedCurrency(home) ? home.toUpperCase() : homeCurrency;
-    const nextTrip = isSupportedCurrency(trip) ? trip.toUpperCase() : tripCurrency;
-    if (nextHome === homeCurrency && nextTrip === tripCurrency) return;
-    persistPair(nextHome, nextTrip, nextHome);
+  const setTripCurrency = (value: Currency) => {
+    if (!isSupportedCurrency(value)) return;
+    const nextTrip = value.toUpperCase();
+    if (binding) {
+      binding.persist({ homeCurrency: binding.homeCurrency, tripCurrency: nextTrip });
+      return;
+    }
+    persistDefaults(defaultHome, nextTrip);
   };
 
   useEffect(() => {
@@ -148,12 +188,13 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     const accountHome = localStorage.getItem(`home-currency-${user.id}`);
     const accountTrip = localStorage.getItem(`trip-currency-${user.id}`);
 
-    const nextHome = accountHome && isSupportedCurrency(accountHome) ? accountHome.toUpperCase() : homeCurrency;
-    const nextTrip = accountTrip && isSupportedCurrency(accountTrip) ? accountTrip.toUpperCase() : tripCurrency;
-    const nextDisplay = accountDisplay && (accountDisplay === nextHome || accountDisplay === nextTrip)
-      ? accountDisplay
-      : nextHome;
-    persistPair(nextHome, nextTrip, nextDisplay);
+    const nextHome = accountHome && isSupportedCurrency(accountHome) ? accountHome.toUpperCase() : defaultHome;
+    const nextTrip = accountTrip && isSupportedCurrency(accountTrip) ? accountTrip.toUpperCase() : defaultTrip;
+    persistDefaults(nextHome, nextTrip);
+    if (accountDisplay && isSupportedCurrency(accountDisplay)) {
+      setDisplayPreference(accountDisplay.toUpperCase());
+      localStorage.setItem(DISPLAY_KEY, accountDisplay.toUpperCase());
+    }
 
     if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
       cloudReadyRef.current = true;
@@ -165,9 +206,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       if (!mounted) return;
       if (error) console.error('Failed to load cloud currency preference:', error);
       const cloudCurrency = typeof data?.currency === 'string' ? data.currency.toUpperCase() : null;
-      // Cloud only stores display currency today — keep home/trip local, snap display if valid.
-      if (cloudCurrency && (cloudCurrency === nextHome || cloudCurrency === nextTrip)) {
-        setCurrencyState(cloudCurrency);
+      // Cloud only stores the display preference; the pair belongs to the trip.
+      if (cloudCurrency && isSupportedCurrency(cloudCurrency)) {
+        setDisplayPreference(cloudCurrency);
         localStorage.setItem(DISPLAY_KEY, cloudCurrency);
         localStorage.setItem(`selected-currency-${user.id}`, cloudCurrency);
       }
@@ -209,7 +250,8 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         setHomeCurrency,
         tripCurrency,
         setTripCurrency,
-        adoptTripCurrencies,
+        bindTrip,
+        isTripBound: binding !== null,
         rates,
         refreshRates,
         format,
@@ -217,6 +259,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         convert,
         toBase,
         rateLabel: formatRateLabel(homeCurrency, tripCurrency, rates),
+        rateFreshness: describeRateFreshness(rates),
       }}
     >
       {children}
