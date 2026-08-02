@@ -163,8 +163,18 @@ const sanitizeActivity = (value: unknown, fallback: Activity): Activity => {
   };
 };
 
-const sanitizeDay = (value: unknown, fallback: DayPlan, index: number): DayPlan => {
+const blankDay = (index: number): DayPlan => ({
+  day: index + 1,
+  date: `Day ${index + 1}`,
+  city: '',
+  title: `Day ${index + 1}`,
+  activities: [],
+});
+
+const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, index: number): DayPlan => {
   const source = value && typeof value === 'object' ? value as Partial<DayPlan> : {};
+  // Generated trips have more days than the blank template they sanitize against.
+  const fallback = fallbackDay ?? blankDay(index);
   const activityFallbacks = fallback.activities.length > 0
     ? fallback.activities
     : [{ time: '09:00', name: 'Untitled activity', description: '', type: 'other' as ActivityType }];

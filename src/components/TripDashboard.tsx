@@ -106,11 +106,13 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     setError(null);
     const itinerary = profile ? createItineraryFromProfile(profile) : createBlankItinerary();
     const summary = toTripSummary(itinerary);
+    // Cache locally either way so the handbook opens with its identity intact
+    // before any cloud round trip completes.
+    localStorage.setItem(`itinerary-${user.id}-${itinerary.id}`, JSON.stringify(itinerary));
 
     if (localOnly) {
       const next = [summary, ...readLocalTrips(user.id)];
       persistLocalTrips(next);
-      localStorage.setItem(`itinerary-${user.id}-${itinerary.id}`, JSON.stringify(itinerary));
       setTrips(next);
       setWizardOpen(false);
       onOpenTrip(itinerary);
