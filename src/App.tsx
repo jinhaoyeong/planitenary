@@ -22,6 +22,7 @@ import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
 import { GrainOverlay } from './components/motion/GrainOverlay';
 import { useTheme } from './contexts/ThemeContext';
+import { useCurrency } from './contexts/CurrencyContext';
 import { hasAuthCallbackUrl, useAuth } from './contexts/AuthContext';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { loadFromStorage, saveToStorage, writeRawToStorage, getRestorePreview, restoreSelectedTripData, createRestoreSnapshot, restoreLastSnapshot } from './lib/storageResilience';
@@ -267,8 +268,21 @@ function App() {
   });
 
   const { theme, toggleTheme } = useTheme();
+  const { adoptTripCurrencies } = useCurrency();
   const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
   useTripIdentityTheme(customItinerary?.tripProfile, theme);
+
+  // A trip carries its own home → destination currency pair.
+  const activeTripProfile = useMemo(
+    () => sanitizeTripProfile(customItinerary?.tripProfile),
+    [customItinerary?.tripProfile],
+  );
+  useEffect(() => {
+    if (!activeTripProfile) return;
+    adoptTripCurrencies(activeTripProfile.homeCurrency, activeTripProfile.tripCurrency);
+    // Adopting is idempotent; only the pair itself should retrigger it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTripProfile?.homeCurrency, activeTripProfile?.tripCurrency]);
 
   useEffect(() => {
     setSelectedTripId(isDemoUser ? 'cq-cd' : null);

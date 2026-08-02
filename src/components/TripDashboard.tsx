@@ -4,6 +4,7 @@ import { Archive, ArrowRight, CalendarDays, MapPin, Pencil, Plus, RefreshCw, Spa
 import { motion } from 'framer-motion';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrency } from '../contexts/CurrencyContext';
 import { createBlankItinerary, createItineraryFromProfile, toTripSummary, type TripSummary } from '../lib/trips';
 import { TripCreateWizard } from './TripCreateWizard';
 import type { TripProfile } from '../lib/tripProfile';
@@ -29,6 +30,7 @@ const readLocalTrips = (userId: string): TripSummary[] => {
 
 export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps) {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
+  const { homeCurrency } = useCurrency();
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -380,6 +382,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       <TripCreateWizard
         open={wizardOpen}
         busy={creating}
+        defaultHomeCurrency={homeCurrency}
         onCancel={() => setWizardOpen(false)}
         onCreate={(profile) => void createTrip(profile)}
       />
