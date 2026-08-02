@@ -32,6 +32,7 @@ import { Marquee } from './components/ui/Marquee';
 import { Pets } from './components/Pets';
 import { hapticMedium } from './lib/haptics';
 import { sanitizeTripProfile } from './lib/tripProfile';
+import { markManualFieldEdits, sanitizeFieldSources } from './lib/identityFields';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
@@ -216,6 +217,7 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
   return {
     id: fallback.id,
     tripProfile: sanitizeTripProfile(source.tripProfile) ?? sanitizeTripProfile(fallback.tripProfile) ?? undefined,
+    fieldSources: sanitizeFieldSources(source.fieldSources) ?? sanitizeFieldSources(fallback.fieldSources),
     brandTitle: optionalText(source.brandTitle, fallback.brandTitle),
     heroDayBadgeUnit: optionalText(source.heroDayBadgeUnit, fallback.heroDayBadgeUnit),
     overviewEyebrow: optionalText(source.overviewEyebrow, fallback.overviewEyebrow),
@@ -367,20 +369,24 @@ function App() {
   };
 
   const saveHomeHero = () => {
-    const next = sanitizeItinerary({
-      ...displayItinerary,
+    // Only fields whose wording actually changed become "manual", so saving the
+    // banner never locks copy the traveller left alone.
+    const edited = markManualFieldEdits(displayItinerary, {
       name: heroDraft.headline,
       description: heroDraft.description,
-      marqueeItems: heroDraft.marqueeItems,
       heroEyebrow: heroDraft.eyebrow,
-      primaryButtonLabel: heroDraft.primaryLabel,
-      primaryButtonTab: heroDraft.primaryTab,
-      secondaryButtonLabel: heroDraft.secondaryLabel,
-      secondaryButtonTab: heroDraft.secondaryTab,
+      heroPrimaryButton: heroDraft.primaryLabel,
+      heroSecondaryButton: heroDraft.secondaryLabel,
       coverHeadline: heroDraft.coverHeadline,
       coverLabel: heroDraft.coverLabel,
       coverYear: heroDraft.coverYear,
-      heroDayBadge: heroDraft.dayBadge,
+      dayBadge: heroDraft.dayBadge,
+      marquee: heroDraft.marqueeItems.join('\n'),
+    });
+    const next = sanitizeItinerary({
+      ...edited,
+      primaryButtonTab: heroDraft.primaryTab,
+      secondaryButtonTab: heroDraft.secondaryTab,
     }, activeItinerary);
     handleItineraryChange(next);
     setIsHomeHeroEditing(false);

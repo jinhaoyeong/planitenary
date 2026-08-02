@@ -1,4 +1,13 @@
 import type { DayPlan, Itinerary } from '../data';
+import {
+  GENERATED_FIELDS,
+  applyIdentityProposal,
+  buildIdentityProposal,
+  markAllGenerated,
+  type ApplyProposalResult,
+  type GeneratedField,
+  type IdentityProposal,
+} from './identityFields';
 import { buildTripIdentity, type TripIdentity } from './tripIdentity';
 import {
   destinationCities,
@@ -64,40 +73,53 @@ export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
   });
 }
 
-/** Copy the generated identity onto the itinerary fields the UI already reads. */
-export function applyIdentityToItinerary(
+/**
+ * Writes a whole generated identity onto a brand new itinerary and records
+ * every field as generated. Only safe for trips that have no copy yet — an
+ * existing handbook must go through {@link regenerateItinerary} so hand-written
+ * text is preserved.
+ */
+export function applyIdentityToNewItinerary(
   itinerary: Itinerary,
   profile: TripProfile,
   identity: TripIdentity,
+  generatedAt = new Date().toISOString(),
 ): Itinerary {
-  return {
+  const proposal = buildIdentityProposal(itinerary, profile, identity, generatedAt);
+  const withProfile: Itinerary = {
     ...itinerary,
     tripProfile: profile,
-    name: identity.heroTitle,
-    description: identity.heroDescription,
     cities: destinationCities(profile),
-    brandTitle: identity.brandTitle,
-    marqueeItems: identity.marqueeItems,
-    heroEyebrow: identity.heroEyebrow,
-    primaryButtonLabel: identity.primaryButtonLabel,
     primaryButtonTab: 'itinerary',
-    secondaryButtonLabel: identity.secondaryButtonLabel,
     secondaryButtonTab: 'maps',
-    coverHeadline: identity.coverHeadline,
-    coverLabel: identity.coverLabel,
-    coverYear: identity.coverYear,
-    heroDayBadge: identity.dayBadgeValue,
-    heroDayBadgeUnit: identity.dayBadgeUnit,
-    overviewEyebrow: identity.overviewEyebrow,
-    overviewDescription: identity.overviewDescription,
-    searchPlaceholder: identity.searchPlaceholder,
   };
+  const result = applyIdentityProposal(withProfile, profile, proposal, GENERATED_FIELDS);
+  return { ...result.itinerary, fieldSources: markAllGenerated(result.itinerary, proposal) };
+}
+
+/**
+ * Regenerates copy for an existing handbook. Fields the traveller edited, and
+ * fields saved before provenance tracking existed, are left alone unless they
+ * appear in `selection`.
+ */
+export function regenerateItinerary(
+  itinerary: Itinerary,
+  profile: TripProfile,
+  proposal: IdentityProposal,
+  selection?: Iterable<GeneratedField>,
+): ApplyProposalResult {
+  const withProfile: Itinerary = {
+    ...itinerary,
+    tripProfile: profile,
+    cities: destinationCities(profile),
+  };
+  return applyIdentityProposal(withProfile, profile, proposal, selection);
 }
 
 export function createItineraryFromProfile(profile: TripProfile, id = createTripId()): Itinerary {
   const days = buildDaysFromProfile(profile);
   const identity = buildTripIdentity(profile, { plannedDays: days.length });
-  return applyIdentityToItinerary({ ...createBlankItinerary(id), days }, profile, identity);
+  return applyIdentityToNewItinerary({ ...createBlankItinerary(id), days }, profile, identity);
 }
 
 export const toTripSummary = (itinerary: Itinerary, updatedAt = new Date().toISOString()): TripSummary => ({
