@@ -67,7 +67,6 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
   }
 
   const profileKey = `profile-${user.id}`;
-  const accountType = isDemoUser ? 'Demo account' : isLocalTestUser ? 'Local test account' : 'Cloud account';
 
   const updateField = (field: keyof UserProfileData, value: string | null) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
@@ -162,11 +161,6 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
             <Save className="w-4 h-4" />
             {isSaving ? 'Saving...' : 'Save profile'}
           </button>
-        </div>
-
-        <div className="mt-5 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink-muted)', border: '1px solid var(--border)' }}>
-          <UserRound className="w-3.5 h-3.5" />
-          {accountType}
         </div>
 
         {status && (
