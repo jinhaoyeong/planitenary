@@ -1,10 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, useAnimationFrame, useMotionValue } from 'framer-motion';
-
-// Pixelated running sprites (Glameow for British Shorthair, Eevee for Pomeranian, Umbreon for Black Dog)
-const CAT_SPRITE = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/431.gif"; // Glameow (Grey cat)
-const DOG_SPRITE = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/133.gif"; // Eevee (Fluffy Pomeranian-like)
-const BLACK_DOG_SPRITE = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/197.gif"; // Umbreon (Small, cute, black dog/fox)
+import { loadPetPack, subscribePetPack, type PetDefinition } from '../lib/petPack';
 
 interface PetProps {
   sprite: string;
@@ -15,7 +11,7 @@ interface PetProps {
   spriteFilter?: string;
 }
 
-const Pet = ({ sprite, name, initialX, initialY, speed = 1, spriteFilter = "contrast-125 saturate-150" }: PetProps) => {
+const Pet = ({ sprite, name, initialX, initialY, speed = 1, spriteFilter = 'contrast-125 saturate-150' }: PetProps) => {
   const mx = useMotionValue(initialX);
   const my = useMotionValue(initialY);
   const [facingRight, setFacingRight] = useState(true);
@@ -57,7 +53,6 @@ const Pet = ({ sprite, name, initialX, initialY, speed = 1, spriteFilter = "cont
     return () => clearInterval(interval);
   }, []);
 
-  // Drive MotionValues directly — zero React re-renders per frame.
   useAnimationFrame((_, delta) => {
     const moveSpeed = (speed * delta) / 16;
     posRef.current.x += dirRef.current.dx * moveSpeed;
@@ -110,43 +105,36 @@ const Pet = ({ sprite, name, initialX, initialY, speed = 1, spriteFilter = "cont
 
 export const Pets = () => {
   const [dimensions, setDimensions] = useState({ w: 0, h: 0 });
+  const [pets, setPets] = useState<PetDefinition[]>(() => loadPetPack());
 
   useEffect(() => {
     setDimensions({ w: window.innerWidth, h: window.innerHeight });
-    
     const handleResize = () => setDimensions({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  if (dimensions.w === 0) return null;
+  useEffect(() => subscribePetPack(() => setPets(loadPetPack())), []);
+
+  const activePets = pets.filter((pet) => pet.enabled && pet.sprite);
+  if (dimensions.w === 0 || activePets.length === 0) return null;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden">
-      <Pet 
-        name="Cat" 
-        sprite={CAT_SPRITE} 
-        initialX={dimensions.w * 0.2} 
-        initialY={dimensions.h * 0.8} 
-        speed={1.5}
-        spriteFilter="contrast-125 saturate-100 grayscale-[0.2]" // Makes Glameow look more like a grey British Shorthair
-      />
-      <Pet 
-        name="Dog" 
-        sprite={DOG_SPRITE} 
-        initialX={dimensions.w * 0.8} 
-        initialY={dimensions.h * 0.8} 
-        speed={2.0}
-        spriteFilter="contrast-125 saturate-[1.1] hue-rotate-[-10deg]" // Makes Eevee look slightly more orange like a Pomeranian
-      />
-      <Pet 
-        name="Black Puppy" 
-        sprite={BLACK_DOG_SPRITE} 
-        initialX={dimensions.w * 0.5} 
-        initialY={dimensions.h * 0.6} 
-        speed={1.8}
-        spriteFilter="contrast-125 saturate-110" // Umbreon is naturally black and yellow, very cute!
-      />
+      {activePets.map((pet, index) => {
+        const slot = activePets.length === 1 ? 0.5 : index / Math.max(1, activePets.length - 1);
+        return (
+          <Pet
+            key={pet.id}
+            name={pet.name}
+            sprite={pet.sprite}
+            initialX={dimensions.w * (0.18 + slot * 0.64)}
+            initialY={dimensions.h * (0.55 + ((index % 3) * 0.1))}
+            speed={pet.speed}
+            spriteFilter={pet.spriteFilter}
+          />
+        );
+      })}
     </div>
   );
 };
