@@ -56,6 +56,7 @@ interface CurrencyContextType {
 const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined);
 
 const DISPLAY_KEY = 'selected-currency';
+const DISPLAY_BY_TRIP_KEY = 'display-currency-by-trip';
 const HOME_KEY = 'home-currency';
 const TRIP_KEY = 'trip-currency';
 const BASE: Currency = 'MYR';
@@ -63,6 +64,26 @@ const BASE: Currency = 'MYR';
 const readCurrency = (key: string, fallback: Currency): Currency => {
   const saved = localStorage.getItem(key);
   return saved && isSupportedCurrency(saved) ? saved.toUpperCase() : fallback;
+};
+
+/**
+ * Which of the two currencies each trip's wallet was last showing. Kept per
+ * trip because one global choice cannot be right for a Japan trip and an Italy
+ * trip at the same time.
+ */
+const readDisplayByTrip = (): Record<string, Currency> => {
+  try {
+    const raw = localStorage.getItem(DISPLAY_BY_TRIP_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string' && isSupportedCurrency(entry[1]),
+      ),
+    );
+  } catch {
+    return {};
+  }
 };
 
 /** First run has no saved preference, so start from the device region. */
@@ -75,14 +96,20 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   // Defaults used before any trip is open, and for seeding new trips.
   const [defaultHome, setDefaultHome] = useState<Currency>(initialHomeCurrency);
   const [defaultTrip, setDefaultTrip] = useState<Currency>(() => readCurrency(TRIP_KEY, initialHomeCurrency()));
+  const [displayByTrip, setDisplayByTrip] = useState<Record<string, Currency>>(readDisplayByTrip);
   const [binding, setBinding] = useState<TripCurrencyBinding | null>(null);
   const [rates, setRates] = useState<ExchangeRates>(() => createFallbackRates(true));
 
   // A bound trip's profile wins; otherwise the account-level defaults apply.
   const homeCurrency = binding?.homeCurrency ?? defaultHome;
   const tripCurrency = binding?.tripCurrency ?? defaultTrip;
-  const currency = displayPreference === homeCurrency || displayPreference === tripCurrency
-    ? displayPreference
+  // With a trip open the wallet shows the money being spent there unless the
+  // traveller chose otherwise for that trip specifically.
+  const preferredDisplay = binding
+    ? displayByTrip[binding.tripId] ?? tripCurrency
+    : displayPreference;
+  const currency = preferredDisplay === homeCurrency || preferredDisplay === tripCurrency
+    ? preferredDisplay
     : homeCurrency;
 
   const bindTrip = useCallback((next: TripCurrencyBinding | null) => {
@@ -113,6 +140,12 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
 
   const setCurrency = (newCurrency: Currency) => {
     if (newCurrency !== homeCurrency && newCurrency !== tripCurrency) return;
+    if (binding) {
+      const next = { ...displayByTrip, [binding.tripId]: newCurrency };
+      setDisplayByTrip(next);
+      localStorage.setItem(DISPLAY_BY_TRIP_KEY, JSON.stringify(next));
+      return;
+    }
     setDisplayPreference(newCurrency);
     localStorage.setItem(DISPLAY_KEY, newCurrency);
     if (user) localStorage.setItem(`selected-currency-${user.id}`, newCurrency);
@@ -221,22 +254,24 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isDemoUser, isLocalTestUser]);
 
+  // Only the account-level defaults are synced. A trip's own pair lives in its
+  // profile, and its wallet view lives with the trip.
   useEffect(() => {
     if (!user || !cloudReadyRef.current) return;
-    localStorage.setItem(`selected-currency-${user.id}`, currency);
-    localStorage.setItem(`home-currency-${user.id}`, homeCurrency);
-    localStorage.setItem(`trip-currency-${user.id}`, tripCurrency);
+    localStorage.setItem(`selected-currency-${user.id}`, displayPreference);
+    localStorage.setItem(`home-currency-${user.id}`, defaultHome);
+    localStorage.setItem(`trip-currency-${user.id}`, defaultTrip);
     if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) return;
     const timeoutId = window.setTimeout(async () => {
       const { error } = await supabase.from('user_preferences').upsert({
         user_id: user.id,
-        currency,
+        currency: displayPreference,
         updated_at: new Date().toISOString(),
       });
       if (error) console.error('Failed to save cloud currency preference:', error);
     }, 500);
     return () => window.clearTimeout(timeoutId);
-  }, [currency, homeCurrency, tripCurrency, user?.id, isDemoUser, isLocalTestUser]);
+  }, [displayPreference, defaultHome, defaultTrip, user?.id, isDemoUser, isLocalTestUser]);
 
   const toBase = (amount: number, fromCurrency: Currency = currency): number =>
     convertCurrency(amount, fromCurrency, BASE, rates);
