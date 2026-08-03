@@ -295,7 +295,7 @@ body {
 /* Destination-aware day / surface cards — read recipe tokens without changing structure. */
 .trip-surface-card {
   background-color: var(--bg-elevated);
-  border: 1px solid var(--border);
+  border: var(--card-border-width, 1px) solid var(--border);
   border-radius: var(--card-radius, 1.5rem);
   box-shadow: var(--card-shadow, var(--shadow-lift));
   transition: transform var(--motion-duration, 0.25s) ease, box-shadow var(--motion-duration, 0.25s) ease;
@@ -304,12 +304,16 @@ body {
 .handbook-display {
   letter-spacing: var(--heading-tracking, -0.02em);
   text-transform: var(--heading-transform, none);
+  font-size: calc(1em * var(--heading-size-scale, 1));
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 
 .handbook-cover-frame {
   position: relative;
   overflow: hidden;
   border-radius: var(--card-radius, 1.5rem);
+  padding: var(--cover-frame-padding, 0px);
 }
 .handbook-cover-frame::after {
   content: '';
@@ -321,12 +325,38 @@ body {
   z-index: 1;
 }
 
+/* Cover layout treatments — same structure, different framing. */
+[data-cover-layout='postcard'] .handbook-cover-frame,
+.handbook-cover-frame[data-cover-layout='postcard'] {
+  border: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: inset 0 0 0 6px var(--bg-elevated);
+  background: var(--bg-elevated);
+}
+[data-cover-layout='metro'] .handbook-cover-frame,
+.handbook-cover-frame[data-cover-layout='metro'] {
+  border-radius: 0.45rem;
+  border: 1px solid var(--border);
+}
+[data-cover-layout='expedition'] .handbook-cover-frame,
+.handbook-cover-frame[data-cover-layout='expedition'] {
+  border-radius: 0.3rem;
+  border: 2px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+[data-cover-layout='journal'] .handbook-cover-frame,
+.handbook-cover-frame[data-cover-layout='journal'] {
+  border-radius: var(--card-radius, 1.5rem);
+}
+
 .handbook-motif {
   position: absolute;
   inset: 0;
   pointer-events: none;
   opacity: var(--motif-opacity, 0);
   z-index: 0;
+}
+/* Repeated itinerary cards use a quieter motif so pages with many days stay readable. */
+.trip-surface-card > .handbook-motif {
+  opacity: var(--motif-opacity-surface, 0);
 }
 .handbook-motif[data-motif='sakura-stamp'] {
   background:
@@ -348,6 +378,11 @@ body {
   background:
     linear-gradient(135deg, transparent 40%, color-mix(in srgb, var(--accent) 18%, transparent) 41%, transparent 42%),
     linear-gradient(160deg, transparent 55%, color-mix(in srgb, var(--accent) 14%, transparent) 56%, transparent 57%);
+}
+
+html[data-visual-intensity='immersive'] .editorial-card,
+html[data-visual-intensity='immersive'] .trip-surface-card {
+  border-width: var(--card-border-width, 1.5px);
 }
 
 .pill-btn {

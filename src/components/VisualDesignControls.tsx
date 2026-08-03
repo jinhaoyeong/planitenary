@@ -20,7 +20,8 @@ interface VisualDesignControlsProps {
 
 /**
  * Settings for the Adaptive Destination Design System.
- * Intensity always applies; recipe lock is optional (Automatic vs locked family).
+ * Intensity = how strongly the app adapts.
+ * Recipe = which approved design family is used.
  */
 export function VisualDesignControls({ profile, onChange, compact = false }: VisualDesignControlsProps) {
   const visual = useMemo(
@@ -50,38 +51,42 @@ export function VisualDesignControls({ profile, onChange, compact = false }: Vis
       <div>
         <div className="eyebrow mb-2">Personalise the handbook design</div>
         <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-          Adapts colours, typography, cover styling and decorative details to your destination and travel style.
+          Intensity controls how strongly the handbook adapts. Recipe chooses the design family.
+          Palette, motif and image controls stay automatic in this release.
         </p>
       </div>
 
-      <div className={`grid gap-2 ${compact ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
-        {VISUAL_INTENSITY_OPTIONS.map((option) => {
-          const active = visual.intensity === option.id;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setIntensity(option.id)}
-              className="text-left rounded-2xl px-3 py-3 min-h-16"
-              style={{
-                backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg)',
-                border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-              }}
-              aria-pressed={active}
-            >
-              <span className="block text-sm font-semibold">{option.label}</span>
-              <span className="block text-[11px] mt-1 leading-snug" style={{ color: 'var(--ink-muted)' }}>
-                {option.hint}
-              </span>
-            </button>
-          );
-        })}
+      <div>
+        <div className="eyebrow mb-2">Design intensity</div>
+        <div className={`grid gap-2 ${compact ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
+          {VISUAL_INTENSITY_OPTIONS.map((option) => {
+            const active = visual.intensity === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setIntensity(option.id)}
+                className="text-left rounded-2xl px-3 py-3 min-h-16"
+                style={{
+                  backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg)',
+                  border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                }}
+                aria-pressed={active}
+              >
+                <span className="block text-sm font-semibold">{option.label}</span>
+                <span className="block text-[11px] mt-1 leading-snug" style={{ color: 'var(--ink-muted)' }}>
+                  {option.hint}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {visual.intensity !== 'off' && (
         <>
           <div>
-            <div className="eyebrow mb-2">Design family</div>
+            <div className="eyebrow mb-2">Design recipe</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
@@ -144,29 +149,31 @@ export function VisualDesignControls({ profile, onChange, compact = false }: Vis
             </p>
             <div className="flex flex-wrap gap-2 text-[11px]">
               <span className="rounded-full px-2.5 py-1 font-semibold" style={{ backgroundColor: 'var(--accent-soft)' }}>
-                {visual.intensity}
+                intensity · {visual.intensity}
+              </span>
+              <span className="rounded-full px-2.5 py-1 font-semibold" style={{ backgroundColor: 'var(--accent-soft)' }}>
+                recipe · {resolved.recipe.id}
               </span>
               <span className="rounded-full px-2.5 py-1 font-semibold" style={{ backgroundColor: 'var(--accent-soft)' }}>
                 {resolved.coverLayout}
-              </span>
-              <span className="rounded-full px-2.5 py-1 font-semibold" style={{ backgroundColor: 'var(--accent-soft)' }}>
-                {resolved.motifSet}
               </span>
               <span className="rounded-full px-2.5 py-1 font-semibold" style={{ backgroundColor: 'var(--accent-soft)' }}>
                 {resolved.recipeSource}
               </span>
             </div>
             <div
-              className="trip-surface-card relative p-4 handbook-cover-frame"
+              className="trip-surface-card relative p-4"
               data-cover-layout={resolved.coverLayout}
             >
-              <div className="handbook-motif" data-motif={resolved.motifSet} aria-hidden="true" />
-              <p className="relative z-[2] text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>
-                Cover sample
-              </p>
-              <p className="relative z-[2] font-display handbook-display text-xl mt-2">
-                {profile.destinations[0]?.city || resolved.country.name || 'Your trip'}
-              </p>
+              <div className="handbook-cover-frame relative min-h-28 p-4" data-cover-layout={resolved.coverLayout}>
+                <div className="handbook-motif" data-motif={resolved.motifSet} aria-hidden="true" />
+                <p className="relative z-[2] text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>
+                  Cover sample
+                </p>
+                <p className="relative z-[2] font-display handbook-display text-xl mt-2">
+                  {profile.destinations[0]?.city || resolved.country.name || 'Your trip'}
+                </p>
+              </div>
             </div>
           </div>
         </>

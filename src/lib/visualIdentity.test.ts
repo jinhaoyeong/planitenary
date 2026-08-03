@@ -105,6 +105,19 @@ describe('visual identity intensity', () => {
     expect(resolved.cssVars['--card-radius']).toBe(DESIGN_RECIPES['quiet-editorial'].cardRadius);
     expect(resolved.cssVars['--heading-tracking']).toBeTruthy();
     expect(resolved.coverLayout).toBe('journal');
+    expect(resolved.cssVars['--motif-opacity-surface']).toBeTruthy();
+    expect(Number(resolved.cssVars['--motif-opacity-surface'])).toBeLessThan(
+      Number(resolved.cssVars['--motif-opacity']),
+    );
+  });
+
+  it('makes immersive stronger than balanced beyond motif opacity', () => {
+    const balanced = resolveVisualIdentity(withVisualDesign(profile(), { intensity: 'balanced' }));
+    const immersive = resolveVisualIdentity(withVisualDesign(profile(), { intensity: 'immersive' }));
+    expect(immersive.cssVars['--card-border-width']).not.toBe(balanced.cssVars['--card-border-width']);
+    expect(immersive.cssVars['--heading-size-scale']).toBe('1.04');
+    expect(balanced.cssVars['--heading-size-scale']).toBe('1');
+    expect(immersive.cssVars['--image-overlay']).not.toBe(balanced.cssVars['--image-overlay']);
   });
 
   it('applies full recipe styling for immersive mode', () => {
@@ -149,22 +162,31 @@ describe('visual identity intensity', () => {
     expect(createEmptyProfile().visualDesign?.intensity).toBe('balanced');
   });
 
-  it('reset-via-withVisualDesign restores balanced automatic design', () => {
+  it('preserves a manual recipe lock through sanitize and reload', () => {
     const locked = withVisualDesign(profile(), {
       intensity: 'immersive',
       recipeOverride: 'warm-postcard',
     });
-    const reset = withVisualDesign(locked, {
+    const reloaded = sanitizeTripProfile(JSON.parse(JSON.stringify(locked)));
+    expect(reloaded?.visualDesign?.recipeOverride).toBe('warm-postcard');
+    expect(reloaded?.visualDesign?.intensity).toBe('immersive');
+    const resolved = resolveVisualIdentity(reloaded!);
+    expect(resolved.recipe.id).toBe('warm-postcard');
+    expect(resolved.recipeSource).toBe('override');
+  });
+
+  it('keeps a manual lock when destination changes until reset', () => {
+    const locked = withVisualDesign(profile(), {
       intensity: 'balanced',
-      recipeOverride: null,
-      paletteOverride: null,
+      recipeOverride: 'warm-postcard',
     });
-    expect(reset.visualDesign).toEqual({
-      intensity: 'balanced',
-      recipeOverride: null,
-      paletteOverride: null,
-    });
-    expect(reset.applyVisualIdentity).toBe(true);
+    const moved = {
+      ...locked,
+      destinations: [manualDestination('Seoul', 'South Korea')],
+    };
+    expect(resolveVisualIdentity(moved).recipe.id).toBe('warm-postcard');
+    const reset = withVisualDesign(moved, { recipeOverride: null });
+    expect(resolveVisualIdentity(reset).recipe.id).toBe('modern-metropolitan');
   });
 });
 

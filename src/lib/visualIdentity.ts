@@ -84,10 +84,10 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     id: 'quiet-editorial',
     label: 'Quiet Editorial',
     hint: 'Restrained serif display, soft paper cards, gentle motion.',
-    headingTracking: '-0.02em',
+    headingTracking: '-0.025em',
     headingTransform: 'none',
-    cardRadius: '1.5rem',
-    cardShadow: '0 1px 0 rgba(15,14,13,0.04), 0 14px 36px -18px rgba(15,14,13,0.18)',
+    cardRadius: '1.75rem',
+    cardShadow: '0 1px 0 rgba(15,14,13,0.03), 0 18px 42px -20px rgba(15,14,13,0.16)',
     buttonShape: 'pill',
     dividerStyle: 'solid',
     density: 'spacious',
@@ -95,20 +95,20 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     coverLayout: 'journal',
     imageTreatment: 'muted-paper',
     motion: 'gentle',
-    densityScale: 1.08,
-    motifOpacitySubtle: 0.08,
-    motifOpacityBalanced: 0.16,
-    motifOpacityImmersive: 0.28,
-    motionDurationMs: 700,
+    densityScale: 1.12,
+    motifOpacitySubtle: 0.06,
+    motifOpacityBalanced: 0.14,
+    motifOpacityImmersive: 0.26,
+    motionDurationMs: 720,
   },
   'modern-metropolitan': {
     id: 'modern-metropolitan',
     label: 'Modern Metropolitan',
     hint: 'Clean spacing, sharper cards, quicker motion.',
-    headingTracking: '-0.03em',
+    headingTracking: '-0.045em',
     headingTransform: 'none',
-    cardRadius: '0.85rem',
-    cardShadow: '0 1px 0 rgba(15,14,13,0.05), 0 10px 28px -16px rgba(15,14,13,0.2)',
+    cardRadius: '0.5rem',
+    cardShadow: '0 0 0 1px rgba(15,14,13,0.06), 0 8px 20px -14px rgba(15,14,13,0.18)',
     buttonShape: 'rounded',
     dividerStyle: 'solid',
     density: 'compact',
@@ -116,20 +116,20 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     coverLayout: 'metro',
     imageTreatment: 'cool-clean',
     motion: 'quick',
-    densityScale: 0.94,
-    motifOpacitySubtle: 0.06,
-    motifOpacityBalanced: 0.12,
-    motifOpacityImmersive: 0.22,
-    motionDurationMs: 420,
+    densityScale: 0.88,
+    motifOpacitySubtle: 0.04,
+    motifOpacityBalanced: 0.1,
+    motifOpacityImmersive: 0.18,
+    motionDurationMs: 380,
   },
   'warm-postcard': {
     id: 'warm-postcard',
     label: 'Warm Postcard',
     hint: 'Romantic headings, postcard borders, soft paper shadow.',
-    headingTracking: '-0.015em',
+    headingTracking: '-0.01em',
     headingTransform: 'none',
-    cardRadius: '1.15rem',
-    cardShadow: '0 2px 0 rgba(15,14,13,0.04), 0 18px 40px -18px rgba(15,14,13,0.22)',
+    cardRadius: '1.25rem',
+    cardShadow: '0 3px 0 rgba(15,14,13,0.05), 0 22px 44px -18px rgba(15,14,13,0.24)',
     buttonShape: 'rounded',
     dividerStyle: 'ornamental',
     density: 'balanced',
@@ -137,20 +137,20 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     coverLayout: 'postcard',
     imageTreatment: 'warm-postcard',
     motion: 'soft',
-    densityScale: 1,
-    motifOpacitySubtle: 0.1,
-    motifOpacityBalanced: 0.2,
-    motifOpacityImmersive: 0.32,
-    motionDurationMs: 620,
+    densityScale: 1.02,
+    motifOpacitySubtle: 0.08,
+    motifOpacityBalanced: 0.18,
+    motifOpacityImmersive: 0.3,
+    motionDurationMs: 640,
   },
   'nature-expedition': {
     id: 'nature-expedition',
     label: 'Nature Expedition',
     hint: 'Structured labels, crisp cards, landscape-forward cover.',
-    headingTracking: '0.01em',
+    headingTracking: '0.06em',
     headingTransform: 'uppercase',
-    cardRadius: '0.65rem',
-    cardShadow: '0 1px 0 rgba(15,14,13,0.06), 0 16px 32px -16px rgba(15,14,13,0.24)',
+    cardRadius: '0.35rem',
+    cardShadow: '0 1px 0 rgba(15,14,13,0.08), 0 14px 28px -14px rgba(15,14,13,0.28)',
     buttonShape: 'square',
     dividerStyle: 'dotted',
     density: 'balanced',
@@ -159,10 +159,10 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     imageTreatment: 'crisp',
     motion: 'gentle',
     densityScale: 1,
-    motifOpacitySubtle: 0.07,
-    motifOpacityBalanced: 0.14,
-    motifOpacityImmersive: 0.24,
-    motionDurationMs: 560,
+    motifOpacitySubtle: 0.05,
+    motifOpacityBalanced: 0.12,
+    motifOpacityImmersive: 0.22,
+    motionDurationMs: 540,
   },
 };
 
@@ -172,9 +172,9 @@ export const VISUAL_INTENSITY_OPTIONS: Array<{
   hint: string;
 }> = [
   { id: 'off', label: 'Off', hint: 'Standard app design' },
-  { id: 'subtle', label: 'Subtle', hint: 'Colours and light accents' },
-  { id: 'balanced', label: 'Balanced', hint: 'Colours, cards, cover and type' },
-  { id: 'immersive', label: 'Immersive', hint: 'Full destination-inspired styling' },
+  { id: 'subtle', label: 'Subtle', hint: 'Mostly original — destination accent only' },
+  { id: 'balanced', label: 'Balanced', hint: 'Noticeably personalised cards and cover' },
+  { id: 'immersive', label: 'Immersive', hint: 'Stronger destination-led cover and surfaces' },
 ];
 
 /** Country → base recipe. Unknown countries fall back in the resolver. */
@@ -343,14 +343,14 @@ function motifOpacity(recipe: DesignRecipe, intensity: VisualIdentityIntensity):
 
 function imageOverlay(treatment: ImageTreatmentToken, intensity: VisualIdentityIntensity): string {
   if (intensity === 'off' || intensity === 'subtle') return 'transparent';
-  const strength = intensity === 'immersive' ? 0.22 : 0.12;
+  const strength = intensity === 'immersive' ? 0.28 : 0.12;
   switch (treatment) {
     case 'muted-paper':
       return `color-mix(in srgb, #F4EFE6 ${Math.round(strength * 100)}%, transparent)`;
     case 'warm-postcard':
       return `color-mix(in srgb, #E8B07A ${Math.round(strength * 100)}%, transparent)`;
     case 'crisp':
-      return `color-mix(in srgb, #0F0E0D ${Math.round(strength * 40)}%, transparent)`;
+      return `color-mix(in srgb, #0F0E0D ${Math.round(strength * 55)}%, transparent)`;
     case 'cool-clean':
       return `color-mix(in srgb, #A8C4D8 ${Math.round(strength * 100)}%, transparent)`;
     default:
@@ -360,8 +360,8 @@ function imageOverlay(treatment: ImageTreatmentToken, intensity: VisualIdentityI
 
 function buttonRadius(shape: ButtonShapeToken): string {
   if (shape === 'pill') return '9999px';
-  if (shape === 'rounded') return '0.9rem';
-  return '0.35rem';
+  if (shape === 'rounded') return '0.85rem';
+  return '0.3rem';
 }
 
 function readableInk(hex: string): string {
@@ -373,6 +373,19 @@ function readableInk(hex: string): string {
   });
   const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
   return luminance > 0.45 ? '#0F0E0D' : '#FFFFFF';
+}
+
+function darkCardShadow(recipe: DesignRecipe): string {
+  if (recipe.id === 'modern-metropolitan') {
+    return '0 0 0 1px rgba(255,255,255,0.06), 0 10px 24px -16px rgba(0,0,0,0.55)';
+  }
+  if (recipe.id === 'warm-postcard') {
+    return '0 3px 0 rgba(255,255,255,0.04), 0 22px 44px -18px rgba(0,0,0,0.55)';
+  }
+  if (recipe.id === 'nature-expedition') {
+    return '0 1px 0 rgba(255,255,255,0.05), 0 16px 30px -14px rgba(0,0,0,0.6)';
+  }
+  return '0 1px 0 rgba(255,255,255,0.04), 0 18px 42px -20px rgba(0,0,0,0.5)';
 }
 
 function buildCssVars(
@@ -388,6 +401,9 @@ function buildCssVars(
   const applyType = intensity === 'balanced' || intensity === 'immersive';
   const applyCards = intensity === 'balanced' || intensity === 'immersive';
   const applyMotion = intensity === 'balanced' || intensity === 'immersive';
+  const coverMotif = motifOpacity(recipe, intensity);
+  const surfaceMotif = coverMotif * (intensity === 'immersive' ? 0.28 : 0.18);
+  const themeMotifScale = theme === 'dark' ? 0.85 : 1;
 
   const vars: Record<string, string> = {
     '--accent': accent,
@@ -395,25 +411,31 @@ function buildCssVars(
     '--accent-ink': readableInk(accent),
     '--accent-button': accent,
     '--accent-fill': accent,
+    '--motif-opacity': String(coverMotif * themeMotifScale),
+    '--motif-opacity-surface': String(surfaceMotif * themeMotifScale),
   };
 
   if (applyType) {
     vars['--heading-tracking'] = recipe.headingTracking;
     vars['--heading-transform'] = recipe.headingTransform;
+    vars['--heading-size-scale'] = intensity === 'immersive' ? '1.04' : '1';
+    vars['--image-overlay'] = imageOverlay(recipe.imageTreatment, intensity);
+    vars['--cover-layout'] = recipe.coverLayout;
   }
 
   if (applyCards) {
     vars['--card-radius'] = recipe.cardRadius;
-    vars['--card-shadow'] = recipe.cardShadow;
+    vars['--card-shadow'] = theme === 'dark' ? darkCardShadow(recipe) : recipe.cardShadow;
     vars['--button-radius'] = buttonRadius(recipe.buttonShape);
-    vars['--content-density'] = String(recipe.densityScale);
-  }
-
-  vars['--motif-opacity'] = String(motifOpacity(recipe, intensity));
-
-  if (applyType) {
-    vars['--image-overlay'] = imageOverlay(recipe.imageTreatment, intensity);
-    vars['--cover-layout'] = recipe.coverLayout;
+    vars['--content-density'] = String(
+      intensity === 'immersive' ? recipe.densityScale * 1.04 : recipe.densityScale,
+    );
+    vars['--card-border-width'] = intensity === 'immersive'
+      ? (recipe.id === 'warm-postcard' || recipe.id === 'nature-expedition' ? '2px' : '1.5px')
+      : '1px';
+    vars['--cover-frame-padding'] = intensity === 'immersive'
+      ? (recipe.coverLayout === 'postcard' ? '0.75rem' : '0.35rem')
+      : '0px';
   }
 
   if (applyMotion) {
@@ -516,11 +538,15 @@ export const VISUAL_IDENTITY_CSS_VARS = [
   '--accent-fill',
   '--heading-tracking',
   '--heading-transform',
+  '--heading-size-scale',
   '--card-radius',
   '--card-shadow',
   '--button-radius',
   '--content-density',
+  '--card-border-width',
+  '--cover-frame-padding',
   '--motif-opacity',
+  '--motif-opacity-surface',
   '--image-overlay',
   '--cover-layout',
   '--motion-duration',

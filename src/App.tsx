@@ -26,6 +26,7 @@ import { AppSettingsPanel } from './components/AppSettingsPanel';
 import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
+import { VisualIdentityQa } from './components/VisualIdentityQa';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
@@ -1086,6 +1087,22 @@ function App() {
     return <PasswordResetScreen />;
   }
 
+  // Visual acceptance board for Adaptive Destination Design (PR evidence).
+  // Open with ?visualQa=1 — uses the same token applicator as the live handbook.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('visualQa')) {
+    return (
+      <VisualIdentityQa
+        theme={theme}
+        onClose={() => {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('visualQa');
+          window.history.replaceState({}, '', url.toString());
+          window.location.reload();
+        }}
+      />
+    );
+  }
+
   // The welcome page is the public front door. Auth owns the next step until
   // a real, local-test, or demo session is available.
   if (showWelcome && !hasAuthCallbackUrl()) {
@@ -1410,7 +1427,10 @@ function App() {
                 data-motif={visualIdentity?.motifSet && visualIdentity.motifSet !== 'none' ? visualIdentity.motifSet : undefined}
                 aria-hidden="true"
               />
-              <div className="relative overflow-hidden handbook-cover-frame rounded-2xl z-[1]">
+              <div
+                className="relative overflow-hidden handbook-cover-frame z-[1]"
+                data-cover-layout={visualIdentity?.coverLayout || 'journal'}
+              >
                 {displayItinerary.cities.length > 0 ? (
                   <img
                     src={heroImages[activeItineraryId as keyof typeof heroImages] || defaultTravelHero}
