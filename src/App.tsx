@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import { itineraries } from './data';
 import type {
   Itinerary,
@@ -26,8 +26,6 @@ import { AppSettingsPanel } from './components/AppSettingsPanel';
 import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { VisualIdentityQa } from './components/VisualIdentityQa';
-import { HandbookCapture } from './components/HandbookCapture';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
@@ -48,6 +46,23 @@ import { Pets } from './components/Pets';
 import { hapticMedium } from './lib/haptics';
 import { sanitizeTripProfile } from './lib/tripProfile';
 import { resolveVisualIdentity } from './lib/visualIdentity';
+
+/** Capture/QA boards are local/preview only — never free in production. */
+const qaEnabled =
+  import.meta.env.DEV ||
+  import.meta.env.VITE_ENABLE_HANDBOOK_QA === 'true';
+
+const VisualIdentityQa = lazy(() =>
+  import('./components/VisualIdentityQa').then((module) => ({
+    default: module.VisualIdentityQa,
+  })),
+);
+
+const HandbookCapture = lazy(() =>
+  import('./components/HandbookCapture').then((module) => ({
+    default: module.HandbookCapture,
+  })),
+);
 import { markManualFieldEdits, sanitizeFieldSources } from './lib/identityFields';
 import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
@@ -1089,23 +1104,51 @@ function App() {
   }
 
   // Real handbook surfaces for visual acceptance screenshots.
+  // Enabled only in DEV or when VITE_ENABLE_HANDBOOK_QA=true (preview builds).
   // ?handbookQa=japan&intensity=balanced&view=home&theme=light
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('handbookQa')) {
-    return <HandbookCapture />;
+  // Production ignores these params and continues through the normal app flow.
+  if (
+    qaEnabled &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('handbookQa')
+  ) {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}>
+            <div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" />
+          </div>
+        }
+      >
+        <HandbookCapture />
+      </Suspense>
+    );
   }
 
   // Schematic token board (optional). Prefer handbookQa for acceptance evidence.
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('visualQa')) {
+  if (
+    qaEnabled &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('visualQa')
+  ) {
     return (
-      <VisualIdentityQa
-        theme={theme}
-        onClose={() => {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('visualQa');
-          window.history.replaceState({}, '', url.toString());
-          window.location.reload();
-        }}
-      />
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}>
+            <div className="animate-spin w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full" />
+          </div>
+        }
+      >
+        <VisualIdentityQa
+          theme={theme}
+          onClose={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('visualQa');
+            window.history.replaceState({}, '', url.toString());
+            window.location.reload();
+          }}
+        />
+      </Suspense>
     );
   }
 
