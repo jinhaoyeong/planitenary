@@ -24,7 +24,7 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlightIndex, setHighlightIndex] = useState(0);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 0 });
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 280 });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -44,21 +44,38 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
     const updateMenuPosition = () => {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      setMenuPosition({ top: rect.bottom + 8, left: rect.left, width: rect.width });
+      const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const viewportTop = window.visualViewport?.offsetTop ?? 0;
+      const gutter = 8;
+      const searchHeight = 56;
+      const width = Math.min(rect.width, viewportWidth - gutter * 2);
+      const spaceBelow = viewportTop + viewportHeight - rect.bottom - gutter;
+      const spaceAbove = rect.top - viewportTop - gutter;
+      const opensUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+      const available = (opensUp ? spaceAbove : spaceBelow) - searchHeight;
+      const maxHeight = Math.max(140, Math.min(320, available));
+      const left = Math.max(gutter, Math.min(rect.left, viewportWidth - width - gutter));
+      setMenuPosition({
+        top: opensUp
+          ? Math.max(viewportTop + gutter, rect.top - maxHeight - searchHeight - 6)
+          : rect.bottom + 8,
+        left,
+        width,
+        maxHeight,
+      });
     };
-    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+    const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!containerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
     window.addEventListener('resize', updateMenuPosition);
     window.addEventListener('scroll', updateMenuPosition, true);
     updateMenuPosition();
     window.setTimeout(() => searchRef.current?.focus(), 30);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
       window.removeEventListener('resize', updateMenuPosition);
       window.removeEventListener('scroll', updateMenuPosition, true);
     };
@@ -163,7 +180,10 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
       {open && createPortal(
         <div
           ref={menuRef}
-          className="country-picker-menu fixed z-[120] rounded-2xl overflow-hidden"
+          className="country-picker-menu fixed z-[200] rounded-2xl overflow-hidden flex flex-col"
+          data-lenis-prevent
+          data-lenis-prevent-wheel
+          data-lenis-prevent-touch
           style={{
             top: menuPosition.top,
             left: menuPosition.left,
@@ -174,7 +194,7 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
           }}
           onKeyDown={onMenuKeyDown}
         >
-          <div className="country-picker-search relative p-2" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="country-picker-search relative shrink-0 p-2" style={{ borderBottom: '1px solid var(--border)' }}>
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--ink-muted)' }} />
             <input
               ref={searchRef}
@@ -203,8 +223,17 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
 
           <ul
             id={listboxDomId}
-            className="country-picker-results max-h-64 overflow-y-auto py-1"
-            style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch', overscrollBehaviorY: 'contain' }}
+            className="country-picker-results min-h-0 overflow-y-auto overscroll-contain py-1"
+            style={{
+              maxHeight: menuPosition.maxHeight,
+              touchAction: 'pan-y',
+              WebkitOverflowScrolling: 'touch',
+            }}
+            data-lenis-prevent
+            data-lenis-prevent-wheel
+            data-lenis-prevent-touch
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
             role="listbox"
             aria-label="Countries"
             aria-activedescendant={results[highlightIndex] ? `country-option-${results[highlightIndex].code}` : undefined}

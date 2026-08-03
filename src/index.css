@@ -654,6 +654,7 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
+  overflow-y: auto;
 }
 
 .country-picker-row {
@@ -694,19 +695,6 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
 
 .country-picker-menu {
   overscroll-behavior: contain;
-  touch-action: pan-y;
-}
-
-@media (max-width: 767px) {
-  .country-picker-results {
-    max-height: min(22rem, 42dvh);
-  }
-}
-
-@media (min-width: 768px) {
-  .country-picker-results {
-    max-height: min(23rem, 40dvh);
-  }
 }
 
 @media (min-width: 1024px) {
