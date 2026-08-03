@@ -296,19 +296,19 @@ export function HandbookCapture() {
 
       {view === 'home' && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-16 pb-10">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 items-center">
-            <div className="md:col-span-7">
-              <span className="eyebrow">{itinerary.heroEyebrow || 'A personalized travel starter'}</span>
+          <div className="handbook-home-hero-grid grid grid-cols-1 gap-10 md:gap-12 items-center">
+            <div className="handbook-home-hero-copy">
+              <span className="handbook-home-hero-eyebrow eyebrow">{itinerary.heroEyebrow || 'A personalized travel starter'}</span>
               <h1
-                className="mt-6 font-display handbook-display text-5xl sm:text-6xl md:text-[5rem] leading-[0.95] tracking-tight"
+                className="handbook-home-hero-title mt-6 font-display handbook-display text-5xl sm:text-6xl md:text-[5rem] leading-[0.95] tracking-tight"
                 style={{ color: 'var(--ink)' }}
               >
                 {itinerary.name}
               </h1>
-              <p className="mt-6 max-w-xl text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+              <p className="handbook-home-hero-description mt-6 max-w-xl text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
                 {itinerary.description}
               </p>
-              <div className="mt-8 flex flex-wrap items-center gap-3">
+              <div className="handbook-home-hero-actions mt-8 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   className="pill-btn pill-primary accent-button"
@@ -324,7 +324,7 @@ export function HandbookCapture() {
               </div>
             </div>
 
-            <div className="md:col-span-5 relative" data-cover-layout={resolved.coverLayout}>
+            <div className="handbook-home-hero-cover relative" data-cover-layout={resolved.coverLayout}>
               <div
                 className="editorial-card p-3 md:p-4 rotate-[-2deg] relative overflow-hidden"
                 style={{ backgroundColor: 'var(--bg-elevated)' }}

@@ -309,6 +309,73 @@ body {
   hyphens: auto;
 }
 
+.handbook-home-hero-copy {
+  width: 100%;
+  max-width: 34rem;
+}
+
+.handbook-home-hero-eyebrow {
+  font-size: clamp(0.75rem, 0.7vw, 0.85rem);
+  letter-spacing: 0.16em;
+}
+
+.handbook-home-hero-title {
+  margin-top: 1rem;
+  font-size: clamp(1.75rem, 2.1vw, 2.4rem);
+  line-height: 1.05;
+}
+
+.handbook-home-hero-description {
+  max-width: 32rem;
+  margin-top: 1.25rem;
+  font-size: clamp(1rem, 1.1vw, 1.2rem);
+  line-height: 1.55;
+}
+
+.handbook-home-hero-actions {
+  margin-top: 1.5rem;
+}
+
+.handbook-home-hero-actions .pill-btn {
+  min-height: 3rem;
+  padding-inline: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.handbook-home-hero-grid {
+  column-gap: clamp(3rem, 6vw, 7rem);
+}
+
+@media (min-width: 768px) {
+  .handbook-home-hero-grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .handbook-home-hero-grid {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .handbook-home-hero-copy {
+    max-width: 100%;
+  }
+
+  .handbook-home-hero-title {
+    font-size: clamp(1.65rem, 7vw, 2.1rem);
+  }
+
+  .handbook-home-hero-description {
+    font-size: 1rem;
+  }
+
+  .handbook-home-hero-actions .pill-btn {
+    min-height: 2.75rem;
+  }
+}
+
 .handbook-cover-frame {
   position: relative;
   overflow: hidden;
