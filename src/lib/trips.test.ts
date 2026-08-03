@@ -52,8 +52,18 @@ describe('generated days', () => {
     expect(new Set(days.map((day) => day.city))).toEqual(new Set(['Kyoto', 'Osaka']));
   });
 
-  it('stops short of creating a day card for every date of an absurd range', () => {
+  it('refuses to invent day cards for an over-limit date range', () => {
+    // Defense in depth: absurd spans are rejected, not capped into 90 cards.
     const days = buildDaysFromProfile(kyoto({ startDate: '2027-01-01', endDate: '2030-01-01' }));
+    expect(days).toEqual([]);
+  });
+
+  it('creates only the first block of cards for a long but allowed trip', () => {
+    const start = '2027-01-01';
+    const end = new Date(`${start}T00:00:00`);
+    end.setDate(end.getDate() + 179);
+    const endDate = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+    const days = buildDaysFromProfile(kyoto({ startDate: start, endDate }));
     expect(days).toHaveLength(MAX_GENERATED_DAYS);
   });
 });

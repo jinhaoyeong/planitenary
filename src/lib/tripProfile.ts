@@ -12,6 +12,7 @@ import {
   lookupCityCenter,
   type PlaceSuggestion,
 } from './destinations';
+import { sanitizeDurationFields } from './tripDuration';
 
 export type TripType =
   | 'relaxation' | 'adventure' | 'food' | 'photography' | 'luxury'
@@ -387,12 +388,18 @@ export function sanitizeTripProfile(value: unknown): TripProfile | null {
   if (destinations.length === 0 && !source.startDate && !source.dayCount) return null;
 
   const base = createEmptyProfile();
+  const duration = sanitizeDurationFields({
+    startDate: typeof source.startDate === 'string' ? source.startDate : undefined,
+    endDate: typeof source.endDate === 'string' ? source.endDate : undefined,
+    dayCount: typeof source.dayCount === 'number' && Number.isFinite(source.dayCount) ? source.dayCount : 0,
+  });
+
   return {
     ...base,
     destinations,
-    startDate: typeof source.startDate === 'string' ? source.startDate : undefined,
-    endDate: typeof source.endDate === 'string' ? source.endDate : undefined,
-    dayCount: typeof source.dayCount === 'number' && Number.isFinite(source.dayCount) ? Math.max(0, Math.round(source.dayCount)) : 0,
+    startDate: duration.startDate,
+    endDate: duration.endDate,
+    dayCount: duration.dayCount,
     tripTypes: pickAll(source.tripTypes, TRIP_TYPE_OPTIONS.map((option) => option.id)),
     styles: pickAll(source.styles, TRAVEL_STYLE_OPTIONS.map((option) => option.id)),
     moods: pickAll(source.moods, MOOD_OPTIONS.map((option) => option.id)),

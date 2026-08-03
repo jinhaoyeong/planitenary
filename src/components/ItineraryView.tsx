@@ -11,6 +11,7 @@ import { PlannerPreview } from './PlannerPreview';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
 import { sanitizeTripProfile } from '../lib/tripProfile';
+import { declaredTripDays, longTripItineraryNotice } from '../lib/tripDuration';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -1055,6 +1056,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
   // Use the prop as the source of truth; parent handles persistence and Supabase sync
   const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
   const plannerProfile = useMemo(() => sanitizeTripProfile(customItinerary.tripProfile), [customItinerary.tripProfile]);
+  const declaredDays = useMemo(
+    () => (plannerProfile ? declaredTripDays(plannerProfile) : 0),
+    [plannerProfile],
+  );
+  const longTripNotice = useMemo(
+    () => longTripItineraryNotice(declaredDays, customItinerary.days.length),
+    [declaredDays, customItinerary.days.length],
+  );
 
   // Sync internal state when parent prop changes (from Supabase realtime or other sources)
   useEffect(() => {
@@ -1542,6 +1551,15 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
               </>
             )}
           </p>
+
+          {longTripNotice && (
+            <p
+              className="text-sm max-w-2xl mx-auto rounded-2xl px-4 py-3"
+              style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--ink-muted)' }}
+            >
+              {longTripNotice}
+            </p>
+          )}
 
           {isEditingMode && selectedDay === null && (
             <div className="mx-auto mt-5 max-w-2xl rounded-2xl border p-4 text-left" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }}>

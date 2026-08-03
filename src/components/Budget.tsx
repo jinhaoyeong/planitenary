@@ -10,7 +10,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { BudgetCurrencyToggle } from './CurrencySelector';
 import { convertCurrency } from '../lib/currency';
 import { currencyMeta } from '../lib/currencyCatalog';
-import { resolveDuration, sanitizeTripProfile } from '../lib/tripProfile';
+import { sanitizeTripProfile } from '../lib/tripProfile';
+import { plannedBudgetDays } from '../lib/tripDuration';
 
 interface BudgetItem {
   id: string;
@@ -306,10 +307,10 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const { currency, convert, toBase, rates } = useCurrency();
   const currencySymbol = currencyMeta(currency).symbol;
   const tripProfile = React.useMemo(() => sanitizeTripProfile(itinerary.tripProfile), [itinerary.tripProfile]);
-  const plannedDays = React.useMemo(() => {
-    if (tripProfile) return resolveDuration(tripProfile).days;
-    return itinerary.days.length;
-  }, [tripProfile, itinerary.days.length]);
+  const plannedDays = React.useMemo(
+    () => plannedBudgetDays(tripProfile, itinerary.days.length),
+    [tripProfile, itinerary.days.length],
+  );
   const [customBudget, setCustomBudget] = React.useState<CustomBudget>(createDefaultBudget(0, 0, 0, {
     transport: { details: [] },
     food: { details: [] },

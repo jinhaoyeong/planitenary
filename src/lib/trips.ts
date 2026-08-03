@@ -18,6 +18,19 @@ import {
   sanitizeTripProfile,
   type TripProfile,
 } from './tripProfile';
+import {
+  generatedDayCardCount,
+  validateTripDuration,
+  withValidatedDuration,
+} from './tripDuration';
+
+export {
+  MAX_GENERATED_DAYS,
+  MAX_TRIP_DURATION_DAYS,
+  TRIP_DURATION_TOO_LONG_MESSAGE,
+  longTripPartialGenerationMessage,
+  validateTripDuration,
+} from './tripDuration';
 
 export type TripStatus = 'active' | 'archived';
 
@@ -58,11 +71,14 @@ const cityForDay = (cities: string[], dayIndex: number, totalDays: number) => {
 };
 
 /** Guards against a mistyped year turning into thousands of day cards. */
-export const MAX_GENERATED_DAYS = 90;
+// MAX_GENERATED_DAYS is re-exported from tripDuration above.
 
 export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
-  const { days: requested } = resolveDuration(profile);
-  const days = Math.min(requested, MAX_GENERATED_DAYS);
+  // Reject invalid ranges rather than inventing cards; still cap valid long
+  // stays so a semester abroad does not create hundreds of empty pages.
+  const validation = validateTripDuration(profile);
+  const requested = validation.ok ? validation.days : 0;
+  const days = generatedDayCardCount(requested);
   if (days <= 0) return [];
 
   const cities = destinationCities(profile);
@@ -222,9 +238,16 @@ export function regenerateItinerary(
 }
 
 export function createItineraryFromProfile(profile: TripProfile, id = createTripId()): Itinerary {
-  const days = buildDaysFromProfile(profile);
-  const identity = buildTripIdentity(profile, { plannedDays: days.length });
-  return applyIdentityToNewItinerary({ ...createBlankItinerary(id), days }, profile, identity);
+  // Sanitize first so imported/legacy payloads cannot carry a 999-day span.
+  const cleaned = sanitizeTripProfile(profile) ?? profile;
+  const committed = withValidatedDuration(cleaned);
+  const safeProfile = committed.ok ? committed.profile : cleaned;
+  const days = buildDaysFromProfile(safeProfile);
+  // plannedDays for identity copy is the declared duration (badge/budget), not
+  // the capped card count — long trips still say "180 days" honestly.
+  const declared = resolveDuration(safeProfile).days;
+  const identity = buildTripIdentity(safeProfile, { plannedDays: declared > 0 ? declared : days.length });
+  return applyIdentityToNewItinerary({ ...createBlankItinerary(id), days }, safeProfile, identity);
 }
 
 export const toTripSummary = (itinerary: Itinerary, updatedAt = new Date().toISOString()): TripSummary => ({

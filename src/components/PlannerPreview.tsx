@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Clock3, Lock, RefreshCw, RotateCcw, Sparkles, Undo2 } from 'lucide-react';
 import type { Itinerary } from '../data';
 import type { TripProfile } from '../lib/tripProfile';
+import { declaredTripDays, plannerExistingDaysNotice } from '../lib/tripDuration';
 import {
   applyItineraryProposal,
   generateInitialItinerary,
@@ -57,6 +58,8 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const lastHistory = itinerary.plannerHistory?.[itinerary.plannerHistory.length - 1];
   const hasActivities = itinerary.days.some((day) => day.activities.length > 0);
   const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.length > 0), [itinerary.days]);
+  const declaredDays = declaredTripDays(profile);
+  const existingDaysNotice = plannerExistingDaysNotice(declaredDays, itinerary.days.length);
 
   const openProposal = (next: ItineraryProposal) => {
     setProposal(next);
@@ -199,6 +202,12 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
         </div>
         <Clock3 className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
       </div>
+
+      {existingDaysNotice && (
+        <p className="text-xs rounded-2xl px-3 py-2" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
+          {existingDaysNotice}
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {!hasActivities && itinerary.days.length > 0 && (

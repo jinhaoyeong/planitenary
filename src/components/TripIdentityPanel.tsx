@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronDown, MapPin, Wand2, X } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { findCountry, type PlaceSuggestion } from '../lib/destinations';
@@ -7,6 +7,12 @@ import { ToggleRow } from './ui/ToggleRow';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { RegenerationPreview } from './RegenerationPreview';
 import { syncDurationDependentFields } from '../lib/trips';
+import {
+  MAX_GENERATED_DAYS,
+  longTripPartialGenerationMessage,
+  validateTripDuration,
+  withValidatedDuration,
+} from '../lib/tripDuration';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -42,6 +48,7 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
       },
     [storedProfile, itinerary.cities, itinerary.days.length],
   );
+  const [durationError, setDurationError] = useState<string | null>(null);
 
   const save = (next: TripProfile) => {
     // Profile is the source of truth for duration: clearing dates must clear
@@ -49,7 +56,23 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
     onItineraryChange(syncDurationDependentFields({ ...itinerary, tripProfile: next }, next));
   };
 
-  const update = (patch: Partial<TripProfile>) => save({ ...profile, ...patch });
+  const update = (patch: Partial<TripProfile>) => {
+    const next = { ...profile, ...patch };
+    // Duration fields are validated before any write so an over-long or
+    // reversed range never partially mutates the saved profile.
+    if ('startDate' in patch || 'endDate' in patch || 'dayCount' in patch) {
+      const committed = withValidatedDuration(next);
+      if (!committed.ok) {
+        setDurationError(committed.message);
+        return;
+      }
+      setDurationError(null);
+      save(committed.profile);
+      return;
+    }
+    setDurationError(null);
+    save(next);
+  };
 
   const toggle = <T extends string>(key: 'tripTypes' | 'styles' | 'moods' | 'transport' | 'stays', id: T) => {
     const list = profile[key] as unknown as T[];
@@ -68,6 +91,7 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
 
   const countryCode = findCountry(primaryCountry(profile))?.code;
   const duration = resolveDuration(profile);
+  const durationValidation = validateTripDuration(profile);
   const identity = useMemo(
     () => buildTripIdentity(profile, { plannedDays: itinerary.days.length }),
     [profile, itinerary.days.length],
@@ -100,6 +124,21 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
           />
         </div>
       </div>
+
+      {durationError && (
+        <p className="text-sm" style={{ color: 'var(--accent)' }} role="alert">
+          {durationError}
+        </p>
+      )}
+
+      {durationValidation.ok && durationValidation.generatesPartialDays && (
+        <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+          {longTripPartialGenerationMessage(durationValidation.days)}
+          {itinerary.days.length > 0 && itinerary.days.length < durationValidation.days
+            ? ` ${itinerary.days.length} of ${durationValidation.days} pages are on this handbook now.`
+            : ''}
+        </p>
+      )}
 
       <div className="space-y-2">
         <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
@@ -141,7 +180,11 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         </div>
         <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
           {duration.days > 0 ? `${duration.days} days · ${duration.nights} nights · ` : 'Dates not set · '}
-          {profile.destinations.length} {profile.destinations.length === 1 ? 'stop' : 'stops'} on the map.
+          {profile.destinations.length} {profile.destinations.length === 1 ? 'stop' : 'stops'} on the map
+          {duration.days > MAX_GENERATED_DAYS && itinerary.days.length > 0
+            ? ` · ${itinerary.days.length} daily pages created`
+            : ''}
+          .
         </p>
       </div>
 

@@ -8,6 +8,7 @@ import type {
   PlannerChangeRecord,
 } from '../data';
 import { profileRevision } from './identityFields';
+import { declaredTripDays } from './tripDuration';
 import type { TripProfile } from './tripProfile';
 
 export type PlannerAction = 'generate' | 'optimise-day' | 'optimise-trip';
@@ -340,6 +341,10 @@ const makeProposal = (
   }));
   if (currencies.size > 1) warnings.push('Known costs use multiple currencies; no combined total is calculated without a saved conversion rate.');
   if (constraints?.maxBudgetAmount !== undefined && knownBudget > constraints.maxBudgetAmount) warnings.push('Known costs exceed the configured budget limit.');
+  const declaredDays = declaredTripDays(profile);
+  if (declaredDays > afterDays.length && afterDays.length > 0) {
+    warnings.push(`Planning covers the ${afterDays.length} daily pages already created, not all ${declaredDays} days of the trip.`);
+  }
   const uniqueWarnings = Array.from(new Set(warnings));
   return {
     id: stableId('suggestion', `${itinerary.id}|${action}|${itinerary.revision || 0}|${beforeDays.map((day) => day.activities.map((activity) => activity.id).join(',')).join('|')}`),

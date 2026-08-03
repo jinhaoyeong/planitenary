@@ -13,7 +13,13 @@ import {
 import { countryFlag, findCountry, type CountryProfile, type PlaceSuggestion } from '../lib/destinations';
 import { CURRENCIES } from '../lib/currencyCatalog';
 import { buildTripIdentity } from '../lib/tripIdentity';
-import { MAX_GENERATED_DAYS } from '../lib/trips';
+import {
+  MAX_TRIP_DURATION_DAYS,
+  TRIP_DATES_REVERSED_MESSAGE,
+  longTripPartialGenerationMessage,
+  validateTripDuration,
+  withValidatedDuration,
+} from '../lib/tripDuration';
 import { OptionChips } from './ui/OptionChips';
 import { CountryPicker } from './ui/CountryPicker';
 import { CitySearchInput } from './ui/CitySearchInput';
@@ -209,7 +215,9 @@ export function TripCreateWizard({
 
   const duration = resolveDuration(profile);
   const nights = nightsBetween(profile.startDate, profile.endDate);
-  const datesReversed = Boolean(profile.startDate && profile.endDate && nights === null);
+  const durationValidation = validateTripDuration(profile);
+  const datesReversed = durationValidation.ok === false && durationValidation.reason === 'reversed';
+  const durationTooLong = durationValidation.ok === false && durationValidation.reason === 'too_long';
   const selectedCountry = useMemo(() => findCountry(countryCode), [countryCode]);
   // Cities can span countries, so the saved stops decide the currency once
   // there are any; the country picker only seeds it beforehand.
@@ -236,13 +244,23 @@ export function TripCreateWizard({
   if (!open) return null;
 
   const step = STEPS[stepIndex];
-  const canContinue = step.id === 'where' ? profile.destinations.length > 0 : true;
+  const whenStepValid = durationValidation.ok;
+  const canContinue = step.id === 'where'
+    ? profile.destinations.length > 0
+    : step.id === 'when'
+      ? whenStepValid
+      : true;
   const isLast = stepIndex === STEPS.length - 1;
 
   const goNext = () => {
     if (isLast) {
+      const committed = withValidatedDuration(resolvedProfile);
+      if (!committed.ok) {
+        setStepIndex(STEPS.findIndex((entry) => entry.id === 'when'));
+        return;
+      }
       clearDraft();
-      onCreate(resolvedProfile);
+      onCreate(committed.profile);
       return;
     }
     setStepIndex((index) => Math.min(STEPS.length - 1, index + 1));
@@ -410,7 +428,7 @@ export function TripCreateWizard({
                 </div>
               </div>
 
-              {nights === null && (
+              {nights === null && !datesReversed && (
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
                     Or just the number of days
@@ -418,7 +436,7 @@ export function TripCreateWizard({
                   <input
                     type="number"
                     min={0}
-                    max={90}
+                    max={MAX_TRIP_DURATION_DAYS}
                     className="editorial-input w-full"
                     value={profile.dayCount || ''}
                     onChange={(event) => update({ dayCount: Number(event.target.value) || 0 })}
@@ -429,7 +447,13 @@ export function TripCreateWizard({
 
               {datesReversed && (
                 <p className="text-sm" style={{ color: 'var(--accent)' }}>
-                  The end date is before the start date. Fix either one and the days will add up again.
+                  {durationValidation.ok === false ? durationValidation.message : TRIP_DATES_REVERSED_MESSAGE}
+                </p>
+              )}
+
+              {durationTooLong && (
+                <p className="text-sm" style={{ color: 'var(--accent)' }}>
+                  {durationValidation.ok === false ? durationValidation.message : ''}
                 </p>
               )}
 
@@ -437,11 +461,15 @@ export function TripCreateWizard({
                 className="rounded-2xl px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1"
                 style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
               >
-                {duration.days > 0 ? (
+                {durationValidation.ok && duration.days > 0 ? (
                   <>
                     <span><strong>{duration.days}</strong> {duration.days === 1 ? 'day' : 'days'}</span>
                     <span><strong>{duration.nights}</strong> {duration.nights === 1 ? 'night' : 'nights'}</span>
                   </>
+                ) : durationTooLong ? (
+                  <span>That span is too long to save.</span>
+                ) : datesReversed ? (
+                  <span>Fix the dates to see the day count.</span>
                 ) : (
                   // Never show "0 days": an undated trip simply has no duration yet.
                   <span>Dates not set — you can add them later.</span>
@@ -452,10 +480,9 @@ export function TripCreateWizard({
                 ) : null}
               </div>
 
-              {duration.days > MAX_GENERATED_DAYS && (
+              {durationValidation.ok && durationValidation.generatesPartialDays && (
                 <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                  That is a long trip. The first {MAX_GENERATED_DAYS} days are created now; add the rest
-                  from the itinerary when you get there.
+                  {longTripPartialGenerationMessage(durationValidation.days)}
                 </p>
               )}
             </>
@@ -657,7 +684,17 @@ export function TripCreateWizard({
 
           <div className="flex items-center gap-2">
             {!isLast && step.id !== 'where' && (
-              <button type="button" className="pill-btn pill-soft" onClick={() => setStepIndex(STEPS.length - 1)}>
+              <button
+                type="button"
+                className="pill-btn pill-soft"
+                onClick={() => {
+                  if (!durationValidation.ok) {
+                    setStepIndex(STEPS.findIndex((entry) => entry.id === 'when'));
+                    return;
+                  }
+                  setStepIndex(STEPS.length - 1);
+                }}
+              >
                 Skip
               </button>
             )}
