@@ -665,6 +665,29 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   background-color: color-mix(in srgb, var(--accent) 9%, var(--bg-elevated));
 }
 
+.country-mark {
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+
+.country-mark:not(.country-mark--empty) {
+  background-color: color-mix(in srgb, var(--accent) 16%, var(--bg-elevated));
+  color: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+.dark .country-mark:not(.country-mark--empty) {
+  background-color: color-mix(in srgb, var(--accent) 24%, var(--bg));
+  color: color-mix(in srgb, var(--accent) 70%, white);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
+.country-mark--empty {
+  background-color: color-mix(in srgb, var(--ink) 6%, var(--bg-elevated));
+  color: var(--ink-muted);
+  border: 1px solid var(--border);
+}
+
 .country-picker-search {
   background-color: color-mix(in srgb, var(--ink) 3%, var(--bg-elevated));
 }
