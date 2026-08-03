@@ -134,8 +134,10 @@ export function SecurityPanel() {
 
       <div className="mt-6 grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="rounded-3xl p-4 sm:p-5" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-          <KeyRound className="w-5 h-5" style={{ color: 'var(--accent)' }} />
-          <h3 className="font-display text-2xl mt-3">Change password</h3>
+          <div className="flex items-center gap-2.5">
+            <KeyRound className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} />
+            <h3 className="font-display text-2xl">Change password</h3>
+          </div>
           <input
             type="password"
             value={password}
@@ -155,8 +157,10 @@ export function SecurityPanel() {
         </div>
 
         <div className="rounded-3xl p-4 sm:p-5" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-          <Mail className="w-5 h-5" style={{ color: 'var(--accent)' }} />
-          <h3 className="font-display text-2xl mt-3">Change email</h3>
+          <div className="flex items-center gap-2.5">
+            <Mail className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} />
+            <h3 className="font-display text-2xl">Change email</h3>
+          </div>
           <p className="text-xs mt-2 truncate" style={{ color: 'var(--ink-muted)' }}>Current: {user.email}</p>
           <input
             type="email"
@@ -176,8 +180,10 @@ export function SecurityPanel() {
         </div>
 
         <div className="rounded-3xl p-4 sm:p-5" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-          <Phone className="w-5 h-5" style={{ color: 'var(--accent)' }} />
-          <h3 className="font-display text-2xl mt-3">Phone number</h3>
+          <div className="flex items-center gap-2.5">
+            <Phone className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} />
+            <h3 className="font-display text-2xl">Phone number</h3>
+          </div>
           <input
             type="tel"
             value={phone}

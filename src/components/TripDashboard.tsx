@@ -391,9 +391,9 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                   <span className="p-2 rounded-full" style={{ color: 'var(--ink-muted)' }}><ArrowRight className="w-5 h-5" /></span>
                 </div>
               </div>
-              <h2 className="font-display text-3xl mt-8">{trip.title}</h2>
+              <h2 className="trip-card-title font-display text-3xl mt-8">{trip.title}</h2>
               <p className="mt-2 line-clamp-2" style={{ color: 'var(--ink-muted)' }}>{trip.description}</p>
-              <div className="flex flex-wrap gap-3 mt-6 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
+              <div className="trip-card-metrics flex flex-wrap gap-3 mt-6 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
                 <span className="inline-flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> {trip.dayCount} days</span>
                 <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {trip.cityCount} cities</span>
               </div>

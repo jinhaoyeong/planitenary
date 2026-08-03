@@ -170,13 +170,13 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
         )}
 
         <div className="flex flex-col xl:flex-row gap-6 md:gap-10 mt-6 md:mt-8">
-          <div className="xl:w-1/3 shrink-0">
+          <div className="xl:w-[280px] shrink-0">
             <div className="editorial-card p-4 md:p-5">
               <div className="eyebrow">Photo</div>
               <h3 className="font-display text-2xl sm:text-3xl mt-3">Profile image</h3>
 
               <div
-                className="mt-5 rounded-[2rem] overflow-hidden aspect-square min-h-48 flex items-center justify-center text-center"
+                className="mt-5 mx-auto xl:mx-0 w-full max-w-[240px] rounded-[1.5rem] overflow-hidden aspect-[4/3] min-h-40 flex items-center justify-center text-center"
                 style={{ backgroundColor: 'var(--bg)', border: '1px dashed var(--border)' }}
               >
                 {profile.avatarImage ? (
@@ -205,7 +205,7 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
             </div>
           </div>
 
-          <div className="xl:w-2/3 space-y-5">
+          <div className="flex-1 min-w-0 space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
