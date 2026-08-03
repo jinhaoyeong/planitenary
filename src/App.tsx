@@ -27,6 +27,7 @@ import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { VisualIdentityQa } from './components/VisualIdentityQa';
+import { HandbookCapture } from './components/HandbookCapture';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
@@ -1087,8 +1088,13 @@ function App() {
     return <PasswordResetScreen />;
   }
 
-  // Visual acceptance board for Adaptive Destination Design (PR evidence).
-  // Open with ?visualQa=1 — uses the same token applicator as the live handbook.
+  // Real handbook surfaces for visual acceptance screenshots.
+  // ?handbookQa=japan&intensity=balanced&view=home&theme=light
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('handbookQa')) {
+    return <HandbookCapture />;
+  }
+
+  // Schematic token board (optional). Prefer handbookQa for acceptance evidence.
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('visualQa')) {
     return (
       <VisualIdentityQa
