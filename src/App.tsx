@@ -52,17 +52,22 @@ const qaEnabled =
   import.meta.env.DEV ||
   import.meta.env.VITE_ENABLE_HANDBOOK_QA === 'true';
 
-const VisualIdentityQa = lazy(() =>
-  import('./components/VisualIdentityQa').then((module) => ({
-    default: module.VisualIdentityQa,
-  })),
-);
+// Ternary keeps the dynamic imports out of production builds when qaEnabled is false.
+const VisualIdentityQa = qaEnabled
+  ? lazy(() =>
+      import('./components/VisualIdentityQa').then((module) => ({
+        default: module.VisualIdentityQa,
+      })),
+    )
+  : null;
 
-const HandbookCapture = lazy(() =>
-  import('./components/HandbookCapture').then((module) => ({
-    default: module.HandbookCapture,
-  })),
-);
+const HandbookCapture = qaEnabled
+  ? lazy(() =>
+      import('./components/HandbookCapture').then((module) => ({
+        default: module.HandbookCapture,
+      })),
+    )
+  : null;
 import { markManualFieldEdits, sanitizeFieldSources } from './lib/identityFields';
 import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
@@ -1109,6 +1114,7 @@ function App() {
   // Production ignores these params and continues through the normal app flow.
   if (
     qaEnabled &&
+    HandbookCapture &&
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('handbookQa')
   ) {
@@ -1128,6 +1134,7 @@ function App() {
   // Schematic token board (optional). Prefer handbookQa for acceptance evidence.
   if (
     qaEnabled &&
+    VisualIdentityQa &&
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('visualQa')
   ) {

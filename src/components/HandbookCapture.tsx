@@ -125,19 +125,23 @@ export function HandbookCapture() {
   const scenario = SCENARIOS[scenarioKey] || SCENARIOS.japan;
 
   const [itinerary, setItinerary] = useState<Itinerary>(() => {
+    // Start on Automatic so Settings can prove manual lock / reset honestly.
+    // Destinations still resolve to the expected recipe via the real resolver.
     const profile = withVisualDesign(scenario.profile, {
       intensity,
-      recipeOverride: scenario.expectedRecipe,
+      recipeOverride: null,
     });
     const created = createItineraryFromProfile(profile, `capture-${scenarioKey}`);
     return { ...created, name: scenario.longTitle };
   });
 
   // Rebuild when scenario / intensity change so the handbook stays honest.
+  // Intentionally resets to Automatic — capture mode is URL-driven, not a
+  // storage backend. Durable reload persistence is proven in the real app path.
   useEffect(() => {
     const profile = withVisualDesign(scenario.profile, {
       intensity,
-      recipeOverride: scenario.expectedRecipe,
+      recipeOverride: null,
     });
     const created = createItineraryFromProfile(profile, `capture-${scenarioKey}`);
     setItinerary({ ...created, name: scenario.longTitle });
