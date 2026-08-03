@@ -619,7 +619,8 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
   }
 
   const actionButtonClass = "flex items-center px-2.5 py-1.5 rounded-lg text-xs font-bold border border-transparent transition-all duration-300 group/btn";
-  const isScheduleLocked = activity.locked === true || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule');
+  const isScheduleLocked = activity.lockedFields?.includes('schedule');
+  const isActivityLocked = activity.locked === true || activity.lockedFields?.includes('all');
   const renderActionButtons = () => (
     <>
       <a
@@ -660,11 +661,28 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
           onEdit?.({ ...activity, lockedFields: Array.from(fields) });
         }}
         className={`${actionButtonClass} ${isScheduleLocked ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
-        aria-label={isScheduleLocked ? `Unlock ${activity.name}` : `Lock ${activity.name}`}
+        aria-label={isScheduleLocked ? `Unlock schedule for ${activity.name}` : `Lock schedule for ${activity.name}`}
       >
         {isScheduleLocked ? <Unlock className="w-3 h-3 shrink-0" /> : <Lock className="w-3 h-3 shrink-0" />}
         <span className="max-w-xs ml-1.5 md:max-w-0 md:ml-0 md:overflow-hidden md:group-hover/btn:max-w-xs md:group-hover/btn:ml-1.5 transition-all duration-300 ease-in-out whitespace-nowrap">
-          {isScheduleLocked ? 'Unlock' : 'Lock'}
+          {isScheduleLocked ? 'Unlock schedule' : 'Lock schedule'}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          const fields = new Set(activity.lockedFields || []);
+          if (isActivityLocked) fields.delete('all');
+          else fields.add('all');
+          onEdit?.({ ...activity, locked: !isActivityLocked, lockedFields: Array.from(fields) });
+        }}
+        className={`${actionButtonClass} ${isActivityLocked ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300' : 'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+        aria-label={isActivityLocked ? `Unlock entire activity ${activity.name}` : `Lock entire activity ${activity.name}`}
+      >
+        {isActivityLocked ? <Unlock className="w-3 h-3 shrink-0" /> : <Lock className="w-3 h-3 shrink-0" />}
+        <span className="max-w-xs ml-1.5 md:max-w-0 md:ml-0 md:overflow-hidden md:group-hover/btn:max-w-xs md:group-hover/btn:ml-1.5 transition-all duration-300 ease-in-out whitespace-nowrap">
+          {isActivityLocked ? 'Unlock activity' : 'Lock activity'}
         </span>
       </button>
       <button
@@ -759,7 +777,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="font-bold text-lg text-slate-800 dark:text-white group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">{activity.name}</h4>
-            {isScheduleLocked && <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-300" aria-label="Schedule locked" />}
+            {(isScheduleLocked || isActivityLocked) && <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-300" aria-label={isActivityLocked ? 'Activity locked' : 'Schedule locked'} />}
             {activityRating !== undefined && (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                 <Star className="w-3 h-3 fill-current" />
