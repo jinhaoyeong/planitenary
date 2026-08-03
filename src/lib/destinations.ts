@@ -112,10 +112,19 @@ const normalize = (value: string) => value.trim().toLowerCase();
 
 export const listCountries = (): CountryProfile[] => COUNTRIES;
 
-/** Regional-indicator flag for an ISO 3166-1 alpha-2 code. */
+/**
+ * ISO 3166-1 alpha-2 code for display marks.
+ * Prefer the `CountryMark` UI component over emoji flags — flag emoji render
+ * inconsistently (colourful icons on iOS, letter pairs on many desktops).
+ */
+export function countryCodeLabel(code: string): string {
+  if (!code || code.length !== 2) return '';
+  return code.toUpperCase();
+}
+
+/** @deprecated Use `CountryMark` / `countryCodeLabel` — emoji flags are platform-inconsistent. */
 export function countryFlag(code: string): string {
-  if (!code || code.length !== 2) return '🌍';
-  return String.fromCodePoint(...[...code.toUpperCase()].map((letter) => 0x1f1a5 + letter.charCodeAt(0)));
+  return countryCodeLabel(code) || '·';
 }
 
 /** Ranked country matches for the picker: prefix hits first, then contains. */

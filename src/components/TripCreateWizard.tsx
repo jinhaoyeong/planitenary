@@ -10,7 +10,8 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { countryFlag, findCountry, type CountryProfile, type PlaceSuggestion } from '../lib/destinations';
+import { findCountry, type CountryProfile, type PlaceSuggestion } from '../lib/destinations';
+import { CountryMark } from './ui/CountryMark';
 import { CURRENCIES } from '../lib/currencyCatalog';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import {
@@ -339,9 +340,11 @@ export function TripCreateWizard({
                 </label>
                 <CountryPicker value={countryCode} onChange={selectCountry} />
                 {selectedCountry && (
-                  <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                    {countryFlag(selectedCountry.code)} Money there is {selectedCountry.currency}, and the handbook will
-                    pick up its colours.
+                  <p className="text-xs flex items-start gap-2" style={{ color: 'var(--ink-muted)' }}>
+                    <CountryMark code={selectedCountry.code} compact />
+                    <span>
+                      Money there is {selectedCountry.currency}, and the handbook will pick up its colours.
+                    </span>
                   </p>
                 )}
               </div>

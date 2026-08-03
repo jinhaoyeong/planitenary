@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
-import { countryFlag, findCountry, searchCountries, type CountryProfile } from '../../lib/destinations';
+import { findCountry, searchCountries, type CountryProfile } from '../../lib/destinations';
+import { CountryMark } from './CountryMark';
 
 interface CountryPickerProps {
   value: string;
@@ -71,8 +72,8 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="flex items-center gap-2 min-w-0">
-          <span aria-hidden="true">{selected ? countryFlag(selected.code) : '🌍'}</span>
+        <span className="flex items-center gap-2.5 min-w-0">
+          <CountryMark code={selected?.code} />
           <span className="truncate" style={{ color: selected ? 'var(--ink)' : 'var(--ink-muted)' }}>
             {selected ? selected.name : placeholder}
           </span>
@@ -138,10 +139,12 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
                     role="option"
                     aria-selected={active}
                   >
-                    <span aria-hidden="true">{countryFlag(country.code)}</span>
+                    <CountryMark code={country.code} compact />
                     <span className="flex-1 text-sm font-medium truncate">{country.name}</span>
-                    <span className="text-xs" style={{ color: 'var(--ink-muted)' }}>{country.currency}</span>
-                    {active && <Check className="w-4 h-4" style={{ color: 'var(--accent)' }} />}
+                    <span className="text-xs tabular-nums tracking-wide" style={{ color: 'var(--ink-muted)' }}>
+                      {country.currency}
+                    </span>
+                    {active && <Check className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />}
                   </button>
                 </li>
               );

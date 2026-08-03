@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MIN_PLACE_QUERY_LENGTH,
+  countryCodeLabel,
   countryTimezone,
   createDestinationId,
   offlinePlace,
@@ -19,6 +20,13 @@ import {
 } from './tripProfile';
 
 describe('destination identity', () => {
+  it('returns stable ISO country marks instead of emoji flags', () => {
+    expect(countryCodeLabel('jp')).toBe('JP');
+    expect(countryCodeLabel('KR')).toBe('KR');
+    expect(countryCodeLabel('')).toBe('');
+    expect(countryCodeLabel('JPN')).toBe('');
+  });
+
   it('keeps places with the same city name apart by country', () => {
     const malaysia = manualDestination('Georgetown', 'Malaysia');
     const guyana = createDestinationId({ city: 'Georgetown', countryCode: 'GY' });
