@@ -1,14 +1,16 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Star } from 'lucide-react';
+import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Star, Lock, Unlock } from 'lucide-react';
 import { itineraries } from '../data';
 import type { Itinerary, Activity, ActivityType, DayPhoto } from '../data';
 import { clsx } from 'clsx';
 import { getPhotos, subscribeToPhotoChanges, syncAllPhotosFromRemote } from '../lib/photoStorage';
 import { PhotoGallery } from './PhotoGallery';
+import { PlannerPreview } from './PlannerPreview';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
+import { sanitizeTripProfile } from '../lib/tripProfile';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -617,6 +619,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
   }
 
   const actionButtonClass = "flex items-center px-2.5 py-1.5 rounded-lg text-xs font-bold border border-transparent transition-all duration-300 group/btn";
+  const isScheduleLocked = activity.lockedFields?.includes('schedule');
   const renderActionButtons = () => (
     <>
       <a
@@ -647,6 +650,20 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
           Photos
         </span>
       </a>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit?.({ ...activity, lockedFields: isScheduleLocked ? [] : ['schedule'] });
+        }}
+        className={`${actionButtonClass} ${isScheduleLocked ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+        aria-label={isScheduleLocked ? `Unlock ${activity.name}` : `Lock ${activity.name}`}
+      >
+        {isScheduleLocked ? <Unlock className="w-3 h-3 shrink-0" /> : <Lock className="w-3 h-3 shrink-0" />}
+        <span className="max-w-xs ml-1.5 md:max-w-0 md:ml-0 md:overflow-hidden md:group-hover/btn:max-w-xs md:group-hover/btn:ml-1.5 transition-all duration-300 ease-in-out whitespace-nowrap">
+          {isScheduleLocked ? 'Unlock' : 'Lock'}
+        </span>
+      </button>
       <button
         type="button"
         onClick={(e) => {
@@ -739,6 +756,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="font-bold text-lg text-slate-800 dark:text-white group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">{activity.name}</h4>
+            {isScheduleLocked && <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-300" aria-label="Schedule locked" />}
             {activityRating !== undefined && (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                 <Star className="w-3 h-3 fill-current" />
@@ -1015,6 +1033,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
 
   // Use the prop as the source of truth; parent handles persistence and Supabase sync
   const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
+  const plannerProfile = useMemo(() => sanitizeTripProfile(customItinerary.tripProfile), [customItinerary.tripProfile]);
 
   // Sync internal state when parent prop changes (from Supabase realtime or other sources)
   useEffect(() => {
@@ -1580,6 +1599,17 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
             )}
           </div>
         </div>
+
+        {plannerProfile && (
+          <PlannerPreview
+            itinerary={customItinerary}
+            profile={plannerProfile}
+            onItineraryChange={(next) => {
+              setCustomItinerary(next);
+              onItineraryChange?.(next);
+            }}
+          />
+        )}
 
         {/* Days Grid - Overview */}
         <DragDropContext onDragEnd={onDragEnd}>

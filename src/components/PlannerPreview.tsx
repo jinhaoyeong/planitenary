@@ -1,0 +1,204 @@
+import { useMemo, useState } from 'react';
+import { AlertTriangle, Check, Clock3, Lock, RefreshCw, RotateCcw, Sparkles, Undo2 } from 'lucide-react';
+import type { Itinerary } from '../data';
+import type { TripProfile } from '../lib/tripProfile';
+import {
+  applyItineraryProposal,
+  generateInitialItinerary,
+  optimiseDay,
+  optimiseTrip,
+  undoPlannerChange,
+  type ItineraryProposal,
+} from '../lib/tripIntelligence';
+import { profileRevision } from '../lib/identityFields';
+
+interface PlannerPreviewProps {
+  itinerary: Itinerary;
+  profile: TripProfile;
+  onItineraryChange: (itinerary: Itinerary) => void;
+}
+
+function ChangeToggle({ checked, disabled, onClick, label }: { checked: boolean; disabled?: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="w-5 h-5 rounded-md shrink-0 flex items-center justify-center transition-colors disabled:opacity-60"
+      style={{
+        backgroundColor: checked ? 'var(--accent)' : 'transparent',
+        border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+        color: 'var(--accent-ink, #fff)',
+      }}
+    >
+      {checked && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
+    </button>
+  );
+}
+
+const actionLabel = (proposal: ItineraryProposal) => {
+  if (proposal.action === 'generate') return 'Build my first itinerary';
+  if (proposal.action === 'optimise-day') return 'Optimise this day';
+  return 'Optimise whole trip';
+};
+
+export function PlannerPreview({ itinerary, profile, onItineraryChange }: PlannerPreviewProps) {
+  const [proposal, setProposal] = useState<ItineraryProposal | null>(null);
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState<string | null>(null);
+  const currentRevision = profileRevision(profile);
+  const isStale = Boolean(proposal && proposal.profileRevision !== currentRevision);
+  const lastHistory = itinerary.plannerHistory?.[itinerary.plannerHistory.length - 1];
+  const hasActivities = itinerary.days.some((day) => day.activities.length > 0);
+  const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.length > 0), [itinerary.days]);
+
+  const openProposal = (next: ItineraryProposal) => {
+    setProposal(next);
+    setSelection(new Set(next.changes.filter((change) => !change.protected).map((change) => change.id)));
+    setStatus(null);
+  };
+
+  const build = () => openProposal(generateInitialItinerary(itinerary, profile));
+  const optimiseWholeTrip = () => openProposal(optimiseTrip(itinerary, profile));
+  const optimiseSelectedDay = (dayNumber: number) => openProposal(optimiseDay(itinerary, profile, dayNumber));
+
+  const toggle = (id: string) => setSelection((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+
+  const apply = () => {
+    if (!proposal) return;
+    if (isStale) {
+      setStatus('Your trip details changed while this preview was open. Refresh it before applying.');
+      return;
+    }
+    const result = applyItineraryProposal(itinerary, proposal, selection);
+    onItineraryChange(result.itinerary);
+    setProposal(null);
+    setSelection(new Set());
+    setStatus(result.applied.length > 0
+      ? `${result.applied.length} changes applied. Your previous plan can be undone.`
+      : 'Nothing selected, so the itinerary is unchanged.');
+  };
+
+  const undo = () => {
+    if (!lastHistory) return;
+    onItineraryChange(undoPlannerChange(itinerary, lastHistory.id));
+    setStatus('The last planner change was undone.');
+  };
+
+  if (proposal) {
+    return (
+      <section className="rounded-3xl p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }} aria-live="polite">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="eyebrow m-0">Preview before applying</div>
+            <h3 className="font-display text-2xl mt-2">{actionLabel(proposal)}</h3>
+            <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--ink-muted)' }}>{proposal.reason}</p>
+          </div>
+          <Sparkles className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+        </div>
+
+        {isStale && (
+          <div className="flex items-start gap-2 rounded-2xl p-3 text-xs" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
+            <AlertTriangle className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
+            <span>Your trip details changed after this preview was created. Refresh to calculate a safe proposal.</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+          <div className="rounded-2xl p-3" style={{ border: '1px solid var(--border)' }}>
+            <span style={{ color: 'var(--ink-muted)' }}>Travel estimate</span>
+            <strong className="block mt-1">{proposal.travelMinutesBefore} → {proposal.travelMinutesAfter} min</strong>
+          </div>
+          <div className="rounded-2xl p-3" style={{ border: '1px solid var(--border)' }}>
+            <span style={{ color: 'var(--ink-muted)' }}>Changes</span>
+            <strong className="block mt-1">{proposal.changes.length}</strong>
+          </div>
+          <div className="rounded-2xl p-3" style={{ border: '1px solid var(--border)' }}>
+            <span style={{ color: 'var(--ink-muted)' }}>Confidence</span>
+            <strong className="block mt-1 capitalize">{proposal.confidence}</strong>
+          </div>
+        </div>
+
+        {proposal.changes.length === 0 ? (
+          <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>This plan already matches the current information.</p>
+        ) : (
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            {proposal.changes.map((change) => (
+              <div key={change.id} className="flex items-start gap-3 rounded-2xl p-3" style={{ border: `1px solid ${selection.has(change.id) ? 'var(--accent)' : 'var(--border)'}` }}>
+                <ChangeToggle
+                  checked={selection.has(change.id)}
+                  disabled={change.protected}
+                  onClick={() => toggle(change.id)}
+                  label={change.label}
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold">{change.label}</span>
+                    {change.protected && <Lock className="w-3.5 h-3.5" style={{ color: 'var(--ink-muted)' }} aria-label="Protected" />}
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>
+                    Day {change.dayNumber} · {change.current || 'New'} → {change.proposed || 'Updated'}
+                  </p>
+                  {change.protected && <p className="text-[11px] mt-1" style={{ color: 'var(--accent)' }}>Locked activity stays unchanged.</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="pill-btn pill-primary" onClick={apply} disabled={selection.size === 0 || isStale}>
+            <Check className="w-4 h-4" /> Apply selected
+          </button>
+          <button type="button" className="pill-btn pill-ghost" onClick={() => {
+            if (proposal.action === 'generate') build();
+            else if (proposal.action === 'optimise-trip') optimiseWholeTrip();
+            else optimiseSelectedDay(proposal.changes[0]?.dayNumber || dayOptions[0]?.day || 1);
+          }}>
+            <RefreshCw className="w-4 h-4" /> Refresh
+          </button>
+          <button type="button" className="pill-btn pill-ghost" onClick={() => setProposal(null)}>Cancel</button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-3xl p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="eyebrow m-0">Trip intelligence</div>
+          <h3 className="font-display text-2xl mt-2">Make the next day make sense.</h3>
+          <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
+            Preview a practical sequence, protect what matters, and keep every change reversible.
+          </p>
+        </div>
+        <Clock3 className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {!hasActivities && itinerary.days.length > 0 && (
+          <button type="button" className="pill-btn pill-primary" onClick={build}><Sparkles className="w-4 h-4" /> Build my first itinerary</button>
+        )}
+        {hasActivities && <button type="button" className="pill-btn pill-primary" onClick={optimiseWholeTrip}><Sparkles className="w-4 h-4" /> Optimise whole trip</button>}
+        {dayOptions.map((day) => (
+          <button key={day.day} type="button" className="pill-btn pill-soft" onClick={() => optimiseSelectedDay(day.day)}>
+            <RotateCcw className="w-4 h-4" /> Optimise day {day.day}
+          </button>
+        ))}
+        {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}
+      </div>
+
+      {status && <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{status}</p>}
+      {itinerary.days.length === 0 && <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Add travel dates first, then the planner can shape your days.</p>}
+    </section>
+  );
+}

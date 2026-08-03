@@ -2,13 +2,48 @@ import type { FieldSourceMap } from './lib/identityFields';
 
 export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 'travel' | 'flight' | 'cafe' | 'shop' | 'nightlife' | 'other';
 
+export type ActivitySource = 'manual' | 'generated' | 'imported';
+export type BookingStatus = 'none' | 'requested' | 'confirmed' | 'cancelled';
+
+export interface ActivityOpeningHours {
+  label?: string;
+  opensAt?: string;
+  closesAt?: string;
+  days?: number[];
+  sourceUpdatedAt?: string;
+}
+
+export interface ActivityGeneratedMetadata {
+  source: ActivitySource;
+  generatedAt: string;
+  reason?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  profileRevision?: string;
+}
+
+export interface ActivityCost {
+  amount: number;
+  currency: string;
+  basis?: 'per-person' | 'per-group' | 'fixed' | 'unknown';
+}
+
 export interface Activity {
+  id?: string;
   time: string;
+  durationMinutes?: number;
   name: string;
   description: string;
   type: ActivityType;
   location?: string;
-  cost?: string; // Estimate in RMB
+  cost?: string; // Legacy display value, retained for old records.
+  estimatedCost?: ActivityCost;
+  bookingStatus?: BookingStatus;
+  openingHours?: ActivityOpeningHours;
+  transportMinutes?: number;
+  transportMode?: string;
+  source?: ActivitySource;
+  lockedFields?: string[];
+  generatedMetadata?: ActivityGeneratedMetadata;
   rating?: number;
   coordinates?: [number, number]; // [lat, lng] for manual location search
   moodVotes?: {
@@ -38,6 +73,28 @@ export interface DayPlan {
   title: string;
   activities: Activity[];
   photos?: DayPhoto[];
+}
+
+export interface PlanningConstraints {
+  preferredStartTime?: string;
+  preferredEndTime?: string;
+  maxMainActivitiesPerDay?: number;
+  includeMealBreaks?: boolean;
+  includeRestBreaks?: boolean;
+  accommodationLocation?: string;
+  accommodationCoordinates?: [number, number];
+  mustDoActivityIds?: string[];
+  unavailableTimes?: Array<{ date?: string; start: string; end: string; reason?: string }>;
+}
+
+export interface PlannerChangeRecord {
+  id: string;
+  action: 'generate' | 'optimise-day' | 'optimise-trip';
+  createdAt: string;
+  summary: string;
+  affectedDayNumbers: number[];
+  beforeDays: DayPlan[];
+  afterDays: DayPlan[];
 }
 
 export interface Itinerary {
@@ -72,6 +129,11 @@ export interface Itinerary {
    * without a deliberate choice.
    */
   fieldSources?: FieldSourceMap;
+  schemaVersion?: number;
+  planningConstraints?: PlanningConstraints;
+  plannerSuggestions?: unknown[];
+  plannerHistory?: PlannerChangeRecord[];
+  lastPlannerProfileRevision?: string;
   days: DayPlan[];
 }
 

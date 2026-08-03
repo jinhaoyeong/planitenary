@@ -1,6 +1,18 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { itineraries } from './data';
-import type { Itinerary, DayPhoto, Activity, ActivityType, DayPlan } from './data';
+import type {
+  Itinerary,
+  DayPhoto,
+  Activity,
+  ActivityType,
+  ActivitySource,
+  ActivityCost,
+  ActivityGeneratedMetadata,
+  BookingStatus,
+  DayPlan,
+  PlanningConstraints,
+  PlannerChangeRecord,
+} from './data';
 import { ItineraryView } from './components/ItineraryView';
 import { Draft } from './components/Handbook';
 import { Budget } from './components/Budget';
@@ -92,6 +104,13 @@ interface CloudBackupVersion {
 }
 
 const VALID_ACTIVITY_TYPES: ActivityType[] = ['food', 'sight', 'culture', 'walk', 'nature', 'travel', 'flight', 'cafe', 'shop', 'nightlife', 'other'];
+const VALID_ACTIVITY_SOURCES: ActivitySource[] = ['manual', 'generated', 'imported'];
+const VALID_BOOKING_STATUSES: BookingStatus[] = ['none', 'requested', 'confirmed', 'cancelled'];
+
+const legacyActivityId = (name: string, time: string, location: string, index: number) => {
+  const seed = `${name}-${time}-${location}-${index}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `activity-legacy-${seed || index}`;
+};
 
 const normalizeStoredTime = (value: unknown, fallback = '09:00') => {
   if (typeof value !== 'string') return fallback;
@@ -106,7 +125,7 @@ const normalizeStoredTime = (value: unknown, fallback = '09:00') => {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
-const sanitizeActivity = (value: unknown, fallback: Activity): Activity => {
+const sanitizeActivity = (value: unknown, fallback: Activity, index = 0): Activity => {
   const source = value && typeof value === 'object' ? value as Partial<Activity> : {};
   const type = typeof source.type === 'string' && VALID_ACTIVITY_TYPES.includes(source.type as ActivityType)
     ? source.type as ActivityType
@@ -118,6 +137,59 @@ const sanitizeActivity = (value: unknown, fallback: Activity): Activity => {
       : undefined;
   const rating = typeof source.rating === 'number' && Number.isFinite(source.rating)
     ? Math.max(0, Math.min(10, Math.round(source.rating)))
+    : undefined;
+  const name = typeof source.name === 'string' && source.name.trim() ? source.name.trim() : fallback.name;
+  const time = normalizeStoredTime(source.time, fallback.time);
+  const location = typeof source.location === 'string' ? source.location : undefined;
+  const estimatedCost = source.estimatedCost && typeof source.estimatedCost === 'object'
+    ? (() => {
+        const raw = source.estimatedCost as unknown as Record<string, unknown>;
+        if (typeof raw.amount !== 'number' || !Number.isFinite(raw.amount) || typeof raw.currency !== 'string' || !raw.currency.trim()) return undefined;
+        const basis: ActivityCost['basis'] = raw.basis === 'per-person' || raw.basis === 'per-group' || raw.basis === 'fixed' || raw.basis === 'unknown'
+          ? raw.basis
+          : undefined;
+        return { amount: Math.max(0, raw.amount), currency: raw.currency.trim().toUpperCase(), basis };
+      })()
+    : undefined;
+  const openingHours = source.openingHours && typeof source.openingHours === 'object'
+    ? (() => {
+        const raw = source.openingHours as unknown as Record<string, unknown>;
+        const days = Array.isArray(raw.days) ? raw.days.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6) : undefined;
+        return {
+          label: typeof raw.label === 'string' ? raw.label.trim() : undefined,
+          opensAt: typeof raw.opensAt === 'string' ? raw.opensAt.trim() : undefined,
+          closesAt: typeof raw.closesAt === 'string' ? raw.closesAt.trim() : undefined,
+          days,
+          sourceUpdatedAt: typeof raw.sourceUpdatedAt === 'string' ? raw.sourceUpdatedAt : undefined,
+        };
+      })()
+    : undefined;
+  const sourceValue = typeof source.source === 'string' && VALID_ACTIVITY_SOURCES.includes(source.source as ActivitySource)
+    ? source.source as ActivitySource
+    : 'manual';
+  const bookingStatus = typeof source.bookingStatus === 'string' && VALID_BOOKING_STATUSES.includes(source.bookingStatus as BookingStatus)
+    ? source.bookingStatus as BookingStatus
+    : 'none';
+  const lockedFields = Array.isArray(source.lockedFields)
+    ? Array.from(new Set(source.lockedFields.filter((field): field is string => typeof field === 'string' && field.trim().length > 0).map((field) => field.trim())))
+    : [];
+  const generatedMetadata = source.generatedMetadata && typeof source.generatedMetadata === 'object'
+    ? (() => {
+        const raw = source.generatedMetadata as unknown as Record<string, unknown>;
+        const generatedSource = typeof raw.source === 'string' && VALID_ACTIVITY_SOURCES.includes(raw.source as ActivitySource)
+          ? raw.source as ActivitySource
+          : sourceValue;
+        const confidence: ActivityGeneratedMetadata['confidence'] = raw.confidence === 'high' || raw.confidence === 'medium' || raw.confidence === 'low'
+          ? raw.confidence
+          : undefined;
+        return {
+          source: generatedSource,
+          generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : new Date(0).toISOString(),
+          reason: typeof raw.reason === 'string' ? raw.reason : undefined,
+          confidence,
+          profileRevision: typeof raw.profileRevision === 'string' ? raw.profileRevision : undefined,
+        };
+      })()
     : undefined;
   const moodVotes = source.moodVotes && typeof source.moodVotes === 'object'
     ? (() => {
@@ -152,12 +224,26 @@ const sanitizeActivity = (value: unknown, fallback: Activity): Activity => {
       : undefined;
 
   return {
-    time: normalizeStoredTime(source.time, fallback.time),
-    name: typeof source.name === 'string' && source.name.trim() ? source.name.trim() : fallback.name,
+    id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : legacyActivityId(name, time, location || '', index),
+    time,
+    durationMinutes: typeof source.durationMinutes === 'number' && Number.isFinite(source.durationMinutes)
+      ? Math.max(5, Math.min(1440, Math.round(source.durationMinutes)))
+      : undefined,
+    name,
     description: typeof source.description === 'string' ? source.description : fallback.description,
     type,
-    location: typeof source.location === 'string' ? source.location : undefined,
+    location,
     cost: typeof source.cost === 'string' ? source.cost : undefined,
+    estimatedCost,
+    bookingStatus,
+    openingHours,
+    transportMinutes: typeof source.transportMinutes === 'number' && Number.isFinite(source.transportMinutes)
+      ? Math.max(0, Math.min(1440, Math.round(source.transportMinutes)))
+      : undefined,
+    transportMode: typeof source.transportMode === 'string' ? source.transportMode.trim() : undefined,
+    source: sourceValue,
+    lockedFields,
+    generatedMetadata,
     rating,
     coordinates,
     moodVotes,
@@ -189,10 +275,40 @@ const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, index: nu
     city: typeof source.city === 'string' && source.city.trim() ? source.city : fallback.city,
     title: typeof source.title === 'string' && source.title.trim() ? source.title : fallback.title,
     activities: sourceActivities.map((activity, activityIndex) =>
-      sanitizeActivity(activity, activityFallbacks[activityIndex] || activityFallbacks[activityFallbacks.length - 1])
+      sanitizeActivity(activity, activityFallbacks[activityIndex] || activityFallbacks[activityFallbacks.length - 1], activityIndex)
     ),
     photos: Array.isArray(source.photos) ? source.photos : fallback.photos,
   };
+};
+
+const sanitizePlanningConstraints = (value: unknown): PlanningConstraints | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Partial<PlanningConstraints>;
+  const coordinatePair = (candidate: unknown): [number, number] | undefined =>
+    Array.isArray(candidate) && candidate.length === 2 && candidate.every((item) => typeof item === 'number' && Number.isFinite(item))
+      ? [candidate[0], candidate[1]]
+      : undefined;
+  return {
+    preferredStartTime: typeof source.preferredStartTime === 'string' ? source.preferredStartTime : undefined,
+    preferredEndTime: typeof source.preferredEndTime === 'string' ? source.preferredEndTime : undefined,
+    maxMainActivitiesPerDay: typeof source.maxMainActivitiesPerDay === 'number' ? Math.max(1, Math.min(12, Math.round(source.maxMainActivitiesPerDay))) : undefined,
+    includeMealBreaks: typeof source.includeMealBreaks === 'boolean' ? source.includeMealBreaks : undefined,
+    includeRestBreaks: typeof source.includeRestBreaks === 'boolean' ? source.includeRestBreaks : undefined,
+    accommodationLocation: typeof source.accommodationLocation === 'string' ? source.accommodationLocation : undefined,
+    accommodationCoordinates: coordinatePair(source.accommodationCoordinates),
+    mustDoActivityIds: Array.isArray(source.mustDoActivityIds) ? source.mustDoActivityIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0) : undefined,
+    unavailableTimes: Array.isArray(source.unavailableTimes)
+      ? source.unavailableTimes.filter((entry): entry is NonNullable<PlanningConstraints['unavailableTimes']>[number] => Boolean(entry && typeof entry === 'object' && typeof entry.start === 'string' && typeof entry.end === 'string'))
+      : undefined,
+  };
+};
+
+const sanitizePlannerHistory = (value: unknown): PlannerChangeRecord[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  return value.slice(-10).filter((entry): entry is PlannerChangeRecord => Boolean(entry && typeof entry === 'object' && typeof (entry as PlannerChangeRecord).id === 'string' && Array.isArray((entry as PlannerChangeRecord).beforeDays) && Array.isArray((entry as PlannerChangeRecord).afterDays))).map((entry) => ({
+    ...entry,
+    affectedDayNumbers: Array.isArray(entry.affectedDayNumbers) ? entry.affectedDayNumbers : [],
+  }));
 };
 
 const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
@@ -219,6 +335,11 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     id: fallback.id,
     tripProfile: sanitizeTripProfile(source.tripProfile) ?? sanitizeTripProfile(fallback.tripProfile) ?? undefined,
     fieldSources: sanitizeFieldSources(source.fieldSources) ?? sanitizeFieldSources(fallback.fieldSources),
+    schemaVersion: typeof source.schemaVersion === 'number' ? Math.max(1, Math.round(source.schemaVersion)) : 1,
+    planningConstraints: sanitizePlanningConstraints(source.planningConstraints) ?? sanitizePlanningConstraints(fallback.planningConstraints),
+    plannerSuggestions: Array.isArray(source.plannerSuggestions) ? source.plannerSuggestions.slice(-20) : (fallback.plannerSuggestions || []),
+    plannerHistory: sanitizePlannerHistory(source.plannerHistory) ?? sanitizePlannerHistory(fallback.plannerHistory),
+    lastPlannerProfileRevision: typeof source.lastPlannerProfileRevision === 'string' ? source.lastPlannerProfileRevision : fallback.lastPlannerProfileRevision,
     brandTitle: optionalText(source.brandTitle, fallback.brandTitle),
     overviewEyebrow: optionalText(source.overviewEyebrow, fallback.overviewEyebrow),
     overviewDescription: optionalText(source.overviewDescription, fallback.overviewDescription),
