@@ -260,8 +260,13 @@ export function TripCreateWizard({
   const stepTitle = step.id === 'identity' && finalDestination
     ? `Your ${finalDestination} handbook is ready`
     : step.title;
+  const manualRecipe = resolvedProfile.visualDesign?.recipeOverride;
   const stepHint = step.id === 'identity'
-    ? `We created a ${resolvedVisualIdentity.recipe.label} design based on ${resolvedVisualIdentity.country.name || 'your destination'} and your travel preferences.`
+    ? manualRecipe
+      ? `You selected ${resolvedVisualIdentity.recipe.label} for your ${finalDestination || 'handbook'}.`
+      : resolvedProfile.visualDesign?.intensity === 'off'
+        ? 'Your handbook will use the standard app design.'
+        : `We created a ${resolvedVisualIdentity.recipe.label} design based on ${resolvedVisualIdentity.country.name || 'your destination'} and your travel preferences.`
     : step.hint;
   const whenStepValid = durationValidation.ok;
   const canContinue = step.id === 'where'

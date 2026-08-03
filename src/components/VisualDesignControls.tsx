@@ -105,9 +105,15 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
     resetAllDesignSettings();
   };
   const destinationLabel = resolved.country.name || profile.destinations[0]?.city || 'your destination';
-  const selectionDescription = visual.recipeOverride
-    ? `Manually selected ${resolved.recipe.label}.`
-    : `Chosen automatically for ${destinationLabel}.`;
+  const previewIsOff = visual.intensity === 'off';
+  const previewRecipeLabel = previewIsOff ? 'Standard handbook design' : resolved.recipe.label;
+  const selectionDescription = previewIsOff
+    ? 'Destination styling is turned off.'
+    : visual.recipeOverride
+      ? `Manually selected ${resolved.recipe.label}.`
+      : `Chosen automatically for ${destinationLabel}.`;
+  const previewCoverLayout = previewIsOff ? 'journal' : resolved.coverLayout;
+  const previewMotif = previewIsOff ? 'none' : resolved.motifSet;
   const previewCity = profile.destinations[0]?.city || resolved.country.name || 'Your trip';
   const selectedIntensity = VISUAL_INTENSITY_OPTIONS.find((option) => option.id === visual.intensity) ?? VISUAL_INTENSITY_OPTIONS[2];
   const previewStyle = {
@@ -281,23 +287,23 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
               aria-expanded={previewOpen}
               aria-controls={previewId}
             >
-              <span>{resolved.recipe.label} · {visual.intensity}</span>
+              <span>{previewRecipeLabel} · {visual.intensity}</span>
               <span>{previewOpen ? 'Hide' : 'Show'}</span>
             </button>
             <div id={previewId} className="visual-preview-body" hidden={!previewOpen}>
-              <p className="visual-preview-title font-display handbook-display text-2xl leading-tight mt-3">{resolved.recipe.label}</p>
+              <p className="visual-preview-title font-display handbook-display text-2xl leading-tight mt-3">{previewRecipeLabel}</p>
               <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>{selectionDescription}</p>
-              <div className="visual-preview-stage mt-3" data-cover-layout={resolved.coverLayout}>
+              <div className="visual-preview-stage mt-3" data-cover-layout={previewCoverLayout}>
                 <div
                   className="visual-preview-cover handbook-cover-frame"
                 >
-                  <div className="handbook-motif" data-motif={resolved.motifSet} aria-hidden="true" />
+                  <div className="handbook-motif" data-motif={previewMotif} aria-hidden="true" />
                   <span className="relative z-[2] text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>
                     {resolved.country.name}
                   </span>
                   <span className="relative z-[2] font-display handbook-display text-xl mt-1">{previewCity} Handbook</span>
                   <span className="relative z-[2] text-[10px] mt-1" style={{ color: 'var(--ink-muted)' }}>
-                    {resolved.country.name} · {resolved.recipe.label}
+                    {previewIsOff ? 'Standard app design' : `${resolved.country.name} · ${resolved.recipe.label}`}
                   </span>
                 </div>
                 <div className="visual-preview-itinerary">
