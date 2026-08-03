@@ -48,7 +48,7 @@ function recipeButtonRadius(shape: 'pill' | 'rounded' | 'square') {
  * Intensity = how strongly the app adapts.
  * Recipe = which approved design family is used.
  */
-export function VisualDesignControls({ profile, onChange, compact = false }: VisualDesignControlsProps) {
+export function VisualDesignControls({ profile, onChange }: VisualDesignControlsProps) {
   const visual = useMemo(
     () => sanitizeTripVisualDesign(profile.visualDesign, profile.applyVisualIdentity),
     [profile.visualDesign, profile.applyVisualIdentity],
@@ -58,9 +58,10 @@ export function VisualDesignControls({ profile, onChange, compact = false }: Vis
     () => resolveVisualIdentity(withVisualDesign(profile, { recipeOverride: null })),
     [profile],
   );
-  const [previewOpen, setPreviewOpen] = useState(!compact);
+  const [previewOpen, setPreviewOpen] = useState(true);
   const intensityLabelId = useId();
   const recipeLabelId = useId();
+  const previewId = useId();
   const intensityRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const recipeRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -72,7 +73,7 @@ export function VisualDesignControls({ profile, onChange, compact = false }: Vis
     onChange(withVisualDesign(profile, { recipeOverride }));
   };
 
-  const reset = () => {
+  const resetAllDesignSettings = () => {
     onChange(withVisualDesign(profile, {
       intensity: 'balanced',
       recipeOverride: null,
@@ -81,9 +82,19 @@ export function VisualDesignControls({ profile, onChange, compact = false }: Vis
   };
 
   const hasDesignChanges = visual.intensity !== 'balanced' || Boolean(visual.recipeOverride) || Boolean(visual.paletteOverride);
-  const resetLabel = visual.recipeOverride && visual.intensity === 'balanced'
+  const onlyRecipeOverride = Boolean(visual.recipeOverride)
+    && visual.intensity === 'balanced'
+    && !visual.paletteOverride;
+  const resetLabel = onlyRecipeOverride
     ? 'Use automatic design'
     : 'Reset all design settings';
+  const handleReset = () => {
+    if (onlyRecipeOverride) {
+      setRecipeOverride(null);
+      return;
+    }
+    resetAllDesignSettings();
+  };
   const destinationLabel = resolved.country.name || profile.destinations[0]?.city || 'your destination';
   const selectionDescription = visual.recipeOverride
     ? `Manually selected ${resolved.recipe.label}.`
@@ -200,18 +211,17 @@ export function VisualDesignControls({ profile, onChange, compact = false }: Vis
               <span id="visual-preview-label" className="eyebrow m-0">Live preview</span>
               <span className="ml-auto h-5 w-10 rounded-full" style={{ backgroundColor: 'var(--accent)' }} role="img" aria-label="Current accent colour" />
             </div>
-            {compact && (
-              <button
-                type="button"
-                className="visual-preview-toggle"
-                onClick={() => setPreviewOpen((current) => !current)}
-                aria-expanded={previewOpen}
-              >
-                <span>{resolved.recipe.label} · {visual.intensity}</span>
-                <span>{previewOpen ? 'Hide' : 'Show'}</span>
-              </button>
-            )}
-            <div className={`visual-preview-body${previewOpen ? '' : ' is-collapsed'}`}>
+            <button
+              type="button"
+              className="visual-preview-toggle"
+              onClick={() => setPreviewOpen((current) => !current)}
+              aria-expanded={previewOpen}
+              aria-controls={previewId}
+            >
+              <span>{resolved.recipe.label} · {visual.intensity}</span>
+              <span>{previewOpen ? 'Hide' : 'Show'}</span>
+            </button>
+            <div id={previewId} className="visual-preview-body" hidden={!previewOpen}>
               <p className="font-display handbook-display text-2xl leading-tight mt-3">{resolved.recipe.label}</p>
               <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>{selectionDescription}</p>
               <div className="visual-preview-stage mt-3" data-cover-layout={resolved.coverLayout}>
@@ -253,7 +263,7 @@ export function VisualDesignControls({ profile, onChange, compact = false }: Vis
       </div>
 
       {hasDesignChanges && (
-        <button type="button" className="pill-btn pill-ghost" onClick={reset}>
+        <button type="button" className="pill-btn pill-ghost" onClick={handleReset}>
           <RotateCcw className="w-4 h-4" />
           {resetLabel}
         </button>
