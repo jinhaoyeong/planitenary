@@ -8,6 +8,7 @@ import type {
   ActivitySource,
   ActivityCost,
   ActivityGeneratedMetadata,
+  ActivityLockedField,
   BookingStatus,
   DayPlan,
   PlanningConstraints,
@@ -106,10 +107,20 @@ interface CloudBackupVersion {
 const VALID_ACTIVITY_TYPES: ActivityType[] = ['food', 'sight', 'culture', 'walk', 'nature', 'travel', 'flight', 'cafe', 'shop', 'nightlife', 'other'];
 const VALID_ACTIVITY_SOURCES: ActivitySource[] = ['manual', 'generated', 'imported'];
 const VALID_BOOKING_STATUSES: BookingStatus[] = ['none', 'requested', 'confirmed', 'cancelled'];
+const VALID_LOCKED_FIELDS: ActivityLockedField[] = ['schedule', 'location', 'duration', 'cost', 'booking', 'all'];
 
-const legacyActivityId = (name: string, time: string, location: string, index: number) => {
-  const seed = `${name}-${time}-${location}-${index}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return `activity-legacy-${seed || index}`;
+const stableHash = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const legacyActivityId = (scope: string, name: string, time: string, location: string, index: number) => {
+  const seed = `${scope}|${name}|${time}|${location}|${index}`.toLowerCase();
+  return `activity-legacy-${stableHash(seed)}`;
 };
 
 const normalizeStoredTime = (value: unknown, fallback = '09:00') => {
@@ -125,7 +136,7 @@ const normalizeStoredTime = (value: unknown, fallback = '09:00') => {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
-const sanitizeActivity = (value: unknown, fallback: Activity, index = 0): Activity => {
+const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, scope = 'activity'): Activity => {
   const source = value && typeof value === 'object' ? value as Partial<Activity> : {};
   const type = typeof source.type === 'string' && VALID_ACTIVITY_TYPES.includes(source.type as ActivityType)
     ? source.type as ActivityType
@@ -171,7 +182,7 @@ const sanitizeActivity = (value: unknown, fallback: Activity, index = 0): Activi
     ? source.bookingStatus as BookingStatus
     : 'none';
   const lockedFields = Array.isArray(source.lockedFields)
-    ? Array.from(new Set(source.lockedFields.filter((field): field is string => typeof field === 'string' && field.trim().length > 0).map((field) => field.trim())))
+    ? Array.from(new Set(source.lockedFields.filter((field): field is ActivityLockedField => typeof field === 'string' && VALID_LOCKED_FIELDS.includes(field as ActivityLockedField)).map((field) => field as ActivityLockedField)))
     : [];
   const generatedMetadata = source.generatedMetadata && typeof source.generatedMetadata === 'object'
     ? (() => {
@@ -224,7 +235,7 @@ const sanitizeActivity = (value: unknown, fallback: Activity, index = 0): Activi
       : undefined;
 
   return {
-    id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : legacyActivityId(name, time, location || '', index),
+    id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : legacyActivityId(scope, name, time, location || '', index),
     time,
     durationMinutes: typeof source.durationMinutes === 'number' && Number.isFinite(source.durationMinutes)
       ? Math.max(5, Math.min(1440, Math.round(source.durationMinutes)))
@@ -242,7 +253,13 @@ const sanitizeActivity = (value: unknown, fallback: Activity, index = 0): Activi
       : undefined,
     transportMode: typeof source.transportMode === 'string' ? source.transportMode.trim() : undefined,
     source: sourceValue,
+    locked: source.locked === true,
     lockedFields,
+    fieldProvenance: source.fieldProvenance && typeof source.fieldProvenance === 'object'
+      ? Object.fromEntries(Object.entries(source.fieldProvenance).filter(([, value]) => typeof value === 'string' && VALID_ACTIVITY_SOURCES.includes(value as ActivitySource))) as Activity['fieldProvenance']
+      : undefined,
+    travelEstimateSource: source.travelEstimateSource === 'offline-straight-line' || source.travelEstimateSource === 'unknown' ? source.travelEstimateSource : undefined,
+    travelEstimateConfidence: source.travelEstimateConfidence === 'high' || source.travelEstimateConfidence === 'medium' || source.travelEstimateConfidence === 'low' ? source.travelEstimateConfidence : undefined,
     generatedMetadata,
     rating,
     coordinates,
@@ -259,7 +276,7 @@ const blankDay = (index: number): DayPlan => ({
   activities: [],
 });
 
-const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, index: number): DayPlan => {
+const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, index: number, tripId = 'trip'): DayPlan => {
   const source = value && typeof value === 'object' ? value as Partial<DayPlan> : {};
   // Generated trips have more days than the blank template they sanitize against.
   const fallback = fallbackDay ?? blankDay(index);
@@ -275,7 +292,7 @@ const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, index: nu
     city: typeof source.city === 'string' && source.city.trim() ? source.city : fallback.city,
     title: typeof source.title === 'string' && source.title.trim() ? source.title : fallback.title,
     activities: sourceActivities.map((activity, activityIndex) =>
-      sanitizeActivity(activity, activityFallbacks[activityIndex] || activityFallbacks[activityFallbacks.length - 1], activityIndex)
+      sanitizeActivity(activity, activityFallbacks[activityIndex] || activityFallbacks[activityFallbacks.length - 1], activityIndex, `${tripId}|day-${index + 1}`)
     ),
     photos: Array.isArray(source.photos) ? source.photos : fallback.photos,
   };
@@ -300,6 +317,8 @@ const sanitizePlanningConstraints = (value: unknown): PlanningConstraints | unde
     unavailableTimes: Array.isArray(source.unavailableTimes)
       ? source.unavailableTimes.filter((entry): entry is NonNullable<PlanningConstraints['unavailableTimes']>[number] => Boolean(entry && typeof entry === 'object' && typeof entry.start === 'string' && typeof entry.end === 'string'))
       : undefined,
+    maxBudgetAmount: typeof source.maxBudgetAmount === 'number' && Number.isFinite(source.maxBudgetAmount) ? Math.max(0, source.maxBudgetAmount) : undefined,
+    maxBudgetCurrency: typeof source.maxBudgetCurrency === 'string' ? source.maxBudgetCurrency.toUpperCase() : undefined,
   };
 };
 
@@ -314,7 +333,11 @@ const sanitizePlannerHistory = (value: unknown): PlannerChangeRecord[] | undefin
 const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
   const source = value && typeof value === 'object' ? value as Partial<Itinerary> : {};
   const sourceDays = Array.isArray(source.days) && source.days.length > 0 ? source.days : fallback.days;
-  const sanitizedDays = sourceDays.map((day, index) => sanitizeDay(day, fallback.days[index] || fallback.days[fallback.days.length - 1], index));
+  const sanitizedDays = sourceDays.map((day, index) => sanitizeDay(day, fallback.days[index] || fallback.days[fallback.days.length - 1], index, fallback.id));
+  const fallbackActivity = { time: '09:00', name: 'Unassigned activity', description: '', type: 'other' as ActivityType };
+  const unassignedActivities = Array.isArray(source.unassignedActivities)
+    ? source.unassignedActivities.map((activity, index) => sanitizeActivity(activity, fallbackActivity, index, `${fallback.id}|inbox`))
+    : (Array.isArray(fallback.unassignedActivities) ? fallback.unassignedActivities : []);
   const sanitizedCities = Array.isArray(source.cities)
     ? source.cities.filter((city): city is string => typeof city === 'string' && city.trim().length > 0)
     : [];
@@ -336,9 +359,11 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     tripProfile: sanitizeTripProfile(source.tripProfile) ?? sanitizeTripProfile(fallback.tripProfile) ?? undefined,
     fieldSources: sanitizeFieldSources(source.fieldSources) ?? sanitizeFieldSources(fallback.fieldSources),
     schemaVersion: typeof source.schemaVersion === 'number' ? Math.max(1, Math.round(source.schemaVersion)) : 1,
+    revision: typeof source.revision === 'number' ? Math.max(0, Math.round(source.revision)) : (fallback.revision || 0),
     planningConstraints: sanitizePlanningConstraints(source.planningConstraints) ?? sanitizePlanningConstraints(fallback.planningConstraints),
     plannerSuggestions: Array.isArray(source.plannerSuggestions) ? source.plannerSuggestions.slice(-20) : (fallback.plannerSuggestions || []),
     plannerHistory: sanitizePlannerHistory(source.plannerHistory) ?? sanitizePlannerHistory(fallback.plannerHistory),
+    unassignedActivities,
     lastPlannerProfileRevision: typeof source.lastPlannerProfileRevision === 'string' ? source.lastPlannerProfileRevision : fallback.lastPlannerProfileRevision,
     brandTitle: optionalText(source.brandTitle, fallback.brandTitle),
     overviewEyebrow: optionalText(source.overviewEyebrow, fallback.overviewEyebrow),
@@ -490,7 +515,10 @@ function App() {
     ? `itinerary-demo-${activeItineraryId}`
     : `itinerary-${user?.id ?? 'account'}-${activeItineraryId}`;
   const handleItineraryChange = (nextItinerary: Itinerary) => {
-    setCustomItinerary(sanitizeItinerary(nextItinerary, activeItinerary));
+    setCustomItinerary((current) => sanitizeItinerary({
+      ...nextItinerary,
+      revision: Math.max(nextItinerary.revision || 0, (current?.revision || 0) + 1),
+    }, activeItinerary));
   };
 
   const commitHeroText = (field: keyof Itinerary, value: string) => {

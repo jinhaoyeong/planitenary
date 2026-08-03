@@ -4,6 +4,7 @@ export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 't
 
 export type ActivitySource = 'manual' | 'generated' | 'imported';
 export type BookingStatus = 'none' | 'requested' | 'confirmed' | 'cancelled';
+export type ActivityLockedField = 'schedule' | 'location' | 'duration' | 'cost' | 'booking' | 'all';
 
 export interface ActivityOpeningHours {
   label?: string;
@@ -20,6 +21,8 @@ export interface ActivityGeneratedMetadata {
   confidence?: 'high' | 'medium' | 'low';
   profileRevision?: string;
 }
+
+export type ActivityFieldProvenance = Partial<Record<'time' | 'durationMinutes' | 'location' | 'estimatedCost' | 'openingHours' | 'transport', ActivitySource>>;
 
 export interface ActivityCost {
   amount: number;
@@ -41,8 +44,12 @@ export interface Activity {
   openingHours?: ActivityOpeningHours;
   transportMinutes?: number;
   transportMode?: string;
+  travelEstimateSource?: 'offline-straight-line' | 'unknown';
+  travelEstimateConfidence?: 'high' | 'medium' | 'low';
   source?: ActivitySource;
-  lockedFields?: string[];
+  locked?: boolean;
+  lockedFields?: ActivityLockedField[];
+  fieldProvenance?: ActivityFieldProvenance;
   generatedMetadata?: ActivityGeneratedMetadata;
   rating?: number;
   coordinates?: [number, number]; // [lat, lng] for manual location search
@@ -85,6 +92,18 @@ export interface PlanningConstraints {
   accommodationCoordinates?: [number, number];
   mustDoActivityIds?: string[];
   unavailableTimes?: Array<{ date?: string; start: string; end: string; reason?: string }>;
+  maxBudgetAmount?: number;
+  maxBudgetCurrency?: string;
+}
+
+export interface PlannerOperation {
+  kind: 'move' | 'time' | 'travel' | 'insert' | 'remove' | 'lock';
+  dayNumber: number;
+  activityId?: string;
+  beforeIndex?: number;
+  afterIndex?: number;
+  before?: unknown;
+  after?: unknown;
 }
 
 export interface PlannerChangeRecord {
@@ -93,6 +112,9 @@ export interface PlannerChangeRecord {
   createdAt: string;
   summary: string;
   affectedDayNumbers: number[];
+  operations?: PlannerOperation[];
+  beforeUnassignedActivities?: Activity[];
+  afterUnassignedActivities?: Activity[];
   beforeDays: DayPlan[];
   afterDays: DayPlan[];
 }
@@ -129,10 +151,12 @@ export interface Itinerary {
    * without a deliberate choice.
    */
   fieldSources?: FieldSourceMap;
+  revision?: number;
   schemaVersion?: number;
   planningConstraints?: PlanningConstraints;
   plannerSuggestions?: unknown[];
   plannerHistory?: PlannerChangeRecord[];
+  unassignedActivities?: Activity[];
   lastPlannerProfileRevision?: string;
   days: DayPlan[];
 }

@@ -50,7 +50,10 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
   const currentRevision = profileRevision(profile);
-  const isStale = Boolean(proposal && proposal.profileRevision !== currentRevision);
+  const isStale = Boolean(proposal && (
+    proposal.baseProfileRevision !== currentRevision
+    || proposal.baseItineraryRevision !== (itinerary.revision || 0)
+  ));
   const lastHistory = itinerary.plannerHistory?.[itinerary.plannerHistory.length - 1];
   const hasActivities = itinerary.days.some((day) => day.activities.length > 0);
   const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.length > 0), [itinerary.days]);
@@ -78,7 +81,13 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
       setStatus('Your trip details changed while this preview was open. Refresh it before applying.');
       return;
     }
-    const result = applyItineraryProposal(itinerary, proposal, selection);
+    const result = applyItineraryProposal(itinerary, profile, proposal, selection);
+    if (!result.ok) {
+      setStatus(result.reason === 'profile-changed'
+        ? 'Your trip profile changed while this preview was open. Refresh it before applying.'
+        : 'Your itinerary changed while this preview was open. Refresh it before applying.');
+      return;
+    }
     onItineraryChange(result.itinerary);
     setProposal(null);
     setSelection(new Set());
@@ -114,8 +123,9 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
           <div className="rounded-2xl p-3" style={{ border: '1px solid var(--border)' }}>
-            <span style={{ color: 'var(--ink-muted)' }}>Travel estimate</span>
+            <span style={{ color: 'var(--ink-muted)' }}>Approximate movement estimate</span>
             <strong className="block mt-1">{proposal.travelMinutesBefore} → {proposal.travelMinutesAfter} min</strong>
+            <span className="block mt-1 text-[11px]" style={{ color: 'var(--ink-muted)' }}>Offline straight-line model · {Math.round(proposal.coordinateCoverage * 100)}% coordinate coverage</span>
           </div>
           <div className="rounded-2xl p-3" style={{ border: '1px solid var(--border)' }}>
             <span style={{ color: 'var(--ink-muted)' }}>Changes</span>
@@ -126,6 +136,12 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
             <strong className="block mt-1 capitalize">{proposal.confidence}</strong>
           </div>
         </div>
+
+        {proposal.warnings.length > 0 && (
+          <div className="rounded-2xl p-3 text-xs" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
+            {proposal.warnings.join(' ')}{proposal.unknownLegCount > 0 ? ' Unknown legs are not presented as precise routing.' : ''}
+          </div>
+        )}
 
         {proposal.changes.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>This plan already matches the current information.</p>

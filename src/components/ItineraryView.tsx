@@ -619,7 +619,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
   }
 
   const actionButtonClass = "flex items-center px-2.5 py-1.5 rounded-lg text-xs font-bold border border-transparent transition-all duration-300 group/btn";
-  const isScheduleLocked = activity.lockedFields?.includes('schedule');
+  const isScheduleLocked = activity.locked === true || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule');
   const renderActionButtons = () => (
     <>
       <a
@@ -654,7 +654,10 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onEdit?.({ ...activity, lockedFields: isScheduleLocked ? [] : ['schedule'] });
+          const fields = new Set(activity.lockedFields || []);
+          if (isScheduleLocked) fields.delete('schedule');
+          else fields.add('schedule');
+          onEdit?.({ ...activity, lockedFields: Array.from(fields) });
         }}
         className={`${actionButtonClass} ${isScheduleLocked ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
         aria-label={isScheduleLocked ? `Unlock ${activity.name}` : `Lock ${activity.name}`}
@@ -1601,6 +1604,28 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
         </div>
 
         {plannerProfile && (
+          <>
+            {(customItinerary.unassignedActivities?.length || 0) > 0 && (
+              <section className="rounded-3xl p-4 sm:p-5 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="eyebrow m-0">Activity inbox</div>
+                    <h3 className="font-display text-2xl mt-2">Confirmed places waiting for a day.</h3>
+                  </div>
+                  <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
+                    {customItinerary.unassignedActivities?.length} unassigned
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {customItinerary.unassignedActivities?.map((activity) => (
+                    <span key={activity.id} className="rounded-full px-3 py-1.5 text-xs font-semibold" style={{ border: '1px solid var(--border)', color: 'var(--ink-muted)' }}>
+                      {activity.name}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Build my first itinerary will distribute these confirmed activities across available days. Nothing is discarded if it cannot be scheduled.</p>
+              </section>
+            )}
           <PlannerPreview
             itinerary={customItinerary}
             profile={plannerProfile}
@@ -1609,6 +1634,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
               onItineraryChange?.(next);
             }}
           />
+          </>
         )}
 
         {/* Days Grid - Overview */}
