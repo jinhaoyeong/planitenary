@@ -139,6 +139,22 @@ describe('visual identity intensity', () => {
     expect(resolved.recipeSource).toBe('override');
   });
 
+  it('keeps the recipe family independent from intensity application', () => {
+    const subtle = resolveVisualIdentity(withVisualDesign(profile(), {
+      intensity: 'subtle',
+      recipeOverride: 'nature-expedition',
+    }));
+    const balanced = resolveVisualIdentity(withVisualDesign(profile(), {
+      intensity: 'balanced',
+      recipeOverride: 'nature-expedition',
+    }));
+
+    expect(subtle.recipe.id).toBe('nature-expedition');
+    expect(subtle.cssVars['--card-radius']).toBeUndefined();
+    expect(balanced.recipe.id).toBe('nature-expedition');
+    expect(balanced.cssVars['--card-radius']).toBe(DESIGN_RECIPES['nature-expedition'].cardRadius);
+  });
+
   it('migrates legacy applyVisualIdentity=false to off', () => {
     const legacy = sanitizeTripProfile({
       ...profile(),

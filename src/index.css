@@ -702,6 +702,16 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   gap: 1.25rem;
 }
 
+.visual-design-layout.is-off .visual-preview-panel {
+  max-width: 38rem;
+}
+
+.visual-preview-title {
+  letter-spacing: var(--heading-tracking, -0.02em);
+  text-transform: var(--heading-transform, none);
+  font-size: calc(1.5rem * var(--heading-size-scale, 1));
+}
+
 .visual-design-controls {
   container-type: inline-size;
   container-name: visual-design;
@@ -898,12 +908,14 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
 .visual-preview-itinerary {
   position: relative;
   display: flex;
-  min-height: 6.1rem;
+  min-height: 7.2rem;
   flex-direction: column;
   overflow: hidden;
-  padding: 0.85rem;
+  padding: calc(0.65rem + var(--cover-frame-padding, 0px));
   background-color: var(--bg-elevated);
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border: var(--card-border-width, 1px) solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: var(--card-radius, 1rem);
+  box-shadow: var(--card-shadow, var(--shadow-lift));
 }
 
 .visual-preview-cover {
@@ -911,7 +923,7 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
 }
 
 .visual-preview-itinerary {
-  min-height: 5.9rem;
+  min-height: 6.5rem;
 }
 
 .visual-preview-button {
@@ -919,8 +931,26 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   align-items: center;
   align-self: flex-start;
   padding: 0.35rem 0.65rem;
+  border-radius: var(--button-radius, 9999px);
+  background-color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.65rem;
   font-weight: 700;
+}
+
+.visual-preview-cover > .handbook-motif {
+  opacity: var(--motif-opacity, 0);
+}
+
+.visual-preview-cover::after {
+  background: var(--image-overlay, transparent);
+}
+
+.visual-preview-cover > .font-display,
+.visual-preview-itinerary > .font-display {
+  letter-spacing: var(--heading-tracking, -0.02em);
+  text-transform: var(--heading-transform, none);
+  font-size: calc(1em * var(--heading-size-scale, 1));
 }
 
 @container visual-design (min-width: 32rem) {
@@ -943,6 +973,10 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   .visual-design-layout {
     grid-template-columns: minmax(0, 0.9fr) minmax(17rem, 1.1fr);
     align-items: start;
+  }
+
+  .visual-design-layout.is-off {
+    display: block;
   }
 
   .visual-preview-panel {

@@ -1,5 +1,6 @@
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Check, RotateCcw, Wand2 } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 import type { TripProfile } from '../lib/tripProfile';
 import { sanitizeTripVisualDesign } from '../lib/tripProfile';
 import {
@@ -56,14 +57,15 @@ const RECIPE_SHORT_DESCRIPTIONS: Record<DesignRecipeId, string> = {
  * Recipe = which approved design family is used.
  */
 export function VisualDesignControls({ profile, onChange }: VisualDesignControlsProps) {
+  const { theme } = useTheme();
   const visual = useMemo(
     () => sanitizeTripVisualDesign(profile.visualDesign, profile.applyVisualIdentity),
     [profile.visualDesign, profile.applyVisualIdentity],
   );
-  const resolved = useMemo(() => resolveVisualIdentity(profile), [profile]);
+  const resolved = useMemo(() => resolveVisualIdentity(profile, { theme }), [profile, theme]);
   const automaticResolved = useMemo(
-    () => resolveVisualIdentity(withVisualDesign(profile, { recipeOverride: null })),
-    [profile],
+    () => resolveVisualIdentity(withVisualDesign(profile, { recipeOverride: null }), { theme }),
+    [profile, theme],
   );
   const [previewOpen, setPreviewOpen] = useState(true);
   const intensityLabelId = useId();
@@ -108,6 +110,27 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
     : `Chosen automatically for ${destinationLabel}.`;
   const previewCity = profile.destinations[0]?.city || resolved.country.name || 'Your trip';
   const selectedIntensity = VISUAL_INTENSITY_OPTIONS.find((option) => option.id === visual.intensity) ?? VISUAL_INTENSITY_OPTIONS[2];
+  const previewStyle = {
+    '--accent': theme === 'dark' ? '#FF6B9A' : '#EE4D87',
+    '--accent-soft': theme === 'dark' ? '#3A1F2A' : '#FFE4EE',
+    '--accent-ink': '#0F0E0D',
+    '--card-radius': '1rem',
+    '--card-shadow': theme === 'dark'
+      ? '0 1px 0 rgba(255,255,255,0.04), 0 14px 30px -18px rgba(0,0,0,0.6)'
+      : '0 1px 0 rgba(15,14,13,0.04), 0 12px 28px -18px rgba(15,14,13,0.18)',
+    '--button-radius': '9999px',
+    '--heading-tracking': '-0.02em',
+    '--heading-transform': 'none',
+    '--heading-size-scale': '1',
+    '--motif-opacity': '0',
+    '--motif-opacity-surface': '0',
+    '--image-overlay': 'transparent',
+    '--cover-layout': 'journal',
+    '--card-border-width': '1px',
+    '--cover-frame-padding': '0px',
+    '--content-density': '1',
+    ...resolved.cssVars,
+  } as CSSProperties;
 
   const recipeChoices: Array<{ id: DesignRecipeId | null; label: string; hint: string }> = [
     {
@@ -162,8 +185,8 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
         </p>
       </section>
 
-      {visual.intensity !== 'off' && (
-        <div className="visual-design-layout">
+      <div className={`visual-design-layout${visual.intensity === 'off' ? ' is-off' : ''}`}>
+        {visual.intensity !== 'off' && (
           <div className="min-w-0">
             <section aria-labelledby={recipeLabelId}>
               <div id={recipeLabelId} className="eyebrow mb-2">Design recipe</div>
@@ -243,8 +266,9 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
               </div>
             </section>
           </div>
+        )}
 
-          <section className="visual-preview-panel" aria-labelledby="visual-preview-label">
+          <section className="visual-preview-panel" aria-labelledby="visual-preview-label" data-intensity={visual.intensity} style={previewStyle}>
             <div className="flex items-center gap-2">
               <Wand2 className="w-4 h-4" style={{ color: 'var(--accent)' }} aria-hidden="true" />
               <span id="visual-preview-label" className="eyebrow m-0">Live preview</span>
@@ -261,15 +285,11 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
               <span>{previewOpen ? 'Hide' : 'Show'}</span>
             </button>
             <div id={previewId} className="visual-preview-body" hidden={!previewOpen}>
-              <p className="font-display handbook-display text-2xl leading-tight mt-3">{resolved.recipe.label}</p>
+              <p className="visual-preview-title font-display handbook-display text-2xl leading-tight mt-3">{resolved.recipe.label}</p>
               <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>{selectionDescription}</p>
               <div className="visual-preview-stage mt-3" data-cover-layout={resolved.coverLayout}>
                 <div
-                  className="visual-preview-cover"
-                  style={{
-                    borderRadius: recipeButtonRadius(resolved.recipe.buttonShape),
-                    boxShadow: resolved.recipe.cardShadow,
-                  }}
+                  className="visual-preview-cover handbook-cover-frame"
                 >
                   <div className="handbook-motif" data-motif={resolved.motifSet} aria-hidden="true" />
                   <span className="relative z-[2] text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>
@@ -280,28 +300,18 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
                     {resolved.country.name} · {resolved.recipe.label}
                   </span>
                 </div>
-                <div
-                  className="visual-preview-itinerary"
-                  style={{
-                    borderRadius: resolved.recipe.cardRadius,
-                    boxShadow: resolved.recipe.cardShadow,
-                  }}
-                >
+                <div className="visual-preview-itinerary">
                   <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>Day 01</span>
                   <span className="font-display text-base mt-1">A first morning in {previewCity}</span>
                   <span className="text-[10px] mt-1" style={{ color: 'var(--ink-muted)' }}>Local streets, a slow start, and one good place to linger.</span>
-                  <span
-                    className="visual-preview-button mt-3"
-                    style={{ borderRadius: recipeButtonRadius(resolved.recipe.buttonShape), backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
-                  >
+                  <span className="visual-preview-button mt-3">
                     Start day 1
                   </span>
                 </div>
               </div>
             </div>
           </section>
-        </div>
-      )}
+      </div>
 
       {hasDesignChanges && (
         <button type="button" className="visual-reset-action" onClick={handleReset}>
