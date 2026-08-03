@@ -8,6 +8,7 @@ import {
   type CountryProfile,
 } from '../../lib/destinations';
 import { CountryMark } from './CountryMark';
+import { handleNestedListWheel, useOverlayScrollIsolation } from '../../lib/overlayScrollIsolation';
 
 interface CountryPickerProps {
   value: string;
@@ -28,11 +29,50 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const selection = useMemo(() => resolveCountrySelection(value), [value]);
   const results = useMemo(() => searchCountries(query, query ? 12 : 60), [query]);
+
+  useOverlayScrollIsolation(open);
+
+  useEffect(() => {
+    if (!open) return;
+    const list = listRef.current;
+    if (!list) return;
+
+    let lastTouchY = 0;
+    const onTouchStart = (event: TouchEvent) => {
+      lastTouchY = event.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const touchY = event.touches[0]?.clientY ?? lastTouchY;
+      const delta = lastTouchY - touchY;
+      lastTouchY = touchY;
+      if (list.scrollHeight <= list.clientHeight) {
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
+      const maxScroll = list.scrollHeight - list.clientHeight;
+      const next = list.scrollTop + delta;
+      if (next < 0 || next > maxScroll) {
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
+      list.scrollTop = next;
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+
+    list.addEventListener('touchstart', onTouchStart, { passive: true });
+    list.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      list.removeEventListener('touchstart', onTouchStart);
+      list.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [open, results.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -178,7 +218,16 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
       </button>
 
       {open && createPortal(
-        <div
+        <>
+          <div
+            className="country-picker-overlay fixed inset-0 z-[199]"
+            aria-hidden="true"
+            onWheel={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          />
+          <div
           ref={menuRef}
           className="country-picker-menu fixed z-[200] rounded-2xl overflow-hidden flex flex-col"
           data-lenis-prevent
@@ -222,18 +271,18 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
           </div>
 
           <ul
+            ref={listRef}
             id={listboxDomId}
             className="country-picker-results min-h-0 overflow-y-auto overscroll-contain py-1"
             style={{
               maxHeight: menuPosition.maxHeight,
-              touchAction: 'pan-y',
+              touchAction: 'none',
               WebkitOverflowScrolling: 'touch',
             }}
             data-lenis-prevent
             data-lenis-prevent-wheel
             data-lenis-prevent-touch
-            onWheel={(event) => event.stopPropagation()}
-            onTouchMove={(event) => event.stopPropagation()}
+            onWheel={handleNestedListWheel}
             role="listbox"
             aria-label="Countries"
             aria-activedescendant={results[highlightIndex] ? `country-option-${results[highlightIndex].code}` : undefined}
@@ -280,7 +329,8 @@ export function CountryPicker({ value, onChange, placeholder = 'Choose a country
               );
             })}
           </ul>
-        </div>,
+        </div>
+        </>,
         document.body,
       )}
     </div>
