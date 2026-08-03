@@ -45,6 +45,7 @@ import { Marquee } from './components/ui/Marquee';
 import { Pets } from './components/Pets';
 import { hapticMedium } from './lib/haptics';
 import { sanitizeTripProfile } from './lib/tripProfile';
+import { resolveVisualIdentity } from './lib/visualIdentity';
 import { markManualFieldEdits, sanitizeFieldSources } from './lib/identityFields';
 import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
@@ -441,6 +442,10 @@ function App() {
   const activeTripProfile = useMemo(
     () => sanitizeTripProfile(customItinerary?.tripProfile),
     [customItinerary?.tripProfile],
+  );
+  const visualIdentity = useMemo(
+    () => (activeTripProfile ? resolveVisualIdentity(activeTripProfile, { theme }) : null),
+    [activeTripProfile, theme],
   );
 
   // Currency edits are written back into the profile, which is the only place
@@ -1329,7 +1334,7 @@ function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-6 font-display text-5xl sm:text-6xl md:text-[5.5rem] lg:text-[6.5rem] leading-[0.95] tracking-tight"
+              className="mt-6 font-display handbook-display text-5xl sm:text-6xl md:text-[5.5rem] lg:text-[6.5rem] leading-[0.95] tracking-tight"
               style={{ color: 'var(--ink)' }}
             >
               <span
@@ -1396,10 +1401,16 @@ function App() {
             className="md:col-span-5 relative"
           >
             <div
-              className="editorial-card p-3 md:p-4 rotate-[-2deg]"
+              className="editorial-card p-3 md:p-4 rotate-[-2deg] relative overflow-hidden"
               style={{ backgroundColor: 'var(--bg-elevated)' }}
+              data-cover-layout={visualIdentity?.coverLayout || 'journal'}
             >
-              <div className="relative overflow-hidden rounded-2xl">
+              <div
+                className="handbook-motif"
+                data-motif={visualIdentity?.motifSet && visualIdentity.motifSet !== 'none' ? visualIdentity.motifSet : undefined}
+                aria-hidden="true"
+              />
+              <div className="relative overflow-hidden handbook-cover-frame rounded-2xl z-[1]">
                 {displayItinerary.cities.length > 0 ? (
                   <img
                     src={heroImages[activeItineraryId as keyof typeof heroImages] || defaultTravelHero}
@@ -1418,7 +1429,7 @@ function App() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center justify-between px-2 pt-3 pb-1">
+              <div className="relative z-[2] flex items-center justify-between px-2 pt-3 pb-1">
                 <span className="font-display-italic text-lg" style={{ color: 'var(--ink)' }}>
                   <span
                     contentEditable={isHomeHeroEditing}

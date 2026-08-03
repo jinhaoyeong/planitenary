@@ -43,6 +43,18 @@
   --border: #E8E1D5;
   --warn: #B45309;
   --shadow-lift: 0 1px 0 rgba(15,14,13,0.04), 0 12px 32px -16px rgba(15,14,13,0.18);
+
+  /* Adaptive Destination Design System — defaults (overridden per trip). */
+  --heading-tracking: -0.02em;
+  --heading-transform: none;
+  --card-radius: 1.75rem;
+  --card-shadow: var(--shadow-lift);
+  --button-radius: 9999px;
+  --content-density: 1;
+  --motif-opacity: 0;
+  --image-overlay: transparent;
+  --cover-layout: journal;
+  --motion-duration: 600ms;
 }
 
 .dark {
@@ -77,6 +89,17 @@ html {
 }
 
 html.dark { color-scheme: dark; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  .dark {
+    --motion-duration: 1ms;
+  }
+  .editorial-card:hover,
+  .trip-surface-card:hover {
+    transform: none;
+  }
+}
 
 body {
   background-color: var(--bg);
@@ -260,13 +283,71 @@ body {
 .editorial-card {
   background-color: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 1.75rem;
-  box-shadow: var(--shadow-lift);
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  border-radius: var(--card-radius, 1.75rem);
+  box-shadow: var(--card-shadow, var(--shadow-lift));
+  transition: transform var(--motion-duration, 0.25s) ease, box-shadow var(--motion-duration, 0.25s) ease;
 }
 .editorial-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 1px 0 rgba(15,14,13,0.06), 0 28px 48px -18px rgba(15,14,13,0.22);
+}
+
+/* Destination-aware day / surface cards — read recipe tokens without changing structure. */
+.trip-surface-card {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius, 1.5rem);
+  box-shadow: var(--card-shadow, var(--shadow-lift));
+  transition: transform var(--motion-duration, 0.25s) ease, box-shadow var(--motion-duration, 0.25s) ease;
+}
+
+.handbook-display {
+  letter-spacing: var(--heading-tracking, -0.02em);
+  text-transform: var(--heading-transform, none);
+}
+
+.handbook-cover-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--card-radius, 1.5rem);
+}
+.handbook-cover-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--image-overlay, transparent);
+  opacity: 1;
+  z-index: 1;
+}
+
+.handbook-motif {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--motif-opacity, 0);
+  z-index: 0;
+}
+.handbook-motif[data-motif='sakura-stamp'] {
+  background:
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--accent) 55%, transparent) 0 2px, transparent 3px),
+    radial-gradient(circle at 88% 22%, color-mix(in srgb, var(--accent) 40%, transparent) 0 1.5px, transparent 3px),
+    radial-gradient(circle at 80% 78%, color-mix(in srgb, var(--accent) 35%, transparent) 0 2px, transparent 3.5px);
+}
+.handbook-motif[data-motif='metro-grid'] {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 22%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.handbook-motif[data-motif='postcard-arch'] {
+  background:
+    radial-gradient(ellipse at 50% -10%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 55%);
+}
+.handbook-motif[data-motif='alpine-line'] {
+  background:
+    linear-gradient(135deg, transparent 40%, color-mix(in srgb, var(--accent) 18%, transparent) 41%, transparent 42%),
+    linear-gradient(160deg, transparent 55%, color-mix(in srgb, var(--accent) 14%, transparent) 56%, transparent 57%);
 }
 
 .pill-btn {
@@ -274,7 +355,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.5rem;
-  border-radius: 9999px;
+  border-radius: var(--button-radius, 9999px);
   font-weight: 600;
   font-size: 0.9rem;
   letter-spacing: 0.01em;

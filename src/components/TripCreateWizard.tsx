@@ -24,6 +24,7 @@ import { OptionChips } from './ui/OptionChips';
 import { CountryPicker } from './ui/CountryPicker';
 import { CitySearchInput } from './ui/CitySearchInput';
 import { ToggleRow } from './ui/ToggleRow';
+import { VisualDesignControls } from './VisualDesignControls';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -624,28 +625,24 @@ export function TripCreateWizard({
                   checked={profile.brandAfterDestination}
                   onChange={(checked) => update({ brandAfterDestination: checked })}
                 />
-                <ToggleRow
-                  label="Use the destination’s colours"
-                  description="Accent and highlights match where you are going."
-                  checked={profile.applyVisualIdentity}
-                  onChange={(checked) => update({ applyVisualIdentity: checked })}
-                />
               </div>
+
+              <VisualDesignControls
+                profile={resolvedProfile}
+                compact
+                onChange={(next) => {
+                  setProfile(next);
+                  if (next.tripCurrency !== autoCurrency) setCurrencyTouched(true);
+                }}
+              />
 
               <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center gap-2">
                   <Wand2 className="w-4 h-4" style={{ color: 'var(--accent)' }} />
-                  <span className="eyebrow m-0">Preview</span>
-                  {profile.applyVisualIdentity && (
-                    <span
-                      className="ml-auto h-5 w-10 rounded-full"
-                      style={{ backgroundColor: identity.palette.accent }}
-                      aria-hidden="true"
-                    />
-                  )}
+                  <span className="eyebrow m-0">Copy preview</span>
                 </div>
                 <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--accent)' }}>{identity.heroEyebrow}</p>
-                <p className="font-display text-3xl leading-tight">{identity.heroTitle}</p>
+                <p className="font-display handbook-display text-3xl leading-tight">{identity.heroTitle}</p>
                 <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>{identity.heroDescription}</p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   {identity.summaryChips.map((chip) => (
