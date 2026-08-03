@@ -26,6 +26,7 @@ import { CountryPicker } from './ui/CountryPicker';
 import { CitySearchInput } from './ui/CitySearchInput';
 import { ToggleRow } from './ui/ToggleRow';
 import { VisualDesignControls } from './VisualDesignControls';
+import { resolveVisualIdentity } from '../lib/visualIdentity';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -55,7 +56,8 @@ interface TripCreateWizardProps {
   onCreate: (profile: TripProfile) => void;
 }
 
-const DRAFT_KEY = 'trip-wizard-draft-v1';
+const DRAFT_KEY = 'trip-wizard-draft-v2';
+const LEGACY_DRAFT_KEY = 'trip-wizard-draft-v1';
 
 interface WizardDraft {
   stepIndex: number;
@@ -72,13 +74,16 @@ interface WizardDraft {
  */
 const readDraft = (): WizardDraft | null => {
   try {
-    const raw = localStorage.getItem(DRAFT_KEY);
+    const currentRaw = localStorage.getItem(DRAFT_KEY);
+    const raw = currentRaw ?? localStorage.getItem(LEGACY_DRAFT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<WizardDraft>;
     const profile = sanitizeTripProfile(parsed.profile);
     if (!profile) return null;
+    const parsedStepIndex = typeof parsed.stepIndex === 'number' ? parsed.stepIndex : 0;
+    const stepIndex = currentRaw || parsedStepIndex < 4 ? parsedStepIndex : parsedStepIndex + 1;
     return {
-      stepIndex: typeof parsed.stepIndex === 'number' ? parsed.stepIndex : 0,
+      stepIndex,
       profile,
       countryCode: typeof parsed.countryCode === 'string' ? parsed.countryCode : '',
       countryName: typeof parsed.countryName === 'string' ? parsed.countryName : '',
@@ -102,7 +107,8 @@ const STEPS = [
   { id: 'where', title: 'Where are you going?', hint: 'Add every city you plan to visit.' },
   { id: 'when', title: 'When is the trip?', hint: 'Dates set your days, nights, and season.' },
   { id: 'type', title: 'What kind of trip is it?', hint: 'Pick the ones that fit.' },
-  { id: 'style', title: 'What will you spend time on?', hint: 'Style and mood shape the writing.' },
+  { id: 'style', title: 'What will you spend time on?', hint: 'Choose the experiences you want to make room for.' },
+  { id: 'mood', title: 'What should it feel like?', hint: 'Set the mood for the writing in your handbook.' },
   { id: 'practical', title: 'How will you travel?', hint: 'Budget, transport, and where you stay.' },
   { id: 'identity', title: 'Your handbook identity', hint: 'Generated from everything above.' },
 ] as const;
@@ -242,10 +248,21 @@ export function TripCreateWizard({
     () => buildTripIdentity(resolvedProfile, { plannedDays: duration.days }),
     [resolvedProfile, duration.days],
   );
+  const resolvedVisualIdentity = useMemo(
+    () => resolveVisualIdentity(resolvedProfile),
+    [resolvedProfile],
+  );
 
   if (!open) return null;
 
   const step = STEPS[stepIndex];
+  const finalDestination = profile.destinations[0]?.city || resolvedVisualIdentity.country.name;
+  const stepTitle = step.id === 'identity' && finalDestination
+    ? `Your ${finalDestination} handbook is ready`
+    : step.title;
+  const stepHint = step.id === 'identity'
+    ? `We created a ${resolvedVisualIdentity.recipe.label} design based on ${resolvedVisualIdentity.country.name || 'your destination'} and your travel preferences.`
+    : step.hint;
   const whenStepValid = durationValidation.ok;
   const canContinue = step.id === 'where'
     ? profile.destinations.length > 0
@@ -292,8 +309,8 @@ export function TripCreateWizard({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="eyebrow">Step {stepIndex + 1} of {STEPS.length}</div>
-              <h2 className="font-display text-2xl sm:text-3xl mt-2">{step.title}</h2>
-              <p className="mt-1 text-sm" style={{ color: 'var(--ink-muted)' }}>{step.hint}</p>
+              <h2 className="font-display text-2xl sm:text-3xl mt-2">{stepTitle}</h2>
+              <p className="mt-1 text-sm" style={{ color: 'var(--ink-muted)' }}>{stepHint}</p>
             </div>
             <button
               type="button"
@@ -313,7 +330,14 @@ export function TripCreateWizard({
           </div>
         </header>
 
-        <div className="wizard-dialog-content flex-1 overflow-y-auto px-5 py-5 space-y-5">
+        <div
+          className="wizard-dialog-content flex-1 overflow-y-auto px-5 py-5 space-y-5"
+          data-lenis-prevent
+          data-lenis-prevent-wheel
+          data-lenis-prevent-touch
+          onWheel={(event) => event.stopPropagation()}
+          onTouchMove={(event) => event.stopPropagation()}
+        >
           {resumedDraft && (
             <div
               className="flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3"
@@ -340,7 +364,7 @@ export function TripCreateWizard({
                 </label>
                 <CountryPicker value={countryCode} onChange={selectCountry} />
                 {selectedCountry && (
-                  <p className="text-xs flex items-start gap-2" style={{ color: 'var(--ink-muted)' }}>
+                  <p className="text-xs flex items-center gap-2" style={{ color: 'var(--ink-muted)' }}>
                     <CountryMark code={selectedCountry.code} compact />
                     <span>
                       Money there is {selectedCountry.currency}, and the handbook will pick up its colours.
@@ -501,24 +525,25 @@ export function TripCreateWizard({
           )}
 
           {step.id === 'style' && (
-            <>
-              <div>
-                <div className="eyebrow mb-3">Travel style</div>
-                <OptionChips
-                  options={TRAVEL_STYLE_OPTIONS}
-                  selected={profile.styles}
-                  onToggle={(id) => toggle('styles', id)}
-                />
-              </div>
-              <div>
-                <div className="eyebrow mb-3">Mood</div>
-                <OptionChips
-                  options={MOOD_OPTIONS}
-                  selected={profile.moods}
-                  onToggle={(id) => toggle('moods', id)}
-                />
-              </div>
-            </>
+            <div>
+              <div className="eyebrow mb-3">Travel style</div>
+              <OptionChips
+                options={TRAVEL_STYLE_OPTIONS}
+                selected={profile.styles}
+                onToggle={(id) => toggle('styles', id)}
+              />
+            </div>
+          )}
+
+          {step.id === 'mood' && (
+            <div>
+              <div className="eyebrow mb-3">Mood</div>
+              <OptionChips
+                options={MOOD_OPTIONS}
+                selected={profile.moods}
+                onToggle={(id) => toggle('moods', id)}
+              />
+            </div>
           )}
 
           {step.id === 'practical' && (

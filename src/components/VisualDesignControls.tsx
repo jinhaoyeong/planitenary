@@ -43,6 +43,13 @@ function recipeButtonRadius(shape: 'pill' | 'rounded' | 'square') {
   return '0.25rem';
 }
 
+const RECIPE_SHORT_DESCRIPTIONS: Record<DesignRecipeId, string> = {
+  'quiet-editorial': 'Soft paper · calm editorial',
+  'modern-metropolitan': 'Sharp cards · modern city',
+  'warm-postcard': 'Warm paper · postcard style',
+  'nature-expedition': 'Crisp layout · outdoor feel',
+};
+
 /**
  * Settings for the Adaptive Destination Design System.
  * Intensity = how strongly the app adapts.
@@ -100,6 +107,7 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
     ? `Manually selected ${resolved.recipe.label}.`
     : `Chosen automatically for ${destinationLabel}.`;
   const previewCity = profile.destinations[0]?.city || resolved.country.name || 'Your trip';
+  const selectedIntensity = VISUAL_INTENSITY_OPTIONS.find((option) => option.id === visual.intensity) ?? VISUAL_INTENSITY_OPTIONS[2];
 
   const recipeChoices: Array<{ id: DesignRecipeId | null; label: string; hint: string }> = [
     {
@@ -123,93 +131,124 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
         </p>
       </div>
 
-      <div className="visual-design-layout">
-        <div className="space-y-5 min-w-0">
-          <section aria-labelledby={intensityLabelId}>
-            <div id={intensityLabelId} className="eyebrow mb-2">Design intensity</div>
-            <div className="visual-radio-grid visual-radio-grid--intensity" role="radiogroup" aria-labelledby={intensityLabelId}>
-              {VISUAL_INTENSITY_OPTIONS.map((option, index) => {
-                const active = visual.intensity === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    ref={(node) => { intensityRefs.current[index] = node; }}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    tabIndex={active ? 0 : -1}
-                    onClick={() => setIntensity(option.id)}
-                    onKeyDown={(event) => moveRadio(event, index, VISUAL_INTENSITY_OPTIONS.length, (next) => setIntensity(VISUAL_INTENSITY_OPTIONS[next].id), intensityRefs)}
-                    className="visual-choice-card text-left rounded-2xl px-3 py-3 min-h-14"
-                    data-selected={active ? 'true' : 'false'}
-                  >
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="block text-sm font-semibold">{option.label}</span>
-                      {active && <Check className="w-4 h-4 shrink-0" aria-hidden="true" />}
-                    </span>
-                    <span className="block text-[11px] mt-1 leading-snug" style={{ color: 'var(--ink-muted)' }}>
-                      {option.hint}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+      <section aria-labelledby={intensityLabelId}>
+        <div id={intensityLabelId} className="eyebrow mb-2">Design intensity</div>
+        <div className="visual-radio-grid visual-radio-grid--intensity" role="radiogroup" aria-labelledby={intensityLabelId}>
+          {VISUAL_INTENSITY_OPTIONS.map((option, index) => {
+            const active = visual.intensity === option.id;
+            return (
+              <button
+                key={option.id}
+                ref={(node) => { intensityRefs.current[index] = node; }}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                tabIndex={active ? 0 : -1}
+                onClick={() => setIntensity(option.id)}
+                onKeyDown={(event) => moveRadio(event, index, VISUAL_INTENSITY_OPTIONS.length, (next) => setIntensity(VISUAL_INTENSITY_OPTIONS[next].id), intensityRefs)}
+                className="visual-choice-card visual-intensity-option text-left rounded-2xl px-3 py-2.5"
+                data-selected={active ? 'true' : 'false'}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="block text-sm font-semibold">{option.label}</span>
+                  {active && <span className="visual-choice-check" aria-hidden="true"><Check className="w-3 h-3" /></span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="visual-intensity-explanation text-xs mt-2" style={{ color: 'var(--ink-muted)' }}>
+          <strong style={{ color: 'var(--ink)' }}>{selectedIntensity.label}</strong>{' '}{selectedIntensity.hint}
+        </p>
+      </section>
 
-          {visual.intensity !== 'off' && (
+      {visual.intensity !== 'off' && (
+        <div className="visual-design-layout">
+          <div className="min-w-0">
             <section aria-labelledby={recipeLabelId}>
               <div id={recipeLabelId} className="eyebrow mb-2">Design recipe</div>
-              <div className="visual-radio-grid visual-radio-grid--recipes" role="radiogroup" aria-labelledby={recipeLabelId}>
-                {recipeChoices.map((choice, index) => {
-                  const active = visual.recipeOverride === choice.id;
-                  const recipe = choice.id ? DESIGN_RECIPES[choice.id] : automaticResolved.recipe;
+              <div className="visual-recipe-group" role="radiogroup" aria-labelledby={recipeLabelId}>
+                {(() => {
+                  const active = visual.recipeOverride === null;
                   return (
                     <button
-                      key={choice.id ?? 'automatic'}
-                      ref={(node) => { recipeRefs.current[index] = node; }}
                       type="button"
                       role="radio"
                       aria-checked={active}
                       tabIndex={active ? 0 : -1}
-                      onClick={() => setRecipeOverride(choice.id)}
-                      onKeyDown={(event) => moveRadio(event, index, recipeChoices.length, (next) => setRecipeOverride(recipeChoices[next].id), recipeRefs)}
-                      className="visual-choice-card visual-recipe-card text-left rounded-2xl px-3 py-3"
+                      ref={(node) => { recipeRefs.current[0] = node; }}
+                      onClick={() => setRecipeOverride(null)}
+                      onKeyDown={(event) => moveRadio(event, 0, recipeChoices.length, (next) => setRecipeOverride(recipeChoices[next].id), recipeRefs)}
+                      className="visual-choice-card visual-automatic-card text-left rounded-2xl px-3 py-3"
                       data-selected={active ? 'true' : 'false'}
                     >
-                      <span className="flex items-start justify-between gap-2">
-                        <span className="block text-sm font-semibold">{choice.label}</span>
-                        {active && <Check className="w-4 h-4 shrink-0" aria-hidden="true" />}
-                      </span>
-                      <span className="block text-[11px] mt-1 leading-snug" style={{ color: 'var(--ink-muted)' }}>
-                        {choice.hint}
-                      </span>
-                      <span className="visual-recipe-sample mt-3" style={{ borderRadius: recipe.cardRadius }} aria-hidden="true">
-                        <span className="visual-recipe-sample-accent" style={{ backgroundColor: 'var(--accent)' }} />
-                        <span
-                          className="visual-recipe-sample-title"
-                          style={{
-                            borderRadius: recipeButtonRadius(recipe.buttonShape),
-                            textTransform: recipe.headingTransform,
-                            letterSpacing: recipe.headingTracking,
-                          }}
-                        >
-                          {recipe.label}
+                      <span className="flex items-start justify-between gap-3">
+                        <span>
+                          <span className="block text-sm font-semibold">Automatic <span className="visual-recommended-label">Recommended</span></span>
+                          <span className="block text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>
+                            {destinationLabel} currently suggests {automaticResolved.recipe.label}.
+                          </span>
+                          <span className="block text-[11px] mt-1" style={{ color: 'var(--ink-muted)' }}>
+                            It will continue adapting if your destination or trip style changes.
+                          </span>
                         </span>
+                        {active && <span className="visual-choice-check" aria-hidden="true"><Check className="w-3 h-3" /></span>}
                       </span>
                     </button>
                   );
-                })}
+                })()}
+                <div className="visual-manual-heading">Or choose manually</div>
+                <div className="visual-radio-grid visual-radio-grid--recipes">
+                  {(Object.keys(DESIGN_RECIPES) as DesignRecipeId[]).map((id, index) => {
+                    const choiceIndex = index + 1;
+                    const active = visual.recipeOverride === id;
+                    const recipe = DESIGN_RECIPES[id];
+                    return (
+                      <button
+                        key={id}
+                        ref={(node) => { recipeRefs.current[choiceIndex] = node; }}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        tabIndex={active ? 0 : -1}
+                        onClick={() => setRecipeOverride(id)}
+                        onKeyDown={(event) => moveRadio(event, choiceIndex, recipeChoices.length, (next) => setRecipeOverride(recipeChoices[next].id), recipeRefs)}
+                        className="visual-choice-card visual-recipe-card text-left rounded-2xl px-3 py-2.5"
+                        data-selected={active ? 'true' : 'false'}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="block text-sm font-semibold">{recipe.label}</span>
+                          {active && <span className="visual-choice-check" aria-hidden="true"><Check className="w-3 h-3" /></span>}
+                        </span>
+                        <span className="block text-[11px] mt-1" style={{ color: 'var(--ink-muted)' }}>
+                          {RECIPE_SHORT_DESCRIPTIONS[id]}
+                        </span>
+                        <span className="visual-recipe-sample mt-2" style={{ borderRadius: recipe.cardRadius }} aria-hidden="true">
+                          <span className="visual-recipe-sample-accent" style={{ backgroundColor: 'var(--accent)' }} />
+                          <span
+                            className="visual-recipe-sample-title"
+                            style={{
+                              borderRadius: recipeButtonRadius(recipe.buttonShape),
+                              textTransform: recipe.headingTransform,
+                              letterSpacing: recipe.headingTracking,
+                            }}
+                          >
+                            {recipe.label}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </section>
-          )}
-        </div>
+          </div>
 
-        {visual.intensity !== 'off' && (
           <section className="visual-preview-panel" aria-labelledby="visual-preview-label">
             <div className="flex items-center gap-2">
               <Wand2 className="w-4 h-4" style={{ color: 'var(--accent)' }} aria-hidden="true" />
               <span id="visual-preview-label" className="eyebrow m-0">Live preview</span>
-              <span className="ml-auto h-5 w-10 rounded-full" style={{ backgroundColor: 'var(--accent)' }} role="img" aria-label="Current accent colour" />
+              <span className="visual-preview-accent-label">Accent <span className="visual-preview-accent-swatch" style={{ backgroundColor: 'var(--accent)' }} /></span>
             </div>
             <button
               type="button"
@@ -236,8 +275,10 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
                   <span className="relative z-[2] text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>
                     {resolved.country.name}
                   </span>
-                  <span className="relative z-[2] font-display handbook-display text-xl mt-1">{previewCity}</span>
-                  <span className="relative z-[2] text-[10px] mt-1" style={{ color: 'var(--ink-muted)' }}>A handbook shaped around your trip.</span>
+                  <span className="relative z-[2] font-display handbook-display text-xl mt-1">{previewCity} Handbook</span>
+                  <span className="relative z-[2] text-[10px] mt-1" style={{ color: 'var(--ink-muted)' }}>
+                    {resolved.country.name} · {resolved.recipe.label}
+                  </span>
                 </div>
                 <div
                   className="visual-preview-itinerary"
@@ -259,11 +300,11 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
               </div>
             </div>
           </section>
-        )}
-      </div>
+        </div>
+      )}
 
       {hasDesignChanges && (
-        <button type="button" className="pill-btn pill-ghost" onClick={handleReset}>
+        <button type="button" className="visual-reset-action" onClick={handleReset}>
           <RotateCcw className="w-4 h-4" />
           {resetLabel}
         </button>
