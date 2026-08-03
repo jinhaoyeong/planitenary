@@ -12,6 +12,7 @@ import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
 import { sanitizeTripProfile } from '../lib/tripProfile';
 import { declaredTripDays, longTripItineraryNotice } from '../lib/tripDuration';
+import { resolveVisualIdentity } from '../lib/visualIdentity';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -1056,6 +1057,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
   // Use the prop as the source of truth; parent handles persistence and Supabase sync
   const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
   const plannerProfile = useMemo(() => sanitizeTripProfile(customItinerary.tripProfile), [customItinerary.tripProfile]);
+  const visualIdentity = useMemo(
+    () => (plannerProfile ? resolveVisualIdentity(plannerProfile) : null),
+    [plannerProfile],
+  );
   const declaredDays = useMemo(
     () => (plannerProfile ? declaredTripDays(plannerProfile) : 0),
     [plannerProfile],
@@ -1704,13 +1709,21 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                       >
                         <div
                           className={clsx(
-                            "w-full h-full bg-white dark:bg-slate-900 p-6 rounded-3xl border shadow-sm transition-all group flex flex-col relative overflow-hidden",
-                            snapshot.isDragging 
-                              ? "border-rose-500 shadow-2xl scale-105 rotate-2" 
-                              : "border-slate-100 dark:border-slate-800 hover:shadow-xl hover:-translate-y-1"
+                            "w-full h-full trip-surface-card p-6 group flex flex-col relative overflow-hidden",
+                            snapshot.isDragging
+                              ? "shadow-2xl scale-105 rotate-2"
+                              : "hover:shadow-xl hover:-translate-y-1"
                           )}
+                          style={{
+                            borderColor: snapshot.isDragging ? 'var(--accent)' : undefined,
+                          }}
                         >
-                          <div className="flex justify-between items-start mb-3 md:mb-4 gap-2">
+                          <div
+                            className="handbook-motif"
+                            data-motif={visualIdentity?.motifSet && visualIdentity.motifSet !== 'none' ? visualIdentity.motifSet : undefined}
+                            aria-hidden="true"
+                          />
+                          <div className="flex justify-between items-start mb-3 md:mb-4 gap-2 relative z-[1]">
                             <div className="flex items-start md:items-center gap-2 md:gap-3 flex-wrap">
                               {isEditingMode && (
                                 <div 
@@ -1722,7 +1735,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                               )}
                               <div
                                 className={clsx(
-                                  "font-display text-5xl md:text-6xl leading-none whitespace-nowrap transition-transform origin-left",
+                                  "font-display handbook-display text-5xl md:text-6xl leading-none whitespace-nowrap transition-transform origin-left",
                                   !isEditingMode && "group-hover:scale-105 cursor-pointer"
                                 )}
                                 style={{ color: 'var(--accent)' }}

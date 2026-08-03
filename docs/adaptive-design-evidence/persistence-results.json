@@ -1,0 +1,273 @@
+{
+  "initial": {
+    "auto": "true",
+    "warm": "false",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Nature Expedition",
+    "chips": [
+      "intensity · balanced",
+      "recipe · nature-expedition",
+      "expedition",
+      "city"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(47, 111, 191)"
+      }
+    ]
+  },
+  "locked": {
+    "auto": "false",
+    "warm": "true",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Warm Postcard",
+    "chips": [
+      "intensity · balanced",
+      "recipe · warm-postcard",
+      "postcard",
+      "override"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(47, 111, 191)"
+      }
+    ]
+  },
+  "afterDest": {
+    "auto": "false",
+    "warm": "true",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Warm Postcard",
+    "chips": [
+      "intensity · balanced",
+      "recipe · warm-postcard",
+      "postcard",
+      "override"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(47, 111, 191)"
+      }
+    ]
+  },
+  "afterReset": {
+    "auto": "true",
+    "warm": "false",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Nature Expedition",
+    "chips": [
+      "intensity · balanced",
+      "recipe · nature-expedition",
+      "expedition",
+      "city"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(47, 111, 191)"
+      }
+    ]
+  },
+  "koreaState": {
+    "auto": "true",
+    "warm": "false",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Modern Metropolitan",
+    "chips": [
+      "intensity · balanced",
+      "recipe · modern-metropolitan",
+      "metro",
+      "city"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(90, 95, 207)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(255, 255, 255)"
+      }
+    ]
+  },
+  "back": {
+    "auto": "true",
+    "warm": "false",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Nature Expedition",
+    "chips": [
+      "intensity · balanced",
+      "recipe · nature-expedition",
+      "expedition",
+      "city"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(47, 111, 191)"
+      }
+    ]
+  },
+  "beforeReload": {
+    "auto": "false",
+    "warm": "true",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Warm Postcard",
+    "chips": [
+      "intensity · balanced",
+      "recipe · warm-postcard",
+      "postcard",
+      "override"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(47, 111, 191)"
+      }
+    ]
+  },
+  "afterReload": {
+    "auto": "true",
+    "warm": "false",
+    "quiet": "false",
+    "modern": "false",
+    "nature": "false",
+    "preview": "Nature Expedition",
+    "chips": [
+      "intensity · balanced",
+      "recipe · nature-expedition",
+      "expedition",
+      "city"
+    ],
+    "scenarioToolbar": [
+      {
+        "label": "Japan — Quiet Editorial",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Korea — Modern Metropolitan",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Italy — Warm Postcard",
+        "active": "rgb(255, 255, 255)"
+      },
+      {
+        "label": "Switzerland — Nature Expedition",
+        "active": "rgb(47, 111, 191)"
+      }
+    ]
+  },
+  "storageProof": {
+    "japanLockSurvivedReload": true,
+    "koreaStayedAutomatic": true,
+    "tripsIndependent": true
+  },
+  "assertions": {
+    "automaticResolvesNature": true,
+    "manualLockSelectsWarm": true,
+    "lockSurvivesDestinationChange": true,
+    "resetReturnsAutomatic": true,
+    "koreaIndependentAutomatic": true,
+    "switzerlandResetsOnScenarioSwitch": true,
+    "captureReloadResetsToAutomatic": true,
+    "durableStorageIndependent": true
+  }
+}

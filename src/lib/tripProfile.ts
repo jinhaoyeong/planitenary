@@ -32,6 +32,24 @@ export type TransportMode = 'car' | 'train' | 'plane' | 'walking' | 'public-tran
 export type StayType = 'hotel' | 'hostel' | 'airbnb' | 'resort';
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
+/** How strongly the handbook adapts to destination design recipes. */
+export type VisualIdentityIntensity = 'off' | 'subtle' | 'balanced' | 'immersive';
+
+export type DesignRecipeId =
+  | 'quiet-editorial'
+  | 'modern-metropolitan'
+  | 'warm-postcard'
+  | 'nature-expedition';
+
+/** Per-trip adaptive design controls. Stored on the profile. */
+export interface TripVisualDesign {
+  intensity: VisualIdentityIntensity;
+  /** When set, locks the recipe instead of auto-resolving. */
+  recipeOverride?: DesignRecipeId | null;
+  /** Reserved for a later Custom palette picker. */
+  paletteOverride?: string | null;
+}
+
 /**
  * A saved stop. Identity is a stable id rather than the city name, because
  * city names repeat across the world: Georgetown exists in Malaysia and in
@@ -70,8 +88,13 @@ export interface TripProfile {
   tripCurrency: string;
   /** When true the app brands the handbook after the destination. */
   brandAfterDestination: boolean;
-  /** Applies the destination's colour identity to the handbook. */
+  /**
+   * Legacy colour toggle. Kept in sync with visualDesign.intensity !== 'off'
+   * so older clients and stored trips keep working.
+   */
   applyVisualIdentity: boolean;
+  /** Adaptive destination design controls (intensity, optional recipe lock). */
+  visualDesign?: TripVisualDesign;
   createdAt: string;
 }
 
@@ -145,6 +168,65 @@ export const STAY_OPTIONS: OptionMeta<StayType>[] = [
   { id: 'resort', label: 'Resort', hint: 'Everything on site' },
 ];
 
+const VISUAL_INTENSITIES: VisualIdentityIntensity[] = ['off', 'subtle', 'balanced', 'immersive'];
+const DESIGN_RECIPE_IDS: DesignRecipeId[] = [
+  'quiet-editorial',
+  'modern-metropolitan',
+  'warm-postcard',
+  'nature-expedition',
+];
+
+export function isVisualIdentityIntensity(value: unknown): value is VisualIdentityIntensity {
+  return typeof value === 'string' && (VISUAL_INTENSITIES as string[]).includes(value);
+}
+
+export function isDesignRecipeId(value: unknown): value is DesignRecipeId {
+  return typeof value === 'string' && (DESIGN_RECIPE_IDS as string[]).includes(value);
+}
+
+/** Legacy colour toggle → intensity. Migrated trips stay Subtle; new trips use Balanced. */
+export function intensityFromLegacy(
+  applyVisualIdentity: boolean | undefined,
+  isNewTrip = false,
+): VisualIdentityIntensity {
+  if (applyVisualIdentity === false) return 'off';
+  return isNewTrip ? 'balanced' : 'subtle';
+}
+
+export function applyVisualIdentityFromIntensity(intensity: VisualIdentityIntensity): boolean {
+  return intensity !== 'off';
+}
+
+export function sanitizeTripVisualDesign(
+  value: unknown,
+  legacyApplyVisualIdentity?: boolean,
+): TripVisualDesign {
+  if (value && typeof value === 'object') {
+    const source = value as Partial<TripVisualDesign>;
+    const intensity = isVisualIdentityIntensity(source.intensity)
+      ? source.intensity
+      : intensityFromLegacy(legacyApplyVisualIdentity, false);
+    return {
+      intensity,
+      recipeOverride: isDesignRecipeId(source.recipeOverride) ? source.recipeOverride : null,
+      paletteOverride: typeof source.paletteOverride === 'string' && source.paletteOverride.trim()
+        ? source.paletteOverride.trim()
+        : null,
+    };
+  }
+  return {
+    intensity: intensityFromLegacy(legacyApplyVisualIdentity, false),
+    recipeOverride: null,
+    paletteOverride: null,
+  };
+}
+
+export const defaultVisualDesignForNewTrip = (): TripVisualDesign => ({
+  intensity: 'balanced',
+  recipeOverride: null,
+  paletteOverride: null,
+});
+
 export const createEmptyProfile = (homeCurrency = 'MYR'): TripProfile => ({
   version: 1,
   destinations: [],
@@ -160,6 +242,7 @@ export const createEmptyProfile = (homeCurrency = 'MYR'): TripProfile => ({
   tripCurrency: homeCurrency,
   brandAfterDestination: true,
   applyVisualIdentity: true,
+  visualDesign: defaultVisualDesignForNewTrip(),
   createdAt: new Date().toISOString(),
 });
 
@@ -394,6 +477,11 @@ export function sanitizeTripProfile(value: unknown): TripProfile | null {
     dayCount: typeof source.dayCount === 'number' && Number.isFinite(source.dayCount) ? source.dayCount : 0,
   });
 
+  const visualDesign = sanitizeTripVisualDesign(
+    source.visualDesign,
+    source.applyVisualIdentity !== false,
+  );
+
   return {
     ...base,
     destinations,
@@ -412,7 +500,8 @@ export function sanitizeTripProfile(value: unknown): TripProfile | null {
     homeCurrency: typeof source.homeCurrency === 'string' && source.homeCurrency.trim() ? source.homeCurrency.trim().toUpperCase() : base.homeCurrency,
     tripCurrency: typeof source.tripCurrency === 'string' && source.tripCurrency.trim() ? source.tripCurrency.trim().toUpperCase() : base.tripCurrency,
     brandAfterDestination: source.brandAfterDestination !== false,
-    applyVisualIdentity: source.applyVisualIdentity !== false,
+    applyVisualIdentity: applyVisualIdentityFromIntensity(visualDesign.intensity),
+    visualDesign,
     createdAt: typeof source.createdAt === 'string' ? source.createdAt : base.createdAt,
   };
 }

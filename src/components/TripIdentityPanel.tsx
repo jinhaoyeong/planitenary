@@ -13,6 +13,7 @@ import {
   validateTripDuration,
   withValidatedDuration,
 } from '../lib/tripDuration';
+import { VisualDesignControls } from './VisualDesignControls';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -249,13 +250,9 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
           checked={profile.brandAfterDestination}
           onChange={(checked) => update({ brandAfterDestination: checked })}
         />
-        <ToggleRow
-          label="Use the destination’s colours"
-          description="Applies as soon as you toggle it."
-          checked={profile.applyVisualIdentity}
-          onChange={(checked) => update({ applyVisualIdentity: checked })}
-        />
       </div>
+
+      <VisualDesignControls profile={profile} onChange={save} />
 
       <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
