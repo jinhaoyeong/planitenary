@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MIN_PLACE_QUERY_LENGTH,
   countryCodeLabel,
+  countryOptionLabel,
   countryTimezone,
   createDestinationId,
   offlinePlace,
   resetPlaceCache,
+  resolveCountrySelection,
+  searchCountries,
   searchPlaces,
 } from './destinations';
 import {
@@ -25,6 +28,34 @@ describe('destination identity', () => {
     expect(countryCodeLabel('KR')).toBe('KR');
     expect(countryCodeLabel('')).toBe('');
     expect(countryCodeLabel('JPN')).toBe('');
+  });
+
+  it('builds accessible country option labels', () => {
+    const japan = searchCountries('japan', 1)[0];
+    expect(countryOptionLabel(japan)).toBe('Japan, JPY');
+  });
+
+  it('searches countries by name, alias and ISO code', () => {
+    expect(searchCountries('japan', 3).map((country) => country.code)).toContain('JP');
+    expect(searchCountries('jp', 3).map((country) => country.code)).toContain('JP');
+    expect(searchCountries('uae', 3).map((country) => country.code)).toContain('AE');
+    expect(searchCountries('united arab', 3).map((country) => country.name)).toContain('United Arab Emirates');
+  });
+
+  it('resolves known and legacy country values for display', () => {
+    const known = resolveCountrySelection('JP');
+    expect(known.isKnown).toBe(true);
+    expect(known.displayName).toBe('Japan');
+    expect(known.displayCode).toBe('JP');
+    expect(known.currency).toBe('JPY');
+
+    const legacy = resolveCountrySelection('ZZ');
+    expect(legacy.isKnown).toBe(false);
+    expect(legacy.displayName).toBe('Saved country (ZZ)');
+    expect(legacy.displayCode).toBe('ZZ');
+
+    const empty = resolveCountrySelection('');
+    expect(empty.displayName).toBe('');
   });
 
   it('keeps places with the same city name apart by country', () => {

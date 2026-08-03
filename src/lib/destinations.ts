@@ -136,11 +136,70 @@ export function searchCountries(query: string, limit = 8): CountryProfile[] {
   const contains: CountryProfile[] = [];
   for (const country of COUNTRIES) {
     const name = normalize(country.name);
+    const code = normalize(country.code);
     const aliasHit = country.aliases?.some((alias) => normalize(alias).startsWith(needle));
-    if (name.startsWith(needle) || aliasHit || normalize(country.code) === needle) startsWith.push(country);
-    else if (name.includes(needle)) contains.push(country);
+    if (
+      name.startsWith(needle)
+      || aliasHit
+      || code === needle
+      || (needle.length >= 2 && code.startsWith(needle))
+    ) {
+      startsWith.push(country);
+    } else if (name.includes(needle) || code.includes(needle)) {
+      contains.push(country);
+    }
   }
   return [...startsWith, ...contains].slice(0, limit);
+}
+
+/** Screen-reader label for a country row: "Japan, JPY". */
+export function countryOptionLabel(country: CountryProfile): string {
+  return `${country.name}, ${country.currency}`;
+}
+
+export type CountrySelectionState = {
+  country: CountryProfile | null;
+  displayName: string;
+  displayCode: string | null;
+  currency: string | null;
+  isKnown: boolean;
+};
+
+/**
+ * Resolve a stored country code/name for display. Unknown legacy codes still
+ * render safely instead of breaking the picker.
+ */
+export function resolveCountrySelection(value: string | undefined | null): CountrySelectionState {
+  const country = findCountry(value);
+  if (country) {
+    return {
+      country,
+      displayName: country.name,
+      displayCode: country.code,
+      currency: country.currency,
+      isKnown: true,
+    };
+  }
+
+  const raw = (value || '').trim();
+  if (!raw) {
+    return {
+      country: null,
+      displayName: '',
+      displayCode: null,
+      currency: null,
+      isKnown: false,
+    };
+  }
+
+  const maybeCode = raw.length === 2 ? raw.toUpperCase() : null;
+  return {
+    country: null,
+    displayName: maybeCode ? `Saved country (${maybeCode})` : raw,
+    displayCode: maybeCode,
+    currency: null,
+    isKnown: false,
+  };
 }
 
 export function findCountry(query: string | undefined | null): CountryProfile | null {

@@ -1,5 +1,6 @@
 import { Globe } from 'lucide-react';
 import { clsx } from 'clsx';
+import { countryCodeLabel } from '../../lib/destinations';
 
 interface CountryMarkProps {
   /** ISO 3166-1 alpha-2 code. Omit or empty for the unset globe mark. */
@@ -15,8 +16,8 @@ interface CountryMarkProps {
  * desktop browsers — this keeps every device looking the same.
  */
 export function CountryMark({ code, className, compact = false }: CountryMarkProps) {
-  const normalized = code?.trim().toUpperCase();
-  if (!normalized || normalized.length !== 2) {
+  const normalized = countryCodeLabel(code || '');
+  if (!normalized) {
     return (
       <span
         className={clsx(
@@ -24,11 +25,6 @@ export function CountryMark({ code, className, compact = false }: CountryMarkPro
           compact ? 'h-7 w-7 rounded-lg' : 'h-8 w-8 rounded-xl',
           className,
         )}
-        style={{
-          backgroundColor: 'color-mix(in srgb, var(--ink) 6%, var(--bg))',
-          color: 'var(--ink-muted)',
-          border: '1px solid var(--border)',
-        }}
         aria-hidden="true"
       >
         <Globe className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} strokeWidth={1.75} />
@@ -43,12 +39,7 @@ export function CountryMark({ code, className, compact = false }: CountryMarkPro
         compact ? 'h-7 min-w-7 px-1.5 rounded-lg text-[10px]' : 'h-8 min-w-8 px-2 rounded-xl text-[11px]',
         className,
       )}
-      style={{
-        backgroundColor: 'color-mix(in srgb, var(--accent) 14%, var(--bg))',
-        color: 'var(--accent)',
-        border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border))',
-        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-      }}
+      style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
       aria-hidden="true"
     >
       {normalized}
