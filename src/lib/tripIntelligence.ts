@@ -611,6 +611,43 @@ export function repairConflicts(itinerary: Itinerary, profile: TripProfile): Iti
   );
 }
 
+/** Move the most expensive optional stop to the inbox for a reversible cost preview. */
+export function lowerCostTrip(itinerary: Itinerary, profile: TripProfile): ItineraryProposal {
+  const beforeDays = clone(itinerary.days);
+  const mustDo = new Set(itinerary.planningConstraints?.mustDoActivityIds || []);
+  const optionalCosts = beforeDays.flatMap((day) => day.activities
+    .filter((activity) => isPlaceActivity(activity) && !isLocked(activity) && !mustDo.has(activity.id || '') && activity.estimatedCost?.amount)
+    .map((activity) => activity));
+  const target = optionalCosts.sort((left, right) => (right.estimatedCost?.amount || 0) - (left.estimatedCost?.amount || 0))[0];
+  if (!target) {
+    return makeProposal(
+      itinerary,
+      profile,
+      'optimise-trip',
+      'No optional place has a known cost that can be reduced safely; no activity was removed or changed.',
+      beforeDays,
+      beforeDays,
+      itinerary.unassignedActivities || [],
+      itinerary.unassignedActivities || [],
+    );
+  }
+  const afterDays = beforeDays.map((day) => ({
+    ...day,
+    activities: day.activities.filter((activity) => activity.id !== target.id),
+  }));
+  const afterUnassignedActivities = [...(itinerary.unassignedActivities || []), target];
+  return makeProposal(
+    itinerary,
+    profile,
+    'optimise-trip',
+    `${activityLabel(target)} is the highest-cost optional stop with a known price. It is moved to the unassigned pool for your review; it is not deleted.`,
+    beforeDays,
+    afterDays,
+    itinerary.unassignedActivities || [],
+    afterUnassignedActivities,
+  );
+}
+
 export function applyItineraryProposal(
   itinerary: Itinerary,
   profile: TripProfile,
@@ -635,7 +672,14 @@ export function applyItineraryProposal(
   }
   const selectedDays = new Set(selectedChanges.map((change) => change.dayNumber));
   const selectedInboxIds = new Set(selectedChanges.filter((change) => change.kind === 'insert').map((change) => change.activityId));
-  const nextUnassigned = (itinerary.unassignedActivities || []).filter((activity) => !selectedInboxIds.has(activity.id));
+  const removedToInbox = selectedChanges
+    .filter((change) => change.kind === 'remove' && change.activityId)
+    .map((change) => proposal.beforeDays.find((day) => day.day === change.dayNumber)?.activities.find((activity) => activity.id === change.activityId))
+    .filter((activity): activity is Activity => Boolean(activity));
+  const nextUnassigned = [
+    ...(itinerary.unassignedActivities || []).filter((activity) => !selectedInboxIds.has(activity.id)),
+    ...removedToInbox.filter((activity) => !(itinerary.unassignedActivities || []).some((existing) => existing.id === activity.id)),
+  ];
   const days = itinerary.days.map((day) => {
     if (!selectedDays.has(day.day)) return day;
     const proposedDay = proposal.afterDays.find((candidate) => candidate.day === day.day);

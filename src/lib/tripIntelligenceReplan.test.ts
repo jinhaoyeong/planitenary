@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Itinerary } from '../data';
-import { relaxTrip, repairConflicts, replanDay } from './tripIntelligence';
+import { lowerCostTrip, relaxTrip, repairConflicts, replanDay } from './tripIntelligence';
 import type { TripProfile } from './tripProfile';
 
 const profile = (): TripProfile => ({
@@ -77,5 +77,15 @@ describe('replanDay', () => {
     const proposal = repairConflicts(source, profile());
     expect(proposal.reason).toContain('re-times');
     expect(proposal.changes.length).toBeGreaterThan(0);
+  });
+
+  it('moves the highest-cost optional place to the inbox instead of deleting it', () => {
+    const source = itinerary();
+    source.days[0].activities[1].estimatedCost = { amount: 80, currency: 'AUD' };
+    source.days[0].activities[2].estimatedCost = { amount: 140, currency: 'AUD' };
+    const proposal = lowerCostTrip(source, profile());
+    expect(proposal.reason).toContain('highest-cost optional stop');
+    expect(proposal.afterUnassignedActivities.some((activity) => activity.id === 'garden')).toBe(true);
+    expect(proposal.afterDays[0].activities.some((activity) => activity.id === 'garden')).toBe(false);
   });
 });

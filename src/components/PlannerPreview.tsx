@@ -8,6 +8,7 @@ import {
   generateInitialItinerary,
   optimiseDay,
   optimiseTrip,
+  lowerCostTrip,
   repairConflicts,
   replanDay,
   relaxTrip,
@@ -139,6 +140,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   };
   const relaxWholeTrip = () => openProposal(relaxTrip(itinerary, profile));
   const repairWholeTrip = () => openProposal(repairConflicts(itinerary, profile));
+  const lowerCostWholeTrip = () => openProposal(lowerCostTrip(itinerary, profile));
 
   const toggle = (id: string) => setSelection((current) => {
     const next = new Set(current);
@@ -340,7 +342,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
               <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 })}>Reduce walking load</button>
               <button type="button" className="pill-btn pill-soft" disabled title="Requires live place discovery and replacement candidates">Make it more local · Coming soon</button>
               <button type="button" className="pill-btn pill-soft" onClick={relaxWholeTrip}>Make it more relaxed</button>
-              <button type="button" className="pill-btn pill-soft" disabled title="Provider price coverage is incomplete">Lower the cost · Coming soon</button>
+              <button type="button" className="pill-btn pill-soft" onClick={lowerCostWholeTrip}>Lower the cost</button>
               <button type="button" className="pill-btn pill-soft" disabled={conflictCount === 0} title={conflictCount > 0 ? 'Preview deterministic conflict repair' : 'No opening-hours or overlap conflicts detected'} onClick={repairWholeTrip}>Fix conflicts{conflictCount > 0 ? ` · ${conflictCount} found` : ''}</button>
               {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}
             </div>
