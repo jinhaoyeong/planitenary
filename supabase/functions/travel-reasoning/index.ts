@@ -2,6 +2,38 @@ import { json, preflight, ProviderError, secrets } from '../_shared/providers.ts
 
 interface ReasoningBody { operation?: string; input?: unknown; }
 
+interface ResponseOutputItem {
+  type?: string;
+  content?: Array<{ type?: string; text?: string }>;
+}
+
+interface ResponsePayload {
+  /** Convenience field returned by SDKs; raw HTTP responses may omit it. */
+  output_text?: string;
+  output?: ResponseOutputItem[];
+}
+
+const outputTextFromResponse = (payload: ResponsePayload): string => {
+  if (typeof payload.output_text === 'string' && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  const parts = (payload.output || []).flatMap((item) => (item.content || [])
+    .filter((part) => part.type === 'output_text' && typeof part.text === 'string')
+    .map((part) => part.text!.trim()))
+    .filter(Boolean);
+  return parts.join('\n').trim();
+};
+
+const parseStructuredJson = (text: string): unknown => {
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new ProviderError('AI returned invalid structured JSON.');
+  }
+};
+
 const SYSTEM = `You are a travel evidence interpreter. You may summarise, classify, translate, and explain only the source-backed input you receive. Never invent a place, opening hour, price, route, queue, review, closure, or availability. Return valid JSON only.`;
 
 Deno.serve(async (request) => {
@@ -24,9 +56,10 @@ Deno.serve(async (request) => {
       }),
     });
     if (!response.ok) throw new ProviderError(`OpenAI responded ${response.status}`, response.status === 429 ? 429 : 502);
-    const payload = await response.json() as { output_text?: string };
-    if (!payload.output_text) throw new ProviderError('AI returned no structured output.');
-    return json({ operation: body.operation, result: JSON.parse(payload.output_text) });
+    const payload = await response.json() as ResponsePayload;
+    const outputText = outputTextFromResponse(payload);
+    if (!outputText) throw new ProviderError('AI returned no structured output.');
+    return json({ operation: body.operation, result: parseStructuredJson(outputText) });
   } catch (error) {
     const status = error instanceof ProviderError ? error.status : 502;
     return json({ error: error instanceof Error ? error.message : 'AI reasoning failed.' }, status);
