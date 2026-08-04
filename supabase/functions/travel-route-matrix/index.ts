@@ -8,6 +8,7 @@
  * presenting an invented duration as routing.
  */
 import { expiryFor, fetchJson, json, preflight, ProviderError, secrets } from '../_shared/providers.ts';
+import { parseAmapWalkingRoute, parseBaiduWalkingRoute } from '../_shared/regionalRoutes.ts';
 
 interface Point { placeId?: string; coordinates?: [number, number] }
 
@@ -17,6 +18,7 @@ interface MatrixBody {
   mode?: 'walking' | 'public-transport' | 'driving' | 'cycling';
   departureTime?: string;
   travelStartsInDays?: number;
+  provider?: 'google' | 'amap' | 'baidu';
 }
 
 const TRAVEL_MODES: Record<string, string> = {
@@ -37,6 +39,37 @@ const waypoint = (point: Point) => {
   }
   throw new ProviderError('Each point needs a placeId or coordinates.', 400);
 };
+
+const coordinate = (point: Point, provider: 'amap' | 'baidu') => {
+  if (!point.coordinates) throw new ProviderError('Regional routes require coordinates.', 400);
+  const [latitude, longitude] = point.coordinates;
+  return provider === 'amap' ? `${longitude},${latitude}` : `${latitude},${longitude}`;
+};
+
+async function regionalRoute(origin: Point, destination: Point, provider: 'amap' | 'baidu') {
+  if (provider === 'amap') {
+    const key = secrets.amap();
+    if (!key) throw new ProviderError('Amap routing is not configured.', 503);
+    const params = new URLSearchParams({
+      key,
+      origin: coordinate(origin, provider),
+      destination: coordinate(destination, provider),
+      output: 'JSON',
+    });
+    const payload = await fetchJson(`https://restapi.amap.com/v5/direction/walking?${params}`, {}, 8000);
+    return parseAmapWalkingRoute(payload);
+  }
+
+  const key = secrets.baidu();
+  if (!key) throw new ProviderError('Baidu routing is not configured.', 503);
+  const params = new URLSearchParams({
+    ak: key,
+    origin: coordinate(origin, provider),
+    destination: coordinate(destination, provider),
+  });
+  const payload = await fetchJson(`https://api.map.baidu.com/directionlite/v1/walking?${params}`, {}, 8000);
+  return parseBaiduWalkingRoute(payload);
+}
 
 interface MatrixElement {
   originIndex?: number;
@@ -62,12 +95,48 @@ Deno.serve(async (request) => {
     return json({ error: 'Shortlist the places before requesting a matrix.' }, 400);
   }
 
-  const key = secrets.google();
-  if (!key) return json({ error: 'Routing is not configured.' }, 503);
-
   const mode = TRAVEL_MODES[body.mode || 'public-transport'] || 'TRANSIT';
+  const regionalProvider = body.provider === 'amap' || body.provider === 'baidu' ? body.provider : undefined;
+
+  if (regionalProvider && body.mode && body.mode !== 'walking') {
+    return json({ error: 'Regional providers currently support walking routes only; public transit is not assumed.' }, 400);
+  }
+
+  const key = secrets.google();
+  if (!regionalProvider && !key) return json({ error: 'Routing is not configured.' }, 503);
 
   try {
+    if (regionalProvider) {
+      // Amap/Baidu expose point-to-point directions rather than Google-style
+      // matrices. Keep the cost bounded and leave the rest explicitly unknown.
+      const matrix = origins.map(() => destinations.map(() => ({ status: 'unknown' as const, source: regionalProvider as 'provider' })));
+      const maxRegionalPairs = 100;
+      const pairs: Array<{ originIndex: number; destinationIndex: number }> = [];
+      for (let originIndex = 0; originIndex < origins.length; originIndex += 1) {
+        for (let destinationIndex = 0; destinationIndex < destinations.length; destinationIndex += 1) {
+          if (pairs.length >= maxRegionalPairs) break;
+          pairs.push({ originIndex, destinationIndex });
+        }
+      }
+      let failedPairs = 0;
+      for (let offset = 0; offset < pairs.length; offset += 8) {
+        const batch = pairs.slice(offset, offset + 8);
+        const results = await Promise.all(batch.map(async ({ originIndex, destinationIndex }) => {
+          if (originIndex === destinationIndex) return { originIndex, destinationIndex, route: { durationMinutes: 0, distanceMeters: 0 } };
+          try {
+            return { originIndex, destinationIndex, route: await regionalRoute(origins[originIndex], destinations[destinationIndex], regionalProvider) };
+          } catch {
+            failedPairs += 1;
+            return { originIndex, destinationIndex, route: null };
+          }
+        }));
+        results.forEach(({ originIndex, destinationIndex, route }) => {
+          if (route) matrix[originIndex][destinationIndex] = { status: 'ok', source: 'provider', ...route } as never;
+        });
+      }
+      return json({ matrix, provider: regionalProvider, partial: origins.length * destinations.length > maxRegionalPairs, failedPairs, expiresAt: expiryFor('routeMatrix', body.travelStartsInDays) });
+    }
+
     const payload = await fetchJson('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
       method: 'POST',
       headers: {

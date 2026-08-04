@@ -465,6 +465,13 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     let weatherWarning: string | undefined;
     let eventsWarning: string | undefined;
     let currentEventNotes: string[] = [];
+    const regionalRouteProvider = capability.routes.provider === 'amap' || capability.routes.provider === 'baidu'
+      ? capability.routes.provider
+      : undefined;
+    const effectiveRouteMode = regionalRouteProvider ? 'walking' : (profile.transport.includes('public-transport') ? 'public-transport' : 'walking');
+    if (regionalRouteProvider && profile.transport.includes('public-transport')) {
+      routeWarning = 'The regional route provider currently supplies walking routes; transit time is not assumed.';
+    }
     const nextWeatherRiskDays: number[] = [];
     try {
       const selected = ranked
@@ -476,11 +483,18 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         const payload = await invokeTravelFunction('travel-route-matrix', {
           origins: selected.map((candidate) => ({ coordinates: candidate.coordinates })),
           destinations: selected.map((candidate) => ({ coordinates: candidate.coordinates })),
-          mode: profile.transport.includes('public-transport') ? 'public-transport' : 'walking',
+          mode: effectiveRouteMode,
+          provider: regionalRouteProvider,
           travelStartsInDays: profile.startDate
             ? Math.max(0, Math.ceil((new Date(profile.startDate).getTime() - Date.now()) / 86_400_000))
             : undefined,
-        }) as { matrix?: Array<Array<{ status?: string; durationMinutes?: number; distanceMeters?: number }>> };
+        }) as { matrix?: Array<Array<{ status?: string; durationMinutes?: number; distanceMeters?: number }>>; failedPairs?: number };
+        if ((payload as { partial?: boolean }).partial) {
+          routeWarning = 'The regional route provider returned a bounded partial matrix; remaining travel is estimated honestly.';
+        }
+        if ((payload.failedPairs || 0) > 0) {
+          routeWarning = 'Some regional routes were unavailable; those legs remain explicitly estimated.';
+        }
         const routeMap = new Map<string, RouteLeg>();
         payload.matrix?.forEach((row, originIndex) => row.forEach((cell, destinationIndex) => {
           if (cell.status !== 'ok' || !cell.durationMinutes || !cell.distanceMeters) return;
@@ -489,7 +503,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           if (from && to) routeMap.set(`${from.id}:${to.id}`, {
             durationMinutes: cell.durationMinutes,
             distanceMeters: cell.distanceMeters,
-            mode: profile.transport.includes('public-transport') ? 'public-transport' : 'walking',
+            mode: effectiveRouteMode,
             source: 'provider',
           });
         }));
