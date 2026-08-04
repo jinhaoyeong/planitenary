@@ -14,11 +14,11 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 | Function | Result | Evidence |
 | --- | --- | --- |
-| `travel-capabilities-live` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` reports Places, Reviews and YouTube available; the safe fixed-coordinate Routes probe returns false because Google currently responds 403; weather is available; events/China/social partners are false. |
-| `travel-discover-live` Melbourne | HTTP 502 | The deployed function now surfaces `Provider responded 400`; the local Google key succeeds against the identical Places request, so the Supabase `GOOGLE_MAPS_API_KEY` secret still needs to be replaced/checked. |
-| `travel-evidence-live` Melbourne | HTTP 200 | Returned 5 Google Places review documents and 8 YouTube documents with source URLs and retrieval timestamps. |
+| `travel-capabilities-live` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` now reports Places, Reviews, YouTube and Routes available; weather is available; events/China/social partners are false. |
+| `travel-discover-live` Melbourne | HTTP 200 | Returned current Google Places records including Fed Square, coordinates, rating, address and retrieval timestamp. |
+| `travel-evidence-live` Melbourne | HTTP 200 | Returned Google Places review documents and YouTube documents with source URLs and retrieval timestamps. |
 | `travel-weather` Melbourne | HTTP 200 | Returned Open-Meteo daily forecast and expiry timestamp. |
-| `travel-route-matrix` | HTTP 502 | Underlying Google response is HTTP 403; the capability endpoint now suppresses Routes from the live UI until this is fixed. |
+| `travel-route-matrix` | HTTP 200 | Returned a real walking route of 15 minutes and 1,095 metres for the fixed Melbourne verification coordinates. |
 | `travel-events` | HTTP 503 | `TICKETMASTER_API_KEY` is not configured. |
 | `travel-discover-live` Beijing | HTTP 503 | Neither `AMAP_API_KEY` nor `BAIDU_API_KEY` is configured. |
 | `travel-reasoning` | HTTP 503 | `OPENAI_API_KEY` is not configured. |
@@ -45,15 +45,15 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
   horizontal overflow.
 - Mobile discovery failure remained reversible and did not change the trip;
   the UI displayed `Live discovery unavailable: Provider responded 400`.
-- These checks used the existing local/demo session. A signed-in cloud-user
-  acceptance run, live place results, and mobile itinerary-building with real
-  provider candidates remain unproven until the Supabase Google secret is
-  corrected.
+- These checks used the existing local/demo session. Live provider candidates
+  are now available from Supabase; a signed-in cloud-user acceptance run and
+  mobile itinerary-building with live candidates still need a fresh browser
+  session to be recorded.
 
 ## Remaining external proof
 
-1. Replace/check the Supabase Edge Function secret `GOOGLE_MAPS_API_KEY` with the verified Google key. The local direct checks returned HTTP 200 for Places, YouTube and Routes; the current deployed discovery request returns HTTP 400.
-2. Enable Google Routes API in the Google Cloud project that owns `GOOGLE_MAPS_API_KEY` and recheck the capability probe.
+1. Keep the verified single `GOOGLE_MAPS_API_KEY` configured in Supabase Edge Function secrets. Live Places, YouTube and Routes calls now succeed.
+2. The same key was independently verified against Geocoding and the Maps JavaScript loader (HTTP 200). Do not expose this server-side key in browser code.
 3. Add `TICKETMASTER_API_KEY` to Supabase Edge Function secrets.
 4. Add `AMAP_API_KEY` or `BAIDU_API_KEY` to Supabase Edge Function secrets.
 5. Add `OPENAI_API_KEY` to Supabase Edge Function secrets.

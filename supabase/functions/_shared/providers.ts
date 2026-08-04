@@ -91,10 +91,20 @@ export async function fetchJson(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
+    const responseText = await response.text();
     if (!response.ok) {
-      throw new ProviderError(`Provider responded ${response.status}`, response.status === 429 ? 429 : 502);
+      let detail = '';
+      try {
+        const payload = JSON.parse(responseText) as { error?: { message?: string } | string };
+        const providerMessage = typeof payload.error === 'string' ? payload.error : payload.error?.message;
+        if (providerMessage) detail = `: ${providerMessage.slice(0, 240)}`;
+      } catch {
+        const plain = responseText.trim().replace(/\s+/g, ' ');
+        if (plain) detail = `: ${plain.slice(0, 240)}`;
+      }
+      throw new ProviderError(`Provider responded ${response.status}${detail}`, response.status === 429 ? 429 : 502);
     }
-    return await response.json();
+    return responseText ? JSON.parse(responseText) : null;
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     throw new ProviderError(error instanceof Error ? error.message : 'Provider request failed');

@@ -78,12 +78,38 @@ const parseHistory = (key: string): StorageHistoryEntry[] => {
   }
 };
 
+const isQuotaExceededError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === 'QuotaExceededError' || candidate.code === 22 || candidate.code === 1014;
+};
+
 const writeHistory = (key: string, entries: StorageHistoryEntry[]) => {
   if (entries.length === 0) {
     localStorage.removeItem(getHistoryKey(key));
     return;
   }
-  localStorage.setItem(getHistoryKey(key), JSON.stringify(entries.slice(0, HISTORY_LIMIT)));
+
+  const historyKey = getHistoryKey(key);
+  // History is a recovery aid, not the primary itinerary. A large itinerary or
+  // photo-rich snapshot must never make the main save operation crash. Retry
+  // with progressively smaller history windows, then drop only this optional
+  // history key if the browser quota is still exhausted.
+  const retrySizes = [HISTORY_LIMIT, 10, 3, 1];
+  for (const size of retrySizes) {
+    try {
+      localStorage.setItem(historyKey, JSON.stringify(entries.slice(0, size)));
+      return;
+    } catch (error) {
+      if (!isQuotaExceededError(error)) throw error;
+    }
+  }
+
+  try {
+    localStorage.removeItem(historyKey);
+  } catch {
+    // Best effort: the primary itinerary remains more important than history.
+  }
 };
 
 const pushHistorySnapshot = (key: string, raw: string) => {
