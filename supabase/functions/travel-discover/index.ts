@@ -96,6 +96,27 @@ interface GooglePlace {
   addressComponents?: Array<{ longText?: string; types?: string[] }>;
 }
 
+interface AmapPoi {
+  id?: string;
+  name?: string;
+  address?: string;
+  location?: string;
+  type?: string;
+  typecode?: string;
+  tel?: string;
+  website?: string;
+  rating?: string;
+  biz_ext?: { rating?: string; cost?: string };
+}
+
+interface BaiduPoi {
+  uid?: string;
+  name?: string;
+  address?: string;
+  location?: { lat?: number; lng?: number };
+  telephone?: string;
+  detail_info?: { overall_rating?: string; price?: string; detail_url?: string; tag?: string };
+}
 const PRICE_LEVELS: Record<string, number> = {
   PRICE_LEVEL_FREE: 0,
   PRICE_LEVEL_INEXPENSIVE: 1,
@@ -247,6 +268,88 @@ async function searchGoogle(city: string, countryCode: string, limit: number, tr
   return [...seen.values()];
 }
 
+function regionalCandidate(
+  provider: 'amap' | 'baidu',
+  place: AmapPoi | BaiduPoi,
+  city: string,
+  countryCode: string,
+  retrievedAt: string,
+  expiresAt: string,
+) {
+  const isAmap = provider === 'amap';
+  const amap = place as AmapPoi;
+  const baidu = place as BaiduPoi;
+  const id = isAmap ? amap.id : baidu.uid;
+  const name = isAmap ? amap.name : baidu.name;
+  const coordinates = isAmap
+    ? (amap.location || '').split(',').map(Number)
+    : [Number(baidu.location?.lat), Number(baidu.location?.lng)];
+  if (!id || !name || coordinates.length !== 2 || coordinates.some((value) => !Number.isFinite(value))) return null;
+  const url = isAmap
+    ? (amap.website || `https://www.amap.com/search?query=${encodeURIComponent(name)}`)
+    : (baidu.detail_info?.detail_url || `https://map.baidu.com/search/${encodeURIComponent(name)}`);
+  const rating = Number(isAmap ? (amap.biz_ext?.rating || amap.rating) : baidu.detail_info?.overall_rating);
+  return {
+    id: `${provider}-${id}`,
+    provider,
+    providerPlaceId: id,
+    name,
+    description: isAmap ? amap.type : baidu.detail_info?.tag,
+    countryCode,
+    city,
+    address: isAmap ? amap.address : baidu.address,
+    coordinates: [coordinates[0], coordinates[1]] as [number, number],
+    categories: ['essential'],
+    experienceTags: ['regional-provider'],
+    rating: Number.isFinite(rating) ? rating : undefined,
+    estimatedVisitMinutes: 90,
+    indoorOutdoor: 'mixed' as const,
+    reservationStatus: 'unknown' as const,
+    sourceConfidence: 'medium' as const,
+    sourceReferences: [{ label: provider === 'amap' ? 'Amap' : 'Baidu Maps', url, retrievedAt }],
+    lastVerifiedAt: retrievedAt,
+    expiresAt,
+  };
+}
+
+async function searchAmap(city: string, countryCode: string, limit: number, travelStartsInDays?: number) {
+  const key = secrets.amap();
+  if (!key) throw new ProviderError('Amap is not configured.', 503);
+  const retrievedAt = new Date().toISOString();
+  const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
+  const results: ReturnType<typeof regionalCandidate>[] = [];
+  for (const query of DISCOVERY_QUERIES) {
+    if (results.length >= limit) break;
+    const params = new URLSearchParams({ key, keywords: query.text, city, citylimit: 'true', offset: '20', page: '1', extensions: 'all' });
+    const payload = await fetchJson(`https://restapi.amap.com/v5/place/text?${params}`) as { status?: string; pois?: AmapPoi[] };
+    for (const place of payload.pois || []) {
+      const candidate = regionalCandidate('amap', place, city, countryCode, retrievedAt, expiresAt);
+      if (candidate && !results.some((item) => item?.providerPlaceId === candidate.providerPlaceId)) results.push(candidate);
+      if (results.length >= limit) break;
+    }
+  }
+  return results.filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+}
+
+async function searchBaidu(city: string, countryCode: string, limit: number, travelStartsInDays?: number) {
+  const key = secrets.baidu();
+  if (!key) throw new ProviderError('Baidu Maps is not configured.', 503);
+  const retrievedAt = new Date().toISOString();
+  const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
+  const results: ReturnType<typeof regionalCandidate>[] = [];
+  for (const query of DISCOVERY_QUERIES) {
+    if (results.length >= limit) break;
+    const params = new URLSearchParams({ query: query.text, region: city, city_limit: 'true', output: 'json', ak: key, scope: '2' });
+    const payload = await fetchJson(`https://api.map.baidu.com/place/v3/region?${params}`) as { status?: number; results?: BaiduPoi[] };
+    for (const place of payload.results || []) {
+      const candidate = regionalCandidate('baidu', place, city, countryCode, retrievedAt, expiresAt);
+      if (candidate && !results.some((item) => item?.providerPlaceId === candidate.providerPlaceId)) results.push(candidate);
+      if (results.length >= limit) break;
+    }
+  }
+  return results.filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+}
+
 Deno.serve(async (request) => {
   const early = preflight(request);
   if (early) return early;
@@ -266,7 +369,15 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const candidates = await searchGoogle(city, countryCode, limit, body.travelStartsInDays);
+    const selectedProvider = body.provider === 'amap' || body.provider === 'baidu'
+      ? body.provider
+      : countryCode === 'CN' && secrets.amap() ? 'amap'
+        : countryCode === 'CN' && secrets.baidu() ? 'baidu' : 'google';
+    const candidates = selectedProvider === 'amap'
+      ? await searchAmap(city, countryCode, limit, body.travelStartsInDays)
+      : selectedProvider === 'baidu'
+        ? await searchBaidu(city, countryCode, limit, body.travelStartsInDays)
+        : await searchGoogle(city, countryCode, limit, body.travelStartsInDays);
     if (candidates.length === 0) {
       return json({ error: `No places were returned for ${city}.` }, 404);
     }

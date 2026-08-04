@@ -27,3 +27,6 @@ verify_jwt = true
 
 [functions.travel-import-link]
 verify_jwt = true
+
+[functions.travel-reasoning]
+verify_jwt = true

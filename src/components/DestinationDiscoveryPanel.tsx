@@ -298,7 +298,9 @@ function DiscoveryPreview({
 
       <div className="destination-route-warning">
         <Info className="w-4 h-4" />
-        <span>Place identity and coordinates are source-backed. Travel minutes remain an offline straight-line fallback and overall confidence stays Low until a live route provider is connected.</span>
+        <span>{result.routeMode === 'provider'
+          ? 'Place identity, coordinates and travel minutes are backed by the connected route provider. Recheck conditions near departure.'
+          : 'Place identity and coordinates are source-backed. Travel minutes are an offline straight-line estimate until a live route provider is connected.'}</span>
       </div>
 
       <div className="flex flex-wrap gap-2">
