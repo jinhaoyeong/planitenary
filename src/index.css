@@ -309,6 +309,17 @@ body.planner-intelligence-active .pet-overlay {
   line-height: 1.4;
 }
 
+/* Evidence-backed warnings: reported closures, long queues, promoted praise.
+   Muted rather than alarming — these inform a choice, they do not forbid it. */
+.destination-match-caution {
+  margin-top: 0.35rem;
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--accent-soft);
+}
+
 .destination-candidate-footer {
   display: flex;
   align-items: flex-end;

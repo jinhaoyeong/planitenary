@@ -15,3 +15,6 @@ verify_jwt = true
 
 [functions.travel-route-matrix]
 verify_jwt = true
+
+[functions.travel-evidence]
+verify_jwt = true

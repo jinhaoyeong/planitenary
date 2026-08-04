@@ -16,12 +16,13 @@ import { FixturePlaceDiscoveryProvider, getDestinationCapability } from '../lib/
 import { describeCapability } from '../lib/destinationCapability';
 import { capabilityFor, discoverPlaces, loadProviderRuntime } from '../lib/discoveryRuntime';
 import { describePace } from '../lib/travelBehaviour';
+import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
 import {
   buildDestinationItinerary,
   defaultDiscoveryDecisions,
-  rankDestinationCandidates,
+  rankWithIntelligence,
   type DestinationBuildResult,
 } from '../lib/destinationPlanner';
 import type { TripProfile } from '../lib/tripProfile';
@@ -76,7 +77,7 @@ function CandidateCard({
   decision?: DiscoveryCandidateDecision;
   onDecision: (decision: DiscoveryCandidateDecision) => void;
 }) {
-  const { candidate, score, reasons } = ranked;
+  const { candidate, score, reasons, cautions = [] } = ranked;
   return (
     <article className="destination-candidate" data-decision={decision || 'undecided'}>
       <div className="destination-candidate-map" aria-hidden="true">
@@ -97,7 +98,12 @@ function CandidateCard({
           <span>{formatPrice(candidate.priceLevel)}</span>
           <span>{openingSummary(candidate)}</span>
         </div>
+        {/* Cautions are shown separately so a card never reads as pure upside
+            when the evidence carries a warning. */}
         <p className="destination-match-reason">{reasons.join(' · ')}</p>
+        {cautions.length > 0 && (
+          <p className="destination-match-caution">{cautions.join(' ')}</p>
+        )}
         <div className="destination-candidate-footer">
           <fieldset className="destination-decision-group">
             <legend className="sr-only">Preference for {candidate.name}</legend>
@@ -324,7 +330,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const [usingFixture, setUsingFixture] = useState(false);
   /** Reported wait times by candidate id, gathered from evidence. */
   const [queueEvidence, setQueueEvidence] = useState<Record<string, number>>({});
-  const ranked = useMemo(() => rankDestinationCandidates(candidates, profile), [candidates, profile]);
+  /** Per-place evidence summaries and trend strength, when a provider supplied them. */
+  const [evidenceSummaries, setEvidenceSummaries] = useState<Record<string, PlaceEvidenceSummary>>({});
+  const [trends, setTrends] = useState<Record<string, number>>({});
+  // Multi-dimensional ranking: interests, significance, recent quality,
+  // practicality, trend and promotion risk — not one opaque number.
+  const ranked = useMemo(
+    () => rankWithIntelligence(candidates, profile, { evidence: evidenceSummaries, trends }),
+    [candidates, profile, evidenceSummaries, trends],
+  );
   const groupedRanked = useMemo(() => {
     const assigned = new Set<string>();
     return GROUPS.map((group) => {
@@ -379,6 +393,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       );
       setUsingFixture(outcome.usingFixture);
       setQueueEvidence(outcome.queueEvidence);
+      setEvidenceSummaries(outcome.evidenceSummaries);
+      setTrends(outcome.trends);
 
       const discovered = outcome.candidates.length > 0
         ? outcome.candidates

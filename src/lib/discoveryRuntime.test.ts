@@ -77,20 +77,57 @@ describe('discovering places', () => {
     expect(outcome.capability.places.status).toBe('fixture');
   });
 
-  it('gathers corroborated queue times to feed the scheduler', async () => {
+  /** One evidence document as the backend actually returns it. */
+  const document = (placeId: string, queueMinutes?: number) => ({
+    id: `e-${placeId}-${Math.random()}`,
+    canonicalPlaceId: placeId,
+    source: 'google-places',
+    sourceUrl: 'https://maps.example/p',
+    publishedAt: new Date(Date.now() - 20 * 86_400_000).toISOString(),
+    retrievedAt: new Date().toISOString(),
+    authorType: 'traveller',
+    disclosure: 'organic',
+    confidence: 0.7,
+    claims: queueMinutes === undefined ? [] : [{
+      type: 'queue-time',
+      summary: `Reported wait of about ${queueMinutes} minutes`,
+      value: queueMinutes,
+      unit: 'minutes',
+      strength: 0.7,
+    }],
+  });
+
+  it('summarises corroborated queue times and keys them by candidate id', async () => {
     const invoke = vi.fn(async (name: string) => {
-      if (name === 'travel-discover') return [{ id: 'p1', providerPlaceId: 'g1', name: 'Place' }];
+      if (name === 'travel-discover') {
+        return [
+          { id: 'cand-1', providerPlaceId: 'g1', name: 'Corroborated' },
+          { id: 'cand-2', providerPlaceId: 'g2', name: 'Single mention' },
+        ];
+      }
       return {
-        summaries: [
-          { canonicalPlaceId: 'p1', typicalQueueMinutes: 45, sourceCount: 4 },
-          // Single-source claims must not reshape a day.
-          { canonicalPlaceId: 'p2', typicalQueueMinutes: 90, sourceCount: 1 },
-          { canonicalPlaceId: 'p3', typicalQueueMinutes: Number.NaN, sourceCount: 5 },
+        documents: [
+          document('g1', 40), document('g1', 50), document('g1', 45),
+          // One lone mention must not be allowed to reshape a day.
+          document('g2', 120),
         ],
       };
     });
+
     const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
-    expect(outcome.queueEvidence).toEqual({ p1: 45 });
+    // Keyed by candidate id, not the provider's place id.
+    expect(outcome.queueEvidence).toEqual({ 'cand-1': 45 });
+    expect(outcome.evidenceSummaries['cand-1'].sourceCount).toBe(3);
+    expect(outcome.evidenceSummaries['cand-1'].canonicalPlaceId).toBe('cand-1');
+  });
+
+  it('derives trend strength from recent evidence when the backend omits it', async () => {
+    const invoke = vi.fn(async (name: string) => {
+      if (name === 'travel-discover') return [{ id: 'cand-1', providerPlaceId: 'g1', name: 'Place' }];
+      return { documents: [document('g1'), document('g1'), document('g1')] };
+    });
+    const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
+    expect(outcome.trends['cand-1']).toBeGreaterThan(0);
   });
 
   it('still returns places when evidence gathering fails', async () => {

@@ -20,6 +20,7 @@ import {
   type RouteResolver,
   type ScheduledSlot,
 } from './humanScheduler';
+import { scorePlaces, type ScoringInputs } from './placeIntelligence';
 
 const STYLE_TAGS: Record<string, string[]> = {
   cafes: ['cafes', 'food'],
@@ -60,6 +61,45 @@ const budgetFit = (candidate: PlaceCandidate, profile: TripProfile) => {
   if (profile.budgetTier === 'luxury') return price >= 2 ? 1 : 0.75;
   return price <= 3 ? 1 : 0.7;
 };
+
+/**
+ * Rank a shortlist using the multi-dimensional scorer, keeping the
+ * {@link RankedCandidate} shape the UI already consumes.
+ *
+ * Evidence and trend data are optional: with them the ranking reflects what
+ * visitors report lately; without them it degrades to interests, significance
+ * and practicality rather than failing.
+ */
+export function rankWithIntelligence(
+  candidates: PlaceCandidate[],
+  profile: TripProfile,
+  options: { behaviour?: TravelBehaviourProfile; evidence?: ScoringInputs['evidence']; trends?: ScoringInputs['trends'] } = {},
+): RankedCandidate[] {
+  const behaviour = options.behaviour ?? deriveTravelBehaviour(profile);
+  const scored = scorePlaces(candidates, {
+    profile,
+    behaviour,
+    evidence: options.evidence,
+    trends: options.trends,
+  });
+
+  return scored.map(({ candidate, score, dimensions, reasons, cautions }) => ({
+    candidate,
+    score,
+    breakdown: {
+      interestFit: dimensions.travellerFit,
+      localSignificance: dimensions.destinationSignificance,
+      neighbourhoodFit: dimensions.localRelevance,
+      dataCompleteness: dimensions.evidenceConfidence,
+      budgetFit: budgetFit(candidate, profile),
+      openingHoursFit: candidate.openingHours ? 1 : 0.45,
+      routeCompatibility: dimensions.practicality,
+      diversityContribution: dimensions.currentQuality,
+    },
+    reasons,
+    cautions,
+  }));
+}
 
 export function rankDestinationCandidates(candidates: PlaceCandidate[], profile: TripProfile): RankedCandidate[] {
   const requestedTags = new Set(profile.styles.flatMap((style) => STYLE_TAGS[style] || [style]));

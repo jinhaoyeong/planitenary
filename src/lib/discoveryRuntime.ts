@@ -19,6 +19,12 @@ import {
   SUPPORTED_DISCOVERY_CITIES,
 } from './destinationFixtures';
 import type { PlaceCandidate } from './destinationIntelligence';
+import {
+  summarisePlaceEvidence,
+  trendStrength,
+  type PlaceEvidenceSummary,
+  type SourceEvidence,
+} from './travelEvidence';
 import type { TripDestination } from './tripProfile';
 
 /** Cached so every panel mount does not re-ask the server. */
@@ -91,33 +97,68 @@ export interface DiscoveryOutcome {
    * scheduler so a place with a long queue costs the day what it really costs.
    */
   queueEvidence: Record<string, number>;
+  /** Per-place evidence summaries, feeding the multi-dimensional ranker. */
+  evidenceSummaries: Record<string, PlaceEvidenceSummary>;
+  /** Trend strength 0–1 by candidate id. */
+  trends: Record<string, number>;
 }
 
-/**
- * Pull reported queue times out of an evidence payload, keyed by candidate id.
- * Only claims backed by a summary median are used — a single offhand mention
- * should not reshape a day.
- */
-function queueEvidenceFrom(payload: unknown): Record<string, number> {
-  if (!payload || typeof payload !== 'object') return {};
-  const summaries = (payload as { summaries?: unknown }).summaries;
-  if (!Array.isArray(summaries)) return {};
 
-  const queues: Record<string, number> = {};
-  for (const entry of summaries) {
-    if (!entry || typeof entry !== 'object') continue;
-    const { canonicalPlaceId, typicalQueueMinutes, sourceCount } = entry as {
-      canonicalPlaceId?: unknown;
-      typicalQueueMinutes?: unknown;
-      sourceCount?: unknown;
-    };
-    if (typeof canonicalPlaceId !== 'string') continue;
-    if (typeof typicalQueueMinutes !== 'number' || !Number.isFinite(typicalQueueMinutes)) continue;
-    // Require corroboration before letting a queue claim move the schedule.
-    if (typeof sourceCount === 'number' && sourceCount < 2) continue;
-    queues[canonicalPlaceId] = Math.max(0, Math.round(typicalQueueMinutes));
+/**
+ * Fold the raw evidence documents the backend returned into per-place
+ * summaries, queue times and trend scores — all keyed by *candidate id*.
+ *
+ * The backend keys evidence by provider place id, because that is what it
+ * queried with. Everything downstream keys by candidate id, so the mapping
+ * happens here, once.
+ */
+function digestEvidence(
+  payload: unknown,
+  candidates: PlaceCandidate[],
+): Pick<DiscoveryOutcome, 'queueEvidence' | 'evidenceSummaries' | 'trends'> {
+  const empty = { queueEvidence: {}, evidenceSummaries: {}, trends: {} };
+  if (!payload || typeof payload !== 'object') return empty;
+
+  const documents = (payload as { documents?: unknown }).documents;
+  const rawTrends = (payload as { trends?: unknown }).trends;
+  if (!Array.isArray(documents)) return empty;
+
+  const byProviderId = new Map(
+    candidates
+      .filter((candidate) => candidate.providerPlaceId)
+      .map((candidate) => [candidate.providerPlaceId!, candidate.id]),
+  );
+
+  const evidence = documents.filter(
+    (document): document is SourceEvidence =>
+      Boolean(document)
+      && typeof document === 'object'
+      && typeof (document as SourceEvidence).canonicalPlaceId === 'string',
+  );
+
+  const queueEvidence: Record<string, number> = {};
+  const evidenceSummaries: Record<string, PlaceEvidenceSummary> = {};
+  const trends: Record<string, number> = {};
+
+  for (const [providerId, candidateId] of byProviderId) {
+    const summary = summarisePlaceEvidence(providerId, evidence);
+    if (summary.sourceCount === 0) continue;
+    evidenceSummaries[candidateId] = { ...summary, canonicalPlaceId: candidateId };
+
+    // Require corroboration before a queue claim is allowed to reshape a day.
+    if (summary.typicalQueueMinutes !== undefined && summary.sourceCount >= 2) {
+      queueEvidence[candidateId] = Math.max(0, Math.round(summary.typicalQueueMinutes));
+    }
+
+    const trend = (rawTrends as Record<string, unknown> | undefined)?.[providerId];
+    if (typeof trend === 'number' && Number.isFinite(trend)) {
+      trends[candidateId] = Math.max(0, Math.min(1, trend));
+    } else {
+      trends[candidateId] = trendStrength(evidence.filter((item) => item.canonicalPlaceId === providerId));
+    }
   }
-  return queues;
+
+  return { queueEvidence, evidenceSummaries, trends };
 }
 
 /**
@@ -142,16 +183,21 @@ export async function discoverPlaces(
       if (candidates.length > 0) {
         // Evidence is a separate, optional call: a plan built from real places
         // is still worth having even if review gathering is unavailable.
-        let queueEvidence: Record<string, number> = {};
+        let evidencePayload: unknown = null;
         try {
-          queueEvidence = queueEvidenceFrom(await invoke('travel-evidence', {
+          evidencePayload = await invoke('travel-evidence', {
             city: destination.city,
             placeIds: candidates.map((candidate) => candidate.providerPlaceId).filter(Boolean),
-          }));
+          });
         } catch {
-          queueEvidence = {};
+          evidencePayload = null;
         }
-        return { candidates, capability, usingFixture: false, queueEvidence };
+        return {
+          candidates,
+          capability,
+          usingFixture: false,
+          ...digestEvidence(evidencePayload, candidates),
+        };
       }
     } catch {
       // Fall through to the fixture rather than failing the whole panel.
@@ -174,6 +220,8 @@ export async function discoverPlaces(
       capability: { ...capability, places: { provider: 'fixture', status: 'fixture' } },
       usingFixture: true,
       queueEvidence: {},
+      evidenceSummaries: {},
+      trends: {},
     };
   }
 
@@ -182,5 +230,7 @@ export async function discoverPlaces(
     capability: { ...capability, places: { ...capability.places, status: 'unavailable' } },
     usingFixture: false,
     queueEvidence: {},
+    evidenceSummaries: {},
+    trends: {},
   };
 }

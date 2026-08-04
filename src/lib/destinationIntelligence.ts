@@ -85,6 +85,12 @@ export interface RankedCandidate {
   score: number;
   breakdown: CandidateScoreBreakdown;
   reasons: string[];
+  /**
+   * Things the traveller should weigh against the reasons — a reported
+   * closure, a long queue, heavily promoted praise. Kept separate so a card can
+   * never present a place as pure upside when the evidence says otherwise.
+   */
+  cautions?: string[];
 }
 
 export interface PlaceCandidateDetails extends PlaceCandidate {
