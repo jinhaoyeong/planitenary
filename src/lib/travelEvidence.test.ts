@@ -1,0 +1,173 @@
+import { describe, expect, it } from 'vitest';
+import {
+  claimIsPresentableAsFact,
+  evidenceWeight,
+  freshnessWeight,
+  isStale,
+  promotionRisk,
+  summarisePlaceEvidence,
+  trendStrength,
+  type SourceEvidence,
+  type TravelClaim,
+} from './travelEvidence';
+
+const NOW = new Date('2026-08-04T00:00:00.000Z');
+const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
+
+const claim = (overrides: Partial<TravelClaim> = {}): TravelClaim => ({
+  type: 'worth-visiting',
+  summary: 'Worth the trip',
+  strength: 0.8,
+  ...overrides,
+});
+
+const evidence = (overrides: Partial<SourceEvidence> = {}): SourceEvidence => ({
+  id: `evidence-${Math.random()}`,
+  canonicalPlaceId: 'place-1',
+  source: 'youtube',
+  sourceUrl: 'https://example.com/video',
+  retrievedAt: NOW.toISOString(),
+  publishedAt: daysAgo(30),
+  authorType: 'traveller',
+  disclosure: 'organic',
+  claims: [claim()],
+  confidence: 0.8,
+  ...overrides,
+});
+
+describe('evidence weighting', () => {
+  it('decays with age so an old video cannot outrank a recent one', () => {
+    const fresh = freshnessWeight(evidence({ publishedAt: daysAgo(5) }), NOW);
+    const old = freshnessWeight(evidence({ publishedAt: daysAgo(900) }), NOW);
+    expect(fresh).toBeGreaterThan(old);
+    expect(old).toBeGreaterThan(0);
+  });
+
+  it('treats undated evidence as weak rather than fresh', () => {
+    const undated = freshnessWeight(evidence({ publishedAt: undefined }), NOW);
+    const recent = freshnessWeight(evidence({ publishedAt: daysAgo(2) }), NOW);
+    expect(undated).toBeLessThan(recent);
+  });
+
+  it('ranks an official page above a traveller video', () => {
+    const official = evidenceWeight(evidence({ source: 'official-website' }), NOW);
+    const video = evidenceWeight(evidence({ source: 'tiktok' }), NOW);
+    expect(official).toBeGreaterThan(video);
+  });
+
+  it('discounts but does not discard stale records', () => {
+    const stale = evidence({ expiresAt: daysAgo(1) });
+    expect(isStale(stale, NOW)).toBe(true);
+    expect(evidenceWeight(stale, NOW)).toBeGreaterThan(0);
+    expect(evidenceWeight(stale, NOW)).toBeLessThan(evidenceWeight(evidence(), NOW));
+  });
+});
+
+describe('operational fact gating', () => {
+  it('lets an official source establish a closure', () => {
+    const official = evidence({ source: 'official-website', claims: [claim({ type: 'closed', summary: 'Closed for renovation' })] });
+    expect(claimIsPresentableAsFact(official, official.claims[0])).toBe(true);
+  });
+
+  it('refuses to present a closure claimed only by a social video as fact', () => {
+    const social = evidence({ source: 'rednote', claims: [claim({ type: 'closed', summary: 'Looked shut' })] });
+    expect(claimIsPresentableAsFact(social, social.claims[0])).toBe(false);
+  });
+
+  it('still allows opinion claims from any source', () => {
+    const social = evidence({ source: 'tiktok', claims: [claim({ type: 'overrated', summary: 'Overrated' })] });
+    expect(claimIsPresentableAsFact(social, social.claims[0])).toBe(true);
+  });
+});
+
+describe('promotion risk', () => {
+  it('maxes out on a declared sponsorship', () => {
+    expect(promotionRisk(evidence({ disclosure: 'sponsored' }))).toBe(1);
+  });
+
+  it('rates a business account above an organic traveller post', () => {
+    const business = promotionRisk(evidence({ authorType: 'business' }));
+    const traveller = promotionRisk(evidence({ authorType: 'traveller' }));
+    expect(business).toBeGreaterThan(traveller);
+  });
+
+  it('stays within 0 and 1', () => {
+    const risk = promotionRisk(evidence({ disclosure: 'possible-promotion', authorType: 'business', source: 'rednote' }));
+    expect(risk).toBeGreaterThanOrEqual(0);
+    expect(risk).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('place evidence summary', () => {
+  it('reports a median queue travellers actually reported', () => {
+    const summary = summarisePlaceEvidence('place-1', [
+      evidence({ claims: [claim({ type: 'queue-time', summary: '30 minutes', value: 30, unit: 'minutes' })] }),
+      evidence({ claims: [claim({ type: 'queue-time', summary: '50 minutes', value: 50, unit: 'minutes' })] }),
+      evidence({ claims: [claim({ type: 'queue-time', summary: '40 minutes', value: 40, unit: 'minutes' })] }),
+    ], NOW);
+    expect(summary.typicalQueueMinutes).toBe(40);
+    expect(summary.sourceCount).toBe(3);
+  });
+
+  it('gains confidence from independent sources agreeing', () => {
+    const single = summarisePlaceEvidence('place-1', [
+      evidence({ source: 'youtube' }),
+      evidence({ source: 'youtube' }),
+      evidence({ source: 'youtube' }),
+    ], NOW);
+    const varied = summarisePlaceEvidence('place-1', [
+      evidence({ source: 'youtube' }),
+      evidence({ source: 'google-places' }),
+      evidence({ source: 'official-website' }),
+    ], NOW);
+    expect(varied.evidenceConfidence).toBeGreaterThan(single.evidenceConfidence);
+  });
+
+  it('warns when an authoritative source reports a closure', () => {
+    const summary = summarisePlaceEvidence('place-1', [
+      evidence({ source: 'official-website', claims: [claim({ type: 'closed', summary: 'Permanently closed' })] }),
+    ], NOW);
+    expect(summary.warnings.join(' ')).toContain('closed');
+  });
+
+  it('ignores evidence attached to a different place', () => {
+    const summary = summarisePlaceEvidence('place-1', [
+      evidence({ canonicalPlaceId: 'place-2' }),
+    ], NOW);
+    expect(summary.sourceCount).toBe(0);
+  });
+});
+
+describe('trend strength', () => {
+  it('rates a recent cross-platform surge above a single old mention', () => {
+    const trending = trendStrength([
+      evidence({ source: 'tiktok', publishedAt: daysAgo(10) }),
+      evidence({ source: 'youtube', publishedAt: daysAgo(20) }),
+      evidence({ source: 'rednote', publishedAt: daysAgo(30) }),
+      evidence({ source: 'google-places', publishedAt: daysAgo(15) }),
+    ], NOW);
+    const dormant = trendStrength([
+      evidence({ source: 'youtube', publishedAt: daysAgo(1200) }),
+    ], NOW);
+    expect(trending).toBeGreaterThan(dormant);
+    expect(dormant).toBe(0);
+  });
+
+  it('does not let a coordinated sponsored push manufacture a trend', () => {
+    const organic = trendStrength([
+      evidence({ source: 'tiktok', publishedAt: daysAgo(10), disclosure: 'organic' }),
+      evidence({ source: 'youtube', publishedAt: daysAgo(12), disclosure: 'organic' }),
+      evidence({ source: 'rednote', publishedAt: daysAgo(14), disclosure: 'organic' }),
+    ], NOW);
+    const sponsored = trendStrength([
+      evidence({ source: 'tiktok', publishedAt: daysAgo(10), disclosure: 'sponsored' }),
+      evidence({ source: 'youtube', publishedAt: daysAgo(12), disclosure: 'sponsored' }),
+      evidence({ source: 'rednote', publishedAt: daysAgo(14), disclosure: 'sponsored' }),
+    ], NOW);
+    expect(organic).toBeGreaterThan(sponsored);
+  });
+
+  it('returns zero when nothing is dated', () => {
+    expect(trendStrength([evidence({ publishedAt: undefined })], NOW)).toBe(0);
+  });
+});

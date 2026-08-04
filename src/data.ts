@@ -83,6 +83,12 @@ export type DiscoveryUnscheduledReason =
   | 'incompatible-location'
   | 'insufficient-route-data'
   | 'duplicate'
+  // Raised by the human scheduler: the traveller's own comfort limits, not a
+  // data gap. Kept distinct so the UI can offer to relax the limit instead of
+  // implying the place is unavailable.
+  | 'walking-limit-exceeded'
+  | 'return-time-exceeded'
+  | 'queue-exceeds-tolerance'
   | 'no-viable-day';
 
 export interface DiscoveryUnscheduledCandidate {

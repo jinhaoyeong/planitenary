@@ -1,4 +1,4 @@
-import type { Activity, DayPlan, Itinerary } from '../data';
+import type { Activity, DayPlan, DiscoveryUnscheduledReason, Itinerary } from '../data';
 import type { TripProfile } from './tripProfile';
 import {
   candidateToActivity,
@@ -7,6 +7,19 @@ import {
   type PlaceCandidate,
   type RankedCandidate,
 } from './destinationIntelligence';
+import {
+  applyTravellerConstraints,
+  deriveTravelBehaviour,
+  type TravelBehaviourProfile,
+} from './travelBehaviour';
+import {
+  clusterCandidates,
+  simulateDay,
+  toTime,
+  type DayLoad,
+  type RouteResolver,
+  type ScheduledSlot,
+} from './humanScheduler';
 
 const STYLE_TAGS: Record<string, string[]> = {
   cafes: ['cafes', 'food'],
@@ -102,51 +115,13 @@ export function defaultDiscoveryDecisions(ranked: RankedCandidate[]): Record<str
   return decisions;
 }
 
-interface ThemeDefinition {
-  title: string;
-  cities: string[];
-  neighbourhoods: string[];
-  maxPlaces: number;
-}
-
-const OSAKA_THEMES: ThemeDefinition[] = [
-  { title: 'Arrival and Minami after dark', cities: ['Osaka'], neighbourhoods: ['Namba', 'Minami'], maxPlaces: 2 },
-  { title: 'Historic Osaka', cities: ['Osaka'], neighbourhoods: ['Osaka Castle'], maxPlaces: 3 },
-  { title: 'Markets and local food', cities: ['Osaka'], neighbourhoods: ['Minami'], maxPlaces: 3 },
-  { title: 'Retro Osaka', cities: ['Osaka'], neighbourhoods: ['Tennoji', 'Shinsekai'], maxPlaces: 3 },
-  { title: 'Osaka Bay', cities: ['Osaka'], neighbourhoods: ['Osaka Bay'], maxPlaces: 3 },
-  { title: 'Art, river and skyline', cities: ['Osaka'], neighbourhoods: ['Nakanoshima', 'Umeda'], maxPlaces: 3 },
-  { title: 'Tenma and everyday Osaka', cities: ['Osaka'], neighbourhoods: ['Tenma', 'Umeda'], maxPlaces: 3 },
-  { title: 'Northern Osaka breathing room', cities: ['Osaka'], neighbourhoods: ['Ikeda', 'Suita', 'Minoh', 'Nagai', 'Sumiyoshi'], maxPlaces: 3 },
-  { title: 'Nara heritage day trip', cities: ['Nara'], neighbourhoods: ['Central Nara'], maxPlaces: 3 },
-  { title: 'Kyoto heritage day trip', cities: ['Kyoto'], neighbourhoods: ['Fushimi', 'Higashiyama'], maxPlaces: 3 },
-  { title: 'Kobe waterfront day trip', cities: ['Kobe'], neighbourhoods: ['Kobe Waterfront', 'Shin-Kobe'], maxPlaces: 3 },
-];
-
-const minutesToTime = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
-
-const distanceKm = (a: [number, number], b: [number, number]) => {
-  const radians = (value: number) => value * Math.PI / 180;
-  const dLat = radians(b[0] - a[0]);
-  const dLng = radians(b[1] - a[1]);
-  const lat1 = radians(a[0]);
-  const lat2 = radians(b[0]);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-};
-
-const fallbackTransitMinutes = (from: PlaceCandidate, to: PlaceCandidate) => {
-  if (!from.coordinates || !to.coordinates) return undefined;
-  return Math.max(8, Math.round((distanceKm(from.coordinates, to.coordinates) / 20) * 60 + 8));
-};
-
-const createMealWindow = (day: number, time: string, neighbourhood: string): Activity => ({
-  id: `discovery-meal-${day}`,
+const createMealWindow = (day: number, label: string, time: string, durationMinutes: number, neighbourhood: string): Activity => ({
+  id: `discovery-meal-${day}-${label.toLowerCase()}`,
   kind: 'meal-window',
   time,
-  durationMinutes: 60,
-  name: 'Meal window — venue not selected',
-  description: `Keep this hour flexible around ${neighbourhood}.`,
+  durationMinutes,
+  name: `${label} — venue not selected`,
+  description: `Keep this time flexible around ${neighbourhood}.`,
   type: 'food',
   location: neighbourhood,
   source: 'generated',
@@ -154,103 +129,273 @@ const createMealWindow = (day: number, time: string, neighbourhood: string): Act
   generatedMetadata: { source: 'generated', generatedAt: new Date().toISOString(), reason: 'Schedule constraint, not a discovered attraction.', confidence: 'high' },
 });
 
+const createRestBeat = (day: number, time: string, reason: string): Activity => ({
+  id: `discovery-rest-${day}`,
+  kind: 'meal-window',
+  time,
+  durationMinutes: 20,
+  name: 'Breather',
+  description: reason,
+  type: 'other',
+  source: 'generated',
+  lockedFields: [],
+  generatedMetadata: { source: 'generated', generatedAt: new Date().toISOString(), reason, confidence: 'high' },
+});
+
 export interface DestinationBuildResult {
   days: DayPlan[];
   scheduledCandidates: PlaceCandidate[];
   unscheduledCandidates: PlaceCandidate[];
-  unscheduledReasons: Array<{ candidate: PlaceCandidate; reason: 'daily-capacity-reached' | 'incompatible-location' | 'no-viable-day' }>;
+  unscheduledReasons: Array<{ candidate: PlaceCandidate; reason: DiscoveryUnscheduledReason; detail: string }>;
+  /** Per-day human load: travel, walking, queueing, fatigue. */
+  dayLoads: DayLoad[];
   warnings: string[];
-  routeMode: 'offline-straight-line';
+  routeMode: 'offline-straight-line' | 'provider';
+  /** The pace actually used, so the UI can explain the shape of the plan. */
+  behaviour: TravelBehaviourProfile;
 }
 
+/**
+ * Rejections that hold for the whole trip rather than one day. A duplicate is
+ * always a duplicate and a queue always exceeds a fixed tolerance, but capacity,
+ * walking, opening hours and return time all depend on what else that
+ * particular day contains.
+ */
+const TRIP_WIDE_REJECTIONS = new Set<DiscoveryUnscheduledReason>([
+  'duplicate',
+  'insufficient-route-data',
+  'queue-exceeds-tolerance',
+]);
+
+export interface BuildOptions {
+  /** Live routing when a provider is connected; estimates otherwise. */
+  routeResolver?: RouteResolver;
+  /** Reported queue minutes by candidate id, drawn from evidence. */
+  queueEvidence?: Record<string, number>;
+  /** Explicit traveller settings, which always beat anything inferred. */
+  behaviour?: TravelBehaviourProfile;
+}
+
+/** Categories that describe logistics rather than the character of a day. */
+const UNINFORMATIVE_CATEGORIES = new Set(['essential', 'experience', 'day-trip']);
+
+const humanise = (category: string) =>
+  category.replace(/-/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
+
+/** The category that best characterises what a day is actually about. */
+function dominantTheme(places: PlaceCandidate[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const place of places) {
+    for (const category of place.categories) {
+      if (UNINFORMATIVE_CATEGORIES.has(category)) continue;
+      counts.set(category, (counts.get(category) || 0) + 1);
+    }
+  }
+  const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best ? humanise(best[0]) : undefined;
+}
+
+/**
+ * Name a day after where it actually goes. Titles must be distinct across the
+ * trip — two days both called "Minami and nearby" read like a bug — so this
+ * falls through progressively more specific forms until one is unused.
+ */
+function composeDayTitle(places: PlaceCandidate[], used: Set<string>, dayNumber: number): string {
+  if (places.length === 0) return `Flexible day ${dayNumber}`;
+  const areas = [...new Set(places.map((place) => place.neighbourhood || place.city))];
+  const theme = dominantTheme(places);
+
+  const options = [
+    areas.length === 1 ? areas[0] : areas.slice(0, 2).join(' and '),
+    theme ? `${theme} in ${areas[0]}` : undefined,
+    theme && areas.length > 1 ? `${theme} around ${areas[1]}` : undefined,
+    `Around ${places[0].name}`,
+    `${areas[0]} · day ${dayNumber}`,
+  ].filter((option): option is string => Boolean(option));
+
+  return options.find((option) => !used.has(option)) ?? `${areas[0]} · day ${dayNumber}`;
+}
+
+/** Turn one simulated slot into the Activity shape the rest of the app renders. */
+function slotToActivity(
+  slot: ScheduledSlot,
+  dayNumber: number,
+  transportMode: string,
+): Activity | null {
+  const time = toTime(slot.startMinutes);
+
+  if (slot.kind === 'meal') {
+    return createMealWindow(
+      dayNumber,
+      slot.label,
+      time,
+      slot.endMinutes - slot.startMinutes,
+      slot.reason.replace(/^Kept flexible around /, '').split('.')[0],
+    );
+  }
+  if (slot.kind === 'rest') return createRestBeat(dayNumber, time, slot.reason);
+  if (!slot.candidate) return null;
+
+  const activity = candidateToActivity(slot.candidate);
+  activity.time = time;
+  activity.durationMinutes = slot.endMinutes - slot.startMinutes;
+  activity.transportMinutes = slot.arrivalLeg?.durationMinutes;
+  activity.transportMode = slot.arrivalLeg
+    ? (slot.arrivalLeg.mode === 'walking' ? 'walking' : transportMode)
+    : undefined;
+  activity.travelEstimateSource = slot.arrivalLeg
+    ? (slot.arrivalLeg.source === 'provider' ? 'provider-route' : 'offline-straight-line')
+    : 'unknown';
+  activity.generatedMetadata = {
+    source: 'imported',
+    generatedAt: new Date().toISOString(),
+    reason: slot.queueMinutes
+      ? `${slot.reason} · about ${slot.queueMinutes} min wait`
+      : slot.reason,
+    // Confidence tracks the evidence, not the neatness of the schedule.
+    confidence: slot.candidate.openingHours && slot.arrivalLeg?.source === 'provider'
+      ? 'high'
+      : slot.candidate.openingHours ? 'medium' : 'low',
+  };
+  return activity;
+}
+
+/**
+ * Build a full itinerary by simulating each day as a person would live it.
+ *
+ * Days are formed from geographic clusters discovered in the candidates
+ * themselves — there is no per-city theme table, so this behaves identically in
+ * Melbourne, Beijing, Osaka or anywhere a provider can answer.
+ */
 export function buildDestinationItinerary(
   itinerary: Itinerary,
   profile: TripProfile,
   ranked: RankedCandidate[],
   decisions: Record<string, CandidateDecision>,
+  options: BuildOptions = {},
 ): DestinationBuildResult {
   const accepted = ranked
     .filter(({ candidate }) => decisions[candidate.id] === 'must-do' || decisions[candidate.id] === 'interested')
     .map(({ candidate }) => candidate);
-  const remaining = new Map(accepted.map((candidate) => [candidate.id, candidate]));
+
+  const behaviour = applyTravellerConstraints(
+    options.behaviour ?? deriveTravelBehaviour(profile),
+  );
   const dayCount = Math.max(1, itinerary.days.length || profile.dayCount || 1);
   const primaryCity = profile.destinations[0]?.city || itinerary.cities[0] || accepted[0]?.city || '';
-  const genericThemes = Array.from(new Set(accepted.map((candidate) => `${candidate.city}|${candidate.neighbourhood || candidate.city}`)))
-    .map((key): ThemeDefinition => {
-      const [city, neighbourhood] = key.split('|');
-      return { title: `${neighbourhood} highlights`, cities: [city], neighbourhoods: [neighbourhood], maxPlaces: 3 };
-    });
-  const themes = primaryCity.toLowerCase() === 'osaka'
-    ? OSAKA_THEMES.slice(0, dayCount)
-    : genericThemes.slice(0, dayCount);
+  const transportMode = profile.transport.includes('public-transport')
+    ? 'public transport'
+    : 'walking / public transport';
+
+  // Must-do places lead their cluster so capacity limits never drop them first.
+  const mustDo = new Set(
+    accepted.filter((candidate) => decisions[candidate.id] === 'must-do').map((candidate) => candidate.id),
+  );
+  const clusters = clusterCandidates(accepted).map((cluster) =>
+    [...cluster].sort((a, b) => Number(mustDo.has(b.id)) - Number(mustDo.has(a.id))));
+
   const days: DayPlan[] = [];
+  const dayLoads: DayLoad[] = [];
+  const scheduled = new Set<string>();
+  const rejections = new Map<string, { candidate: PlaceCandidate; reason: DiscoveryUnscheduledReason; detail: string }>();
+  const warnings = new Set<string>();
+  const usedTitles = new Set<string>();
+  let usedProviderRoutes = false;
+
+  // Anything a cluster could not absorb rolls forward to later days.
+  let carryOver: PlaceCandidate[] = [];
 
   for (let index = 0; index < dayCount; index += 1) {
     const existing = itinerary.days[index];
-    const theme = themes[index] || {
-      title: primaryCity.toLowerCase() === 'osaka'
-        ? (index === dayCount - 1 ? 'Flexible final day and departure buffer' : 'Flexible Osaka breathing room')
-        : `Flexible ${primaryCity || 'travel'} day ${index + 1}`,
-      cities: [primaryCity].filter(Boolean),
-      neighbourhoods: [],
-      maxPlaces: 3,
-    };
-    const protectedActivities = (existing?.activities || []).filter((activity) => activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
-    const matching = [...remaining.values()]
-      .filter((candidate) => theme.cities.includes(candidate.city) && (theme.neighbourhoods.length === 0 || theme.neighbourhoods.includes(candidate.neighbourhood || '')))
-      .slice(0, Math.max(0, theme.maxPlaces - protectedActivities.length));
-    matching.forEach((candidate) => remaining.delete(candidate.id));
-    let clock = index === 0 ? 15 * 60 : 9 * 60 + 30;
-    const discoveredActivities: Activity[] = [];
-    matching.forEach((candidate, candidateIndex) => {
-      const previous = matching[candidateIndex - 1];
-      if (previous) clock += fallbackTransitMinutes(previous, candidate) || 20;
-      if (candidateIndex === 1 && clock < 13 * 60) {
-        discoveredActivities.push(createMealWindow(index + 1, minutesToTime(Math.max(clock, 12 * 60 + 30)), candidate.neighbourhood || candidate.city));
-        clock = Math.max(clock, 13 * 60 + 30);
-      }
-      const activity = candidateToActivity(candidate);
-      activity.time = minutesToTime(clock);
-      activity.transportMinutes = previous ? fallbackTransitMinutes(previous, candidate) : undefined;
-      activity.transportMode = profile.transport.includes('public-transport') ? 'public transport' : 'walking / public transport';
-      activity.travelEstimateSource = previous ? 'offline-straight-line' : 'unknown';
-      activity.generatedMetadata = {
-        source: 'imported',
-        generatedAt: new Date().toISOString(),
-        reason: `${candidate.neighbourhood || candidate.city} cluster · ${candidate.categories.slice(0, 2).join(' and ')}`,
-        confidence: candidate.openingHours ? 'medium' : 'low',
-      };
-      discoveredActivities.push(activity);
-      clock += candidate.estimatedVisitMinutes;
+    const protectedActivities = (existing?.activities || []).filter((activity) =>
+      activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
+
+    const cluster = clusters[index] || [];
+    const dayCandidates = [...carryOver, ...cluster].filter((candidate) => !scheduled.has(candidate.id));
+    carryOver = [];
+
+    const simulated = simulateDay({
+      dayNumber: index + 1,
+      city: primaryCity,
+      candidates: dayCandidates,
+      behaviour,
+      routeResolver: options.routeResolver,
+      queueEvidence: options.queueEvidence,
+      // Arrival day starts in the afternoon; the traveller is in transit.
+      startTimeOverride: index === 0 && itinerary.days.length === 0 ? '15:00' : undefined,
     });
+
+    const discoveredActivities = simulated.slots
+      .map((slot) => slotToActivity(slot, index + 1, transportMode))
+      .filter((activity): activity is Activity => activity !== null);
+
+    for (const slot of simulated.slots) {
+      if (slot.candidate) scheduled.add(slot.candidate.id);
+      if (slot.arrivalLeg?.source === 'provider') usedProviderRoutes = true;
+    }
+
+    // Most rejections are about *this* day, not the place: a museum that shuts
+    // before you could reach it today fits easily on a lighter day. Only
+    // trip-wide reasons are final; everything else rolls forward.
+    for (const rejection of simulated.rejections) {
+      if (TRIP_WIDE_REJECTIONS.has(rejection.reason)) {
+        rejections.set(rejection.candidate.id, rejection);
+      } else {
+        carryOver.push(rejection.candidate);
+      }
+    }
+    simulated.warnings.forEach((warning) => warnings.add(warning));
+
+    const dayPlaces = simulated.slots
+      .map((slot) => slot.candidate)
+      .filter((candidate): candidate is PlaceCandidate => Boolean(candidate));
+    const title = dayPlaces.length > 0
+      ? composeDayTitle(dayPlaces, usedTitles, index + 1)
+      : existing?.title || `Flexible day ${index + 1}`;
+    usedTitles.add(title);
+
     days.push({
       day: existing?.day || index + 1,
       date: existing?.date || '',
-      city: matching[0]?.city || existing?.city || primaryCity,
-      title: matching.length > 0 ? theme.title : existing?.title || `Flexible day ${index + 1}`,
+      city: simulated.city || existing?.city || primaryCity,
+      title,
       activities: [...protectedActivities, ...discoveredActivities].sort((a, b) => a.time.localeCompare(b.time)),
       photos: existing?.photos,
     });
+    dayLoads.push(simulated.load);
   }
 
-  const unscheduledReasons = [...remaining.values()].map((candidate) => ({
-    candidate,
-    reason: themes.some((theme) => theme.cities.includes(candidate.city)
-      && (theme.neighbourhoods.length === 0 || theme.neighbourhoods.includes(candidate.neighbourhood || '')))
-      ? 'daily-capacity-reached' as const
-      : 'no-viable-day' as const,
-  }));
+  // Anything still carried after the last day genuinely has no home.
+  for (const candidate of carryOver) {
+    if (scheduled.has(candidate.id) || rejections.has(candidate.id)) continue;
+    rejections.set(candidate.id, {
+      candidate,
+      reason: 'no-viable-day',
+      detail: 'The trip has no remaining day with room for this place.',
+    });
+  }
+  // And anything never offered to a day at all, because there were more
+  // clusters than days.
+  for (const candidate of accepted) {
+    if (scheduled.has(candidate.id) || rejections.has(candidate.id)) continue;
+    rejections.set(candidate.id, {
+      candidate,
+      reason: 'no-viable-day',
+      detail: `This trip has ${dayCount} ${dayCount === 1 ? 'day' : 'days'}; add a day to fit more areas.`,
+    });
+  }
+
+  const unscheduledReasons = [...rejections.values()];
+  warnings.add('Opening hours with low or medium source confidence should be rechecked before travel.');
 
   return {
     days,
-    scheduledCandidates: accepted.filter((candidate) => !remaining.has(candidate.id)),
-    unscheduledCandidates: [...remaining.values()],
+    scheduledCandidates: accepted.filter((candidate) => scheduled.has(candidate.id)),
+    unscheduledCandidates: unscheduledReasons.map((item) => item.candidate),
     unscheduledReasons,
-    warnings: [
-      'Fixture mode uses captured official-tourism place records.',
-      'Travel times are clearly labelled straight-line fallbacks until a server route provider is connected.',
-      'Opening hours with low or medium source confidence must be rechecked before travel.',
-    ],
-    routeMode: 'offline-straight-line',
+    dayLoads,
+    warnings: [...warnings],
+    routeMode: usedProviderRoutes ? 'provider' : 'offline-straight-line',
+    behaviour,
   };
 }
