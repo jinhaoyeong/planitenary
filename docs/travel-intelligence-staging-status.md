@@ -14,14 +14,14 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 | Function | Result | Evidence |
 | --- | --- | --- |
-| `travel-capabilities` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` now reports Places, Reviews, YouTube and Routes available; weather is available; events/China/social partners are false. |
+| `travel-capabilities` | HTTP 200 | Google Places, Reviews, YouTube, Routes, weather, events and Amap are now reported available. |
 | `travel-discover` Melbourne | HTTP 200 | Returned current Google Places records including Fed Square, coordinates, rating, address and retrieval timestamp. |
 | `travel-evidence` Melbourne | HTTP 200 | Returned Google Places review documents and YouTube documents with source URLs and retrieval timestamps. |
 | `travel-weather` Melbourne | HTTP 200 | Returned Open-Meteo daily forecast and expiry timestamp. |
 | `travel-route-matrix` | HTTP 200 | Returned a real walking route of 15 minutes and 1,095 metres for the fixed Melbourne verification coordinates. |
-| `travel-route-matrix` regional path | Implemented, not live-proven | Amap/Baidu walking adapters are deployed in version 8; without regional credentials they return an honest failed-pair/unknown result rather than inventing a route. |
-| `travel-events` | HTTP 503 | `TICKETMASTER_API_KEY` is not configured. |
-| `travel-discover` Beijing | HTTP 503 | Neither `AMAP_API_KEY` nor `BAIDU_API_KEY` is configured. |
+| `travel-route-matrix` regional path | HTTP 200 | Amap walking route returned `ok`, with `partial=false` and `failedPairs=0` for Beijing verification coordinates. |
+| `travel-events` | HTTP 200 | Ticketmaster returned 3 events for the Melbourne verification window. |
+| `travel-discover` Beijing | HTTP 200 | Amap returned 3 live candidates. |
 | `travel-reasoning` | HTTP 503 | `OPENAI_API_KEY` is not configured. |
 | `travel-import-link` without a session | HTTP 401 | Authentication is enforced. Unsafe HTTPS validation is covered by tests. |
 
@@ -63,12 +63,11 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 ## Remaining external proof
 
-1. Keep the verified single `GOOGLE_MAPS_API_KEY` configured in Supabase Edge Function secrets. Live Places, YouTube and Google Routes calls now succeed; the branch is currently at `a75d594`.
+1. Keep the verified `GOOGLE_MAPS_API_KEY`, `AMAP_API_KEY` and `TICKETMASTER_API_KEY` configured in Supabase Edge Function secrets. Live Google, Amap and Ticketmaster calls now succeed.
 2. The same key was independently verified against Geocoding and the Maps JavaScript loader (HTTP 200). Do not expose this server-side key in browser code.
-3. Add `TICKETMASTER_API_KEY` to Supabase Edge Function secrets if event-provider ingestion is required.
-4. Add `AMAP_API_KEY` or `BAIDU_API_KEY` to Supabase Edge Function secrets if mainland-China route verification is required; Google remains the live provider for other destinations.
-5. Add `OPENAI_API_KEY` to Supabase Edge Function secrets if live AI reasoning is required.
-6. Sign in to Planitenary in the browser and exercise live discovery, build, improve, shared-link import and mobile itinerary-building with cloud data.
+3. Add `BAIDU_API_KEY` only if a secondary mainland-China provider is required; Amap is now the verified primary China path.
+4. Add `OPENAI_API_KEY` to Supabase Edge Function secrets if live AI reasoning is required.
+5. Sign in to Planitenary in the browser and exercise live discovery, build, improve, shared-link import and mobile itinerary-building with cloud data.
 
 No provider key belongs in `VITE_*` variables. No unavailable provider is presented as live.
 
