@@ -296,6 +296,8 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .destination-flip-face.is-front {
+  display: grid;
+  grid-template-rows: 1fr auto;
   padding: 0;
   border: 0;
   color: inherit;
@@ -328,9 +330,7 @@ body.planner-intelligence-active .pet-overlay {
 
 .destination-deck-photo {
   position: relative;
-  min-height: 0;
-  flex: 1;
-  height: 68%;
+  min-height: 11rem;
   background:
     radial-gradient(circle at 70% 25%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 42%),
     linear-gradient(145deg, color-mix(in srgb, var(--accent-soft) 70%, var(--bg)), var(--bg));
