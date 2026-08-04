@@ -34,6 +34,7 @@ export const secrets = {
   amap: () => env('AMAP_API_KEY'),
   baidu: () => env('BAIDU_API_KEY'),
   weather: () => env('WEATHER_API_KEY'),
+  ticketmaster: () => env('TICKETMASTER_API_KEY'),
   tiktokPartner: () => env('TIKTOK_PARTNER_TOKEN'),
   douyinPartner: () => env('DOUYIN_PARTNER_TOKEN'),
   rednotePartner: () => env('REDNOTE_PARTNER_TOKEN'),
@@ -54,8 +55,9 @@ export function capabilitySnapshot() {
     tripadvisor: Boolean(secrets.tripadvisor()),
     // Official-source fetching needs no third-party key.
     officialSources: true,
-    weather: Boolean(secrets.weather()),
-    events: false,
+    // Weather uses the public Open-Meteo API; no key is required.
+    weather: true,
+    events: Boolean(secrets.ticketmaster()),
     amap: Boolean(secrets.amap()),
     baidu: Boolean(secrets.baidu()),
     tiktokPartner: Boolean(secrets.tiktokPartner()),

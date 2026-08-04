@@ -18,3 +18,9 @@ verify_jwt = true
 
 [functions.travel-evidence]
 verify_jwt = true
+
+[functions.travel-weather]
+verify_jwt = true
+
+[functions.travel-events]
+verify_jwt = true
