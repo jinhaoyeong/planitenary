@@ -24,3 +24,6 @@ verify_jwt = true
 
 [functions.travel-events]
 verify_jwt = true
+
+[functions.travel-import-link]
+verify_jwt = true
