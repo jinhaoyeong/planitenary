@@ -21,6 +21,14 @@ const sourceForHost = (host: string) => {
   return 'user-shared';
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const normaliseTripId = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const candidate = value.trim().replace(/^trip-/i, '');
+  return UUID_PATTERN.test(candidate) ? candidate : null;
+};
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -31,6 +39,8 @@ Deno.serve(async (request) => {
   let url: URL;
   try { url = new URL(body.url); } catch { return json({ error: 'The link is not a valid URL.' }, 400); }
   if (url.protocol !== 'https:') return json({ error: 'Only HTTPS links can be imported.' }, 400);
+  const tripId = normaliseTripId(body.tripId);
+  if (body.tripId && !tripId) return json({ error: 'The trip identifier is invalid.' }, 400);
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL') || '',
@@ -42,7 +52,7 @@ Deno.serve(async (request) => {
   const source = sourceForHost(url.hostname);
   const { data, error } = await supabase.from('user_shared_sources').insert({
     user_id: userData.user.id,
-    trip_id: body.tripId || null,
+    trip_id: tripId,
     source,
     source_url: url.toString(),
     note: body.note || null,

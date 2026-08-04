@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ActivityType, Itinerary } from '../data';
 import { Plus, Link as LinkIcon, Trash2, CheckCircle2, Edit2, Save, X, ExternalLink, BookOpen, ImagePlus } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { describeImport, recogniseLink } from '../lib/sharedLinks';
 
 type DraftItem = {
   id: string;
@@ -172,6 +173,7 @@ export const Draft = ({
   const [readerMode, setReaderMode] = useState<'rednote' | 'image' | null>(null);
   const [readingImageUrl, setReadingImageUrl] = useState<string | null>(null);
   const [isDraftSyncAvailable, setIsDraftSyncAvailable] = useState(true);
+  const [intelligenceStatus, setIntelligenceStatus] = useState<string | null>(null);
   const [useItineraryDraftStore, setUseItineraryDraftStore] = useState(false);
   const clientIdRef = useRef('draft-client-pending');
   const fallbackHydratedRef = useRef(false);
@@ -273,6 +275,19 @@ export const Draft = ({
         setUseItineraryDraftStore(true);
       }
       console.error('Error syncing draft item:', error);
+    }
+  };
+
+  const queueLinkForTravelIntelligence = async (item: DraftItem) => {
+    const recognised = recogniseLink(item.link);
+    if (!recognised || !isSupabaseConfigured() || !user || isDemoUser || isLocalTestUser) return;
+    try {
+      await invokeTravelFunction('travel-import-link', { url: recognised.url, tripId: itinerary.id });
+      setIntelligenceStatus(`${describeImport([recognised])} Saved from “${item.name}” for place matching.`);
+    } catch (error) {
+      setIntelligenceStatus(error instanceof Error
+        ? `Draft saved, but intelligence matching is unavailable: ${error.message}`
+        : 'Draft saved, but intelligence matching is unavailable.');
     }
   };
 
@@ -543,6 +558,7 @@ export const Draft = ({
     };
     setDrafts((prev) => sortDraftsNewestFirst([newDraft, ...prev]));
     void upsertDraftRemote(newDraft);
+    void queueLinkForTravelIntelligence(newDraft);
     if (redNote && normalizedLink) {
       void updateDraftPreview(newDraft.id, normalizedLink);
     }
@@ -596,6 +612,7 @@ export const Draft = ({
     };
     setDrafts((prev) => prev.map((item) => (item.id === editedId ? updatedDraft : item)));
     void upsertDraftRemote(updatedDraft);
+    void queueLinkForTravelIntelligence(updatedDraft);
     if (redNote && normalizedLink) {
       void updateDraftPreview(editedId, normalizedLink);
     }
@@ -768,6 +785,7 @@ export const Draft = ({
           <Plus className="w-4 h-4" />
           Save Draft
         </button>
+        {intelligenceStatus && <p className="text-sm" style={{ color: 'var(--accent)' }} role="status">{intelligenceStatus}</p>}
       </div>
 
       <div className="space-y-3">
