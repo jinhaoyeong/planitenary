@@ -1258,7 +1258,11 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
+    <div
+      className="adaptive-handbook-root min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
+      data-adaptive-handbook="true"
+      style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}
+    >
 
       {/* Scroll progress bar */}
       <motion.div
@@ -1596,7 +1600,7 @@ function App() {
       />
 
       {/* Main Content Area */}
-      <main id="main-content" className="max-w-7xl mx-auto px-4 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10">
+      <main id="main-content" data-adaptive-handbook-content="true" className="max-w-7xl mx-auto px-4 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10">
         
         {/* Tab Content Wrapper with Glass Effect for overlapping sections */}
         <AnimatePresence mode="wait">

@@ -580,6 +580,28 @@ body.planner-intelligence-active .pet-overlay {
   /* Adaptive Destination Design System — defaults (overridden per trip). */
   --heading-tracking: -0.02em;
   --heading-transform: none;
+  --radius-page-panel: 1.5rem;
+  --radius-section: 1.25rem;
+  --radius-card: var(--card-radius);
+  --radius-compact-card: 0.75rem;
+  --radius-button: 9999px;
+  --radius-control: 0.75rem;
+  --radius-chip: 9999px;
+  --radius-tab: 9999px;
+  --radius-input: 1rem;
+  --radius-modal: 1.5rem;
+  --radius-media: 1rem;
+  --radius-icon-tile: 9999px;
+  --radius-full: 9999px;
+  --border-width-surface: 1px;
+  --border-width-control: 1px;
+  --border-style: solid;
+  --shadow-panel: var(--shadow-lift);
+  --shadow-card: var(--shadow-lift);
+  --shadow-floating: var(--shadow-lift);
+  --tab-shape: pill;
+  --badge-shape: circle;
+  --icon-tile-shape: circle;
   --card-radius: 1.75rem;
   --card-shadow: var(--shadow-lift);
   --button-radius: 9999px;
@@ -815,9 +837,9 @@ body {
 /* ---------- Editorial primitives ---------- */
 .editorial-card {
   background-color: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--card-radius, 1.75rem);
-  box-shadow: var(--card-shadow, var(--shadow-lift));
+  border: var(--border-width-surface, 1px) var(--border-style, solid) var(--border);
+  border-radius: var(--radius-card, var(--card-radius, 1.75rem));
+  box-shadow: var(--shadow-card, var(--card-shadow, var(--shadow-lift)));
   transition: transform var(--motion-duration, 0.25s) ease, box-shadow var(--motion-duration, 0.25s) ease;
 }
 .editorial-card:hover {
@@ -828,9 +850,9 @@ body {
 /* Destination-aware day / surface cards — read recipe tokens without changing structure. */
 .trip-surface-card {
   background-color: var(--bg-elevated);
-  border: var(--card-border-width, 1px) solid var(--border);
-  border-radius: var(--card-radius, 1.5rem);
-  box-shadow: var(--card-shadow, var(--shadow-lift));
+  border: var(--card-border-width, var(--border-width-surface, 1px)) var(--border-style, solid) var(--border);
+  border-radius: var(--radius-card, var(--card-radius, 1.5rem));
+  box-shadow: var(--shadow-card, var(--card-shadow, var(--shadow-lift)));
   transition: transform var(--motion-duration, 0.25s) ease, box-shadow var(--motion-duration, 0.25s) ease;
 }
 
@@ -920,7 +942,7 @@ body {
 .handbook-cover-frame {
   position: relative;
   overflow: hidden;
-  border-radius: var(--card-radius, 1.5rem);
+  border-radius: var(--radius-media, var(--card-radius, 1.5rem));
   padding: var(--cover-frame-padding, 0px);
 }
 .handbook-cover-frame::after {
@@ -942,12 +964,12 @@ body {
 }
 [data-cover-layout='metro'] .handbook-cover-frame,
 .handbook-cover-frame[data-cover-layout='metro'] {
-  border-radius: 0.45rem;
+  border-radius: var(--radius-media, 0.45rem);
   border: 1px solid var(--border);
 }
 [data-cover-layout='expedition'] .handbook-cover-frame,
 .handbook-cover-frame[data-cover-layout='expedition'] {
-  border-radius: 0.3rem;
+  border-radius: var(--radius-media, 0.3rem);
   border: 2px solid color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 [data-cover-layout='journal'] .handbook-cover-frame,
@@ -998,7 +1020,7 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.5rem;
-  border-radius: var(--button-radius, 9999px);
+  border-radius: var(--radius-button, var(--button-radius, 9999px));
   font-weight: 600;
   font-size: 0.9rem;
   letter-spacing: 0.01em;
@@ -1803,7 +1825,7 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   background-color: var(--bg-elevated) !important;
   color: var(--ink) !important;
   border: 1px solid var(--border) !important;
-  border-radius: 1rem;
+  border-radius: var(--radius-input, 1rem);
   padding: 0.75rem 1rem;
   font-family: var(--font-sans);
   font-size: 0.9rem;
@@ -1858,7 +1880,73 @@ textarea.editorial-input {
 .editorial-select.is-compact {
   padding: 0.5rem 0.75rem;
   font-size: 0.8rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-control, 0.75rem);
+}
+
+/* ---------- Adaptive handbook surface language ----------
+   Feature screens can keep their layout utilities while semantic roles own
+   shape, border and elevation. Off/subtle retain these app defaults; balanced
+   and immersive replace them from the selected recipe. */
+.adaptive-surface {
+  border-radius: var(--radius-card, 1rem);
+  border-width: var(--border-width-surface, 1px);
+  border-style: var(--border-style, solid);
+  box-shadow: var(--shadow-card, var(--shadow-lift));
+}
+.adaptive-surface-page-panel { border-radius: var(--radius-page-panel, 1.5rem); box-shadow: var(--shadow-panel, var(--shadow-lift)); }
+.adaptive-surface-section { border-radius: var(--radius-section, 1.25rem); box-shadow: var(--shadow-panel, var(--shadow-lift)); }
+.adaptive-surface-card { border-radius: var(--radius-card, 1rem); }
+.adaptive-surface-compact-card { border-radius: var(--radius-compact-card, 0.75rem); }
+.adaptive-surface-modal { border-radius: var(--radius-modal, 1.5rem); box-shadow: var(--shadow-floating, var(--shadow-lift)); }
+.adaptive-button { border-radius: var(--radius-button, var(--button-radius, 9999px)); border-width: var(--border-width-control, 1px); }
+.adaptive-chip { border-radius: var(--radius-chip, 9999px); }
+.adaptive-tab { border-radius: var(--radius-tab, 9999px); }
+.adaptive-input { border-radius: var(--radius-input, 0.75rem); border-width: var(--border-width-control, 1px); }
+.adaptive-media-frame { border-radius: var(--radius-media, 1rem); overflow: hidden; }
+.adaptive-icon-tile { border-radius: var(--radius-icon-tile, 9999px); }
+.adaptive-badge { border-radius: var(--radius-chip, 9999px); }
+
+/* These selectors are a migration bridge for legacy handbook screens. They
+   deliberately stay inside the handbook root and do not alter auth/system UI. */
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .rounded-3xl { border-radius: var(--radius-page-panel, 1.5rem); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .rounded-2xl { border-radius: var(--radius-card, 1rem); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .rounded-xl { border-radius: var(--radius-compact-card, 0.75rem); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .rounded-lg { border-radius: var(--radius-control, 0.75rem); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .rounded-md { border-radius: var(--radius-chip, 9999px); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .rounded-full:not(.adaptive-circle):not(.map-marker):not(.radio-indicator):not(.status-dot):not(.loading-spinner):not(.avatar):not(.color-swatch):not([class*=" w-"]):not([class^="w-"]) {
+  border-radius: var(--radius-chip, 9999px);
+}
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .adaptive-surface-page-panel { border-radius: var(--radius-page-panel); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .adaptive-surface-section { border-radius: var(--radius-section); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .adaptive-card { border-radius: var(--radius-card); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] .adaptive-surface-compact-card { border-radius: var(--radius-compact-card); }
+[data-adaptive-handbook] .adaptive-circle,
+[data-adaptive-handbook] .map-marker,
+[data-adaptive-handbook] .radio-indicator,
+[data-adaptive-handbook] .status-dot,
+[data-adaptive-handbook] .loading-spinner,
+[data-adaptive-handbook] .avatar,
+[data-adaptive-handbook] .color-swatch { border-radius: 9999px; }
+[data-adaptive-handbook] .editorial-card { border-radius: var(--card-radius, 1.75rem); }
+[data-adaptive-handbook] .trip-surface-card { border-radius: var(--card-radius, 1.5rem); }
+[data-adaptive-handbook] .handbook-cover-frame { border-radius: var(--radius-media, var(--card-radius, 1.5rem)); }
+[data-adaptive-handbook] .pill-btn { border-radius: var(--radius-button, var(--button-radius, 9999px)); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] input:not([type="checkbox"]):not([type="radio"]),
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] select,
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] textarea { border-radius: var(--radius-input, 0.75rem); }
+html:is([data-visual-intensity='balanced'], [data-visual-intensity='immersive']) [data-adaptive-handbook] [role="dialog"] {
+  border-radius: var(--radius-modal, var(--radius-page-panel));
+  box-shadow: var(--shadow-floating, var(--shadow-lift));
+}
+/* Nature Expedition and Modern Metropolitan use structure instead of pills
+   for tabs/badges, while circles remain reserved for semantic indicators. */
+html[data-design-recipe='nature-expedition'] [data-adaptive-handbook] .eyebrow,
+html[data-design-recipe='modern-metropolitan'] [data-adaptive-handbook] .eyebrow {
+  letter-spacing: 0.12em;
+}
+html[data-design-recipe='nature-expedition'] [data-adaptive-handbook] .handbook-cover-frame,
+html[data-design-recipe='modern-metropolitan'] [data-adaptive-handbook] .handbook-cover-frame {
+  border-radius: var(--radius-media);
 }
 .editorial-select.is-compact {
   padding-right: 2rem;

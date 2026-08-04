@@ -5,6 +5,7 @@ import {
   applyVisualIdentityCss,
   clearVisualIdentityCss,
   resolveVisualIdentity,
+  VISUAL_IDENTITY_CSS_VARS,
   withVisualDesign,
 } from './visualIdentity';
 
@@ -128,6 +129,56 @@ describe('visual identity intensity', () => {
     expect(Number(resolved.cssVars['--motif-opacity'])).toBeGreaterThan(
       Number(resolveVisualIdentity(withVisualDesign(profile(), { intensity: 'subtle' })).cssVars['--motif-opacity']),
     );
+  });
+
+  it('emits semantic surface tokens for balanced and immersive modes', () => {
+    const balanced = resolveVisualIdentity(withVisualDesign(profile(), {
+      intensity: 'balanced',
+      recipeOverride: 'nature-expedition',
+    }));
+    const immersive = resolveVisualIdentity(withVisualDesign(profile(), {
+      intensity: 'immersive',
+      recipeOverride: 'nature-expedition',
+    }));
+
+    expect(balanced.cssVars['--radius-page-panel']).toBe('0.45rem');
+    expect(balanced.cssVars['--radius-card']).toBe('0.3rem');
+    expect(balanced.cssVars['--radius-tab']).toBe('0.3rem');
+    expect(balanced.cssVars['--radius-chip']).toBe('0.2rem');
+    expect(balanced.cssVars['--icon-tile-shape']).toBe('square');
+    expect(immersive.cssVars['--border-width-surface']).toBe('2px');
+    expect(immersive.cssVars['--radius-media']).toBe('0.15rem');
+  });
+
+  it('leaves semantic component shapes at app defaults for off and subtle', () => {
+    const off = resolveVisualIdentity(withVisualDesign(profile(), { intensity: 'off' }));
+    const subtle = resolveVisualIdentity(withVisualDesign(profile(), { intensity: 'subtle', recipeOverride: 'nature-expedition' }));
+
+    expect(off.cssVars['--radius-card']).toBeUndefined();
+    expect(subtle.cssVars['--radius-card']).toBeUndefined();
+    expect(subtle.cssVars['--radius-tab']).toBeUndefined();
+  });
+
+  it('clears every semantic token when visual identity is removed', () => {
+    const store = {
+      values: {} as Record<string, string>,
+      attrs: {} as Record<string, string | null>,
+    };
+    const root = {
+      style: {
+        setProperty(name: string, value: string) { store.values[name] = value; },
+        removeProperty(name: string) { delete store.values[name]; },
+        getPropertyValue(name: string) { return store.values[name] || ''; },
+      },
+      setAttribute(name: string, value: string) { store.attrs[name] = value; },
+      removeAttribute(name: string) { store.attrs[name] = null; },
+      getAttribute(name: string) { return store.attrs[name] ?? null; },
+    } as unknown as HTMLElement;
+
+    applyVisualIdentityCss(resolveVisualIdentity(withVisualDesign(profile(), { intensity: 'immersive' })), root);
+    expect(root.style.getPropertyValue('--radius-modal')).toBeTruthy();
+    clearVisualIdentityCss(root);
+    expect(VISUAL_IDENTITY_CSS_VARS.every((name) => root.style.getPropertyValue(name) === '')).toBe(true);
   });
 
   it('honours a manual recipe override', () => {

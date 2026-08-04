@@ -46,6 +46,10 @@ export {
 export type DensityToken = 'compact' | 'balanced' | 'spacious';
 export type ButtonShapeToken = 'pill' | 'rounded' | 'square';
 export type DividerToken = 'solid' | 'ornamental' | 'dotted';
+export type BorderStyleToken = 'solid' | 'dotted' | 'double';
+export type TabShapeToken = 'pill' | 'rounded' | 'square' | 'ticket';
+export type BadgeShapeToken = 'circle' | 'rounded-square' | 'stamp';
+export type IconTileShapeToken = 'circle' | 'rounded-square' | 'square';
 export type MotionToken = 'gentle' | 'quick' | 'soft' | 'still';
 export type CoverLayoutToken = 'journal' | 'postcard' | 'metro' | 'expedition';
 export type ImageTreatmentToken = 'muted-paper' | 'warm-postcard' | 'crisp' | 'cool-clean';
@@ -65,6 +69,26 @@ export interface DesignRecipe {
   cardRadius: string;
   cardShadow: string;
   buttonShape: ButtonShapeToken;
+  radiusPagePanel: string;
+  radiusSection: string;
+  radiusCard: string;
+  radiusCompactCard: string;
+  radiusButton: string;
+  radiusControl: string;
+  radiusChip: string;
+  radiusTab: string;
+  radiusInput: string;
+  radiusModal: string;
+  radiusMedia: string;
+  radiusIconTile: string;
+  borderWidthSurface: string;
+  borderWidthControl: string;
+  borderStyle: BorderStyleToken;
+  panelShadow: string;
+  floatingShadow: string;
+  tabShape: TabShapeToken;
+  badgeShape: BadgeShapeToken;
+  iconTileShape: IconTileShapeToken;
   dividerStyle: DividerToken;
   density: DensityToken;
   motifSet: MotifSetId;
@@ -89,6 +113,26 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     cardRadius: '1.75rem',
     cardShadow: '0 1px 0 rgba(15,14,13,0.03), 0 18px 42px -20px rgba(15,14,13,0.16)',
     buttonShape: 'pill',
+    radiusPagePanel: '1.75rem',
+    radiusSection: '1.5rem',
+    radiusCard: '1.5rem',
+    radiusCompactCard: '1rem',
+    radiusButton: '9999px',
+    radiusControl: '9999px',
+    radiusChip: '9999px',
+    radiusTab: '9999px',
+    radiusInput: '1rem',
+    radiusModal: '1.75rem',
+    radiusMedia: '1.5rem',
+    radiusIconTile: '9999px',
+    borderWidthSurface: '1px',
+    borderWidthControl: '1px',
+    borderStyle: 'solid',
+    panelShadow: '0 1px 0 rgba(15,14,13,0.03), 0 22px 52px -24px rgba(15,14,13,0.18)',
+    floatingShadow: '0 12px 28px -12px rgba(15,14,13,0.22)',
+    tabShape: 'pill',
+    badgeShape: 'circle',
+    iconTileShape: 'circle',
     dividerStyle: 'solid',
     density: 'spacious',
     motifSet: 'sakura-stamp',
@@ -110,6 +154,26 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     cardRadius: '0.5rem',
     cardShadow: '0 0 0 1px rgba(15,14,13,0.06), 0 8px 20px -14px rgba(15,14,13,0.18)',
     buttonShape: 'rounded',
+    radiusPagePanel: '0.75rem',
+    radiusSection: '0.65rem',
+    radiusCard: '0.5rem',
+    radiusCompactCard: '0.4rem',
+    radiusButton: '0.45rem',
+    radiusControl: '0.45rem',
+    radiusChip: '0.35rem',
+    radiusTab: '0.4rem',
+    radiusInput: '0.4rem',
+    radiusModal: '0.75rem',
+    radiusMedia: '0.35rem',
+    radiusIconTile: '0.4rem',
+    borderWidthSurface: '1px',
+    borderWidthControl: '1px',
+    borderStyle: 'solid',
+    panelShadow: '0 0 0 1px rgba(15,14,13,0.06), 0 12px 28px -18px rgba(15,14,13,0.2)',
+    floatingShadow: '0 10px 22px -14px rgba(15,14,13,0.24)',
+    tabShape: 'rounded',
+    badgeShape: 'rounded-square',
+    iconTileShape: 'rounded-square',
     dividerStyle: 'solid',
     density: 'compact',
     motifSet: 'metro-grid',
@@ -131,6 +195,26 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     cardRadius: '1.25rem',
     cardShadow: '0 3px 0 rgba(15,14,13,0.05), 0 22px 44px -18px rgba(15,14,13,0.24)',
     buttonShape: 'rounded',
+    radiusPagePanel: '1.25rem',
+    radiusSection: '1.1rem',
+    radiusCard: '1rem',
+    radiusCompactCard: '0.75rem',
+    radiusButton: '0.75rem',
+    radiusControl: '0.75rem',
+    radiusChip: '9999px',
+    radiusTab: '0.75rem',
+    radiusInput: '0.75rem',
+    radiusModal: '1.25rem',
+    radiusMedia: '0.25rem',
+    radiusIconTile: '0.75rem',
+    borderWidthSurface: '1px',
+    borderWidthControl: '1px',
+    borderStyle: 'double',
+    panelShadow: '0 3px 0 rgba(15,14,13,0.05), 0 26px 50px -20px rgba(15,14,13,0.24)',
+    floatingShadow: '0 14px 30px -14px rgba(15,14,13,0.28)',
+    tabShape: 'ticket',
+    badgeShape: 'stamp',
+    iconTileShape: 'rounded-square',
     dividerStyle: 'ornamental',
     density: 'balanced',
     motifSet: 'postcard-arch',
@@ -152,6 +236,26 @@ export const DESIGN_RECIPES: Record<DesignRecipeId, DesignRecipe> = {
     cardRadius: '0.35rem',
     cardShadow: '0 1px 0 rgba(15,14,13,0.08), 0 14px 28px -14px rgba(15,14,13,0.28)',
     buttonShape: 'square',
+    radiusPagePanel: '0.45rem',
+    radiusSection: '0.4rem',
+    radiusCard: '0.3rem',
+    radiusCompactCard: '0.25rem',
+    radiusButton: '0.25rem',
+    radiusControl: '0.25rem',
+    radiusChip: '0.2rem',
+    radiusTab: '0.3rem',
+    radiusInput: '0.25rem',
+    radiusModal: '0.4rem',
+    radiusMedia: '0.15rem',
+    radiusIconTile: '0.15rem',
+    borderWidthSurface: '2px',
+    borderWidthControl: '1px',
+    borderStyle: 'solid',
+    panelShadow: '0 1px 0 rgba(15,14,13,0.08), 0 16px 32px -16px rgba(15,14,13,0.28)',
+    floatingShadow: '0 12px 26px -12px rgba(15,14,13,0.32)',
+    tabShape: 'square',
+    badgeShape: 'rounded-square',
+    iconTileShape: 'square',
     dividerStyle: 'dotted',
     density: 'balanced',
     motifSet: 'alpine-line',
@@ -358,12 +462,6 @@ function imageOverlay(treatment: ImageTreatmentToken, intensity: VisualIdentityI
   }
 }
 
-function buttonRadius(shape: ButtonShapeToken): string {
-  if (shape === 'pill') return '9999px';
-  if (shape === 'rounded') return '0.85rem';
-  return '0.3rem';
-}
-
 function readableInk(hex: string): string {
   const value = hex.replace('#', '');
   if (value.length !== 6) return '#0F0E0D';
@@ -424,9 +522,38 @@ function buildCssVars(
   }
 
   if (applyCards) {
+    const cardShadow = theme === 'dark' ? darkCardShadow(recipe) : recipe.cardShadow;
+    const panelShadow = theme === 'dark' ? darkCardShadow(recipe) : recipe.panelShadow;
+    const floatingShadow = theme === 'dark' ? darkCardShadow(recipe) : recipe.floatingShadow;
+    vars['--radius-page-panel'] = recipe.radiusPagePanel;
+    vars['--radius-section'] = recipe.radiusSection;
+    vars['--radius-card'] = recipe.radiusCard;
+    vars['--radius-compact-card'] = recipe.radiusCompactCard;
+    vars['--radius-button'] = recipe.radiusButton;
+    vars['--radius-control'] = recipe.radiusControl;
+    vars['--radius-chip'] = recipe.radiusChip;
+    vars['--radius-tab'] = recipe.radiusTab;
+    vars['--radius-input'] = recipe.radiusInput;
+    vars['--radius-modal'] = recipe.radiusModal;
+    vars['--radius-media'] = recipe.radiusMedia;
+    vars['--radius-icon-tile'] = recipe.radiusIconTile;
+    vars['--border-width-surface'] = intensity === 'immersive'
+      ? (recipe.id === 'warm-postcard' || recipe.id === 'nature-expedition' ? '2px' : recipe.borderWidthSurface)
+      : recipe.borderWidthSurface;
+    vars['--border-width-control'] = recipe.borderWidthControl;
+    vars['--border-style'] = recipe.borderStyle;
+    vars['--shadow-panel'] = panelShadow;
+    vars['--shadow-card'] = cardShadow;
+    vars['--shadow-floating'] = floatingShadow;
+    vars['--tab-shape'] = recipe.tabShape;
+    vars['--badge-shape'] = recipe.badgeShape;
+    vars['--icon-tile-shape'] = recipe.iconTileShape;
+    vars['--radius-full'] = recipe.radiusChip;
+
+    // Legacy aliases remain available for the preview and existing primitives.
     vars['--card-radius'] = recipe.cardRadius;
-    vars['--card-shadow'] = theme === 'dark' ? darkCardShadow(recipe) : recipe.cardShadow;
-    vars['--button-radius'] = buttonRadius(recipe.buttonShape);
+    vars['--card-shadow'] = cardShadow;
+    vars['--button-radius'] = recipe.radiusButton;
     vars['--content-density'] = String(
       intensity === 'immersive' ? recipe.densityScale * 1.04 : recipe.densityScale,
     );
@@ -542,6 +669,28 @@ export const VISUAL_IDENTITY_CSS_VARS = [
   '--card-radius',
   '--card-shadow',
   '--button-radius',
+  '--radius-page-panel',
+  '--radius-section',
+  '--radius-card',
+  '--radius-compact-card',
+  '--radius-button',
+  '--radius-control',
+  '--radius-chip',
+  '--radius-tab',
+  '--radius-input',
+  '--radius-modal',
+  '--radius-media',
+  '--radius-icon-tile',
+  '--radius-full',
+  '--border-width-surface',
+  '--border-width-control',
+  '--border-style',
+  '--shadow-panel',
+  '--shadow-card',
+  '--shadow-floating',
+  '--tab-shape',
+  '--badge-shape',
+  '--icon-tile-shape',
   '--content-density',
   '--card-border-width',
   '--cover-frame-padding',

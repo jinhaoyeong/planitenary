@@ -26,7 +26,7 @@ export function OptionChips<T extends string>({
             key={option.id}
             type="button"
             onClick={() => onToggle(option.id)}
-            className="text-left rounded-2xl px-4 py-3 transition-colors min-h-16"
+            className="adaptive-surface adaptive-card text-left px-4 py-3 transition-colors min-h-16"
             style={{
               backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg)',
               border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,

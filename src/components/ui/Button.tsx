@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { clsx } from 'clsx';
+import { AdaptiveButton } from './AdaptivePrimitives';
 
 type Variant = 'primary' | 'ghost' | 'soft';
 
@@ -9,10 +10,11 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export const Button = ({ variant = 'primary', className, children, ...rest }: Props) => (
-  <button
+  <AdaptiveButton
     {...rest}
+    variant={variant === 'primary' ? 'primary' : variant === 'ghost' ? 'ghost' : 'secondary'}
     className={clsx(
-      'pill-btn',
+      'pill-btn adaptive-button',
       variant === 'primary' && 'pill-primary accent-button',
       variant === 'ghost' && 'pill-ghost',
       variant === 'soft' && 'pill-soft',
@@ -20,5 +22,5 @@ export const Button = ({ variant = 'primary', className, children, ...rest }: Pr
     )}
   >
     {children}
-  </button>
+  </AdaptiveButton>
 );
