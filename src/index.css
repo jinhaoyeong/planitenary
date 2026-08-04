@@ -196,22 +196,66 @@ body.planner-intelligence-active .pet-overlay {
   margin-top: 1.25rem;
 }
 
+.destination-discovery-review.is-deck-only {
+  display: grid;
+  gap: 1rem;
+}
+
+.destination-deck-chrome-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.destination-deck-close {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.destination-deck-chrome h3 {
+  margin-top: 0.7rem;
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.destination-deck-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .destination-deck-stage {
   position: relative;
-  min-height: 17rem;
+  min-height: 22rem;
+  display: grid;
+  place-items: center;
+}
+
+.destination-deck-pop {
+  width: min(100%, 22rem);
 }
 
 .destination-deck-card {
   position: relative;
   display: grid;
-  gap: 0.85rem;
-  min-height: 16rem;
-  padding: 1.15rem;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: 1.25rem;
+  border-radius: 1.35rem;
   background:
-    linear-gradient(160deg, color-mix(in srgb, var(--accent-soft) 55%, var(--bg)) 0%, var(--bg) 62%);
-  box-shadow: 0 1rem 2.4rem color-mix(in srgb, var(--ink) 12%, transparent);
+    linear-gradient(160deg, color-mix(in srgb, var(--accent-soft) 45%, var(--bg)) 0%, var(--bg) 62%);
+  box-shadow: 0 1.1rem 2.6rem color-mix(in srgb, var(--ink) 14%, transparent);
   touch-action: pan-y;
   cursor: grab;
 }
@@ -220,10 +264,131 @@ body.planner-intelligence-active .pet-overlay {
   cursor: grabbing;
 }
 
+.destination-flip-scene {
+  perspective: 1200px;
+  width: 100%;
+  aspect-ratio: 1 / 1.08;
+}
+
+.destination-flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.destination-flip-scene.is-flipped .destination-flip-inner {
+  transform: rotateY(180deg);
+}
+
+.destination-flip-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--bg-elevated, var(--bg)) 92%, transparent);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.destination-flip-face.is-front {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.destination-flip-face.is-back {
+  padding: 0.9rem;
+  transform: rotateY(180deg);
+  overflow: auto;
+}
+
+.destination-flip-back-close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  z-index: 2;
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.destination-deck-photo {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  height: 68%;
+  background:
+    radial-gradient(circle at 70% 25%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 42%),
+    linear-gradient(145deg, color-mix(in srgb, var(--accent-soft) 70%, var(--bg)), var(--bg));
+  background-position: center;
+  background-size: cover;
+}
+
+.destination-deck-photo[data-has-photo="true"] {
+  background-color: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.destination-deck-photo .destination-match-score {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+}
+
+.destination-deck-photo-fallback {
+  display: grid;
+  height: 100%;
+  place-content: center;
+  gap: 0.4rem;
+  color: var(--accent);
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.destination-deck-front-copy {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem 0.9rem 0.95rem;
+}
+
+.destination-deck-front-copy h5 {
+  font-size: 1.05rem;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.destination-deck-tap-hint {
+  margin-top: 0.25rem;
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.destination-deck-back-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
 .destination-deck-stamp {
   position: absolute;
   top: 1rem;
-  z-index: 2;
+  z-index: 3;
   padding: 0.35rem 0.65rem;
   border: 2px solid currentColor;
   border-radius: 0.55rem;
@@ -291,6 +456,16 @@ body.planner-intelligence-active .pet-overlay {
   display: grid;
   gap: 0.5rem;
   margin-top: 0.35rem;
+}
+
+.destination-intro-actions {
+  display: grid;
+  gap: 0.55rem;
+  width: 100%;
+}
+
+.destination-deck-footer {
+  margin-top: 0.25rem;
 }
 
 .destination-candidate-meta-line {

@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Sparkles,
   Undo2,
+  X,
 } from 'lucide-react';
 import { AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform } from 'framer-motion';
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
@@ -39,9 +40,7 @@ interface DestinationDiscoveryPanelProps {
 }
 
 type DiscoveryPhase = 'idle' | 'review' | 'preview' | 'built';
-type ReviewBrowseMode = 'deck' | 'list';
 
-const TOP_PICKS_COUNT = 15;
 const SWIPE_COMMIT_PX = 110;
 
 const GROUPS = [
@@ -275,53 +274,129 @@ function CandidateCard({
 function DeckCard({
   ranked,
   onDecision,
-  onOpenDetails,
 }: {
   ranked: RankedCandidate;
   onDecision: (decision: DiscoveryCandidateDecision) => void;
-  onOpenDetails: () => void;
 }) {
-  const { candidate, score, reasons } = ranked;
+  const { candidate, score, reasons, cautions = [] } = ranked;
   const reduceMotion = useReducedMotion();
+  const [flipped, setFlipped] = useState(false);
   const x = useMotionValue(0);
-  const rotate = useTransform(x, [-220, 0, 220], [-10, 0, 10]);
+  const rotate = useTransform(x, [-220, 0, 220], [-8, 0, 8]);
   const mustOpacity = useTransform(x, [20, SWIPE_COMMIT_PX], [0, 1]);
   const skipOpacity = useTransform(x, [-SWIPE_COMMIT_PX, -20], [1, 0]);
+  const photoUrl = candidate.photoUrl;
+
+  useEffect(() => {
+    setFlipped(false);
+    x.set(0);
+  }, [candidate.id, x]);
+
+  const commit = (decision: DiscoveryCandidateDecision) => {
+    onDecision(decision);
+  };
 
   return (
-    <motion.article
-      className="destination-deck-card"
-      style={{ x, rotate }}
-      drag={reduceMotion ? false : 'x'}
-      dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.92}
-      onDragEnd={(_, info) => {
-        if (info.offset.x >= SWIPE_COMMIT_PX || info.velocity.x > 700) {
-          onDecision('must-do');
-          return;
-        }
-        if (info.offset.x <= -SWIPE_COMMIT_PX || info.velocity.x < -700) {
-          onDecision('skip');
-        }
-      }}
+    <motion.div
+      className="destination-deck-pop"
+      initial={reduceMotion ? false : { opacity: 0, scale: 0.88, y: 28 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={reduceMotion ? undefined : { opacity: 0, scale: 0.92, y: -12 }}
+      transition={{ type: 'spring', stiffness: 380, damping: 28 }}
     >
-      <motion.span className="destination-deck-stamp is-must" style={{ opacity: mustOpacity }}>Must do</motion.span>
-      <motion.span className="destination-deck-stamp is-skip" style={{ opacity: skipOpacity }}>Skip</motion.span>
-      <div className="destination-deck-top">
-        <span className="destination-match-score" aria-label={`${score} percent match`}>{score}</span>
-        <div>
-          <p className="destination-candidate-meta-line">{candidate.neighbourhood || candidate.city} · {formatDuration(candidate.estimatedVisitMinutes)}</p>
-          <h5>{candidate.name}</h5>
+      <motion.article
+        className="destination-deck-card"
+        style={{ x, rotate }}
+        drag={flipped || reduceMotion ? false : 'x'}
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.92}
+        onDragEnd={(_, info) => {
+          if (info.offset.x >= SWIPE_COMMIT_PX || info.velocity.x > 700) {
+            commit('must-do');
+            return;
+          }
+          if (info.offset.x <= -SWIPE_COMMIT_PX || info.velocity.x < -700) {
+            commit('skip');
+          }
+        }}
+      >
+        <motion.span className="destination-deck-stamp is-must" style={{ opacity: mustOpacity }}>Must do</motion.span>
+        <motion.span className="destination-deck-stamp is-skip" style={{ opacity: skipOpacity }}>Skip</motion.span>
+
+        <div className={`destination-flip-scene${flipped ? ' is-flipped' : ''}`}>
+          <div className="destination-flip-inner">
+            <button
+              type="button"
+              className="destination-flip-face is-front"
+              onClick={() => { setFlipped(true); hapticTap(); }}
+              aria-label={`Show details for ${candidate.name}`}
+            >
+              <div
+                className="destination-deck-photo"
+                style={photoUrl ? { backgroundImage: `url(${photoUrl})` } : undefined}
+                data-has-photo={photoUrl ? 'true' : 'false'}
+              >
+                {!photoUrl && (
+                  <div className="destination-deck-photo-fallback" aria-hidden="true">
+                    <MapPinned className="w-8 h-8" />
+                    <span>{candidate.neighbourhood || candidate.city}</span>
+                  </div>
+                )}
+                <span className="destination-match-score" aria-label={`${score} percent match`}>{score}</span>
+              </div>
+              <div className="destination-deck-front-copy">
+                <p className="destination-candidate-meta-line">
+                  {candidate.neighbourhood || candidate.city}
+                  {' · '}
+                  {formatDuration(candidate.estimatedVisitMinutes)}
+                </p>
+                <h5>{candidate.name}</h5>
+                <p className="destination-deck-tap-hint">Tap to flip for details</p>
+              </div>
+            </button>
+
+            <div className="destination-flip-face is-back" aria-hidden={!flipped}>
+              <button type="button" className="destination-flip-back-close" onClick={() => setFlipped(false)} aria-label="Flip card back">
+                <X className="w-4 h-4" />
+              </button>
+              <p className="destination-candidate-meta-line">
+                {candidate.neighbourhood || candidate.city}
+                {' · '}
+                {formatDuration(candidate.estimatedVisitMinutes)}
+              </p>
+              <h5>{candidate.name}</h5>
+              <p className="destination-candidate-description">{candidate.description}</p>
+              <div className="destination-facts" aria-label="Place details">
+                <span><Clock3 className="w-3.5 h-3.5" />{formatDuration(candidate.estimatedVisitMinutes)}</span>
+                <span>{formatPrice(candidate.priceLevel)}</span>
+                <span>{openingSummary(candidate)}</span>
+              </div>
+              <p className="destination-match-reason">{reasons.join(' · ')}</p>
+              {cautions.length > 0 && <p className="destination-match-caution">{cautions.join(' ')}</p>}
+              <div className="destination-deck-back-actions">
+                <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
+                <button type="button" className="destination-quick-action is-detail" onClick={() => commit('interested')}>Interested</button>
+                <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
+              </div>
+              {candidate.sourceReferences[0]?.url && (
+                <a href={candidate.sourceReferences[0].url} target="_blank" rel="noreferrer" className="destination-source-link">
+                  Source <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-      <p className="destination-deck-reason">{reasons.slice(0, 2).join(' · ')}</p>
-      <div className="destination-deck-actions">
-        <button type="button" className="destination-quick-action is-skip" onClick={() => onDecision('skip')}>Skip</button>
-        <button type="button" className="destination-quick-action is-detail" onClick={onOpenDetails}>Details</button>
-        <button type="button" className="destination-quick-action is-must" onClick={() => onDecision('must-do')}>Must do</button>
-      </div>
-      <p className="destination-deck-hint">Swipe right to keep · left to skip</p>
-    </motion.article>
+
+        {!flipped && (
+          <div className="destination-deck-actions">
+            <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
+            <button type="button" className="destination-quick-action is-detail" onClick={() => { setFlipped(true); hapticTap(); }}>Flip</button>
+            <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
+          </div>
+        )}
+        {!flipped && <p className="destination-deck-hint">Swipe right to keep · left to skip</p>}
+      </motion.article>
+    </motion.div>
   );
 }
 
@@ -570,25 +645,16 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     savedStateMatchesCity ? itinerary.discoveryState!.decisions : {}
   ));
   const [buildResult, setBuildResult] = useState<DestinationBuildResult | null>(null);
-  const [browseMode, setBrowseMode] = useState<ReviewBrowseMode>('deck');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const [showAllGroups, setShowAllGroups] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const isMobileReview = useIsMobileReview();
   const selectedCount = Object.values(decisions).filter((decision) => decision === 'must-do' || decision === 'interested').length;
   const reviewedCount = Object.keys(decisions).length;
-  const topPicks = useMemo(() => ranked.slice(0, TOP_PICKS_COUNT), [ranked]);
-  const topPickPending = useMemo(
-    () => topPicks.filter(({ candidate }) => !decisions[candidate.id]),
-    [topPicks, decisions],
-  );
-  const currentDeckCard = topPickPending[0] || null;
-  const decidedRanked = useMemo(
-    () => ranked.filter(({ candidate }) => Boolean(decisions[candidate.id])),
+  const pendingDeck = useMemo(
+    () => ranked.filter(({ candidate }) => !decisions[candidate.id]),
     [ranked, decisions],
   );
+  const currentDeckCard = pendingDeck[0] || null;
 
   const persistDecisions = (next: Record<string, CandidateDecision>, discoveredAt = itinerary.discoveryState?.discoveredAt || new Date().toISOString()) => {
     onItineraryChange({
@@ -670,7 +736,6 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     setUndoState({ candidateId, name, previous, next: decision });
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setUndoState(null), 4200);
-    if (expandedId === candidateId && (decision === 'must-do' || decision === 'skip')) setExpandedId(null);
   };
 
   const undoLastDecision = () => {
@@ -689,17 +754,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
   }, []);
 
-  useEffect(() => {
-    if (!isMobileReview) setBrowseMode('list');
-  }, [isMobileReview]);
-
   const selectRecommended = () => {
     const next = defaultDiscoveryDecisions(ranked);
     setDecisions(next);
     persistDecisions(next);
     hapticSuccess();
-    setBrowseMode('list');
-    setShowAllGroups(true);
   };
 
   const clearAllDecisions = () => {
@@ -707,7 +766,6 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     setDecisions(next);
     persistDecisions(next);
     setUndoState(null);
-    setExpandedId(null);
     hapticTap();
   };
 
@@ -933,32 +991,129 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   }
 
   if (phase === 'idle') {
+    const canResumeReview = Boolean(candidates.length > 0 || (savedStateMatchesCity && itinerary.discoveryState?.stage === 'reviewing'));
     return (
       <section className="destination-discovery-shell destination-discovery-intro">
         <div>
           <span className="fixture-badge"><Database className="w-4 h-4" /> Official tourism sources</span>
           <h3>Build a {cityLabel} itinerary</h3>
-          <p>Review real places from official tourism sources, choose what matters, then shape distinct neighbourhood-led days around your pace and interests.</p>
+          <p>Review real places one by one, flip for details, then build neighbourhood-led days around what you keep.</p>
         </div>
-        <button type="button" className="pill-btn pill-primary" onClick={beginDiscovery} disabled={loading}>
-          <Sparkles className="w-4 h-4" /> {loading ? 'Loading verified places…' : `Discover ${cityLabel} places`}
-        </button>
+        <div className="destination-intro-actions">
+          {canResumeReview && candidates.length > 0 && (
+            <button type="button" className="pill-btn pill-primary" onClick={() => { hapticTap(); setPhase('review'); }}>
+              Continue reviewing
+            </button>
+          )}
+          <button type="button" className={`pill-btn ${canResumeReview && candidates.length > 0 ? 'pill-ghost' : 'pill-primary'}`} onClick={beginDiscovery} disabled={loading}>
+            <Sparkles className="w-4 h-4" /> {loading ? 'Loading verified places…' : `Discover ${cityLabel} places`}
+          </button>
+        </div>
         {error && <p className="destination-discovery-error" role="alert">{error} Try again; your itinerary has not changed.</p>}
       </section>
     );
   }
 
+  if (isMobileReview) {
+    return (
+      <section className="destination-discovery-shell destination-discovery-review is-deck-only" aria-label={`Review places for ${cityLabel}`}>
+        <div className="destination-deck-chrome">
+          <div className="destination-deck-chrome-top">
+            <span className="fixture-badge">
+              <Database className="w-4 h-4" /> {ranked.length} verified
+            </span>
+            <button
+              type="button"
+              className="destination-deck-close"
+              aria-label="Close place review"
+              onClick={() => { hapticTap(); setPhase('idle'); }}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <h3>Choose places for {cityLabel}</h3>
+          <div className="destination-review-progress" aria-label={`${reviewedCount} of ${ranked.length} places reviewed`}>
+            <div className="destination-review-progress-track">
+              <div
+                className="destination-review-progress-fill"
+                style={{ width: ranked.length ? `${Math.min(100, (reviewedCount / ranked.length) * 100)}%` : '0%' }}
+              />
+            </div>
+            <div className="destination-deck-progress-meta">
+              <span>{reviewedCount} of {ranked.length}</span>
+              <span>{selectedCount} selected</span>
+            </div>
+          </div>
+        </div>
+
+        {currentDeckCard ? (
+          <div className="destination-deck-stage">
+            <AnimatePresence mode="wait">
+              <DeckCard
+                key={currentDeckCard.candidate.id}
+                ranked={currentDeckCard}
+                onDecision={(decision) => updateDecision(currentDeckCard.candidate.id, decision, { name: currentDeckCard.candidate.name })}
+              />
+            </AnimatePresence>
+            {pendingDeck.length > 1 && (
+              <p className="destination-deck-remaining">{pendingDeck.length - 1} left after this</p>
+            )}
+          </div>
+        ) : (
+          <div className="destination-deck-complete">
+            <strong>Shortlist ready</strong>
+            <p>{selectedCount} places selected. Build your itinerary, or keep adjusting with recommended picks.</p>
+            <div className="destination-deck-complete-actions">
+              <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Use recommended shortlist</button>
+              <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={selectedCount < 2 || routeLoading}>
+                {routeLoading ? 'Checking routes…' : 'Build itinerary'}
+              </button>
+              <button type="button" className="pill-btn pill-ghost" onClick={() => { hapticTap(); setPhase('idle'); }}>Close</button>
+            </div>
+          </div>
+        )}
+
+        <AnimatePresence>
+          {undoState && (
+            <motion.div
+              className="destination-undo-toast"
+              role="status"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+            >
+              <span>Marked {undoState.name} as {DECISION_LABEL[undoState.next]}</span>
+              <button type="button" onClick={undoLastDecision}>
+                <Undo2 className="w-4 h-4" /> Undo
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {currentDeckCard && selectedCount >= 2 && (
+          <div className="destination-review-footer destination-deck-footer">
+            <div>
+              <strong>{selectedCount} selected</strong>
+              <span>You can build anytime</span>
+            </div>
+            <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={routeLoading}>
+              {routeLoading ? 'Checking routes…' : 'Build'}
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  }
+
   return (
-    <section className="destination-discovery-shell destination-discovery-review" data-mobile-review={isMobileReview ? 'true' : 'false'}>
+    <section className="destination-discovery-shell destination-discovery-review" data-mobile-review="false">
       <div className="destination-review-header">
         <div>
           <span className="fixture-badge">
-            <Database className="w-4 h-4" /> {ranked.length} verified{usingFixture ? ' · may be out of date' : ''}
+            <Database className="w-4 h-4" /> {ranked.length} verified places{usingFixture ? ' · may be out of date' : ''}
           </span>
-          <h3>{isMobileReview ? `Choose places for ${cityLabel}` : `Choose what belongs in your ${cityLabel} trip`}</h3>
-          {!isMobileReview && (
-            <p>Nothing is scheduled until you review it. Ranking uses your interests, budget, data completeness and neighbourhood fit.</p>
-          )}
+          <h3>Choose what belongs in your {cityLabel} trip</h3>
+          <p>Nothing is scheduled until you review it. Ranking uses your interests, budget, data completeness and neighbourhood fit.</p>
           <div className="destination-review-progress" aria-label={`${reviewedCount} of ${ranked.length} places reviewed`}>
             <div className="destination-review-progress-track">
               <div
@@ -984,165 +1139,29 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         </div>
       </div>
 
-      {isMobileReview && (
-        <div className="destination-review-mode-toggle" role="tablist" aria-label="Review mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={browseMode === 'deck'}
-            className={browseMode === 'deck' ? 'is-active' : undefined}
-            onClick={() => { setBrowseMode('deck'); hapticTap(); }}
-          >
-            Deck · top picks
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={browseMode === 'list'}
-            className={browseMode === 'list' ? 'is-active' : undefined}
-            onClick={() => { setBrowseMode('list'); setShowAllGroups(true); hapticTap(); }}
-          >
-            Browse all
-          </button>
-        </div>
-      )}
-
-      {isMobileReview && browseMode === 'deck' && (
-        <section className="destination-deck-panel" aria-label="Top picks deck">
-          <div className="destination-group-heading">
-            <h4>Top picks</h4>
-            <span>{Math.min(TOP_PICKS_COUNT, ranked.length) - topPickPending.length}/{Math.min(TOP_PICKS_COUNT, ranked.length)} done</span>
-          </div>
-          {currentDeckCard ? (
-            <div className="destination-deck-stage">
-              <AnimatePresence mode="wait">
-                <DeckCard
-                  key={currentDeckCard.candidate.id}
-                  ranked={currentDeckCard}
-                  onDecision={(decision) => updateDecision(currentDeckCard.candidate.id, decision, { name: currentDeckCard.candidate.name })}
-                  onOpenDetails={() => {
-                    setBrowseMode('list');
-                    setShowAllGroups(true);
-                    setExpandedId(currentDeckCard.candidate.id);
-                  }}
-                />
-              </AnimatePresence>
-              {topPickPending.length > 1 && (
-                <p className="destination-deck-remaining">{topPickPending.length - 1} more in this deck</p>
-              )}
-            </div>
-          ) : (
-            <div className="destination-deck-complete">
-              <strong>Top picks sorted</strong>
-              <p>{selectedCount} selected so far. Build now, or browse the rest of the catalog.</p>
-              <div className="destination-deck-complete-actions">
-                <button type="button" className="pill-btn pill-ghost" onClick={() => { setBrowseMode('list'); setShowAllGroups(true); }}>
-                  Browse remaining places
-                </button>
-                <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={selectedCount < 2 || routeLoading}>
-                  {routeLoading ? 'Checking routes…' : 'Build itinerary'}
-                </button>
+      <div className="destination-review-groups">
+        {groupedRanked.map((group) => {
+          if (group.items.length === 0) return null;
+          return (
+            <section key={group.id} className="destination-review-group">
+              <div className="destination-group-heading">
+                <h4>{group.label}</h4>
+                <span>{group.items.length} places</span>
               </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {(!isMobileReview || browseMode === 'list') && (
-        <div className="destination-review-groups">
-          {isMobileReview && decidedRanked.length > 0 && (
-            <section className="destination-review-group destination-decided-group">
-              <button
-                type="button"
-                className="destination-group-heading is-toggle"
-                aria-expanded={openGroups.decided === true}
-                onClick={() => setOpenGroups((current) => ({ ...current, decided: !current.decided }))}
-              >
-                <h4>Decided</h4>
-                <span>{decidedRanked.length} places <ChevronDown className={`w-4 h-4 inline transition-transform ${openGroups.decided ? 'rotate-180' : ''}`} /></span>
-              </button>
-              {openGroups.decided && (
-                <div className="destination-candidate-grid">
-                  {decidedRanked.map((item) => (
-                    <CandidateCard
-                      key={`decided-${item.candidate.id}`}
-                      ranked={item}
-                      decision={decisions[item.candidate.id]}
-                      compact
-                      expanded={expandedId === item.candidate.id}
-                      onToggleExpand={() => setExpandedId((current) => (current === item.candidate.id ? null : item.candidate.id))}
-                      onDecision={(decision) => updateDecision(item.candidate.id, decision, { name: item.candidate.name })}
-                    />
-                  ))}
-                </div>
-              )}
+              <div className="destination-candidate-grid">
+                {group.items.map((item) => (
+                  <CandidateCard
+                    key={item.candidate.id}
+                    ranked={item}
+                    decision={decisions[item.candidate.id]}
+                    onDecision={(decision) => updateDecision(item.candidate.id, decision, { name: item.candidate.name })}
+                  />
+                ))}
+              </div>
             </section>
-          )}
-
-          {groupedRanked.map((group) => {
-            const groupCandidates = isMobileReview
-              ? group.items.filter(({ candidate }) => !decisions[candidate.id])
-              : group.items;
-            if (groupCandidates.length === 0 && isMobileReview) return null;
-            if (group.items.length === 0) return null;
-            const selectedInGroup = group.items.filter(({ candidate }) => {
-              const decision = decisions[candidate.id];
-              return decision === 'must-do' || decision === 'interested';
-            }).length;
-            const groupOpen = !isMobileReview
-              || openGroups[group.id] === true
-              || (group.id === 'essentials' && openGroups[group.id] !== false);
-            return (
-              <section key={group.id} className="destination-review-group">
-                {isMobileReview ? (
-                  <button
-                    type="button"
-                    className="destination-group-heading is-toggle"
-                    aria-expanded={groupOpen}
-                    onClick={() => {
-                      setShowAllGroups(true);
-                      setOpenGroups((current) => ({ ...current, [group.id]: !groupOpen }));
-                    }}
-                  >
-                    <h4>{group.label}</h4>
-                    <span>
-                      {group.items.length} · {selectedInGroup} selected
-                      <ChevronDown className={`w-4 h-4 inline transition-transform ${groupOpen ? 'rotate-180' : ''}`} />
-                    </span>
-                  </button>
-                ) : (
-                  <div className="destination-group-heading">
-                    <h4>{group.label}</h4>
-                    <span>{group.items.length} places</span>
-                  </div>
-                )}
-                {groupOpen && (
-                  <div className="destination-candidate-grid">
-                    {(isMobileReview ? groupCandidates : group.items).map((item) => (
-                      <CandidateCard
-                        key={item.candidate.id}
-                        ranked={item}
-                        decision={decisions[item.candidate.id]}
-                        compact={isMobileReview}
-                        expanded={!isMobileReview || expandedId === item.candidate.id}
-                        onToggleExpand={() => setExpandedId((current) => (current === item.candidate.id ? null : item.candidate.id))}
-                        swipeEnabled={isMobileReview}
-                        onDecision={(decision) => updateDecision(item.candidate.id, decision, { name: item.candidate.name })}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-
-          {isMobileReview && !showAllGroups && (
-            <button type="button" className="pill-btn pill-ghost destination-browse-all-btn" onClick={() => setShowAllGroups(true)}>
-              Browse all {ranked.length} places
-            </button>
-          )}
-        </div>
-      )}
+          );
+        })}
+      </div>
 
       <AnimatePresence>
         {undoState && (
