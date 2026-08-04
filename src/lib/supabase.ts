@@ -67,7 +67,7 @@ export async function invokeTravelFunction(name: string, body?: unknown): Promis
 
 /**
  * AI is deliberately a named server boundary. The browser can request an
- * interpretation, but never receives or sends an OpenAI credential directly.
+ * interpretation, but never receives or sends a Gemini credential directly.
  */
 export async function invokeTravelReasoning(operation: string, input: unknown): Promise<unknown> {
   return invokeTravelFunction('travel-reasoning', { operation, input });

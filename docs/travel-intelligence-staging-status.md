@@ -22,7 +22,7 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 | `travel-route-matrix` regional path | HTTP 200 | Amap walking route returned `ok`, with `partial=false` and `failedPairs=0` for Beijing verification coordinates. |
 | `travel-events` | HTTP 200 | Ticketmaster returned 3 events for the Melbourne verification window. |
 | `travel-discover` Beijing | HTTP 200 | Amap returned 3 live candidates. |
-| `travel-reasoning` | HTTP 503 | `OPENAI_API_KEY` is not configured. |
+| `travel-reasoning` | HTTP 503 | Gemini-backed function is deployed, but Supabase does not currently report `GEMINI_API_KEY`; the local key request reached Gemini and returned HTTP 429 quota/rate-limit. |
 | `travel-import-link` without a session | HTTP 401 | Authentication is enforced. Unsafe HTTPS validation is covered by tests. |
 
 ## Automated verification
@@ -66,7 +66,7 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 1. Keep the verified `GOOGLE_MAPS_API_KEY`, `AMAP_API_KEY` and `TICKETMASTER_API_KEY` configured in Supabase Edge Function secrets. Live Google, Amap and Ticketmaster calls now succeed.
 2. The same key was independently verified against Geocoding and the Maps JavaScript loader (HTTP 200). Do not expose this server-side key in browser code.
 3. Add `BAIDU_API_KEY` only if a secondary mainland-China provider is required; Amap is now the verified primary China path.
-4. Add `OPENAI_API_KEY` to Supabase Edge Function secrets if live AI reasoning is required.
+4. Add `GEMINI_API_KEY` to Supabase Edge Function secrets and ensure its Gemini project quota is available for live AI reasoning.
 5. Sign in to Planitenary in the browser and exercise live discovery, build, improve, shared-link import and mobile itinerary-building with cloud data.
 
 No provider key belongs in `VITE_*` variables. No unavailable provider is presented as live.

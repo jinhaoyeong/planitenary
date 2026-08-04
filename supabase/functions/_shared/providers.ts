@@ -41,7 +41,7 @@ export const secrets = {
   tiktokPartner: () => env('TIKTOK_PARTNER_TOKEN'),
   douyinPartner: () => env('DOUYIN_PARTNER_TOKEN'),
   rednotePartner: () => env('REDNOTE_PARTNER_TOKEN'),
-  openai: () => env('OPENAI_API_KEY'),
+  gemini: () => env('GEMINI_API_KEY'),
 };
 
 /**
@@ -69,7 +69,7 @@ export function capabilitySnapshot() {
     tiktokPartner: Boolean(secrets.tiktokPartner()),
     douyinPartner: Boolean(secrets.douyinPartner()),
     rednotePartner: Boolean(secrets.rednotePartner()),
-    aiReasoning: Boolean(secrets.openai()),
+    aiReasoning: Boolean(secrets.gemini()),
   };
 }
 
