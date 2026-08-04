@@ -101,6 +101,8 @@ export interface DiscoveryOutcome {
   evidenceSummaries: Record<string, PlaceEvidenceSummary>;
   /** Trend strength 0–1 by candidate id. */
   trends: Record<string, number>;
+  /** Provider failure retained for UI diagnostics when no fallback exists. */
+  providerError?: string;
 }
 
 export interface WeatherRiskDay {
@@ -217,6 +219,7 @@ export async function discoverPlaces(
   invoke?: (name: string, body: unknown) => Promise<unknown>,
 ): Promise<DiscoveryOutcome> {
   const capability = capabilityFor(destination, runtime);
+  let providerError: string | undefined;
 
   if (capability.places.status === 'live' && invoke) {
     try {
@@ -248,8 +251,10 @@ export async function discoverPlaces(
           ...digestEvidence(evidencePayload, candidates),
         };
       }
-    } catch {
-      // Fall through to the fixture rather than failing the whole panel.
+    } catch (error) {
+      // Fall through to a labelled fixture rather than failing the whole panel,
+      // but retain the provider reason when no fixture exists for this city.
+      providerError = error instanceof Error ? error.message : 'Live discovery failed.';
     }
   }
 
@@ -271,6 +276,7 @@ export async function discoverPlaces(
       queueEvidence: {},
       evidenceSummaries: {},
       trends: {},
+      providerError,
     };
   }
 
@@ -281,5 +287,6 @@ export async function discoverPlaces(
     queueEvidence: {},
     evidenceSummaries: {},
     trends: {},
+    providerError,
   };
 }

@@ -15,7 +15,7 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 | Function | Result | Evidence |
 | --- | --- | --- |
 | `travel-capabilities-live` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` reports Places, Reviews and YouTube available; the safe fixed-coordinate Routes probe returns false because Google currently responds 403; weather is available; events/China/social partners are false. |
-| `travel-discover-live` Melbourne | HTTP 200 | Returned current Google Places records including Fed Square, coordinates, rating, address and retrieval timestamp. |
+| `travel-discover-live` Melbourne | HTTP 502 | The deployed function now surfaces `Provider responded 400`; the local Google key succeeds against the identical Places request, so the Supabase `GOOGLE_MAPS_API_KEY` secret still needs to be replaced/checked. |
 | `travel-evidence-live` Melbourne | HTTP 200 | Returned 5 Google Places review documents and 8 YouTube documents with source URLs and retrieval timestamps. |
 | `travel-weather` Melbourne | HTTP 200 | Returned Open-Meteo daily forecast and expiry timestamp. |
 | `travel-route-matrix` | HTTP 502 | Underlying Google response is HTTP 403; the capability endpoint now suppresses Routes from the live UI until this is fixed. |
@@ -38,11 +38,12 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 ## Remaining external proof
 
-1. Enable Google Routes API in the Google Cloud project that owns `GOOGLE_MAPS_API_KEY`.
-2. Add `TICKETMASTER_API_KEY` to Supabase Edge Function secrets.
-3. Add `AMAP_API_KEY` or `BAIDU_API_KEY` to Supabase Edge Function secrets.
-4. Add `OPENAI_API_KEY` to Supabase Edge Function secrets.
-5. Sign in to Planitenary in the browser and exercise discovery, build, improve, shared-link import, desktop layout and 390px mobile layout.
+1. Replace/check the Supabase Edge Function secret `GOOGLE_MAPS_API_KEY` with the verified Google key. The local direct checks returned HTTP 200 for Places, YouTube and Routes; the current deployed discovery request returns HTTP 400.
+2. Enable Google Routes API in the Google Cloud project that owns `GOOGLE_MAPS_API_KEY` and recheck the capability probe.
+3. Add `TICKETMASTER_API_KEY` to Supabase Edge Function secrets.
+4. Add `AMAP_API_KEY` or `BAIDU_API_KEY` to Supabase Edge Function secrets.
+5. Add `OPENAI_API_KEY` to Supabase Edge Function secrets.
+6. Sign in to Planitenary in the browser and exercise discovery, build, improve, shared-link import, desktop layout and 390px mobile layout.
 
 No provider key belongs in `VITE_*` variables. No unavailable provider is presented as live.
 

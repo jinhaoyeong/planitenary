@@ -427,7 +427,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           endDate: profile.endDate,
           limit: 40,
         });
-      if (discovered.length === 0) throw new Error('No places were returned for this destination.');
+      if (discovered.length === 0) {
+        throw new Error(outcome.providerError
+          ? `Live discovery unavailable: ${outcome.providerError}`
+          : 'No places were returned for this destination.');
+      }
       const nextDecisions = Object.keys(decisions).length > 0 ? decisions : {};
       setCandidates(discovered);
       setDecisions(nextDecisions);

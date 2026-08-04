@@ -44,7 +44,21 @@ export async function invokeTravelFunction(name: string, body?: unknown): Promis
   const { data, error } = await supabase.functions.invoke(name, {
     body: body ?? {},
   });
-  if (error) throw new Error(error.message || `${name} failed.`);
+  if (error) {
+    // FunctionsHttpError keeps the response body on `context`. Preserve the
+    // provider's safe diagnostic so a 400/403 is distinguishable from an
+    // empty destination; never expose request headers or secret values.
+    const context = (error as { context?: unknown }).context;
+    if (context && typeof context === 'object' && 'clone' in context && typeof context.clone === 'function') {
+      let providerMessage: string | undefined;
+      try {
+        const payload = await (context as Response).clone().json() as { error?: unknown };
+        if (typeof payload.error === 'string' && payload.error.trim()) providerMessage = payload.error;
+      } catch { /* Some Supabase errors have no JSON response body. */ }
+      if (providerMessage) throw new Error(providerMessage);
+    }
+    throw new Error(error.message || `${name} failed.`);
+  }
   if (data && typeof data === 'object' && 'error' in data) {
     throw new Error(String((data as { error: unknown }).error));
   }

@@ -233,6 +233,7 @@ async function searchGoogle(city: string, countryCode: string, limit: number, tr
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const seen = new Map<string, ReturnType<typeof toCandidate>>();
+  let lastProviderError: ProviderError | undefined;
 
   // One request per intent, so the shortlist spans a real trip rather than
   // returning twenty variations of the single most famous landmark.
@@ -253,6 +254,7 @@ async function searchGoogle(city: string, countryCode: string, limit: number, tr
     }).catch((error) => {
       // One failed intent must not sink the whole discovery run.
       console.warn(`Discovery query "${query.text}" failed:`, error.message);
+      if (error instanceof ProviderError) lastProviderError = error;
       return null;
     });
 
@@ -265,6 +267,9 @@ async function searchGoogle(city: string, countryCode: string, limit: number, tr
     }
   }
 
+  // If every intent failed, preserve the provider failure rather than
+  // mislabelling a credentials/API restriction problem as an empty city.
+  if (seen.size === 0 && lastProviderError) throw lastProviderError;
   return [...seen.values()];
 }
 
