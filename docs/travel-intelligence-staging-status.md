@@ -26,11 +26,12 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 ## Automated verification
 
-- Vitest: 288 tests passing across 22 files.
+- Vitest: 290 tests passing across 22 files.
 - Production TypeScript/Vite build: passing.
 - Crowd evidence produces a separate `crowdRisk` signal and caution.
 - Weather risk changes the deterministic scheduler's indoor/outdoor ordering.
 - Replanning previews preserve locks and use existing preview/apply/undo protection.
+- The planner UI now exposes reversible route-delay recovery, walking-load reduction, and relaxed-pace previews; focused replanning tests cover each path.
 - Fixtures remain an explicitly labelled fallback.
 
 ## Remaining external proof
