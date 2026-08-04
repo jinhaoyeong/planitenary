@@ -13,6 +13,9 @@ import {
 } from 'lucide-react';
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider, getDestinationCapability } from '../lib/destinationFixtures';
+import { describeCapability } from '../lib/destinationCapability';
+import { capabilityFor } from '../lib/discoveryRuntime';
+import { describePace } from '../lib/travelBehaviour';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
 import {
   buildDestinationItinerary,
@@ -131,6 +134,11 @@ const unscheduledReasonLabel = (reason: string) => {
   if (reason === 'insufficient-route-data') return 'Insufficient route data';
   if (reason === 'opening-hours-conflict') return 'Opening-hours conflict';
   if (reason === 'duplicate') return 'Duplicate place';
+  // These are the traveller's own comfort limits, phrased so it is clear the
+  // limit can be relaxed rather than implying the place is unavailable.
+  if (reason === 'walking-limit-exceeded') return 'Beyond your walking limit';
+  if (reason === 'return-time-exceeded') return 'Past your return time';
+  if (reason === 'queue-exceeds-tolerance') return 'Longer wait than you wanted';
   return 'No viable day found';
 };
 
@@ -201,7 +209,15 @@ function DiscoveryPreview({
   onApply: () => void;
 }) {
   const placeCount = result.days.reduce((total, day) => total + day.activities.filter((activity) => activity.kind === 'place').length, 0);
-  const hoursKnown = result.scheduledCandidates.filter((candidate) => candidate.openingHours).length;
+  const activeLoads = result.dayLoads.filter((load) => load.mainActivities > 0);
+  const totals = {
+    walkingKm: activeLoads.length
+      ? (activeLoads.reduce((sum, load) => sum + load.walkingDistanceMeters, 0) / activeLoads.length / 1000).toFixed(1)
+      : '0.0',
+    averageTransport: activeLoads.length
+      ? Math.round(activeLoads.reduce((sum, load) => sum + load.transportMinutes, 0) / activeLoads.length)
+      : 0,
+  };
   return (
     <div className="destination-plan-preview">
       <div className="destination-preview-header">
@@ -215,20 +231,30 @@ function DiscoveryPreview({
 
       <div className="destination-evidence-strip">
         <span><ShieldCheck className="w-4 h-4" /><strong>{placeCount}/{placeCount}</strong> verified places</span>
-        <span><MapPinned className="w-4 h-4" /><strong>100%</strong> coordinates</span>
-        <span><Clock3 className="w-4 h-4" /><strong>{placeCount ? Math.round(hoursKnown / placeCount * 100) : 0}%</strong> captured hours</span>
-        <span><Route className="w-4 h-4" /><strong>Fallback</strong> routing</span>
+        <span><MapPinned className="w-4 h-4" /><strong>{totals.walkingKm} km</strong> average walking</span>
+        <span><Clock3 className="w-4 h-4" /><strong>{totals.averageTransport} min</strong> average travel</span>
+        <span><Route className="w-4 h-4" /><strong>{result.routeMode === 'provider' ? 'Live' : 'Estimated'}</strong> routing</span>
       </div>
 
+      <p className="destination-pace-summary">{describePace(result.behaviour)}</p>
+
       <div className="destination-day-list">
-        {result.days.map((day) => {
+        {result.days.map((day, dayIndex) => {
           const places = day.activities.filter((activity) => activity.kind === 'place');
           if (places.length === 0) return null;
+          const load = result.dayLoads[dayIndex];
           return (
             <article key={day.day} className="destination-day-row">
               <div className="destination-day-number">Day {day.day}</div>
               <div>
                 <h5>{day.title}</h5>
+                {load && (
+                  <p className="destination-day-load">
+                    {load.transportMinutes} min travel · {(load.walkingDistanceMeters / 1000).toFixed(1)} km walking
+                    {' · '}back by {load.expectedReturnTime}
+                    {load.fatigueScore > 0.8 ? ' · demanding day' : ''}
+                  </p>
+                )}
                 <div className="destination-day-places">
                   {places.map((activity) => (
                     <div key={activity.id}>
@@ -252,10 +278,10 @@ function DiscoveryPreview({
           <strong>{result.unscheduledReasons.length} selected {result.unscheduledReasons.length === 1 ? 'place was' : 'places were'} not scheduled</strong>
           <span>Each place remains visible with a reason so you can adjust the shortlist and rebuild.</span>
           <ul>
-            {result.unscheduledReasons.map(({ candidate, reason }) => (
+            {result.unscheduledReasons.map(({ candidate, reason, detail }) => (
               <li key={candidate.id}>
                 <span>{candidate.name}</span>
-                <small>{unscheduledReasonLabel(reason)}</small>
+                <small title={detail}>{unscheduledReasonLabel(reason)}</small>
               </li>
             ))}
           </ul>
@@ -410,12 +436,20 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   };
 
   if (!supportsFixture) {
+    // Capability is resolved from the destination's region and the connected
+    // providers, so the message stays accurate as backends come online.
+    const destination = profile.destinations[0];
+    const capability = capabilityFor({
+      city: cityLabel,
+      region: destination?.region,
+      countryCode: destination?.countryCode || '',
+    });
     return (
       <section className="destination-discovery-shell destination-discovery-unavailable">
         <Database className="w-5 h-5" />
         <div>
           <h4>Smart discovery isn’t available for {cityLabel} yet</h4>
-          <p>We don’t have a verified place library for {cityLabel} right now. You can still build your trip by adding places manually below.</p>
+          <p>{describeCapability(capability)} You can still build your trip by adding places manually below.</p>
         </div>
       </section>
     );

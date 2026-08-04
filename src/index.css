@@ -497,6 +497,19 @@ body.planner-intelligence-active .pet-overlay {
   font-size: 0.72rem;
 }
 
+/* Per-day human load: travel, walking and the hour you get back. */
+.destination-day-load {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* One-line summary of the pace the plan was actually built to. */
+.destination-pace-summary {
+  margin-top: 0.6rem;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+}
+
 .destination-day-places {
   display: grid;
   gap: 0.55rem;

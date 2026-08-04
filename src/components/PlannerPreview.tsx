@@ -12,7 +12,8 @@ import {
   type ItineraryProposal,
 } from '../lib/tripIntelligence';
 import { profileRevision } from '../lib/identityFields';
-import { getDestinationCapability } from '../lib/destinationFixtures';
+import { canDiscover } from '../lib/destinationCapability';
+import { capabilityFor } from '../lib/discoveryRuntime';
 import { DestinationDiscoveryPanel } from './DestinationDiscoveryPanel';
 
 interface PlannerPreviewProps {
@@ -91,9 +92,17 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const hasPlaceActivities = itinerary.days.some((day) => day.activities.some(isPlaceActivity));
   const hasInboxActivities = (itinerary.unassignedActivities?.length || 0) > 0;
   const discoveryBuilt = itinerary.discoveryState?.stage === 'itinerary-built';
-  const discoveryCapability = getDestinationCapability(profile.destinations[0]?.city || itinerary.cities[0]);
-  const discoverySupported = discoveryCapability !== undefined;
-  const discoveryCityLabel = discoveryCapability?.city || '';
+  // Capability comes from the destination's region and the connected
+  // providers, so this stays correct as live backends come online.
+  const discoveryDestination = profile.destinations[0];
+  const discoveryCityLabel = discoveryDestination?.city || itinerary.cities[0] || '';
+  const discoverySupported = discoveryCityLabel
+    ? canDiscover(capabilityFor({
+        city: discoveryCityLabel,
+        region: discoveryDestination?.region,
+        countryCode: discoveryDestination?.countryCode || '',
+      }))
+    : false;
   const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.some(isPlaceActivity)), [itinerary.days]);
   const conflictCount = useMemo(() => conflictCountFor(itinerary), [itinerary]);
   const declaredDays = declaredTripDays(profile);
