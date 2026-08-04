@@ -666,14 +666,22 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   }
 
   if (phase === 'built') {
+    const reopenReview = () => {
+      if (candidates.length > 0) {
+        setPhase('review');
+        return;
+      }
+      void beginDiscovery();
+    };
+
     return (
       <BuiltDiscoverySummary
         itinerary={itinerary}
         cityLabel={cityLabel}
         candidates={candidates}
         decisions={decisions}
-        onEdit={() => setPhase('review')}
-        onRebuild={() => setPhase('review')}
+        onEdit={reopenReview}
+        onRebuild={reopenReview}
       />
     );
   }
