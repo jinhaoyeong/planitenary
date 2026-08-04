@@ -191,7 +191,7 @@ export function buildDestinationItinerary(
       title: primaryCity.toLowerCase() === 'osaka'
         ? (index === dayCount - 1 ? 'Flexible final day and departure buffer' : 'Flexible Osaka breathing room')
         : `Flexible ${primaryCity || 'travel'} day ${index + 1}`,
-      cities: [primaryCity || 'Osaka'],
+      cities: [primaryCity].filter(Boolean),
       neighbourhoods: [],
       maxPlaces: 3,
     };
@@ -226,7 +226,7 @@ export function buildDestinationItinerary(
     days.push({
       day: existing?.day || index + 1,
       date: existing?.date || '',
-      city: matching[0]?.city || existing?.city || 'Osaka',
+      city: matching[0]?.city || existing?.city || primaryCity,
       title: matching.length > 0 ? theme.title : existing?.title || `Flexible day ${index + 1}`,
       activities: [...protectedActivities, ...discoveredActivities].sort((a, b) => a.time.localeCompare(b.time)),
       photos: existing?.photos,

@@ -12,6 +12,7 @@ import {
   type ItineraryProposal,
 } from '../lib/tripIntelligence';
 import { profileRevision } from '../lib/identityFields';
+import { getDestinationCapability } from '../lib/destinationFixtures';
 import { DestinationDiscoveryPanel } from './DestinationDiscoveryPanel';
 
 interface PlannerPreviewProps {
@@ -90,6 +91,9 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const hasPlaceActivities = itinerary.days.some((day) => day.activities.some(isPlaceActivity));
   const hasInboxActivities = (itinerary.unassignedActivities?.length || 0) > 0;
   const discoveryBuilt = itinerary.discoveryState?.stage === 'itinerary-built';
+  const discoveryCapability = getDestinationCapability(profile.destinations[0]?.city || itinerary.cities[0]);
+  const discoverySupported = discoveryCapability !== undefined;
+  const discoveryCityLabel = discoveryCapability?.city || '';
   const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.some(isPlaceActivity)), [itinerary.days]);
   const conflictCount = useMemo(() => conflictCountFor(itinerary), [itinerary]);
   const declaredDays = declaredTripDays(profile);
@@ -304,7 +308,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
             {hasPlaceActivities && !discoveryBuilt && <button type="button" className="pill-btn pill-primary" onClick={optimiseWholeTrip}><Sparkles className="w-4 h-4" /> Organise saved places</button>}
             {hasInboxActivities && !hasPlaceActivities && <button type="button" className="pill-btn pill-primary" onClick={build}><Sparkles className="w-4 h-4" /> Place saved activities</button>}
             {discoveryBuilt && <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>Use Rebuild itinerary above to preview changes from the selected places.</span>}
-            {!hasPlaceActivities && !hasInboxActivities && <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>Add places manually or use the Osaka discovery review above.</span>}
+            {!hasPlaceActivities && !hasInboxActivities && <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>{discoverySupported ? `Add places manually or use the ${discoveryCityLabel} discovery review above.` : 'Add places manually to start building your itinerary.'}</span>}
           </div>
         </div>
         {hasPlaceActivities && (

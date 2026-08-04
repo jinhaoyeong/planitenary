@@ -12,7 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
-import { FixturePlaceDiscoveryProvider, OSAKA_KNOWLEDGE_FIXTURE, OSAKA_PLACE_FIXTURE } from '../lib/destinationFixtures';
+import { FixturePlaceDiscoveryProvider, getDestinationCapability } from '../lib/destinationFixtures';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
 import {
   buildDestinationItinerary,
@@ -136,12 +136,14 @@ const unscheduledReasonLabel = (reason: string) => {
 
 function BuiltDiscoverySummary({
   itinerary,
+  cityLabel,
   candidates,
   decisions,
   onEdit,
   onRebuild,
 }: {
   itinerary: Itinerary;
+  cityLabel: string;
   candidates: PlaceCandidate[];
   decisions: Record<string, CandidateDecision>;
   onEdit: () => void;
@@ -160,7 +162,7 @@ function BuiltDiscoverySummary({
       <div className="destination-built-summary">
         <div>
           <span className="fixture-badge"><Check className="w-4 h-4" /> Shortlist complete</span>
-          <h3 id="destination-built-title">Your Osaka itinerary is ready</h3>
+          <h3 id="destination-built-title">Your {cityLabel} itinerary is ready</h3>
           <p>{selectedCount} selected places · {scheduledCandidateIds.length} scheduled · {unscheduled.length} need attention · {plannedDays} days with places.</p>
         </div>
         <div className="destination-built-actions">
@@ -189,10 +191,12 @@ function BuiltDiscoverySummary({
 
 function DiscoveryPreview({
   result,
+  cityLabel,
   onBack,
   onApply,
 }: {
   result: DestinationBuildResult;
+  cityLabel: string;
   onBack: () => void;
   onApply: () => void;
 }) {
@@ -203,10 +207,10 @@ function DiscoveryPreview({
       <div className="destination-preview-header">
         <div>
           <button type="button" className="destination-back-link" onClick={onBack}><ArrowLeft className="w-4 h-4" /> Back to shortlist</button>
-          <h4>Your Osaka itinerary is ready to review</h4>
+          <h4>Your {cityLabel} itinerary is ready to review</h4>
           <p>{placeCount} source-backed places across {result.days.filter((day) => day.activities.some((activity) => activity.kind === 'place')).length} themed days.</p>
         </div>
-        <span className="fixture-badge"><Database className="w-4 h-4" /> Fixture mode</span>
+        <span className="fixture-badge"><Database className="w-4 h-4" /> Verified places</span>
       </div>
 
       <div className="destination-evidence-strip">
@@ -273,12 +277,20 @@ function DiscoveryPreview({
 
 export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChange }: DestinationDiscoveryPanelProps) {
   const primaryCity = profile.destinations[0]?.city || itinerary.cities[0] || '';
-  const supportsFixture = primaryCity.trim().toLowerCase() === 'osaka';
+  const capability = getDestinationCapability(primaryCity);
+  const supportsFixture = capability !== undefined;
+  // Canonical display name for the active destination — never a hardcoded city.
+  const cityLabel = capability?.city || primaryCity || 'this destination';
+  const savedStateMatchesCity = Boolean(
+    itinerary.discoveryState
+    && capability
+    && itinerary.discoveryState.city.toLowerCase() === capability.city.toLowerCase(),
+  );
   const [phase, setPhase] = useState<DiscoveryPhase>(() => {
-    if (itinerary.discoveryState?.stage === 'itinerary-built') return 'built';
-    return itinerary.discoveryState?.city.toLowerCase() === 'osaka' ? 'review' : 'idle';
+    if (itinerary.discoveryState?.stage === 'itinerary-built' && savedStateMatchesCity) return 'built';
+    return savedStateMatchesCity ? 'review' : 'idle';
   });
-  const [candidates, setCandidates] = useState<PlaceCandidate[]>(() => supportsFixture ? OSAKA_PLACE_FIXTURE : []);
+  const [candidates, setCandidates] = useState<PlaceCandidate[]>(() => capability?.places ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ranked = useMemo(() => rankDestinationCandidates(candidates, profile), [candidates, profile]);
@@ -294,9 +306,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     });
   }, [ranked]);
   const [decisions, setDecisions] = useState<Record<string, CandidateDecision>>(() => (
-    itinerary.discoveryState?.city.toLowerCase() === 'osaka'
-      ? itinerary.discoveryState.decisions
-      : {}
+    savedStateMatchesCity ? itinerary.discoveryState!.decisions : {}
   ));
   const [buildResult, setBuildResult] = useState<DestinationBuildResult | null>(null);
   const selectedCount = Object.values(decisions).filter((decision) => decision === 'must-do' || decision === 'interested').length;
@@ -306,7 +316,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       ...itinerary,
       revision: (itinerary.revision || 0) + 1,
       discoveryState: {
-        city: 'Osaka',
+        city: cityLabel,
         mode: 'fixture',
         candidateIds: candidates.map((candidate) => candidate.id),
         decisions: next,
@@ -318,15 +328,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   };
 
   const beginDiscovery = async () => {
-    if (!supportsFixture) return;
+    if (!capability) return;
     setLoading(true);
     setError(null);
     try {
       const provider = new FixturePlaceDiscoveryProvider();
       const discovered = await provider.search({
-        city: 'Osaka',
-        countryCode: 'JP',
-        queries: OSAKA_KNOWLEDGE_FIXTURE.discoveryQueries,
+        city: capability.city,
+        countryCode: capability.countryCode,
+        queries: capability.knowledge?.discoveryQueries ?? [],
         interests: profile.styles,
         startDate: profile.startDate,
         endDate: profile.endDate,
@@ -372,7 +382,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       cities: Array.from(new Set(buildResult.days.map((day) => day.city).filter(Boolean))),
       revision: (itinerary.revision || 0) + 1,
       discoveryState: {
-        city: 'Osaka',
+        city: cityLabel,
         mode: 'fixture',
         candidateIds: candidates.map((candidate) => candidate.id),
         decisions,
@@ -388,7 +398,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           id: `discovery-${Date.now()}`,
           action: 'generate' as const,
           createdAt: timestamp,
-          summary: `Built an Osaka fixture itinerary with ${buildResult.scheduledCandidates.length} source-backed places.`,
+          summary: `Built a ${cityLabel} itinerary with ${buildResult.scheduledCandidates.length} verified places.`,
           affectedDayNumbers: buildResult.days.map((day) => day.day),
           beforeDays: itinerary.days,
           afterDays: buildResult.days,
@@ -404,21 +414,22 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       <section className="destination-discovery-shell destination-discovery-unavailable">
         <Database className="w-5 h-5" />
         <div>
-          <h4>Discovery provider not connected for {primaryCity || 'this destination'}</h4>
-          <p>The source-backed vertical slice currently supports Osaka in clearly labelled fixture mode. Saved-place organisation remains available below.</p>
+          <h4>Smart discovery isn’t available for {cityLabel} yet</h4>
+          <p>We don’t have a verified place library for {cityLabel} right now. You can still build your trip by adding places manually below.</p>
         </div>
       </section>
     );
   }
 
   if (phase === 'preview' && buildResult) {
-    return <section className="destination-discovery-shell"><DiscoveryPreview result={buildResult} onBack={() => setPhase('review')} onApply={applyPlan} /></section>;
+    return <section className="destination-discovery-shell"><DiscoveryPreview result={buildResult} cityLabel={cityLabel} onBack={() => setPhase('review')} onApply={applyPlan} /></section>;
   }
 
   if (phase === 'built') {
     return (
       <BuiltDiscoverySummary
         itinerary={itinerary}
+        cityLabel={cityLabel}
         candidates={candidates}
         decisions={decisions}
         onEdit={() => setPhase('review')}
@@ -431,12 +442,12 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     return (
       <section className="destination-discovery-shell destination-discovery-intro">
         <div>
-          <span className="fixture-badge"><Database className="w-4 h-4" /> Official-source fixture</span>
-          <h3>Build an Osaka itinerary</h3>
+          <span className="fixture-badge"><Database className="w-4 h-4" /> Official tourism sources</span>
+          <h3>Build a {cityLabel} itinerary</h3>
           <p>Review real places from official tourism sources, choose what matters, then shape distinct neighbourhood-led days around your pace and interests.</p>
         </div>
         <button type="button" className="pill-btn pill-primary" onClick={beginDiscovery} disabled={loading}>
-          <Sparkles className="w-4 h-4" /> {loading ? 'Loading verified places…' : 'Discover Osaka places'}
+          <Sparkles className="w-4 h-4" /> {loading ? 'Loading verified places…' : `Discover ${cityLabel} places`}
         </button>
         {error && <p className="destination-discovery-error" role="alert">{error} Try again; your itinerary has not changed.</p>}
       </section>
@@ -447,8 +458,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     <section className="destination-discovery-shell">
       <div className="destination-review-header">
         <div>
-          <span className="fixture-badge"><Database className="w-4 h-4" /> Fixture mode · {ranked.length} real candidates</span>
-          <h3>Choose what belongs in your Osaka trip</h3>
+          <span className="fixture-badge"><Database className="w-4 h-4" /> {ranked.length} verified places</span>
+          <h3>Choose what belongs in your {cityLabel} trip</h3>
           <p>Nothing is scheduled until you review it. Ranking uses your interests, budget, data completeness and neighbourhood fit.</p>
         </div>
         <div className="destination-review-summary">

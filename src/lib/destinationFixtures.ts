@@ -187,6 +187,39 @@ export const ALL_DESTINATION_FIXTURES = [
   ...ROME_PLACE_FIXTURE,
 ];
 
+/**
+ * A destination the smart-discovery experience can currently support, together
+ * with the verified place library and (optionally) the richer knowledge pack
+ * that backs it. This registry is the single source of truth for "which cities
+ * support discovery" — nothing in the UI should hardcode a city name.
+ */
+export interface DestinationCapability {
+  /** Canonical display name, e.g. "Osaka". */
+  city: string;
+  countryCode: string;
+  places: PlaceCandidate[];
+  knowledge?: DestinationKnowledgePack;
+}
+
+const DESTINATION_CAPABILITIES: DestinationCapability[] = [
+  { city: 'Osaka', countryCode: 'JP', places: OSAKA_PLACE_FIXTURE, knowledge: OSAKA_KNOWLEDGE_FIXTURE },
+  { city: 'Seoul', countryCode: 'KR', places: SEOUL_PLACE_FIXTURE },
+  { city: 'Rome', countryCode: 'IT', places: ROME_PLACE_FIXTURE },
+];
+
+const CAPABILITY_BY_CITY = new Map(
+  DESTINATION_CAPABILITIES.map((capability) => [capability.city.toLowerCase(), capability]),
+);
+
+/** Resolve the discovery capability for a city name, if one exists. */
+export function getDestinationCapability(city: string | undefined | null): DestinationCapability | undefined {
+  if (!city) return undefined;
+  return CAPABILITY_BY_CITY.get(city.trim().toLowerCase());
+}
+
+/** Canonical display names of every destination discovery currently supports. */
+export const SUPPORTED_DISCOVERY_CITIES = DESTINATION_CAPABILITIES.map((capability) => capability.city);
+
 export class FixturePlaceDiscoveryProvider implements PlaceDiscoveryProvider {
   readonly mode = 'fixture' as const;
 
