@@ -29,7 +29,10 @@ const env = (name: string): string | undefined => {
 /** Secrets, resolved once. Absent secret means that provider is simply off. */
 export const secrets = {
   google: () => env('GOOGLE_MAPS_API_KEY'),
-  youtube: () => env('YOUTUBE_API_KEY'),
+  // Google Cloud uses one API key for the enabled Places, Routes,
+  // Geocoding and YouTube Data APIs. Keep provider access server-side and
+  // avoid requiring a second YouTube-specific secret.
+  youtube: () => env('GOOGLE_MAPS_API_KEY'),
   tripadvisor: () => env('TRIPADVISOR_API_KEY'),
   amap: () => env('AMAP_API_KEY'),
   baidu: () => env('BAIDU_API_KEY'),

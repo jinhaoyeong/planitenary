@@ -68,7 +68,7 @@ export async function loadProviderRuntime(
   if (!invoke) return EMPTY_PROVIDER_RUNTIME;
 
   try {
-    const value = parseRuntime(await invoke('travel-capabilities'));
+    const value = parseRuntime(await invoke('travel-capabilities-live'));
     runtimeCache = { value, fetchedAt: now };
     return value;
   } catch {
@@ -233,7 +233,7 @@ export async function discoverPlaces(
         // is still worth having even if review gathering is unavailable.
         let evidencePayload: unknown = null;
         try {
-          evidencePayload = await invoke('travel-evidence', {
+          evidencePayload = await invoke('travel-evidence-live', {
             city: destination.city,
             placeIds: candidates.map((candidate) => candidate.providerPlaceId).filter(Boolean),
             placeNames: candidates.map((candidate) => candidate.name),
