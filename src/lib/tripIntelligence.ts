@@ -297,18 +297,22 @@ const buildOperations = (changes: ProposedChange[], beforeDays: DayPlan[], after
   return { kind: 'lock', dayNumber: change.dayNumber, activityId: change.activityId };
 });
 
-const plannerCoverage = (days: DayPlan[], knownLegs: number, unknownLegs: number): PlannerCoverage => {
+const plannerCoverage = (days: DayPlan[]): PlannerCoverage => {
   const places = days.flatMap((day) => day.activities).filter(isPlaceActivity);
-  const totalLegs = knownLegs + unknownLegs;
   if (places.length === 0) {
     return { placeVerification: 0, coordinates: 0, openingHours: 0, route: 0, reservations: 0 };
   }
+  const routeLegs = days.reduce((total, day) => total + Math.max(0, day.activities.filter(isPlaceActivity).length - 1), 0);
+  const providerRouteLegs = days.reduce((total, day) => {
+    const dayPlaces = day.activities.filter(isPlaceActivity);
+    return total + dayPlaces.slice(1).filter((activity) => activity.travelEstimateSource === 'provider-route').length;
+  }, 0);
   return {
     placeVerification: places.filter((activity) => Boolean(activity.providerPlaceId)).length / places.length,
     coordinates: places.filter((activity) => Boolean(activity.coordinates)).length / places.length,
     openingHours: places.filter((activity) => Boolean(activity.openingHours?.opensAt && activity.openingHours?.closesAt)).length / places.length,
-    route: totalLegs > 0 ? knownLegs / totalLegs : places.length <= 1 ? 1 : 0,
-    reservations: places.filter((activity) => activity.bookingStatus !== undefined).length / places.length,
+    route: routeLegs > 0 ? providerRouteLegs / routeLegs : places.length <= 1 ? 1 : 0,
+    reservations: places.filter((activity) => activity.reservationRequirement && activity.reservationRequirement !== 'unknown').length / places.length,
   };
 };
 
@@ -339,12 +343,13 @@ const makeProposal = (
     return { total: sum.total + metrics.total, knownLegs: sum.knownLegs + metrics.knownLegs, unknownLegs: sum.unknownLegs + metrics.unknownLegs };
   }, { total: 0, knownLegs: 0, unknownLegs: 0 });
   const totalLegs = afterMetrics.knownLegs + afterMetrics.unknownLegs;
-  const coverage = plannerCoverage(afterDays, afterMetrics.knownLegs, afterMetrics.unknownLegs);
+  const coverage = plannerCoverage(afterDays);
   const warnings: string[] = afterMetrics.unknownLegs > 0
     ? [`${afterMetrics.unknownLegs} movement leg${afterMetrics.unknownLegs === 1 ? '' : 's'} lack coordinates and remain unknown.`]
     : [];
   if (coverage.placeVerification < 1) warnings.push('Some places are not linked to a verified discovery source.');
   if (coverage.coordinates < 1) warnings.push('Some places lack coordinates, so their movement remains approximate.');
+  if (coverage.route < 1) warnings.push('Some movement legs use offline estimates instead of provider routes.');
   if (afterDays.flatMap((day) => day.activities).filter(isPlaceActivity).length === 0) {
     warnings.push('No real places are scheduled. Add or discover places before building a destination-specific itinerary.');
   }

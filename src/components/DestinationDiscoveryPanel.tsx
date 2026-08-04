@@ -1,0 +1,394 @@
+import { useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  Check,
+  Clock3,
+  Database,
+  ExternalLink,
+  Info,
+  MapPinned,
+  Route,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
+import type { DiscoveryCandidateDecision, Itinerary } from '../data';
+import { FixturePlaceDiscoveryProvider, OSAKA_KNOWLEDGE_FIXTURE, OSAKA_PLACE_FIXTURE } from '../lib/destinationFixtures';
+import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
+import {
+  buildDestinationItinerary,
+  defaultDiscoveryDecisions,
+  rankDestinationCandidates,
+  type DestinationBuildResult,
+} from '../lib/destinationPlanner';
+import type { TripProfile } from '../lib/tripProfile';
+
+interface DestinationDiscoveryPanelProps {
+  itinerary: Itinerary;
+  profile: TripProfile;
+  onItineraryChange: (itinerary: Itinerary) => void;
+}
+
+type DiscoveryPhase = 'idle' | 'review' | 'preview';
+
+const GROUPS = [
+  { id: 'essentials', label: 'Essentials', matches: ['essential'] },
+  { id: 'local', label: 'Local character', matches: ['local-character', 'shopping'] },
+  { id: 'culture', label: 'Culture and history', matches: ['history', 'museum', 'temple', 'shrine', 'art'] },
+  { id: 'food', label: 'Food and markets', matches: ['food', 'market', 'food-district'] },
+  { id: 'nature', label: 'Nature and views', matches: ['nature', 'park', 'garden', 'view', 'waterfront'] },
+  { id: 'evening', label: 'Evening options', matches: ['evening'] },
+  { id: 'day-trips', label: 'Nearby day trips', matches: ['day-trip'] },
+] as const;
+
+const DECISIONS: Array<{ id: DiscoveryCandidateDecision; label: string }> = [
+  { id: 'must-do', label: 'Must do' },
+  { id: 'interested', label: 'Interested' },
+  { id: 'skip', label: 'Skip' },
+  { id: 'visited', label: 'Visited' },
+];
+
+const formatDuration = (minutes: number) => minutes >= 120 && minutes % 60 === 0
+  ? `${minutes / 60} hr`
+  : `${minutes} min`;
+
+const formatPrice = (priceLevel?: number) => {
+  if (priceLevel === undefined) return 'Cost unknown';
+  if (priceLevel === 0) return 'Free';
+  return `${'¥'.repeat(Math.min(4, Math.max(1, priceLevel)))} price level`;
+};
+
+const openingSummary = (candidate: PlaceCandidate) => {
+  const period = candidate.openingHours?.periods[0];
+  if (!period?.opensAt || !period.closesAt) return 'Hours need live verification';
+  return `${period.opensAt}–${period.closesAt} · ${candidate.openingHours?.sourceConfidence} confidence`;
+};
+
+function CandidateCard({
+  ranked,
+  decision,
+  onDecision,
+}: {
+  ranked: RankedCandidate;
+  decision?: DiscoveryCandidateDecision;
+  onDecision: (decision: DiscoveryCandidateDecision) => void;
+}) {
+  const { candidate, score, reasons } = ranked;
+  return (
+    <article className="destination-candidate" data-decision={decision || 'undecided'}>
+      <div className="destination-candidate-map" aria-hidden="true">
+        <MapPinned className="w-5 h-5" />
+        <span>{candidate.neighbourhood || candidate.city}</span>
+        {candidate.coordinates && <small>{candidate.coordinates[0].toFixed(3)}, {candidate.coordinates[1].toFixed(3)}</small>}
+      </div>
+      <div className="destination-candidate-body">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h5>{candidate.name}</h5>
+            <p className="destination-candidate-description">{candidate.description}</p>
+          </div>
+          <span className="destination-match-score" aria-label={`${score} percent match`}>{score}</span>
+        </div>
+        <div className="destination-facts" aria-label="Place details">
+          <span><Clock3 className="w-3.5 h-3.5" />{formatDuration(candidate.estimatedVisitMinutes)}</span>
+          <span>{formatPrice(candidate.priceLevel)}</span>
+          <span>{openingSummary(candidate)}</span>
+        </div>
+        <p className="destination-match-reason">{reasons.join(' · ')}</p>
+        <div className="destination-candidate-footer">
+          <div className="destination-decision-group" role="radiogroup" aria-label={`Preference for ${candidate.name}`}>
+            {DECISIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={decision === option.id}
+                data-active={decision === option.id ? 'true' : 'false'}
+                onClick={() => onDecision(option.id)}
+              >
+                {decision === option.id && <Check className="w-3.5 h-3.5" />}
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <a href={candidate.sourceReferences[0]?.url} target="_blank" rel="noreferrer" className="destination-source-link">
+            Source <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function DiscoveryPreview({
+  result,
+  onBack,
+  onApply,
+}: {
+  result: DestinationBuildResult;
+  onBack: () => void;
+  onApply: () => void;
+}) {
+  const placeCount = result.days.reduce((total, day) => total + day.activities.filter((activity) => activity.kind === 'place').length, 0);
+  const hoursKnown = result.scheduledCandidates.filter((candidate) => candidate.openingHours).length;
+  return (
+    <div className="destination-plan-preview">
+      <div className="destination-preview-header">
+        <div>
+          <button type="button" className="destination-back-link" onClick={onBack}><ArrowLeft className="w-4 h-4" /> Back to shortlist</button>
+          <h4>Your Osaka itinerary is ready to review</h4>
+          <p>{placeCount} source-backed places across {result.days.filter((day) => day.activities.some((activity) => activity.kind === 'place')).length} themed days.</p>
+        </div>
+        <span className="fixture-badge"><Database className="w-4 h-4" /> Fixture mode</span>
+      </div>
+
+      <div className="destination-evidence-strip">
+        <span><ShieldCheck className="w-4 h-4" /><strong>{placeCount}/{placeCount}</strong> verified places</span>
+        <span><MapPinned className="w-4 h-4" /><strong>100%</strong> coordinates</span>
+        <span><Clock3 className="w-4 h-4" /><strong>{placeCount ? Math.round(hoursKnown / placeCount * 100) : 0}%</strong> captured hours</span>
+        <span><Route className="w-4 h-4" /><strong>Fallback</strong> routing</span>
+      </div>
+
+      <div className="destination-day-list">
+        {result.days.map((day) => {
+          const places = day.activities.filter((activity) => activity.kind === 'place');
+          if (places.length === 0) return null;
+          return (
+            <article key={day.day} className="destination-day-row">
+              <div className="destination-day-number">Day {day.day}</div>
+              <div>
+                <h5>{day.title}</h5>
+                <div className="destination-day-places">
+                  {places.map((activity) => (
+                    <div key={activity.id}>
+                      <strong>{activity.time} · {activity.name}</strong>
+                      <span>{activity.generatedMetadata?.reason}</span>
+                      {activity.sourceReferences?.[0] && (
+                        <a href={activity.sourceReferences[0].url} target="_blank" rel="noreferrer">Source <ExternalLink className="w-3 h-3" /></a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <span>{places.length} verified {places.length === 1 ? 'place' : 'places'}</span>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="destination-route-warning">
+        <Info className="w-4 h-4" />
+        <span>Place identity and coordinates are source-backed. Travel minutes remain an offline straight-line fallback and overall confidence stays Low until a live route provider is connected.</span>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="pill-btn pill-primary" onClick={onApply}><Check className="w-4 h-4" /> Apply this itinerary</button>
+        <button type="button" className="pill-btn pill-ghost" onClick={onBack}>Change selections</button>
+      </div>
+    </div>
+  );
+}
+
+export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChange }: DestinationDiscoveryPanelProps) {
+  const primaryCity = profile.destinations[0]?.city || itinerary.cities[0] || '';
+  const supportsFixture = primaryCity.trim().toLowerCase() === 'osaka';
+  const [phase, setPhase] = useState<DiscoveryPhase>(itinerary.discoveryState?.city.toLowerCase() === 'osaka' ? 'review' : 'idle');
+  const [candidates, setCandidates] = useState<PlaceCandidate[]>(() => supportsFixture ? OSAKA_PLACE_FIXTURE : []);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ranked = useMemo(() => rankDestinationCandidates(candidates, profile), [candidates, profile]);
+  const groupedRanked = useMemo(() => {
+    const assigned = new Set<string>();
+    return GROUPS.map((group) => {
+      const items = ranked.filter(({ candidate }) => (
+        !assigned.has(candidate.id)
+        && candidate.categories.some((category) => (group.matches as readonly string[]).includes(category))
+      ));
+      items.forEach(({ candidate }) => assigned.add(candidate.id));
+      return { ...group, items };
+    });
+  }, [ranked]);
+  const [decisions, setDecisions] = useState<Record<string, CandidateDecision>>(() => (
+    itinerary.discoveryState?.city.toLowerCase() === 'osaka'
+      ? itinerary.discoveryState.decisions
+      : {}
+  ));
+  const [buildResult, setBuildResult] = useState<DestinationBuildResult | null>(null);
+  const selectedCount = Object.values(decisions).filter((decision) => decision === 'must-do' || decision === 'interested').length;
+
+  const persistDecisions = (next: Record<string, CandidateDecision>, discoveredAt = itinerary.discoveryState?.discoveredAt || new Date().toISOString()) => {
+    onItineraryChange({
+      ...itinerary,
+      revision: (itinerary.revision || 0) + 1,
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'fixture',
+        candidateIds: candidates.map((candidate) => candidate.id),
+        decisions: next,
+        discoveredAt,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  };
+
+  const beginDiscovery = async () => {
+    if (!supportsFixture) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const provider = new FixturePlaceDiscoveryProvider();
+      const discovered = await provider.search({
+        city: 'Osaka',
+        countryCode: 'JP',
+        queries: OSAKA_KNOWLEDGE_FIXTURE.discoveryQueries,
+        interests: profile.styles,
+        startDate: profile.startDate,
+        endDate: profile.endDate,
+        limit: 40,
+      });
+      if (discovered.length === 0) throw new Error('No source-backed places were returned.');
+      const nextDecisions = Object.keys(decisions).length > 0 ? decisions : {};
+      setCandidates(discovered);
+      setDecisions(nextDecisions);
+      setPhase('review');
+      persistDecisions(nextDecisions, new Date().toISOString());
+    } catch (discoveryError) {
+      setError(discoveryError instanceof Error ? discoveryError.message : 'Discovery could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateDecision = (candidateId: string, decision: CandidateDecision) => {
+    const next = { ...decisions, [candidateId]: decision };
+    setDecisions(next);
+    persistDecisions(next);
+  };
+
+  const selectRecommended = () => {
+    const next = defaultDiscoveryDecisions(ranked);
+    setDecisions(next);
+    persistDecisions(next);
+  };
+
+  const previewPlan = () => {
+    const result = buildDestinationItinerary(itinerary, profile, ranked, decisions);
+    setBuildResult(result);
+    setPhase('preview');
+  };
+
+  const applyPlan = () => {
+    if (!buildResult) return;
+    const timestamp = new Date().toISOString();
+    onItineraryChange({
+      ...itinerary,
+      days: buildResult.days,
+      cities: Array.from(new Set(buildResult.days.map((day) => day.city).filter(Boolean))),
+      revision: (itinerary.revision || 0) + 1,
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'fixture',
+        candidateIds: candidates.map((candidate) => candidate.id),
+        decisions,
+        discoveredAt: itinerary.discoveryState?.discoveredAt || timestamp,
+        updatedAt: timestamp,
+      },
+      plannerHistory: [
+        ...(itinerary.plannerHistory || []),
+        {
+          id: `discovery-${Date.now()}`,
+          action: 'generate' as const,
+          createdAt: timestamp,
+          summary: `Built an Osaka fixture itinerary with ${buildResult.scheduledCandidates.length} source-backed places.`,
+          affectedDayNumbers: buildResult.days.map((day) => day.day),
+          beforeDays: itinerary.days,
+          afterDays: buildResult.days,
+        },
+      ].slice(-10),
+    });
+    setPhase('idle');
+    setBuildResult(null);
+  };
+
+  if (!supportsFixture) {
+    return (
+      <section className="destination-discovery-shell destination-discovery-unavailable">
+        <Database className="w-5 h-5" />
+        <div>
+          <h4>Discovery provider not connected for {primaryCity || 'this destination'}</h4>
+          <p>The source-backed vertical slice currently supports Osaka in clearly labelled fixture mode. Saved-place organisation remains available below.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (phase === 'preview' && buildResult) {
+    return <section className="destination-discovery-shell"><DiscoveryPreview result={buildResult} onBack={() => setPhase('review')} onApply={applyPlan} /></section>;
+  }
+
+  if (phase === 'idle') {
+    return (
+      <section className="destination-discovery-shell destination-discovery-intro">
+        <div>
+          <span className="fixture-badge"><Database className="w-4 h-4" /> Official-source fixture</span>
+          <h3>Build an Osaka itinerary</h3>
+          <p>Review real places from official tourism sources, choose what matters, then shape distinct neighbourhood-led days around your pace and interests.</p>
+        </div>
+        <button type="button" className="pill-btn pill-primary" onClick={beginDiscovery} disabled={loading}>
+          <Sparkles className="w-4 h-4" /> {loading ? 'Loading verified places…' : 'Discover Osaka places'}
+        </button>
+        {error && <p className="destination-discovery-error" role="alert">{error} Try again; your itinerary has not changed.</p>}
+      </section>
+    );
+  }
+
+  return (
+    <section className="destination-discovery-shell">
+      <div className="destination-review-header">
+        <div>
+          <span className="fixture-badge"><Database className="w-4 h-4" /> Fixture mode · {ranked.length} real candidates</span>
+          <h3>Choose what belongs in your Osaka trip</h3>
+          <p>Nothing is scheduled until you review it. Ranking uses your interests, budget, data completeness and neighbourhood fit.</p>
+        </div>
+        <div className="destination-review-summary">
+          <div className="destination-selection-count"><strong>{selectedCount}</strong><span>selected</span></div>
+          <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Use recommended shortlist</button>
+        </div>
+      </div>
+
+      <div className="destination-review-groups">
+        {groupedRanked.map((group) => {
+          const groupCandidates = group.items;
+          if (groupCandidates.length === 0) return null;
+          return (
+            <section key={group.id} className="destination-review-group">
+              <div className="destination-group-heading">
+                <h4>{group.label}</h4>
+                <span>{groupCandidates.length} places</span>
+              </div>
+              <div className="destination-candidate-grid">
+                {groupCandidates.map((item) => (
+                  <CandidateCard
+                    key={item.candidate.id}
+                    ranked={item}
+                    decision={decisions[item.candidate.id]}
+                    onDecision={(decision) => updateDecision(item.candidate.id, decision)}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <div className="destination-review-footer">
+        <div>
+          <strong>{selectedCount} places ready for planning</strong>
+          <span>Skipped and visited places stay out of the itinerary.</span>
+        </div>
+        <button type="button" className="pill-btn pill-primary" onClick={previewPlan} disabled={selectedCount < 2}>
+          Build themed itinerary
+        </button>
+      </div>
+    </section>
+  );
+}

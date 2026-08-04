@@ -45,6 +45,8 @@ export interface PlaceCandidate {
   name: string;
   localName?: string;
   description?: string;
+  photoUrl?: string;
+  photoAttribution?: string;
   countryCode: string;
   region?: string;
   city: string;
@@ -63,6 +65,26 @@ export interface PlaceCandidate {
   sourceConfidence: 'high' | 'medium' | 'low';
   sourceReferences: SourceReference[];
   lastVerifiedAt: string;
+}
+
+export type CandidateDecision = 'must-do' | 'interested' | 'skip' | 'visited';
+
+export interface CandidateScoreBreakdown {
+  interestFit: number;
+  localSignificance: number;
+  neighbourhoodFit: number;
+  dataCompleteness: number;
+  budgetFit: number;
+  openingHoursFit: number;
+  routeCompatibility: number;
+  diversityContribution: number;
+}
+
+export interface RankedCandidate {
+  candidate: PlaceCandidate;
+  score: number;
+  breakdown: CandidateScoreBreakdown;
+  reasons: string[];
 }
 
 export interface PlaceCandidateDetails extends PlaceCandidate {
@@ -165,6 +187,7 @@ export function candidateToActivity(candidate: PlaceCandidate): Activity {
     coordinates: candidate.coordinates,
     openingHours: candidate.openingHours?.periods[0],
     bookingStatus: candidate.reservationStatus === 'required' ? 'requested' : 'none',
+    reservationRequirement: candidate.reservationStatus,
     sourceReferences: candidate.sourceReferences.map((source) => ({ label: source.label, url: source.url })),
     lastVerifiedAt: candidate.lastVerifiedAt,
     lockedFields: [],

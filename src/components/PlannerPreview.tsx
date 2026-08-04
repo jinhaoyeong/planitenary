@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Clock3, Lock, RefreshCw, RotateCcw, Sparkles, Undo2 } from 'lucide-react';
-import type { Itinerary } from '../data';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Check, Clock3, Lock, RefreshCw, Sparkles, Undo2 } from 'lucide-react';
+import type { Activity, Itinerary } from '../data';
 import type { TripProfile } from '../lib/tripProfile';
 import { declaredTripDays, plannerExistingDaysNotice } from '../lib/tripDuration';
 import {
@@ -12,6 +12,7 @@ import {
   type ItineraryProposal,
 } from '../lib/tripIntelligence';
 import { profileRevision } from '../lib/identityFields';
+import { DestinationDiscoveryPanel } from './DestinationDiscoveryPanel';
 
 interface PlannerPreviewProps {
   itinerary: Itinerary;
@@ -46,6 +47,13 @@ const actionLabel = (proposal: ItineraryProposal) => {
   return 'Optimise whole trip';
 };
 
+const isPlaceActivity = (activity: Activity) =>
+  activity.kind !== 'meal-window'
+  && activity.kind !== 'rest-window'
+  && activity.kind !== 'free-time'
+  && activity.kind !== 'transport'
+  && !(activity.source === 'generated' && !activity.providerPlaceId && (activity.type === 'food' || activity.type === 'cafe'));
+
 export function PlannerPreview({ itinerary, profile, onItineraryChange }: PlannerPreviewProps) {
   const [proposal, setProposal] = useState<ItineraryProposal | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
@@ -56,17 +64,16 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     || proposal.baseItineraryRevision !== (itinerary.revision || 0)
   ));
   const lastHistory = itinerary.plannerHistory?.[itinerary.plannerHistory.length - 1];
-  const isPlaceActivity = (activity: (typeof itinerary.days)[number]['activities'][number]) =>
-    activity.kind !== 'meal-window'
-    && activity.kind !== 'rest-window'
-    && activity.kind !== 'free-time'
-    && activity.kind !== 'transport'
-    && !(activity.source === 'generated' && !activity.providerPlaceId && (activity.type === 'food' || activity.type === 'cafe'));
   const hasPlaceActivities = itinerary.days.some((day) => day.activities.some(isPlaceActivity));
   const hasInboxActivities = (itinerary.unassignedActivities?.length || 0) > 0;
   const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.some(isPlaceActivity)), [itinerary.days]);
   const declaredDays = declaredTripDays(profile);
   const existingDaysNotice = plannerExistingDaysNotice(declaredDays, itinerary.days.length);
+
+  useEffect(() => {
+    document.body.classList.add('planner-intelligence-active');
+    return () => document.body.classList.remove('planner-intelligence-active');
+  }, []);
 
   const openProposal = (next: ItineraryProposal) => {
     setProposal(next);
@@ -213,13 +220,14 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   }
 
   return (
-    <section className="rounded-3xl p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+    <div className="space-y-4">
+      <DestinationDiscoveryPanel itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
+      <section className="planner-organise-panel rounded-3xl p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="eyebrow m-0">Organise saved places</div>
-          <h3 className="font-display text-2xl mt-2">Keep the places you saved coherent.</h3>
+          <h3 className="font-display text-2xl">Organise saved places</h3>
           <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-            Arrange confirmed places, protect what matters, and keep every change reversible. Destination discovery is not connected yet.
+            Arrange confirmed places, protect what matters, and keep every change reversible.
           </p>
         </div>
         <Clock3 className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
@@ -231,21 +239,33 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
         </p>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {(hasPlaceActivities || hasInboxActivities) && <button type="button" className="pill-btn pill-primary" onClick={hasPlaceActivities ? optimiseWholeTrip : build}><Sparkles className="w-4 h-4" /> {hasPlaceActivities ? 'Organise my saved places' : 'Place saved activities'}</button>}
-        {!hasPlaceActivities && !hasInboxActivities && <button type="button" className="pill-btn pill-soft" disabled><Sparkles className="w-4 h-4" /> Discover and build my itinerary</button>}
-        {hasPlaceActivities && <button type="button" className="pill-btn pill-soft" disabled title="Discovery provider is not connected yet"><Sparkles className="w-4 h-4" /> Discover and build my itinerary</button>}
-        {dayOptions.map((day) => (
-          <button key={day.day} type="button" className="pill-btn pill-soft" onClick={() => optimiseSelectedDay(day.day)}>
-            <RotateCcw className="w-4 h-4" /> Optimise day {day.day}
-          </button>
-        ))}
-        {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}
+      <div className="planner-action-groups">
+        <div>
+          <span className="planner-action-label">Build</span>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {(hasPlaceActivities || hasInboxActivities) && <button type="button" className="pill-btn pill-primary" onClick={hasPlaceActivities ? optimiseWholeTrip : build}><Sparkles className="w-4 h-4" /> {hasPlaceActivities ? 'Organise saved places' : 'Place saved activities'}</button>}
+            {!hasPlaceActivities && !hasInboxActivities && <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>Add places manually or use the Osaka discovery review above.</span>}
+          </div>
+        </div>
+        {hasPlaceActivities && (
+          <div>
+            <span className="planner-action-label">Improve</span>
+            <div className="flex flex-wrap gap-2 mt-2">
+              <button type="button" className="pill-btn pill-soft" onClick={optimiseWholeTrip}>Reduce travel and balance days</button>
+              <button type="button" className="pill-btn pill-soft" disabled title="Requires live place and route providers">Make it more local</button>
+              <button type="button" className="pill-btn pill-soft" disabled title="Pace-aware solver is not connected yet">Make it more relaxed</button>
+              <button type="button" className="pill-btn pill-soft" disabled title="Provider price coverage is incomplete">Lower the cost</button>
+              <button type="button" className="pill-btn pill-soft" disabled title="Conflict repair is part of the next solver phase">Fix conflicts</button>
+              {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}
+            </div>
+          </div>
+        )}
       </div>
 
       {status && <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{status}</p>}
       {!hasPlaceActivities && !hasInboxActivities && <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>No places selected yet. Discover attractions and build a destination-specific itinerary, or add places manually.</p>}
       {itinerary.days.length === 0 && <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Add travel dates first, then the organiser can shape your saved places.</p>}
-    </section>
+      </section>
+    </div>
   );
 }

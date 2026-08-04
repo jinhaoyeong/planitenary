@@ -43,10 +43,11 @@ export interface Activity {
   cost?: string; // Legacy display value, retained for old records.
   estimatedCost?: ActivityCost;
   bookingStatus?: BookingStatus;
+  reservationRequirement?: 'not-needed' | 'recommended' | 'required' | 'unknown';
   openingHours?: ActivityOpeningHours;
   transportMinutes?: number;
   transportMode?: string;
-  travelEstimateSource?: 'offline-straight-line' | 'unknown';
+  travelEstimateSource?: 'provider-route' | 'offline-straight-line' | 'unknown';
   travelEstimateConfidence?: 'high' | 'medium' | 'low';
   source?: ActivitySource;
   locked?: boolean;
@@ -70,6 +71,17 @@ export interface Activity {
     durationSec: number;
     createdAt: string;
   };
+}
+
+export type DiscoveryCandidateDecision = 'must-do' | 'interested' | 'skip' | 'visited';
+
+export interface ItineraryDiscoveryState {
+  city: string;
+  mode: 'fixture' | 'live';
+  candidateIds: string[];
+  decisions: Record<string, DiscoveryCandidateDecision>;
+  discoveredAt: string;
+  updatedAt: string;
 }
 
 export interface DayPhoto {
@@ -161,6 +173,7 @@ export interface Itinerary {
   schemaVersion?: number;
   planningConstraints?: PlanningConstraints;
   plannerSuggestions?: unknown[];
+  discoveryState?: ItineraryDiscoveryState;
   plannerHistory?: PlannerChangeRecord[];
   unassignedActivities?: Activity[];
   lastPlannerProfileRevision?: string;

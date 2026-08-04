@@ -66,6 +66,17 @@ describe('trip intelligence', () => {
     expect(proposal.afterDays[0].activities[1].transportMinutes).toBeGreaterThan(0);
   });
 
+  it('keeps confidence low when coordinates exist but provider route coverage is zero', () => {
+    const current = itinerary([
+      activity({ id: 'a', providerPlaceId: 'fixture:a', provider: 'official-tourism', coordinates: [35.02, 135.8], openingHours: { opensAt: '09:00', closesAt: '18:00' }, reservationRequirement: 'not-needed' }),
+      activity({ id: 'b', providerPlaceId: 'fixture:b', provider: 'official-tourism', coordinates: [35.01, 135.76], openingHours: { opensAt: '09:00', closesAt: '18:00' }, reservationRequirement: 'not-needed' }),
+    ]);
+    const proposal = optimiseDay(current, profile(), 1);
+    expect(proposal.coverage.coordinates).toBe(1);
+    expect(proposal.coverage.route).toBe(0);
+    expect(proposal.confidence).toBe('low');
+  });
+
   it('keeps locked activities protected in the proposal and apply path', () => {
     const current = itinerary([
       activity({ id: 'locked', name: 'Booked temple', time: '11:00', lockedFields: ['schedule'], coordinates: [35.02, 135.8] }),

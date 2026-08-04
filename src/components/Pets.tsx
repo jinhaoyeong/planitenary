@@ -120,7 +120,7 @@ export const Pets = () => {
   if (dimensions.w === 0 || activePets.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden">
+    <div className="pet-overlay pointer-events-none fixed inset-0 z-40 overflow-hidden">
       {activePets.map((pet, index) => {
         const slot = activePets.length === 1 ? 0.5 : index / Math.max(1, activePets.length - 1);
         return (

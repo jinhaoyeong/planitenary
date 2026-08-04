@@ -13,6 +13,9 @@ import type {
   DayPlan,
   PlanningConstraints,
   PlannerChangeRecord,
+  ScheduleItemKind,
+  DiscoveryCandidateDecision,
+  ItineraryDiscoveryState,
 } from './data';
 import { ItineraryView } from './components/ItineraryView';
 import { Draft } from './components/Handbook';
@@ -131,6 +134,8 @@ const VALID_ACTIVITY_TYPES: ActivityType[] = ['food', 'sight', 'culture', 'walk'
 const VALID_ACTIVITY_SOURCES: ActivitySource[] = ['manual', 'generated', 'imported'];
 const VALID_BOOKING_STATUSES: BookingStatus[] = ['none', 'requested', 'confirmed', 'cancelled'];
 const VALID_LOCKED_FIELDS: ActivityLockedField[] = ['schedule', 'location', 'duration', 'cost', 'booking', 'all'];
+const VALID_SCHEDULE_KINDS: ScheduleItemKind[] = ['place', 'reservation', 'transport', 'meal-window', 'rest-window', 'free-time'];
+const VALID_DISCOVERY_DECISIONS: DiscoveryCandidateDecision[] = ['must-do', 'interested', 'skip', 'visited'];
 
 const stableHash = (value: string) => {
   let hash = 2166136261;
@@ -259,6 +264,9 @@ const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, scope =
 
   return {
     id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : legacyActivityId(scope, name, time, location || '', index),
+    kind: typeof source.kind === 'string' && VALID_SCHEDULE_KINDS.includes(source.kind as ScheduleItemKind)
+      ? source.kind as ScheduleItemKind
+      : undefined,
     time,
     durationMinutes: typeof source.durationMinutes === 'number' && Number.isFinite(source.durationMinutes)
       ? Math.max(5, Math.min(1440, Math.round(source.durationMinutes)))
@@ -270,6 +278,9 @@ const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, scope =
     cost: typeof source.cost === 'string' ? source.cost : undefined,
     estimatedCost,
     bookingStatus,
+    reservationRequirement: source.reservationRequirement === 'not-needed' || source.reservationRequirement === 'recommended' || source.reservationRequirement === 'required' || source.reservationRequirement === 'unknown'
+      ? source.reservationRequirement
+      : undefined,
     openingHours,
     transportMinutes: typeof source.transportMinutes === 'number' && Number.isFinite(source.transportMinutes)
       ? Math.max(0, Math.min(1440, Math.round(source.transportMinutes)))
@@ -281,13 +292,41 @@ const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, scope =
     fieldProvenance: source.fieldProvenance && typeof source.fieldProvenance === 'object'
       ? Object.fromEntries(Object.entries(source.fieldProvenance).filter(([, value]) => typeof value === 'string' && VALID_ACTIVITY_SOURCES.includes(value as ActivitySource))) as Activity['fieldProvenance']
       : undefined,
-    travelEstimateSource: source.travelEstimateSource === 'offline-straight-line' || source.travelEstimateSource === 'unknown' ? source.travelEstimateSource : undefined,
+    travelEstimateSource: source.travelEstimateSource === 'provider-route' || source.travelEstimateSource === 'offline-straight-line' || source.travelEstimateSource === 'unknown' ? source.travelEstimateSource : undefined,
     travelEstimateConfidence: source.travelEstimateConfidence === 'high' || source.travelEstimateConfidence === 'medium' || source.travelEstimateConfidence === 'low' ? source.travelEstimateConfidence : undefined,
     generatedMetadata,
+    provider: source.provider === 'google' || source.provider === 'official-tourism' || source.provider === 'wikidata' ? source.provider : undefined,
+    providerPlaceId: typeof source.providerPlaceId === 'string' && source.providerPlaceId.trim() ? source.providerPlaceId.trim() : undefined,
+    sourceReferences: Array.isArray(source.sourceReferences)
+      ? source.sourceReferences.flatMap((reference) => reference && typeof reference === 'object'
+        && typeof reference.label === 'string' && typeof reference.url === 'string'
+        ? [{ label: reference.label.trim(), url: reference.url.trim() }]
+        : [])
+      : undefined,
+    lastVerifiedAt: typeof source.lastVerifiedAt === 'string' ? source.lastVerifiedAt : undefined,
     rating,
     coordinates,
     moodVotes,
     voiceNote,
+  };
+};
+
+const sanitizeDiscoveryState = (value: unknown): ItineraryDiscoveryState | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Partial<ItineraryDiscoveryState>;
+  if (typeof source.city !== 'string' || !source.city.trim() || (source.mode !== 'fixture' && source.mode !== 'live')) return undefined;
+  const decisions = source.decisions && typeof source.decisions === 'object'
+    ? Object.fromEntries(Object.entries(source.decisions).filter((entry): entry is [string, DiscoveryCandidateDecision] => (
+        Boolean(entry[0]) && VALID_DISCOVERY_DECISIONS.includes(entry[1] as DiscoveryCandidateDecision)
+      )))
+    : {};
+  return {
+    city: source.city.trim(),
+    mode: source.mode,
+    candidateIds: Array.isArray(source.candidateIds) ? source.candidateIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())) : [],
+    decisions,
+    discoveredAt: typeof source.discoveredAt === 'string' ? source.discoveredAt : new Date(0).toISOString(),
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : new Date(0).toISOString(),
   };
 };
 
@@ -385,6 +424,7 @@ const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
     revision: typeof source.revision === 'number' ? Math.max(0, Math.round(source.revision)) : (fallback.revision || 0),
     planningConstraints: sanitizePlanningConstraints(source.planningConstraints) ?? sanitizePlanningConstraints(fallback.planningConstraints),
     plannerSuggestions: Array.isArray(source.plannerSuggestions) ? source.plannerSuggestions.slice(-20) : (fallback.plannerSuggestions || []),
+    discoveryState: sanitizeDiscoveryState(source.discoveryState) ?? sanitizeDiscoveryState(fallback.discoveryState),
     plannerHistory: sanitizePlannerHistory(source.plannerHistory) ?? sanitizePlannerHistory(fallback.plannerHistory),
     unassignedActivities,
     lastPlannerProfileRevision: typeof source.lastPlannerProfileRevision === 'string' ? source.lastPlannerProfileRevision : fallback.lastPlannerProfileRevision,
