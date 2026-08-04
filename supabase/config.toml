@@ -4,3 +4,14 @@ content_path = "./supabase/templates/recovery.html"
 
 [functions.check-user-email]
 verify_jwt = false
+
+# Travel intelligence. These call billed third-party providers on the user's
+# behalf, so unlike the recovery lookup they require a signed-in caller.
+[functions.travel-capabilities]
+verify_jwt = true
+
+[functions.travel-discover]
+verify_jwt = true
+
+[functions.travel-route-matrix]
+verify_jwt = true

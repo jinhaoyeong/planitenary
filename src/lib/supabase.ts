@@ -31,6 +31,26 @@ export const isSupabaseConfigured = () => {
   return hasSupabaseConfig;
 };
 
+/**
+ * Call a travel intelligence Edge Function.
+ *
+ * Provider keys live in Supabase function secrets, so every third-party call
+ * goes through here rather than the browser. Throws on failure; callers are
+ * expected to fall back to a labelled offline path rather than surfacing an
+ * error, because a plan should degrade honestly, not disappear.
+ */
+export async function invokeTravelFunction(name: string, body?: unknown): Promise<unknown> {
+  if (!hasSupabaseConfig) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.functions.invoke(name, {
+    body: body ?? {},
+  });
+  if (error) throw new Error(error.message || `${name} failed.`);
+  if (data && typeof data === 'object' && 'error' in data) {
+    throw new Error(String((data as { error: unknown }).error));
+  }
+  return data;
+}
+
 export const getSupabaseUserId = async (): Promise<string | null> => {
   if (!hasSupabaseConfig) return null;
   const { data, error } = await supabase.auth.getUser();

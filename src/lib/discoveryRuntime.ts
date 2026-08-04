@@ -86,6 +86,38 @@ export interface DiscoveryOutcome {
   capability: DestinationCapability;
   /** True when the results came from a captured fixture rather than a provider. */
   usingFixture: boolean;
+  /**
+   * Reported wait times by candidate id, summarised from evidence. Feeds the
+   * scheduler so a place with a long queue costs the day what it really costs.
+   */
+  queueEvidence: Record<string, number>;
+}
+
+/**
+ * Pull reported queue times out of an evidence payload, keyed by candidate id.
+ * Only claims backed by a summary median are used — a single offhand mention
+ * should not reshape a day.
+ */
+function queueEvidenceFrom(payload: unknown): Record<string, number> {
+  if (!payload || typeof payload !== 'object') return {};
+  const summaries = (payload as { summaries?: unknown }).summaries;
+  if (!Array.isArray(summaries)) return {};
+
+  const queues: Record<string, number> = {};
+  for (const entry of summaries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { canonicalPlaceId, typicalQueueMinutes, sourceCount } = entry as {
+      canonicalPlaceId?: unknown;
+      typicalQueueMinutes?: unknown;
+      sourceCount?: unknown;
+    };
+    if (typeof canonicalPlaceId !== 'string') continue;
+    if (typeof typicalQueueMinutes !== 'number' || !Number.isFinite(typicalQueueMinutes)) continue;
+    // Require corroboration before letting a queue claim move the schedule.
+    if (typeof sourceCount === 'number' && sourceCount < 2) continue;
+    queues[canonicalPlaceId] = Math.max(0, Math.round(typicalQueueMinutes));
+  }
+  return queues;
 }
 
 /**
@@ -107,7 +139,20 @@ export async function discoverPlaces(
         provider: capability.places.provider,
       });
       const candidates = Array.isArray(payload) ? (payload as PlaceCandidate[]) : [];
-      if (candidates.length > 0) return { candidates, capability, usingFixture: false };
+      if (candidates.length > 0) {
+        // Evidence is a separate, optional call: a plan built from real places
+        // is still worth having even if review gathering is unavailable.
+        let queueEvidence: Record<string, number> = {};
+        try {
+          queueEvidence = queueEvidenceFrom(await invoke('travel-evidence', {
+            city: destination.city,
+            placeIds: candidates.map((candidate) => candidate.providerPlaceId).filter(Boolean),
+          }));
+        } catch {
+          queueEvidence = {};
+        }
+        return { candidates, capability, usingFixture: false, queueEvidence };
+      }
     } catch {
       // Fall through to the fixture rather than failing the whole panel.
     }
@@ -128,6 +173,7 @@ export async function discoverPlaces(
       // Report the fixture honestly even if the provider was nominally "live".
       capability: { ...capability, places: { provider: 'fixture', status: 'fixture' } },
       usingFixture: true,
+      queueEvidence: {},
     };
   }
 
@@ -135,5 +181,6 @@ export async function discoverPlaces(
     candidates: [],
     capability: { ...capability, places: { ...capability.places, status: 'unavailable' } },
     usingFixture: false,
+    queueEvidence: {},
   };
 }

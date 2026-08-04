@@ -77,6 +77,32 @@ describe('discovering places', () => {
     expect(outcome.capability.places.status).toBe('fixture');
   });
 
+  it('gathers corroborated queue times to feed the scheduler', async () => {
+    const invoke = vi.fn(async (name: string) => {
+      if (name === 'travel-discover') return [{ id: 'p1', providerPlaceId: 'g1', name: 'Place' }];
+      return {
+        summaries: [
+          { canonicalPlaceId: 'p1', typicalQueueMinutes: 45, sourceCount: 4 },
+          // Single-source claims must not reshape a day.
+          { canonicalPlaceId: 'p2', typicalQueueMinutes: 90, sourceCount: 1 },
+          { canonicalPlaceId: 'p3', typicalQueueMinutes: Number.NaN, sourceCount: 5 },
+        ],
+      };
+    });
+    const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
+    expect(outcome.queueEvidence).toEqual({ p1: 45 });
+  });
+
+  it('still returns places when evidence gathering fails', async () => {
+    const invoke = vi.fn(async (name: string) => {
+      if (name === 'travel-discover') return [{ id: 'p1', name: 'Place' }];
+      throw new Error('evidence provider down');
+    });
+    const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
+    expect(outcome.candidates).toHaveLength(1);
+    expect(outcome.queueEvidence).toEqual({});
+  });
+
   it('returns an honest empty result when there is no provider and no fixture', async () => {
     const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' });
     expect(outcome.candidates).toEqual([]);

@@ -14,8 +14,9 @@ import {
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider, getDestinationCapability } from '../lib/destinationFixtures';
 import { describeCapability } from '../lib/destinationCapability';
-import { capabilityFor } from '../lib/discoveryRuntime';
+import { capabilityFor, discoverPlaces, loadProviderRuntime } from '../lib/discoveryRuntime';
 import { describePace } from '../lib/travelBehaviour';
+import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
 import {
   buildDestinationItinerary,
@@ -319,6 +320,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const [candidates, setCandidates] = useState<PlaceCandidate[]>(() => capability?.places ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** True once results are known to come from the captured library, not a provider. */
+  const [usingFixture, setUsingFixture] = useState(false);
+  /** Reported wait times by candidate id, gathered from evidence. */
+  const [queueEvidence, setQueueEvidence] = useState<Record<string, number>>({});
   const ranked = useMemo(() => rankDestinationCandidates(candidates, profile), [candidates, profile]);
   const groupedRanked = useMemo(() => {
     const assigned = new Set<string>();
@@ -358,17 +363,35 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     setLoading(true);
     setError(null);
     try {
-      const provider = new FixturePlaceDiscoveryProvider();
-      const discovered = await provider.search({
-        city: capability.city,
-        countryCode: capability.countryCode,
-        queries: capability.knowledge?.discoveryQueries ?? [],
-        interests: profile.styles,
-        startDate: profile.startDate,
-        endDate: profile.endDate,
-        limit: 40,
-      });
-      if (discovered.length === 0) throw new Error('No source-backed places were returned.');
+      // Live provider first; the captured library is the labelled fallback.
+      const destination = profile.destinations[0];
+      const runtime = await loadProviderRuntime(
+        isSupabaseConfigured() ? (name) => invokeTravelFunction(name) : undefined,
+      );
+      const outcome = await discoverPlaces(
+        {
+          city: capability.city,
+          region: destination?.region,
+          countryCode: destination?.countryCode || capability.countryCode,
+        },
+        runtime,
+        isSupabaseConfigured() ? invokeTravelFunction : undefined,
+      );
+      setUsingFixture(outcome.usingFixture);
+      setQueueEvidence(outcome.queueEvidence);
+
+      const discovered = outcome.candidates.length > 0
+        ? outcome.candidates
+        : await new FixturePlaceDiscoveryProvider().search({
+          city: capability.city,
+          countryCode: capability.countryCode,
+          queries: capability.knowledge?.discoveryQueries ?? [],
+          interests: profile.styles,
+          startDate: profile.startDate,
+          endDate: profile.endDate,
+          limit: 40,
+        });
+      if (discovered.length === 0) throw new Error('No places were returned for this destination.');
       const nextDecisions = Object.keys(decisions).length > 0 ? decisions : {};
       setCandidates(discovered);
       setDecisions(nextDecisions);
@@ -394,7 +417,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   };
 
   const previewPlan = () => {
-    const result = buildDestinationItinerary(itinerary, profile, ranked, decisions);
+    // Queue evidence feeds the scheduler so a famous place with a 90-minute
+    // wait costs 90 minutes of the day, not zero.
+    const result = buildDestinationItinerary(itinerary, profile, ranked, decisions, {
+      queueEvidence,
+    });
     setBuildResult(result);
     setPhase('preview');
   };
@@ -492,7 +519,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     <section className="destination-discovery-shell">
       <div className="destination-review-header">
         <div>
-          <span className="fixture-badge"><Database className="w-4 h-4" /> {ranked.length} verified places</span>
+          <span className="fixture-badge">
+            <Database className="w-4 h-4" /> {ranked.length} verified places{usingFixture ? ' · captured, may be out of date' : ''}
+          </span>
           <h3>Choose what belongs in your {cityLabel} trip</h3>
           <p>Nothing is scheduled until you review it. Ranking uses your interests, budget, data completeness and neighbourhood fit.</p>
         </div>
