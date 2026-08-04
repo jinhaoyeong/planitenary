@@ -116,6 +116,16 @@ body.planner-intelligence-active .pet-overlay {
   margin-bottom: 0.75rem;
 }
 
+.destination-group-heading.is-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
 .destination-group-heading h4 {
   font-size: 1rem;
   font-weight: 750;
@@ -124,6 +134,327 @@ body.planner-intelligence-active .pet-overlay {
 .destination-group-heading span {
   color: var(--ink-muted);
   font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.destination-review-progress {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+}
+
+.destination-review-progress-track {
+  height: 0.35rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.destination-review-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 220ms ease;
+}
+
+.destination-review-progress span {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.destination-review-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-top: 1rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated, var(--bg)) 88%, transparent);
+}
+
+.destination-review-mode-toggle button {
+  min-height: 2.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.destination-review-mode-toggle button.is-active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--bg));
+}
+
+.destination-deck-panel {
+  margin-top: 1.25rem;
+}
+
+.destination-deck-stage {
+  position: relative;
+  min-height: 17rem;
+}
+
+.destination-deck-card {
+  position: relative;
+  display: grid;
+  gap: 0.85rem;
+  min-height: 16rem;
+  padding: 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 1.25rem;
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--accent-soft) 55%, var(--bg)) 0%, var(--bg) 62%);
+  box-shadow: 0 1rem 2.4rem color-mix(in srgb, var(--ink) 12%, transparent);
+  touch-action: pan-y;
+  cursor: grab;
+}
+
+.destination-deck-card:active {
+  cursor: grabbing;
+}
+
+.destination-deck-stamp {
+  position: absolute;
+  top: 1rem;
+  z-index: 2;
+  padding: 0.35rem 0.65rem;
+  border: 2px solid currentColor;
+  border-radius: 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.destination-deck-stamp.is-must {
+  right: 1rem;
+  color: var(--accent);
+  transform: rotate(8deg);
+}
+
+.destination-deck-stamp.is-skip {
+  left: 1rem;
+  color: var(--ink-muted);
+  transform: rotate(-8deg);
+}
+
+.destination-deck-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.destination-deck-reason {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.destination-deck-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.destination-deck-hint,
+.destination-deck-remaining {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-align: center;
+}
+
+.destination-deck-complete {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--bg-elevated, var(--bg));
+}
+
+.destination-deck-complete p {
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.destination-deck-complete-actions {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.destination-candidate-meta-line {
+  margin-bottom: 0.2rem;
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.destination-candidate.is-compact {
+  grid-template-columns: 1fr;
+}
+
+.destination-candidate.is-compact .destination-candidate-body {
+  padding: 0.85rem;
+}
+
+.destination-candidate.is-swipeable {
+  touch-action: pan-y;
+}
+
+.destination-candidate.is-decided {
+  opacity: 0.92;
+}
+
+.destination-candidate-compact-hit {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.destination-candidate-compact-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.destination-candidate-compact-copy h5 {
+  font-size: 0.9rem;
+}
+
+.destination-candidate-compact-copy p {
+  margin-top: 0.15rem;
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+}
+
+.destination-candidate-chevron {
+  color: var(--ink-muted);
+}
+
+.destination-match-reason-compact {
+  margin-top: 0.45rem;
+  color: var(--ink-muted);
+}
+
+.destination-swipe-hints {
+  position: absolute;
+  inset: 0.7rem 0.7rem auto;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.destination-swipe-hint {
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.destination-swipe-hint.is-must {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.destination-swipe-hint.is-skip {
+  color: var(--ink-muted);
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.destination-quick-actions {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.destination-quick-action {
+  min-height: 2.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.destination-quick-action.is-must {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--bg));
+}
+
+.destination-quick-action.is-skip {
+  color: var(--ink-muted);
+}
+
+.destination-collapse-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.7rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.destination-browse-all-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.destination-undo-toast {
+  position: sticky;
+  bottom: 5.5rem;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  box-shadow: 0 0.7rem 1.8rem color-mix(in srgb, var(--ink) 12%, transparent);
+  backdrop-filter: blur(12px);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.destination-undo-toast button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .destination-candidate-grid {
