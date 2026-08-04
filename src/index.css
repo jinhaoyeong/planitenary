@@ -576,6 +576,17 @@ body.planner-intelligence-active .pet-overlay {
   text-transform: uppercase;
 }
 
+.planner-improve-toggle {
+  width: 100%;
+  justify-content: center;
+}
+
+@media (max-width: 639px) {
+  .planner-improve-actions[data-expanded="false"] .planner-improve-action-extra {
+    display: none;
+  }
+}
+
 .planner-change-day {
   border: 1px solid var(--border);
   border-radius: 0.9rem;

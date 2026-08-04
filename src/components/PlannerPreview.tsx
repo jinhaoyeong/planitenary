@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, Clock3, Lock, RefreshCw, Sparkles, Undo2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Clock3, Lock, RefreshCw, Sparkles, Undo2 } from 'lucide-react';
 import type { Activity, Itinerary } from '../data';
 import type { TripProfile } from '../lib/tripProfile';
 import { declaredTripDays, plannerExistingDaysNotice } from '../lib/tripDuration';
@@ -87,6 +87,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const [proposal, setProposal] = useState<ItineraryProposal | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
+  const [improveExpanded, setImproveExpanded] = useState(false);
   const currentRevision = profileRevision(profile);
   const isStale = Boolean(proposal && (
     proposal.baseProfileRevision !== currentRevision
@@ -334,18 +335,27 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
         {hasPlaceActivities && (
           <div>
             <span className="planner-action-label">Improve</span>
-            <div className="flex flex-wrap gap-2 mt-2">
+            <div className="planner-improve-actions flex flex-wrap gap-2 mt-2" data-expanded={improveExpanded ? 'true' : 'false'}>
               <button type="button" className="pill-btn pill-soft" onClick={optimiseWholeTrip}>Reduce travel and balance days</button>
               <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'late-start', minutes: 60 })}>Replan after 60 min delay</button>
               <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'rain' })}>Find rainy-day order</button>
-              <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'route-delay', minutes: 30 })}>Replan after route delay</button>
-              <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 })}>Reduce walking load</button>
-              <button type="button" className="pill-btn pill-soft" disabled title="Requires live place discovery and replacement candidates">Make it more local · Coming soon</button>
-              <button type="button" className="pill-btn pill-soft" onClick={relaxWholeTrip}>Make it more relaxed</button>
-              <button type="button" className="pill-btn pill-soft" onClick={lowerCostWholeTrip}>Lower the cost</button>
-              <button type="button" className="pill-btn pill-soft" disabled={conflictCount === 0} title={conflictCount > 0 ? 'Preview deterministic conflict repair' : 'No opening-hours or overlap conflicts detected'} onClick={repairWholeTrip}>Fix conflicts{conflictCount > 0 ? ` · ${conflictCount} found` : ''}</button>
-              {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}
+              <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={() => replanSelectedDay({ kind: 'route-delay', minutes: 30 })}>Replan after route delay</button>
+              <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={() => replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 })}>Reduce walking load</button>
+              <button type="button" className="pill-btn pill-soft planner-improve-action-extra" disabled title="Requires live place discovery and replacement candidates">Make it more local · Coming soon</button>
+              <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={relaxWholeTrip}>Make it more relaxed</button>
+              <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={lowerCostWholeTrip}>Lower the cost</button>
+              <button type="button" className="pill-btn pill-soft planner-improve-action-extra" disabled={conflictCount === 0} title={conflictCount > 0 ? 'Preview deterministic conflict repair' : 'No opening-hours or overlap conflicts detected'} onClick={repairWholeTrip}>Fix conflicts{conflictCount > 0 ? ` · ${conflictCount} found` : ''}</button>
+              {lastHistory && <button type="button" className="pill-btn pill-ghost planner-improve-action-extra" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}
             </div>
+            <button
+              type="button"
+              className="planner-improve-toggle pill-btn pill-ghost mt-2 sm:hidden"
+              aria-expanded={improveExpanded}
+              onClick={() => setImproveExpanded((open) => !open)}
+            >
+              {improveExpanded ? 'Show fewer options' : 'Show more options'}
+              <ChevronDown className={`w-4 h-4 transition-transform ${improveExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+            </button>
           </div>
         )}
       </div>
