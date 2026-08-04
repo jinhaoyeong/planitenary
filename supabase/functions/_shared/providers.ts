@@ -18,6 +18,29 @@ export const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
+/**
+ * Routes API computeRouteMatrix returns one JSON RouteMatrixElement per line
+ * when the response contains multiple origin/destination pairs. Accept both
+ * that newline-delimited stream and ordinary JSON responses used by the other
+ * providers.
+ */
+const parseJsonResponse = (responseText: string): unknown => {
+  try {
+    return JSON.parse(responseText);
+  } catch (singleDocumentError) {
+    const lines = responseText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) throw singleDocumentError;
+    try {
+      return lines.map((line) => JSON.parse(line));
+    } catch {
+      throw singleDocumentError;
+    }
+  }
+};
+
 export const preflight = (request: Request) =>
   request.method === 'OPTIONS' ? new Response('ok', { headers: corsHeaders }) : null;
 
@@ -104,7 +127,7 @@ export async function fetchJson(
       }
       throw new ProviderError(`Provider responded ${response.status}${detail}`, response.status === 429 ? 429 : 502);
     }
-    return responseText ? JSON.parse(responseText) : null;
+    return responseText ? parseJsonResponse(responseText) : null;
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     throw new ProviderError(error instanceof Error ? error.message : 'Provider request failed');

@@ -340,7 +340,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   );
   const [phase, setPhase] = useState<DiscoveryPhase>(() => {
     if (itinerary.discoveryState?.stage === 'itinerary-built' && savedStateMatchesCity) return 'built';
-    return savedStateMatchesCity ? 'review' : 'idle';
+    // Candidate records live in component state and are not persisted in the
+    // itinerary. Re-open discovery for any non-built saved state so a reload
+    // cannot render an empty review panel with no way to fetch candidates.
+    return 'idle';
   });
   const [candidates, setCandidates] = useState<PlaceCandidate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -466,8 +469,20 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     let eventsWarning: string | undefined;
     let currentEventNotes: string[] = [];
     let currentEvents: Array<{ id: string; name: string; date?: string; startTime?: string; endTime?: string; url?: string }> = [];
-    const regionalRouteProvider = capability.routes.provider === 'amap' || capability.routes.provider === 'baidu'
-      ? capability.routes.provider
+    // Provider capability can change after auth/function startup. Refresh it
+    // immediately before a paid preview instead of trusting the mount-time
+    // snapshot, which otherwise silently forces estimated routing.
+    const activeRuntime = await loadProviderRuntime(
+      isSupabaseConfigured() ? (name) => invokeTravelFunction(name) : undefined,
+      true,
+    );
+    const activeCapability = capabilityFor({
+      city: capability.destination.city,
+      region: capability.destination.region,
+      countryCode: capability.destination.countryCode,
+    }, activeRuntime);
+    const regionalRouteProvider = activeCapability.routes.provider === 'amap' || activeCapability.routes.provider === 'baidu'
+      ? activeCapability.routes.provider
       : undefined;
     const effectiveRouteMode = regionalRouteProvider ? 'walking' : (profile.transport.includes('public-transport') ? 'public-transport' : 'walking');
     if (regionalRouteProvider && profile.transport.includes('public-transport')) {
@@ -480,10 +495,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         .map(({ candidate }) => candidate)
         .filter((candidate) => candidate.coordinates)
         .slice(0, 25);
-      if (capability.routes.status === 'live' && isSupabaseConfigured() && selected.length > 0) {
+      // Google limits transit matrices to 100 elements, unlike walking/driving
+      // matrices which support up to 625. Ten shortlisted places keep the
+      // transit request within that provider limit; the scheduler can still
+      // use honest estimates for candidates outside the routing subset.
+      const routedCandidates = effectiveRouteMode === 'public-transport' ? selected.slice(0, 10) : selected;
+      if (activeCapability.routes.status === 'live' && isSupabaseConfigured() && routedCandidates.length > 0) {
         const payload = await invokeTravelFunction('travel-route-matrix', {
-          origins: selected.map((candidate) => ({ coordinates: candidate.coordinates })),
-          destinations: selected.map((candidate) => ({ coordinates: candidate.coordinates })),
+          origins: routedCandidates.map((candidate) => ({ coordinates: candidate.coordinates })),
+          destinations: routedCandidates.map((candidate) => ({ coordinates: candidate.coordinates })),
           mode: effectiveRouteMode,
           provider: regionalRouteProvider,
           travelStartsInDays: profile.startDate
@@ -499,8 +519,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         const routeMap = new Map<string, RouteLeg>();
         payload.matrix?.forEach((row, originIndex) => row.forEach((cell, destinationIndex) => {
           if (cell.status !== 'ok' || !cell.durationMinutes || !cell.distanceMeters) return;
-          const from = selected[originIndex];
-          const to = selected[destinationIndex];
+          const from = routedCandidates[originIndex];
+          const to = routedCandidates[destinationIndex];
           if (from && to) routeMap.set(`${from.id}:${to.id}`, {
             durationMinutes: cell.durationMinutes,
             distanceMeters: cell.distanceMeters,
@@ -510,13 +530,13 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         }));
         routeResolver = (from, to) => routeMap.get(`${from.id}:${to.id}`);
         if (routeMap.size === 0) routeWarning = 'The live route provider returned no usable route cells; travel is estimated.';
-      } else if (capability.routes.status !== 'live') {
+      } else if (activeCapability.routes.status !== 'live') {
         routeWarning = 'Live routing is not configured for this destination; travel is estimated.';
       }
     } catch {
       routeWarning = 'Live routing was unavailable for this preview; travel is estimated.';
     }
-    if (capability.weather && isSupabaseConfigured()) {
+    if (activeCapability.weather && isSupabaseConfigured()) {
       const weatherAnchor = ranked.find(({ candidate }) => candidate.coordinates)?.candidate.coordinates;
       if (weatherAnchor) {
         try {
@@ -538,15 +558,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         }
       }
     }
-    if (capability.events && isSupabaseConfigured()) {
+    if (activeCapability.events && isSupabaseConfigured()) {
       try {
         const events = parseCurrentEvents(await invokeTravelFunction('travel-events', {
-          city: capability.destination.city,
+          city: activeCapability.destination.city,
           startDate: profile.startDate,
           endDate: profile.endDate,
         }));
         if (events.length > 0) {
-          eventsWarning = `${events.length} current event${events.length === 1 ? '' : 's'} found near ${capability.destination.city}; review dates before locking the itinerary.`;
+          eventsWarning = `${events.length} current event${events.length === 1 ? '' : 's'} found near ${activeCapability.destination.city}; review dates before locking the itinerary.`;
           currentEvents = events.slice(0, 8);
           currentEventNotes = currentEvents.map((event) => {
             const time = event.startTime ? ` ${event.startTime}${event.endTime ? `–${event.endTime}` : ''}` : '';

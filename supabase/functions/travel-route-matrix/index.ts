@@ -9,6 +9,8 @@
  */
 import { expiryFor, fetchJson, json, preflight, ProviderError, secrets } from '../_shared/providers.ts';
 import { parseAmapWalkingRoute, parseBaiduWalkingRoute } from '../_shared/regionalRoutes.ts';
+import { readRouteCache, type RouteCacheRow, serviceClient, writeRouteCache } from '../_shared/cache.ts';
+import { pairsNeedingProvider, routePairKey, routePointKey } from '../_shared/cacheKeys.ts';
 
 interface Point { placeId?: string; coordinates?: [number, number] }
 
@@ -90,12 +92,18 @@ Deno.serve(async (request) => {
   if (origins.length === 0 || destinations.length === 0) {
     return json({ error: 'Origins and destinations are required.' }, 400);
   }
-  // Guard the cost envelope: this is a billed, quadratic call.
-  if (origins.length * destinations.length > 625) {
-    return json({ error: 'Shortlist the places before requesting a matrix.' }, 400);
+  const mode = TRAVEL_MODES[body.mode || 'public-transport'] || 'TRANSIT';
+  // Google permits up to 625 elements for ordinary matrices, but transit
+  // matrices are limited to 100 origin/destination combinations.
+  const maxElements = mode === 'TRANSIT' ? 100 : 625;
+  if (origins.length * destinations.length > maxElements) {
+    return json({
+      error: mode === 'TRANSIT'
+        ? 'Transit route matrices are limited to 100 elements; shortlist no more than 10 places.'
+        : 'Shortlist the places before requesting a matrix.',
+    }, 400);
   }
 
-  const mode = TRAVEL_MODES[body.mode || 'public-transport'] || 'TRANSIT';
   const regionalProvider = body.provider === 'amap' || body.provider === 'baidu' ? body.provider : undefined;
 
   if (regionalProvider && body.mode && body.mode !== 'walking') {
@@ -105,24 +113,54 @@ Deno.serve(async (request) => {
   const key = secrets.google();
   if (!regionalProvider && !key) return json({ error: 'Routing is not configured.' }, 503);
 
+  // Cache identity for every endpoint. Points without a placeId or coordinates
+  // cannot be cached, so they read as permanent misses rather than a bad key.
+  const cache = serviceClient();
+  const cacheMode = regionalProvider ? 'walking' : mode;
+  const originKeys = origins.map(routePointKey);
+  const destinationKeys = destinations.map(routePointKey);
+  const cacheExpiry = expiryFor('routeMatrix', body.travelStartsInDays);
+
   try {
     if (regionalProvider) {
       // Amap/Baidu expose point-to-point directions rather than Google-style
       // matrices. Keep the cost bounded and leave the rest explicitly unknown.
       const matrix = origins.map(() => destinations.map(() => ({ status: 'unknown' as const, source: regionalProvider as 'provider' })));
       const maxRegionalPairs = 100;
+
+      // Read-through: prefill from cache and only fetch the pairs still missing.
+      const cached = cache
+        ? await readRouteCache(
+          cache,
+          originKeys.filter((entry): entry is string => Boolean(entry)),
+          destinationKeys.filter((entry): entry is string => Boolean(entry)),
+          cacheMode,
+        )
+        : new Map();
+
       const pairs: Array<{ originIndex: number; destinationIndex: number }> = [];
       for (let originIndex = 0; originIndex < origins.length; originIndex += 1) {
         for (let destinationIndex = 0; destinationIndex < destinations.length; destinationIndex += 1) {
-          if (pairs.length >= maxRegionalPairs) break;
-          pairs.push({ originIndex, destinationIndex });
+          if (originIndex === destinationIndex) {
+            matrix[originIndex][destinationIndex] = { status: 'ok', source: regionalProvider, durationMinutes: 0, distanceMeters: 0 } as never;
+            continue;
+          }
+          const oKey = originKeys[originIndex];
+          const dKey = destinationKeys[destinationIndex];
+          const hit = oKey && dKey ? cached.get(routePairKey(oKey, dKey)) : undefined;
+          if (hit) {
+            matrix[originIndex][destinationIndex] = { status: 'ok', source: 'cache', ...hit } as never;
+            continue;
+          }
+          if (pairs.length < maxRegionalPairs) pairs.push({ originIndex, destinationIndex });
         }
       }
+
       let failedPairs = 0;
+      const freshRows: RouteCacheRow[] = [];
       for (let offset = 0; offset < pairs.length; offset += 8) {
         const batch = pairs.slice(offset, offset + 8);
         const results = await Promise.all(batch.map(async ({ originIndex, destinationIndex }) => {
-          if (originIndex === destinationIndex) return { originIndex, destinationIndex, route: { durationMinutes: 0, distanceMeters: 0 } };
           try {
             return { originIndex, destinationIndex, route: await regionalRoute(origins[originIndex], destinations[destinationIndex], regionalProvider) };
           } catch {
@@ -131,10 +169,51 @@ Deno.serve(async (request) => {
           }
         }));
         results.forEach(({ originIndex, destinationIndex, route }) => {
-          if (route) matrix[originIndex][destinationIndex] = { status: 'ok', source: 'provider', ...route } as never;
+          if (!route) return;
+          matrix[originIndex][destinationIndex] = { status: 'ok', source: 'provider', ...route } as never;
+          const oKey = originKeys[originIndex];
+          const dKey = destinationKeys[destinationIndex];
+          if (oKey && dKey) {
+            freshRows.push({ origin_key: oKey, destination_key: dKey, mode: cacheMode, duration_minutes: route.durationMinutes, distance_meters: route.distanceMeters, expires_at: cacheExpiry });
+          }
         });
       }
-      return json({ matrix, provider: regionalProvider, partial: origins.length * destinations.length > maxRegionalPairs, failedPairs, expiresAt: expiryFor('routeMatrix', body.travelStartsInDays) });
+      if (cache) await writeRouteCache(cache, freshRows);
+
+      return json({ matrix, provider: regionalProvider, cached: pairs.length === 0, partial: origins.length * destinations.length > maxRegionalPairs, failedPairs, expiresAt: cacheExpiry });
+    }
+
+    // Read-through: build the matrix from cache first. If every needed pair is
+    // already cached (the common "preview the same shortlist again" case), the
+    // billed Google matrix call is skipped entirely.
+    const cachedRoutes = cache
+      ? await readRouteCache(
+        cache,
+        originKeys.filter((entry): entry is string => Boolean(entry)),
+        destinationKeys.filter((entry): entry is string => Boolean(entry)),
+        cacheMode,
+      )
+      : new Map();
+
+    const matrix = origins.map(() => destinations.map(() => ({
+      status: 'unknown' as const,
+      source: 'provider' as const,
+    })));
+    origins.forEach((_, i) => destinations.forEach((__, j) => {
+      const oKey = originKeys[i];
+      const dKey = destinationKeys[j];
+      if (oKey && dKey && oKey === dKey) {
+        matrix[i][j] = { status: 'ok', source: 'cache', durationMinutes: 0, distanceMeters: 0 } as never;
+        return;
+      }
+      const hit = oKey && dKey ? cachedRoutes.get(routePairKey(oKey, dKey)) : undefined;
+      if (hit) matrix[i][j] = { status: 'ok', source: 'cache', ...hit } as never;
+    }));
+
+    const cachedSet = new Set(cachedRoutes.keys());
+    const { complete } = pairsNeedingProvider(originKeys, destinationKeys, cachedSet);
+    if (complete) {
+      return json({ matrix, cached: true, expiresAt: cacheExpiry });
     }
 
     const payload = await fetchJson('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
@@ -153,28 +232,27 @@ Deno.serve(async (request) => {
       }),
     }, 15_000);
 
-    // Start from "unknown" everywhere, then fill in what the provider answered.
-    // A missing element must stay unknown rather than defaulting to zero.
-    const matrix = origins.map(() => destinations.map(() => ({
-      status: 'unknown' as const,
-      source: 'provider' as const,
-    })));
-
+    // Fill in what the provider answered, overwriting the cache prefill where a
+    // fresh answer exists. A missing element stays whatever the cache had (or
+    // "unknown"), never defaulting to zero.
+    const freshRows: RouteCacheRow[] = [];
     for (const element of (payload as MatrixElement[]) || []) {
       const { originIndex: i, destinationIndex: j } = element;
       if (i === undefined || j === undefined || !matrix[i]?.[j]) continue;
       if (element.condition !== 'ROUTE_EXISTS' || !element.duration) continue;
       const seconds = Number.parseInt(element.duration.replace('s', ''), 10);
-      if (!Number.isFinite(seconds)) continue;
-      matrix[i][j] = {
-        status: 'ok',
-        source: 'provider',
-        durationMinutes: Math.round(seconds / 60),
-        distanceMeters: element.distanceMeters,
-      } as never;
+      if (!Number.isFinite(seconds) || typeof element.distanceMeters !== 'number') continue;
+      const durationMinutes = Math.round(seconds / 60);
+      matrix[i][j] = { status: 'ok', source: 'provider', durationMinutes, distanceMeters: element.distanceMeters } as never;
+      const oKey = originKeys[i];
+      const dKey = destinationKeys[j];
+      if (oKey && dKey && oKey !== dKey) {
+        freshRows.push({ origin_key: oKey, destination_key: dKey, mode: cacheMode, duration_minutes: durationMinutes, distance_meters: element.distanceMeters, expires_at: cacheExpiry });
+      }
     }
+    if (cache) await writeRouteCache(cache, freshRows);
 
-    return json({ matrix, expiresAt: expiryFor('routeMatrix', body.travelStartsInDays) });
+    return json({ matrix, cached: false, expiresAt: cacheExpiry });
   } catch (error) {
     const status = error instanceof ProviderError ? error.status : 502;
     return json({ error: error instanceof Error ? error.message : 'Routing failed.' }, status);

@@ -9,6 +9,16 @@ describe('regional route response parsing', () => {
     });
   });
 
+  it('normalises the Amap v5 nested cost shape', () => {
+    expect(parseAmapWalkingRoute({
+      status: '1',
+      route: { paths: [{ cost: { distance: '1350', duration: '780' } }] },
+    })).toEqual({
+      distanceMeters: 1350,
+      durationMinutes: 13,
+    });
+  });
+
   it('normalises a Baidu walking path', () => {
     expect(parseBaiduWalkingRoute({ status: 0, result: { routes: [{ distance: 800, duration: 600 }] } })).toEqual({
       distanceMeters: 800,

@@ -165,15 +165,33 @@ export const saveToStorage = <T>(key: string, value: T) => {
   const serialized = JSON.stringify(value);
   const currentRaw = localStorage.getItem(key);
 
-  if (currentRaw && currentRaw !== serialized) {
-    // Preserve the previous good value as the immediate restore target.
-    localStorage.setItem(`${key}-backup`, currentRaw);
-    pushHistorySnapshot(key, currentRaw);
-  } else if (!localStorage.getItem(`${key}-backup`)) {
-    localStorage.setItem(`${key}-backup`, serialized);
-  }
+  try {
+    if (currentRaw && currentRaw !== serialized) {
+      // Preserve the previous good value as the immediate restore target.
+      localStorage.setItem(`${key}-backup`, currentRaw);
+      pushHistorySnapshot(key, currentRaw);
+    } else if (!localStorage.getItem(`${key}-backup`)) {
+      localStorage.setItem(`${key}-backup`, serialized);
+    }
 
-  localStorage.setItem(key, serialized);
+    localStorage.setItem(key, serialized);
+  } catch (error) {
+    if (!isQuotaExceededError(error)) throw error;
+
+    // Recovery metadata is optional. Remove it before retrying the primary
+    // save so a growing itinerary cannot blank the app merely because its
+    // backup/history occupied the remaining browser quota.
+    try {
+      localStorage.removeItem(getHistoryKey(key));
+      localStorage.removeItem(`${key}-backup`);
+      localStorage.setItem(key, serialized);
+      return;
+    } catch (retryError) {
+      if (!isQuotaExceededError(retryError)) throw retryError;
+      // The current itinerary remains available in memory and cloud sync can
+      // still proceed. Persistence is best-effort and must never crash React.
+    }
+  }
 };
 
 export const writeRawToStorage = (key: string, raw: string | null, options?: { preserveCurrent?: boolean }) => {

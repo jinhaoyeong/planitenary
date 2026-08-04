@@ -62,9 +62,10 @@ function parseRuntime(payload: unknown): ProviderRuntime {
  */
 export async function loadProviderRuntime(
   invoke?: (name: string) => Promise<unknown>,
+  forceRefresh = false,
 ): Promise<ProviderRuntime> {
   const now = Date.now();
-  if (runtimeCache && now - runtimeCache.fetchedAt < RUNTIME_TTL_MS) return runtimeCache.value;
+  if (!forceRefresh && runtimeCache && now - runtimeCache.fetchedAt < RUNTIME_TTL_MS) return runtimeCache.value;
   if (!invoke) return EMPTY_PROVIDER_RUNTIME;
 
   try {

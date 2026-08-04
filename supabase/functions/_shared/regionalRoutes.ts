@@ -11,11 +11,23 @@ const positiveNumber = (value: unknown): number | undefined => {
 /** Parse the Amap walking response documented by its Web Service API. */
 export function parseAmapWalkingRoute(payload: unknown): RegionalRouteResult | null {
   if (!payload || typeof payload !== 'object') return null;
-  const source = payload as { status?: string; route?: { paths?: Array<{ distance?: unknown; duration?: unknown }> } };
+  const source = payload as {
+    status?: string;
+    route?: {
+      paths?: Array<{
+        distance?: unknown;
+        duration?: unknown;
+        cost?: { distance?: unknown; duration?: unknown };
+      }>;
+    };
+  };
   if (source.status !== '1') return null;
   const path = source.route?.paths?.[0];
-  const distance = positiveNumber(path?.distance);
-  const duration = positiveNumber(path?.duration);
+  // Amap has returned both the older top-level shape and the v5 shape where
+  // the values are nested under `cost`. Accept both so provider changes do
+  // not silently turn every regional leg into `unknown`.
+  const distance = positiveNumber(path?.distance ?? path?.cost?.distance);
+  const duration = positiveNumber(path?.duration ?? path?.cost?.duration);
   if (distance === undefined || duration === undefined) return null;
   return { distanceMeters: distance, durationMinutes: Math.max(1, Math.round(duration / 60)) };
 }
