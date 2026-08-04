@@ -76,7 +76,7 @@ describe('discovering places', () => {
     const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
     expect(outcome.usingFixture).toBe(false);
     expect(outcome.candidates).toHaveLength(1);
-    expect(invoke).toHaveBeenCalledWith('travel-discover', expect.objectContaining({ city: 'Melbourne' }));
+    expect(invoke).toHaveBeenCalledWith('travel-discover-live', expect.objectContaining({ city: 'Melbourne' }));
   });
 
   it('falls back to the fixture when the live call fails, and says so', async () => {

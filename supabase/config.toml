@@ -13,6 +13,9 @@ verify_jwt = true
 [functions.travel-discover]
 verify_jwt = true
 
+[functions.travel-discover-live]
+verify_jwt = true
+
 [functions.travel-route-matrix]
 verify_jwt = true
 

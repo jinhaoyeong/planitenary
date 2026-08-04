@@ -196,7 +196,9 @@ export async function discoverPlaces(
 
   if (capability.places.status === 'live' && invoke) {
     try {
-      const payload = await invoke('travel-discover', {
+      // The versioned endpoint is deployed independently so a stale Supabase
+      // import-map version can never silently route the client to old logic.
+      const payload = await invoke('travel-discover-live', {
         city: destination.city,
         countryCode: destination.countryCode,
         provider: capability.places.provider,
