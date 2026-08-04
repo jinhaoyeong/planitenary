@@ -14,11 +14,11 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 | Function | Result | Evidence |
 | --- | --- | --- |
-| `travel-capabilities-live` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` reports Google Places, Routes, Reviews and YouTube as available; weather is available; events/China/social partners are false. |
+| `travel-capabilities-live` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` reports Places, Reviews and YouTube available; the safe fixed-coordinate Routes probe returns false because Google currently responds 403; weather is available; events/China/social partners are false. |
 | `travel-discover-live` Melbourne | HTTP 200 | Returned current Google Places records including Fed Square, coordinates, rating, address and retrieval timestamp. |
 | `travel-evidence-live` Melbourne | HTTP 200 | Returned 5 Google Places review documents and 8 YouTube documents with source URLs and retrieval timestamps. |
 | `travel-weather` Melbourne | HTTP 200 | Returned Open-Meteo daily forecast and expiry timestamp. |
-| `travel-route-matrix` | HTTP 502 | Underlying Google response is HTTP 403 because the Routes API is disabled for the key's Google project. |
+| `travel-route-matrix` | HTTP 502 | Underlying Google response is HTTP 403; the capability endpoint now suppresses Routes from the live UI until this is fixed. |
 | `travel-events` | HTTP 503 | `TICKETMASTER_API_KEY` is not configured. |
 | `travel-discover-live` Beijing | HTTP 503 | Neither `AMAP_API_KEY` nor `BAIDU_API_KEY` is configured. |
 | `travel-reasoning` | HTTP 503 | `OPENAI_API_KEY` is not configured. |

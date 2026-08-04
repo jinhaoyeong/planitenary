@@ -5,7 +5,7 @@
  * honestly offer. It returns booleans and nothing else — no keys, no endpoints,
  * no quota detail.
  */
-import { capabilitySnapshot, json, preflight } from '../_shared/providers.ts';
+import { capabilitySnapshot, json, preflight, probeGoogleRoutes } from '../_shared/providers.ts';
 
 Deno.serve((request) => {
   const early = preflight(request);
@@ -13,5 +13,5 @@ Deno.serve((request) => {
   if (request.method !== 'POST' && request.method !== 'GET') {
     return json({ error: 'Method not allowed' }, 405);
   }
-  return json(capabilitySnapshot());
+  return probeGoogleRoutes().then((googleRoutes) => json({ ...capabilitySnapshot(), googleRoutes }));
 });

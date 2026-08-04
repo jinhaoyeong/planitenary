@@ -53,7 +53,9 @@ export function capabilitySnapshot() {
   const google = Boolean(secrets.google());
   return {
     googlePlaces: google,
-    googleRoutes: google,
+    // Routes is verified separately by the capability endpoint. A key being
+    // present is not proof that the Routes API is enabled or billable.
+    googleRoutes: false,
     googleReviews: google,
     youtube: Boolean(secrets.youtube()),
     tripadvisor: Boolean(secrets.tripadvisor()),
@@ -98,6 +100,34 @@ export async function fetchJson(
     throw new ProviderError(error instanceof Error ? error.message : 'Provider request failed');
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Verify Routes with fixed public coordinates, never user-supplied locations.
+ * This prevents a configured-but-disabled Routes API from being presented as
+ * live while keeping health checks free of private trip data.
+ */
+export async function probeGoogleRoutes(): Promise<boolean> {
+  const key = secrets.google();
+  if (!key) return false;
+  try {
+    await fetchJson('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,distanceMeters,condition',
+      },
+      body: JSON.stringify({
+        origins: [{ waypoint: { location: { latLng: { latitude: -37.8179789, longitude: 144.9690576 } } } }],
+        destinations: [{ waypoint: { location: { latLng: { latitude: -37.8136, longitude: 144.9631 } } } }],
+        travelMode: 'WALK',
+      }),
+    }, 5000);
+    return true;
+  } catch {
+    return false;
   }
 }
 
