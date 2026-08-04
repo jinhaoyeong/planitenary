@@ -577,6 +577,24 @@ export function optimiseTrip(itinerary: Itinerary, profile: TripProfile): Itiner
   );
 }
 
+/** Create a reversible roomier-plan preview without changing the saved profile. */
+export function relaxTrip(itinerary: Itinerary, profile: TripProfile): ItineraryProposal {
+  const relaxedItinerary: Itinerary = {
+    ...itinerary,
+    planningConstraints: {
+      ...(itinerary.planningConstraints || {}),
+      maxMainActivitiesPerDay: Math.min(2, itinerary.planningConstraints?.maxMainActivitiesPerDay || 4),
+      preferredStartTime: itinerary.planningConstraints?.preferredStartTime || '10:00',
+      includeRestBreaks: true,
+    },
+  };
+  const proposal = optimiseTrip(relaxedItinerary, profile);
+  return {
+    ...proposal,
+    reason: 'A relaxed preview lowers the daily main-stop ceiling, starts later where no start is locked, and preserves every locked activity for selective review.',
+  };
+}
+
 export function applyItineraryProposal(
   itinerary: Itinerary,
   profile: TripProfile,

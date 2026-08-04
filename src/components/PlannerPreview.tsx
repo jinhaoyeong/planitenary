@@ -9,6 +9,7 @@ import {
   optimiseDay,
   optimiseTrip,
   replanDay,
+  relaxTrip,
   undoPlannerChange,
   type ItineraryProposal,
 } from '../lib/tripIntelligence';
@@ -135,6 +136,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     const dayNumber = dayOptions[0]?.day || itinerary.days[0]?.day || 1;
     openProposal(replanDay(itinerary, profile, dayNumber, disruption));
   };
+  const relaxWholeTrip = () => openProposal(relaxTrip(itinerary, profile));
 
   const toggle = (id: string) => setSelection((current) => {
     const next = new Set(current);
@@ -332,8 +334,10 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
               <button type="button" className="pill-btn pill-soft" onClick={optimiseWholeTrip}>Reduce travel and balance days</button>
               <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'late-start', minutes: 60 })}>Replan after 60 min delay</button>
               <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'rain' })}>Find rainy-day order</button>
+              <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'route-delay', minutes: 30 })}>Replan after route delay</button>
+              <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 })}>Reduce walking load</button>
               <button type="button" className="pill-btn pill-soft" disabled title="Requires live place discovery and replacement candidates">Make it more local · Coming soon</button>
-              <button type="button" className="pill-btn pill-soft" disabled title="Pace-aware scheduling is not connected yet">Make it more relaxed · Coming soon</button>
+              <button type="button" className="pill-btn pill-soft" onClick={relaxWholeTrip}>Make it more relaxed</button>
               <button type="button" className="pill-btn pill-soft" disabled title="Provider price coverage is incomplete">Lower the cost · Coming soon</button>
               <button type="button" className="pill-btn pill-soft" disabled title={conflictCount > 0 ? 'Conflict repair is not connected yet' : 'No opening-hours or overlap conflicts detected'}>Fix conflicts · {conflictCount > 0 ? `${conflictCount} found · Coming soon` : 'No conflicts detected'}</button>
               {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}

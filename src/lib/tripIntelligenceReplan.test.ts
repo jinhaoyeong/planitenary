@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Itinerary } from '../data';
-import { replanDay } from './tripIntelligence';
+import { relaxTrip, replanDay } from './tripIntelligence';
 import type { TripProfile } from './tripProfile';
 
 const profile = (): TripProfile => ({
@@ -54,5 +54,19 @@ describe('replanDay', () => {
     const proposal = replanDay(itinerary(), profile(), 1, { kind: 'rain' });
     const activities = proposal.afterDays[0].activities.filter((activity) => activity.kind === 'place');
     expect(activities[0].id).toBe('gallery');
+  });
+
+  it('shifts unlocked activities after a route delay', () => {
+    const proposal = replanDay(itinerary(), profile(), 1, { kind: 'route-delay', minutes: 30 });
+    expect(proposal.reason).toContain('30-minute route delay');
+    expect(proposal.changes.length).toBeGreaterThan(0);
+  });
+
+  it('creates a roomier reversible preview for relaxed planning', () => {
+    const source = itinerary();
+    const proposal = relaxTrip(source, profile());
+    expect(proposal.reason).toContain('relaxed preview');
+    expect(proposal.baseItineraryRevision).toBe(source.revision || 0);
+    expect(proposal.changes.length).toBeGreaterThan(0);
   });
 });
