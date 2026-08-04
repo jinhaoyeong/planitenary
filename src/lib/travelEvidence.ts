@@ -239,6 +239,8 @@ export interface PlaceEvidenceSummary {
   typicalVisitMinutes?: number;
   /** 0–1, weighted by authority, confidence and freshness. */
   evidenceConfidence: number;
+  /** 0-1 visitor crowding signal, separate from general quality. */
+  crowdRisk?: number;
   /** 0–1. High means the shortlist should treat the praise cautiously. */
   promotionRisk: number;
   warnings: string[];
@@ -312,6 +314,9 @@ export function summarisePlaceEvidence(
   const averageWeight = relevant.length > 0 ? weightTotal / relevant.length : 0;
   const corroboration = Math.min(1, distinctSources.length / 3);
   const evidenceConfidence = Math.max(0, Math.min(1, averageWeight * (0.6 + 0.4 * corroboration)));
+  const crowdedClaims = [...negative.keys()].filter((summary) => /crowd|packed|busy|queue|wait/i.test(summary)).length;
+  const queueRisk = queueValues.length > 0 ? Math.min(1, (median(queueValues) || 0) / 90) : 0;
+  const crowdRisk = Math.max(0, Math.min(1, crowdedClaims > 0 ? Math.max(0.55, queueRisk) : queueRisk));
 
   return {
     canonicalPlaceId,
@@ -323,6 +328,7 @@ export function summarisePlaceEvidence(
     typicalQueueMinutes: median(queueValues),
     typicalVisitMinutes: median(visitValues),
     evidenceConfidence,
+    crowdRisk,
     promotionRisk: weightTotal > 0 ? riskTotal / weightTotal : 0.5,
     warnings: Array.from(new Set(warnings)),
   };

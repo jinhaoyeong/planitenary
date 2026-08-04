@@ -186,6 +186,7 @@ function practicality(
   if (evidence?.typicalQueueMinutes !== undefined) {
     score -= clamp01(evidence.typicalQueueMinutes / Math.max(1, tolerance) - 1) * 0.3;
   }
+  if (evidence?.crowdRisk) score -= evidence.crowdRisk * 0.18;
   return clamp01(score);
 }
 
@@ -260,6 +261,7 @@ export function scorePlace(
   if (evidence?.typicalQueueMinutes !== undefined && evidence.typicalQueueMinutes >= 45) {
     cautions.push(`Visitors report waits of about ${evidence.typicalQueueMinutes} minutes.`);
   }
+  if ((evidence?.crowdRisk ?? 0) >= 0.55) cautions.push('Recent evidence suggests this place can be crowded; the plan treats crowding as a real time cost.');
 
   const score = Math.round(100 * clamp01(weighted - promotionPenalty - closurePenalty));
 
