@@ -51,6 +51,14 @@ export async function invokeTravelFunction(name: string, body?: unknown): Promis
   return data;
 }
 
+/**
+ * AI is deliberately a named server boundary. The browser can request an
+ * interpretation, but never receives or sends an OpenAI credential directly.
+ */
+export async function invokeTravelReasoning(operation: string, input: unknown): Promise<unknown> {
+  return invokeTravelFunction('travel-reasoning', { operation, input });
+}
+
 export const getSupabaseUserId = async (): Promise<string | null> => {
   if (!hasSupabaseConfig) return null;
   const { data, error } = await supabase.auth.getUser();
