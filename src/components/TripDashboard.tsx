@@ -9,6 +9,7 @@ import { createBlankItinerary, createItineraryFromProfile, toTripSummary, type T
 import { TripCreateWizard } from './TripCreateWizard';
 import type { TripProfile } from '../lib/tripProfile';
 import type { Itinerary } from '../data';
+import { tripStorageCleanupKeys } from '../lib/tripDeletion';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -226,7 +227,8 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
           supabase.from('draft_items').delete().eq('itinerary_id', trip.id).eq('user_id', user.id),
           supabase.from('budgets').delete().eq('id', trip.id).eq('user_id', user.id),
           supabase.from('checklists').delete().eq('id', `checklist-${trip.id}`).eq('user_id', user.id),
-          supabase.from('trip_settings').delete().eq('id', trip.id).eq('user_id', user.id),
+          supabase.from('trip_documents').delete().eq('trip_id', trip.id).eq('user_id', user.id),
+          supabase.from('day_photos').delete().eq('itinerary_id', trip.id).eq('user_id', user.id),
           supabase.from('itineraries').delete().eq('id', trip.id).eq('user_id', user.id),
           supabase.from('trip_registry').delete().eq('id', trip.id).eq('user_id', user.id),
         ]);
@@ -234,19 +236,15 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
         if (failed?.error) throw failed.error;
       }
 
-      [
-        `itinerary-${user.id}-${trip.id}`,
-        `budget-${trip.id}`,
-        `checklist-data-${trip.id}`,
-        `trip-settings-${trip.id}`,
-        `photos-${trip.id}`,
-      ].forEach((key) => localStorage.removeItem(key));
+      for (const key of tripStorageCleanupKeys(user.id, trip.id)) {
+        localStorage.removeItem(key);
+      }
       const next = trips.filter((item) => item.id !== trip.id);
       persistLocalTrips(next);
       setTrips(next);
     } catch (deleteError) {
       console.error('Failed to delete trip:', deleteError);
-      setError('The trip could not be deleted. Nothing was removed from this device. Please try again.');
+      setError('The trip could not be fully deleted from the cloud. Your local copy was kept. Please try again.');
     } finally {
       setDeletingTripId(null);
     }
