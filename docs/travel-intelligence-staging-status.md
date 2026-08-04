@@ -27,7 +27,7 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 ## Automated verification
 
-- Vitest: 298 tests passing across 24 files.
+- Vitest: 299 tests passing across 24 files.
 - Production TypeScript/Vite build: passing.
 - Crowd evidence produces a separate `crowdRisk` signal and caution.
 - Crowd-averse behaviour now applies a stronger evidence penalty than moderate or crowd-indifferent behaviour.
@@ -35,6 +35,9 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 - Weather risk changes the deterministic scheduler's indoor/outdoor ordering.
 - The regional route request selects Amap/Baidu for a China capability and explicitly falls back to walking-only semantics when public-transit routing is unavailable.
 - Replanning previews preserve locks and use existing preview/apply/undo protection.
+- Disruption replanning now schedules unlocked activities around locked booking
+  windows, so a late-start or route-delay preview cannot create an overlap with
+  a protected reservation.
 - The planner UI now exposes reversible route-delay recovery, walking-load reduction, and relaxed-pace previews; focused replanning tests cover each path.
 - Deterministic conflict repair is available as a preview when overlaps are detected; unresolved opening-hour constraints remain warnings rather than being hidden.
 - Lower-cost planning moves the highest-cost optional place with a known price to the unassigned pool for review; it never deletes the place or moves a locked/must-do activity.

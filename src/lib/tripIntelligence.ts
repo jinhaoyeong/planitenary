@@ -232,6 +232,54 @@ const scheduleActivities = (activities: Activity[], startAt = DEFAULT_START, tra
   });
 };
 
+/**
+ * Schedule movable activities around fixed bookings. A locked reservation is
+ * a hard time window, not merely an item that should be returned unchanged:
+ * unlocked activities must never be placed across it during a disruption
+ * preview.
+ */
+const scheduleAroundLockedSlots = (
+  unlocked: Activity[],
+  locked: Activity[],
+  startAt: number,
+  transport: string,
+): Activity[] => {
+  const fixed = locked
+    .map((activity) => ({ activity, start: parseMinutes(activity.time) }))
+    .filter((item): item is { activity: Activity; start: number } => item.start !== null)
+    .sort((left, right) => left.start - right.start);
+  let cursor = startAt;
+  let previous: Activity | undefined;
+  const scheduled: Activity[] = [];
+
+  unlocked.forEach((activity) => {
+    const travel = previous
+      ? estimateTravelMinutes(coordinatesFor(previous), coordinatesFor(activity), transport) || 0
+      : 0;
+    cursor += travel;
+    const duration = activityDuration(activity);
+
+    // Move past every fixed booking that the activity would overlap. This
+    // keeps the activity in the proposal instead of silently dropping it.
+    for (const slot of fixed) {
+      const slotEnd = slot.start + activityDuration(slot.activity);
+      if (cursor < slotEnd && cursor + duration > slot.start) cursor = slotEnd;
+    }
+
+    const next = {
+      ...activity,
+      time: formatMinutes(cursor),
+      transportMinutes: travel || activity.transportMinutes,
+      transportMode: travel ? transport : activity.transportMode,
+    };
+    scheduled.push(next);
+    previous = next;
+    cursor += duration;
+  });
+
+  return scheduled;
+};
+
 const preserveLockedSlots = (day: DayPlan, candidates: Activity[]) => {
   const lockedSlots = day.activities.map((activity, index) => (isLocked(activity) ? { index, activity } : null)).filter(Boolean) as Array<{ index: number; activity: Activity }>;
   if (lockedSlots.length === 0) return candidates;
@@ -519,8 +567,8 @@ export function replanDay(
       arranged = [...unlocked].sort((left, right) => activityDuration(left) - activityDuration(right));
     }
     const start = planningStartMinutes(itinerary, profile) + delay;
-    const scheduled = scheduleActivities(arranged, start, profile.transport[0]);
-    return { ...day, activities: preserveLockedSlots({ ...day, activities: [...scheduled, ...locked] }, [...scheduled, ...locked]) };
+    const scheduled = scheduleAroundLockedSlots(arranged, locked, start, profile.transport[0]);
+    return { ...day, activities: [...scheduled, ...locked].sort((left, right) => (parseMinutes(left.time) ?? 0) - (parseMinutes(right.time) ?? 0)) };
   };
   const afterDays = beforeDays.map(replanDayActivities);
   return makeProposal(

@@ -62,6 +62,20 @@ describe('replanDay', () => {
     expect(proposal.changes.length).toBeGreaterThan(0);
   });
 
+  it('never schedules an unlocked activity across a locked booking', () => {
+    const source = itinerary();
+    source.days[0].activities.find((activity) => activity.id === 'gallery')!.durationMinutes = 600;
+    const proposal = replanDay(source, profile(), 1, { kind: 'late-start', minutes: 60 });
+    const day = proposal.afterDays[0];
+    const gallery = day.activities.find((activity) => activity.id === 'gallery')!;
+    const dinner = day.activities.find((activity) => activity.id === 'locked')!;
+    const galleryStart = Number(gallery.time.slice(0, 2)) * 60 + Number(gallery.time.slice(3));
+    const galleryEnd = galleryStart + (gallery.durationMinutes || 0);
+    const dinnerStart = Number(dinner.time.slice(0, 2)) * 60 + Number(dinner.time.slice(3));
+    expect(galleryEnd <= dinnerStart || galleryStart >= dinnerStart + (dinner.durationMinutes || 0)).toBe(true);
+    expect(dinner.time).toBe('18:00');
+  });
+
   it('creates a roomier reversible preview for relaxed planning', () => {
     const source = itinerary();
     const proposal = relaxTrip(source, profile());
