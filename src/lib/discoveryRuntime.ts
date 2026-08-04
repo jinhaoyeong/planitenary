@@ -188,6 +188,7 @@ export async function discoverPlaces(
           evidencePayload = await invoke('travel-evidence', {
             city: destination.city,
             placeIds: candidates.map((candidate) => candidate.providerPlaceId).filter(Boolean),
+            placeNames: candidates.map((candidate) => candidate.name),
           });
         } catch {
           evidencePayload = null;

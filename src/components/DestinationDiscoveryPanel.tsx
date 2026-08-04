@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Check,
@@ -12,13 +12,14 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
-import { FixturePlaceDiscoveryProvider, getDestinationCapability } from '../lib/destinationFixtures';
-import { describeCapability } from '../lib/destinationCapability';
+import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
+import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
 import { capabilityFor, discoverPlaces, loadProviderRuntime } from '../lib/discoveryRuntime';
 import { describePace } from '../lib/travelBehaviour';
 import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
+import type { RouteLeg, RouteResolver } from '../lib/humanScheduler';
 import {
   buildDestinationItinerary,
   defaultDiscoveryDecisions,
@@ -310,20 +311,36 @@ function DiscoveryPreview({
 
 export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChange }: DestinationDiscoveryPanelProps) {
   const primaryCity = profile.destinations[0]?.city || itinerary.cities[0] || '';
-  const capability = getDestinationCapability(primaryCity);
-  const supportsFixture = capability !== undefined;
+  const destination = profile.destinations[0];
+  const [providerRuntime, setProviderRuntime] = useState<ProviderRuntime | null>(null);
+  useEffect(() => {
+    let active = true;
+    void loadProviderRuntime(
+      isSupabaseConfigured() ? (name) => invokeTravelFunction(name) : undefined,
+    ).then((runtime) => {
+      if (active) setProviderRuntime(runtime);
+    });
+    return () => { active = false; };
+  }, []);
+  const runtime = providerRuntime ?? EMPTY_PROVIDER_RUNTIME;
+  const capability = capabilityFor({
+    city: primaryCity,
+    region: destination?.region,
+    countryCode: destination?.countryCode || '',
+  }, runtime);
+  const supportsDiscovery = canDiscover(capability);
+  const capabilityLoading = providerRuntime === null && isSupabaseConfigured();
   // Canonical display name for the active destination — never a hardcoded city.
-  const cityLabel = capability?.city || primaryCity || 'this destination';
+  const cityLabel = capability.destination.city || primaryCity || 'this destination';
   const savedStateMatchesCity = Boolean(
     itinerary.discoveryState
-    && capability
-    && itinerary.discoveryState.city.toLowerCase() === capability.city.toLowerCase(),
+    && itinerary.discoveryState.city.toLowerCase() === capability.destination.city.toLowerCase(),
   );
   const [phase, setPhase] = useState<DiscoveryPhase>(() => {
     if (itinerary.discoveryState?.stage === 'itinerary-built' && savedStateMatchesCity) return 'built';
     return savedStateMatchesCity ? 'review' : 'idle';
   });
-  const [candidates, setCandidates] = useState<PlaceCandidate[]>(() => capability?.places ?? []);
+  const [candidates, setCandidates] = useState<PlaceCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** True once results are known to come from the captured library, not a provider. */
@@ -333,6 +350,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   /** Per-place evidence summaries and trend strength, when a provider supplied them. */
   const [evidenceSummaries, setEvidenceSummaries] = useState<Record<string, PlaceEvidenceSummary>>({});
   const [trends, setTrends] = useState<Record<string, number>>({});
+  const [routeLoading, setRouteLoading] = useState(false);
   // Multi-dimensional ranking: interests, significance, recent quality,
   // practicality, trend and promotion risk — not one opaque number.
   const ranked = useMemo(
@@ -362,7 +380,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       revision: (itinerary.revision || 0) + 1,
       discoveryState: {
         city: cityLabel,
-        mode: 'fixture',
+        mode: usingFixture ? 'fixture' : 'live',
         candidateIds: candidates.map((candidate) => candidate.id),
         decisions: next,
         discoveredAt,
@@ -373,7 +391,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   };
 
   const beginDiscovery = async () => {
-    if (!capability) return;
+    if (!supportsDiscovery) return;
     setLoading(true);
     setError(null);
     try {
@@ -384,9 +402,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       );
       const outcome = await discoverPlaces(
         {
-          city: capability.city,
+          city: capability.destination.city,
           region: destination?.region,
-          countryCode: destination?.countryCode || capability.countryCode,
+          countryCode: destination?.countryCode || capability.destination.countryCode,
         },
         runtime,
         isSupabaseConfigured() ? invokeTravelFunction : undefined,
@@ -399,9 +417,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       const discovered = outcome.candidates.length > 0
         ? outcome.candidates
         : await new FixturePlaceDiscoveryProvider().search({
-          city: capability.city,
-          countryCode: capability.countryCode,
-          queries: capability.knowledge?.discoveryQueries ?? [],
+          city: capability.destination.city,
+          countryCode: capability.destination.countryCode,
+          queries: [],
           interests: profile.styles,
           startDate: profile.startDate,
           endDate: profile.endDate,
@@ -432,14 +450,55 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     persistDecisions(next);
   };
 
-  const previewPlan = () => {
+  const previewPlan = async () => {
     // Queue evidence feeds the scheduler so a famous place with a 90-minute
     // wait costs 90 minutes of the day, not zero.
+    setRouteLoading(true);
+    let routeResolver: RouteResolver | undefined;
+    let routeWarning: string | undefined;
+    try {
+      const selected = ranked
+        .filter(({ candidate }) => decisions[candidate.id] === 'must-do' || decisions[candidate.id] === 'interested')
+        .map(({ candidate }) => candidate)
+        .filter((candidate) => candidate.coordinates)
+        .slice(0, 25);
+      if (capability.routes.status === 'live' && isSupabaseConfigured() && selected.length > 0) {
+        const payload = await invokeTravelFunction('travel-route-matrix', {
+          origins: selected.map((candidate) => ({ coordinates: candidate.coordinates })),
+          destinations: selected.map((candidate) => ({ coordinates: candidate.coordinates })),
+          mode: profile.transport.includes('public-transport') ? 'public-transport' : 'walking',
+          travelStartsInDays: profile.startDate
+            ? Math.max(0, Math.ceil((new Date(profile.startDate).getTime() - Date.now()) / 86_400_000))
+            : undefined,
+        }) as { matrix?: Array<Array<{ status?: string; durationMinutes?: number; distanceMeters?: number }>> };
+        const routeMap = new Map<string, RouteLeg>();
+        payload.matrix?.forEach((row, originIndex) => row.forEach((cell, destinationIndex) => {
+          if (cell.status !== 'ok' || !cell.durationMinutes || !cell.distanceMeters) return;
+          const from = selected[originIndex];
+          const to = selected[destinationIndex];
+          if (from && to) routeMap.set(`${from.id}:${to.id}`, {
+            durationMinutes: cell.durationMinutes,
+            distanceMeters: cell.distanceMeters,
+            mode: profile.transport.includes('public-transport') ? 'public-transport' : 'walking',
+            source: 'provider',
+          });
+        }));
+        routeResolver = (from, to) => routeMap.get(`${from.id}:${to.id}`);
+        if (routeMap.size === 0) routeWarning = 'The live route provider returned no usable route cells; travel is estimated.';
+      } else if (capability.routes.status !== 'live') {
+        routeWarning = 'Live routing is not configured for this destination; travel is estimated.';
+      }
+    } catch {
+      routeWarning = 'Live routing was unavailable for this preview; travel is estimated.';
+    }
     const result = buildDestinationItinerary(itinerary, profile, ranked, decisions, {
       queueEvidence,
+      routeResolver,
     });
+    if (routeWarning) result.warnings = [...result.warnings, routeWarning];
     setBuildResult(result);
     setPhase('preview');
+    setRouteLoading(false);
   };
 
   const applyPlan = () => {
@@ -452,7 +511,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       revision: (itinerary.revision || 0) + 1,
       discoveryState: {
         city: cityLabel,
-        mode: 'fixture',
+        mode: usingFixture ? 'fixture' : 'live',
         candidateIds: candidates.map((candidate) => candidate.id),
         decisions,
         discoveredAt: itinerary.discoveryState?.discoveredAt || timestamp,
@@ -478,15 +537,21 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     setBuildResult(null);
   };
 
-  if (!supportsFixture) {
+  if (capabilityLoading) {
+    return (
+      <section className="destination-discovery-shell destination-discovery-unavailable">
+        <Database className="w-5 h-5" />
+        <div>
+          <h4>Checking live destination providers</h4>
+          <p>Preparing the current discovery options for {cityLabel}.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!supportsDiscovery) {
     // Capability is resolved from the destination's region and the connected
     // providers, so the message stays accurate as backends come online.
-    const destination = profile.destinations[0];
-    const capability = capabilityFor({
-      city: cityLabel,
-      region: destination?.region,
-      countryCode: destination?.countryCode || '',
-    });
     return (
       <section className="destination-discovery-shell destination-discovery-unavailable">
         <Database className="w-5 h-5" />
@@ -577,8 +642,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           <strong>{selectedCount} places ready for planning</strong>
           <span>Skipped and visited places stay out of the itinerary.</span>
         </div>
-        <button type="button" className="pill-btn pill-primary" onClick={previewPlan} disabled={selectedCount < 2}>
-          Build themed itinerary
+        <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={selectedCount < 2 || routeLoading}>
+          {routeLoading ? 'Checking routesâ€¦' : 'Build themed itinerary'}
         </button>
       </div>
     </section>
