@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Itinerary } from '../data';
-import { relaxTrip, replanDay } from './tripIntelligence';
+import { relaxTrip, repairConflicts, replanDay } from './tripIntelligence';
 import type { TripProfile } from './tripProfile';
 
 const profile = (): TripProfile => ({
@@ -67,6 +67,15 @@ describe('replanDay', () => {
     const proposal = relaxTrip(source, profile());
     expect(proposal.reason).toContain('relaxed preview');
     expect(proposal.baseItineraryRevision).toBe(source.revision || 0);
+    expect(proposal.changes.length).toBeGreaterThan(0);
+  });
+
+  it('creates a repair preview for overlapping activities', () => {
+    const source = itinerary();
+    source.days[0].activities[1].time = '09:00';
+    source.days[0].activities[2].time = '09:30';
+    const proposal = repairConflicts(source, profile());
+    expect(proposal.reason).toContain('re-times');
     expect(proposal.changes.length).toBeGreaterThan(0);
   });
 });

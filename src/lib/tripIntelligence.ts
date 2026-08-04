@@ -595,6 +595,22 @@ export function relaxTrip(itinerary: Itinerary, profile: TripProfile): Itinerary
   };
 }
 
+/** Re-time each day through the deterministic scheduler to repair overlaps. */
+export function repairConflicts(itinerary: Itinerary, profile: TripProfile): ItineraryProposal {
+  const beforeDays = clone(itinerary.days);
+  const afterDays = beforeDays.map((day) => optimiseOneDay(day, profile, itinerary));
+  return makeProposal(
+    itinerary,
+    profile,
+    'optimise-trip',
+    'The scheduler re-times unlocked activities to remove overlaps while preserving locked bookings. Known opening-hour conflicts remain explicitly warned when they cannot be resolved automatically.',
+    beforeDays,
+    afterDays,
+    itinerary.unassignedActivities || [],
+    itinerary.unassignedActivities || [],
+  );
+}
+
 export function applyItineraryProposal(
   itinerary: Itinerary,
   profile: TripProfile,
