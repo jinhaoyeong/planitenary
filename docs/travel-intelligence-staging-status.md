@@ -6,7 +6,7 @@ This document records the last verified state of the completion branch. It delib
 
 - Branch: `agent/complete-travel-intelligence`
 - Base: `main` (unchanged during this work)
-- Latest implementation areas: live discovery/evidence, weather, events, crowd risk, route preview, authenticated link import, AI boundary, regional discovery, disruption-aware replanning.
+- Latest implementation areas: live discovery/evidence, weather, event-aware warnings, crowd risk, route preview, authenticated link import, AI boundary, regional discovery, disruption-aware replanning.
 
 ## Live staging checks
 
@@ -19,6 +19,7 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 | `travel-evidence-live` Melbourne | HTTP 200 | Returned Google Places review documents and YouTube documents with source URLs and retrieval timestamps. |
 | `travel-weather` Melbourne | HTTP 200 | Returned Open-Meteo daily forecast and expiry timestamp. |
 | `travel-route-matrix` | HTTP 200 | Returned a real walking route of 15 minutes and 1,095 metres for the fixed Melbourne verification coordinates. |
+| `travel-route-matrix` regional path | Implemented, not live-proven | Amap/Baidu walking adapters are deployed in version 8; without regional credentials they return an honest failed-pair/unknown result rather than inventing a route. |
 | `travel-events` | HTTP 503 | `TICKETMASTER_API_KEY` is not configured. |
 | `travel-discover-live` Beijing | HTTP 503 | Neither `AMAP_API_KEY` nor `BAIDU_API_KEY` is configured. |
 | `travel-reasoning` | HTTP 503 | `OPENAI_API_KEY` is not configured. |
@@ -26,10 +27,13 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 ## Automated verification
 
-- Vitest: 292 tests passing across 22 files.
+- Vitest: 298 tests passing across 24 files.
 - Production TypeScript/Vite build: passing.
 - Crowd evidence produces a separate `crowdRisk` signal and caution.
+- Crowd-averse behaviour now applies a stronger evidence penalty than moderate or crowd-indifferent behaviour.
+- Current event notes are passed into the plan warnings so event conflicts are visible before locking; events do not yet occupy schedule slots automatically.
 - Weather risk changes the deterministic scheduler's indoor/outdoor ordering.
+- The regional route request selects Amap/Baidu for a China capability and explicitly falls back to walking-only semantics when public-transit routing is unavailable.
 - Replanning previews preserve locks and use existing preview/apply/undo protection.
 - The planner UI now exposes reversible route-delay recovery, walking-load reduction, and relaxed-pace previews; focused replanning tests cover each path.
 - Deterministic conflict repair is available as a preview when overlaps are detected; unresolved opening-hour constraints remain warnings rather than being hidden.
@@ -43,6 +47,9 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 - Local 390px mobile viewport: itinerary shell and discovery controls rendered;
   measured document width was 375px against a 390px viewport, with no
   horizontal overflow.
+- Local 390px mobile viewport: the Draft page was opened through the mobile
+  menu; `The draft book · ideas & finds` rendered, no duplicate `Save a travel
+  link` control was present, and document width remained 375px.
 - Mobile discovery failure remained reversible and did not change the trip;
   the UI displayed `Live discovery unavailable: Provider responded 400`.
 - These checks used the existing local/demo session. Live provider candidates
@@ -52,12 +59,12 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 ## Remaining external proof
 
-1. Keep the verified single `GOOGLE_MAPS_API_KEY` configured in Supabase Edge Function secrets. Live Places, YouTube and Routes calls now succeed.
+1. Keep the verified single `GOOGLE_MAPS_API_KEY` configured in Supabase Edge Function secrets. Live Places, YouTube and Google Routes calls now succeed; the branch is currently at `a75d594`.
 2. The same key was independently verified against Geocoding and the Maps JavaScript loader (HTTP 200). Do not expose this server-side key in browser code.
-3. Add `TICKETMASTER_API_KEY` to Supabase Edge Function secrets.
-4. Add `AMAP_API_KEY` or `BAIDU_API_KEY` to Supabase Edge Function secrets.
-5. Add `OPENAI_API_KEY` to Supabase Edge Function secrets.
-6. Sign in to Planitenary in the browser and exercise discovery, build, improve, shared-link import, desktop layout and 390px mobile layout.
+3. Add `TICKETMASTER_API_KEY` to Supabase Edge Function secrets if event-provider ingestion is required.
+4. Add `AMAP_API_KEY` or `BAIDU_API_KEY` to Supabase Edge Function secrets if mainland-China route verification is required; Google remains the live provider for other destinations.
+5. Add `OPENAI_API_KEY` to Supabase Edge Function secrets if live AI reasoning is required.
+6. Sign in to Planitenary in the browser and exercise live discovery, build, improve, shared-link import and mobile itinerary-building with cloud data.
 
 No provider key belongs in `VITE_*` variables. No unavailable provider is presented as live.
 
