@@ -321,14 +321,14 @@ body {
 
 .handbook-home-hero-title {
   margin-top: 1rem;
-  font-size: clamp(1.75rem, 2.1vw, 2.4rem);
+  font-size: clamp(1.9rem, 2.25vw, 2.7rem);
   line-height: 1.05;
 }
 
 .handbook-home-hero-description {
   max-width: 32rem;
   margin-top: 1.25rem;
-  font-size: clamp(1rem, 1.1vw, 1.2rem);
+  font-size: clamp(1rem, 1.12vw, 1.25rem);
   line-height: 1.55;
 }
 
