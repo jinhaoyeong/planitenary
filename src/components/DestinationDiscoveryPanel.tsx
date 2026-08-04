@@ -179,7 +179,11 @@ function BuiltDiscoverySummary({
         <div>
           <span className="fixture-badge"><Check className="w-4 h-4" /> Shortlist complete</span>
           <h3 id="destination-built-title">Your {cityLabel} itinerary is ready</h3>
-          <p>{selectedCount} selected places · {scheduledCandidateIds.length} scheduled · {unscheduled.length} need attention · {plannedDays} days with places.</p>
+          <p>
+            {selectedCount} selected · {scheduledCandidateIds.length} scheduled
+            {unscheduled.length > 0 ? ` · ${unscheduled.length} need attention` : ''}
+            {' · '}{plannedDays} {plannedDays === 1 ? 'day' : 'days'}
+          </p>
         </div>
         <div className="destination-built-actions">
           <button type="button" className="pill-btn pill-ghost" onClick={onEdit}>Edit selected places</button>
@@ -188,8 +192,8 @@ function BuiltDiscoverySummary({
       </div>
       {unscheduled.length > 0 && (
         <div className="destination-unscheduled-panel">
-          <strong>{unscheduled.length} selected {unscheduled.length === 1 ? 'place needs' : 'places need'} attention</strong>
-          <span>Nothing was dropped silently. Review the reason before rebuilding.</span>
+          <strong>{unscheduled.length} {unscheduled.length === 1 ? 'place needs' : 'places need'} attention</strong>
+          <span>Review why before rebuilding.</span>
           <ul>
             {unscheduled.slice(0, 4).map((item) => (
               <li key={item.candidateId}>

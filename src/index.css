@@ -576,14 +576,48 @@ body.planner-intelligence-active .pet-overlay {
   text-transform: uppercase;
 }
 
+.planner-organise-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.planner-organise-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .planner-improve-toggle {
   width: 100%;
   justify-content: center;
 }
 
 @media (max-width: 639px) {
+  .planner-organise-body[data-open="false"] {
+    display: none;
+  }
+
   .planner-improve-actions[data-expanded="false"] .planner-improve-action-extra {
     display: none;
+  }
+}
+
+@media (min-width: 640px) {
+  .planner-organise-chevron {
+    display: none;
+  }
+
+  .planner-organise-header {
+    cursor: default;
+    pointer-events: none;
   }
 }
 
