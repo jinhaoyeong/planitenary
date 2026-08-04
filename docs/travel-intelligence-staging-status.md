@@ -36,6 +36,20 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 - Lower-cost planning moves the highest-cost optional place with a known price to the unassigned pool for review; it never deletes the place or moves a locked/must-do activity.
 - Fixtures remain an explicitly labelled fallback.
 
+## Browser acceptance evidence
+
+- Local desktop session at a 1440px viewport: itinerary shell, discovery panel,
+  organiser controls and hero rendered successfully.
+- Local 390px mobile viewport: itinerary shell and discovery controls rendered;
+  measured document width was 375px against a 390px viewport, with no
+  horizontal overflow.
+- Mobile discovery failure remained reversible and did not change the trip;
+  the UI displayed `Live discovery unavailable: Provider responded 400`.
+- These checks used the existing local/demo session. A signed-in cloud-user
+  acceptance run, live place results, and mobile itinerary-building with real
+  provider candidates remain unproven until the Supabase Google secret is
+  corrected.
+
 ## Remaining external proof
 
 1. Replace/check the Supabase Edge Function secret `GOOGLE_MAPS_API_KEY` with the verified Google key. The local direct checks returned HTTP 200 for Places, YouTube and Routes; the current deployed discovery request returns HTTP 400.
