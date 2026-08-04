@@ -4,6 +4,7 @@ import {
   capabilityFor,
   discoverPlaces,
   loadProviderRuntime,
+  parseCurrentEvents,
   parseWeatherRisk,
   resetProviderRuntimeCache,
 } from './discoveryRuntime';
@@ -18,6 +19,12 @@ const liveRuntime = (overrides: Partial<ProviderRuntime> = {}): ProviderRuntime 
 });
 
 describe('provider runtime', () => {
+  it('normalises current event facts without inventing missing dates', () => {
+    expect(parseCurrentEvents({ events: [{ id: 'e1', name: 'Laneway Festival', dates: { start: { localDate: '2026-08-05' } }, url: 'https://example.com/e1' }, { name: 'Untitled' }] })).toEqual([
+      { id: 'e1', name: 'Laneway Festival', date: '2026-08-05', url: 'https://example.com/e1' },
+      { id: 'Untitled', name: 'Untitled', date: undefined, url: undefined },
+    ]);
+  });
   it('turns live precipitation data into explicit indoor-first days', () => {
     expect(parseWeatherRisk({ payload: { daily: {
       time: ['2026-08-04', '2026-08-05'],

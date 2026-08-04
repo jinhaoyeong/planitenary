@@ -14,7 +14,7 @@ import {
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
 import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
-import { capabilityFor, discoverPlaces, loadProviderRuntime, parseWeatherRisk } from '../lib/discoveryRuntime';
+import { capabilityFor, discoverPlaces, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
 import { describePace } from '../lib/travelBehaviour';
 import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
@@ -459,6 +459,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     let routeResolver: RouteResolver | undefined;
     let routeWarning: string | undefined;
     let weatherWarning: string | undefined;
+    let eventsWarning: string | undefined;
     const nextWeatherRiskDays: number[] = [];
     try {
       const selected = ranked
@@ -517,6 +518,20 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         }
       }
     }
+    if (capability.events && isSupabaseConfigured()) {
+      try {
+        const events = parseCurrentEvents(await invokeTravelFunction('travel-events', {
+          city: capability.destination.city,
+          startDate: profile.startDate,
+          endDate: profile.endDate,
+        }));
+        if (events.length > 0) {
+          eventsWarning = `${events.length} current event${events.length === 1 ? '' : 's'} found near ${capability.destination.city}; review dates before locking the itinerary.`;
+        }
+      } catch {
+        eventsWarning = 'Current events were unavailable for this preview; the itinerary does not assume events exist.';
+      }
+    }
     const result = buildDestinationItinerary(itinerary, profile, ranked, decisions, {
       queueEvidence,
       routeResolver,
@@ -524,6 +539,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     });
     if (routeWarning) result.warnings = [...result.warnings, routeWarning];
     if (weatherWarning) result.warnings = [...result.warnings, weatherWarning];
+    if (eventsWarning) result.warnings = [...result.warnings, eventsWarning];
     if (nextWeatherRiskDays.length > 0) result.warnings = [...result.warnings, `Rain-sensitive days use an indoor-first order: ${nextWeatherRiskDays.join(', ')}.`];
     setBuildResult(result);
     setPhase('preview');

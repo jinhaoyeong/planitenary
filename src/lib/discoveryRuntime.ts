@@ -110,6 +110,13 @@ export interface WeatherRiskDay {
   indoorRecommended: boolean;
 }
 
+export interface CurrentEventSummary {
+  id: string;
+  name: string;
+  date?: string;
+  url?: string;
+}
+
 /** Normalise the provider response once; the planner only receives deterministic risk flags. */
 export function parseWeatherRisk(payload: unknown): WeatherRiskDay[] {
   if (!payload || typeof payload !== 'object') return [];
@@ -123,6 +130,23 @@ export function parseWeatherRisk(payload: unknown): WeatherRiskDay[] {
     precipitationMillimetres: Number(precipitation[index] ?? 0),
     indoorRecommended: Number(probability[index] ?? 0) >= 60 || Number(precipitation[index] ?? 0) >= 5,
   }));
+}
+
+/** Keep event data factual and small at the planner boundary. */
+export function parseCurrentEvents(payload: unknown): CurrentEventSummary[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const events = (payload as { events?: unknown }).events;
+  if (!Array.isArray(events)) return [];
+  return events.flatMap((event): CurrentEventSummary[] => {
+    if (!event || typeof event !== 'object') return [];
+    const item = event as Record<string, unknown>;
+    const name = typeof item.name === 'string' ? item.name : '';
+    const id = typeof item.id === 'string' ? item.id : name;
+    if (!name || !id) return [];
+    const dates = item.dates as { start?: { localDate?: string } } | undefined;
+    const url = typeof item.url === 'string' ? item.url : undefined;
+    return [{ id, name, date: dates?.start?.localDate, url }];
+  });
 }
 
 
