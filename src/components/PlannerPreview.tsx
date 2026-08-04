@@ -54,6 +54,29 @@ const isPlaceActivity = (activity: Activity) =>
   && activity.kind !== 'transport'
   && !(activity.source === 'generated' && !activity.providerPlaceId && (activity.type === 'food' || activity.type === 'cafe'));
 
+const timeToMinutes = (value: string) => {
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+};
+
+const conflictCountFor = (itinerary: Itinerary) => itinerary.days.reduce((total, day) => {
+  const activities = day.activities.filter(isPlaceActivity).sort((left, right) => (timeToMinutes(left.time) ?? 0) - (timeToMinutes(right.time) ?? 0));
+  let conflicts = 0;
+  activities.forEach((activity, index) => {
+    const start = timeToMinutes(activity.time);
+    const end = start === null ? null : start + Math.max(15, activity.durationMinutes || 90);
+    const openingStart = timeToMinutes(activity.openingHours?.opensAt || '');
+    const openingEnd = timeToMinutes(activity.openingHours?.closesAt || '');
+    if (start !== null && end !== null && ((openingStart !== null && start < openingStart) || (openingEnd !== null && end > openingEnd))) conflicts += 1;
+    const previous = activities[index - 1];
+    const previousStart = previous ? timeToMinutes(previous.time) : null;
+    const previousEnd = previousStart === null ? null : previousStart + Math.max(15, previous.durationMinutes || 90);
+    if (previousEnd !== null && start !== null && start < previousEnd) conflicts += 1;
+  });
+  return total + conflicts;
+}, 0);
+
 export function PlannerPreview({ itinerary, profile, onItineraryChange }: PlannerPreviewProps) {
   const [proposal, setProposal] = useState<ItineraryProposal | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
@@ -66,7 +89,9 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const lastHistory = itinerary.plannerHistory?.[itinerary.plannerHistory.length - 1];
   const hasPlaceActivities = itinerary.days.some((day) => day.activities.some(isPlaceActivity));
   const hasInboxActivities = (itinerary.unassignedActivities?.length || 0) > 0;
+  const discoveryBuilt = itinerary.discoveryState?.stage === 'itinerary-built';
   const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.some(isPlaceActivity)), [itinerary.days]);
+  const conflictCount = useMemo(() => conflictCountFor(itinerary), [itinerary]);
   const declaredDays = declaredTripDays(profile);
   const existingDaysNotice = plannerExistingDaysNotice(declaredDays, itinerary.days.length);
 
@@ -82,7 +107,15 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   };
 
   const build = () => openProposal(generateInitialItinerary(itinerary, profile));
-  const optimiseWholeTrip = () => openProposal(optimiseTrip(itinerary, profile));
+  const optimiseWholeTrip = () => {
+    const next = optimiseTrip(itinerary, profile);
+    if (next.travelMinutesAfter > next.travelMinutesBefore) {
+      setProposal(null);
+      setStatus(`No travel-saving improvement found. The offline estimate would increase from ${next.travelMinutesBefore} to ${next.travelMinutesAfter} minutes.`);
+      return;
+    }
+    openProposal(next);
+  };
   const optimiseSelectedDay = (dayNumber: number) => openProposal(optimiseDay(itinerary, profile, dayNumber));
 
   const toggle = (id: string) => setSelection((current) => {
@@ -119,6 +152,17 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     setStatus('The last planner change was undone.');
   };
 
+  const changesByDay = useMemo(() => {
+    if (!proposal) return [] as Array<[number, ItineraryProposal['changes']]>;
+    const grouped = new Map<number, ItineraryProposal['changes']>();
+    proposal.changes.forEach((change) => {
+      const current = grouped.get(change.dayNumber) || [];
+      current.push(change);
+      grouped.set(change.dayNumber, current);
+    });
+    return Array.from(grouped.entries()).sort(([left], [right]) => left - right);
+  }, [proposal]);
+
   if (proposal) {
     return (
       <section className="rounded-3xl p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }} aria-live="polite">
@@ -154,6 +198,13 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
           </div>
         </div>
 
+        {proposal.travelMinutesAfter > proposal.travelMinutesBefore && (
+          <div className="flex items-start gap-2 rounded-2xl p-3 text-xs" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
+            <AlertTriangle className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
+            <span>This proposal increases the offline movement estimate and is not a travel-saving improvement.</span>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]" aria-label="Planner evidence coverage">
           {Object.entries({
             Places: proposal.coverage.placeVerification,
@@ -179,7 +230,11 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
           <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>This plan already matches the current information.</p>
         ) : (
           <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {proposal.changes.map((change) => (
+            {changesByDay.map(([dayNumber, dayChanges]) => (
+              <details key={dayNumber} className="planner-change-day" open>
+                <summary>Day {dayNumber} <span>{dayChanges.length} {dayChanges.length === 1 ? 'change' : 'changes'}</span></summary>
+                <div className="space-y-2 pt-2">
+                  {dayChanges.map((change) => (
               <div key={change.id} className="flex items-start gap-3 rounded-2xl p-3" style={{ border: `1px solid ${selection.has(change.id) ? 'var(--accent)' : 'var(--border)'}` }}>
                 <ChangeToggle
                   checked={selection.has(change.id)}
@@ -198,6 +253,9 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
                   {change.protected && <p className="text-[11px] mt-1" style={{ color: 'var(--accent)' }}>Locked activity stays unchanged.</p>}
                 </div>
               </div>
+                  ))}
+                </div>
+              </details>
             ))}
           </div>
         )}
@@ -243,7 +301,9 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
         <div>
           <span className="planner-action-label">Build</span>
           <div className="flex flex-wrap gap-2 mt-2">
-            {(hasPlaceActivities || hasInboxActivities) && <button type="button" className="pill-btn pill-primary" onClick={hasPlaceActivities ? optimiseWholeTrip : build}><Sparkles className="w-4 h-4" /> {hasPlaceActivities ? 'Organise saved places' : 'Place saved activities'}</button>}
+            {hasPlaceActivities && !discoveryBuilt && <button type="button" className="pill-btn pill-primary" onClick={optimiseWholeTrip}><Sparkles className="w-4 h-4" /> Organise saved places</button>}
+            {hasInboxActivities && !hasPlaceActivities && <button type="button" className="pill-btn pill-primary" onClick={build}><Sparkles className="w-4 h-4" /> Place saved activities</button>}
+            {discoveryBuilt && <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>Use Rebuild itinerary above to preview changes from the selected places.</span>}
             {!hasPlaceActivities && !hasInboxActivities && <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>Add places manually or use the Osaka discovery review above.</span>}
           </div>
         </div>
@@ -252,10 +312,10 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
             <span className="planner-action-label">Improve</span>
             <div className="flex flex-wrap gap-2 mt-2">
               <button type="button" className="pill-btn pill-soft" onClick={optimiseWholeTrip}>Reduce travel and balance days</button>
-              <button type="button" className="pill-btn pill-soft" disabled title="Requires live place and route providers">Make it more local</button>
-              <button type="button" className="pill-btn pill-soft" disabled title="Pace-aware solver is not connected yet">Make it more relaxed</button>
-              <button type="button" className="pill-btn pill-soft" disabled title="Provider price coverage is incomplete">Lower the cost</button>
-              <button type="button" className="pill-btn pill-soft" disabled title="Conflict repair is part of the next solver phase">Fix conflicts</button>
+              <button type="button" className="pill-btn pill-soft" disabled title="Requires live place discovery and replacement candidates">Make it more local · Coming soon</button>
+              <button type="button" className="pill-btn pill-soft" disabled title="Pace-aware scheduling is not connected yet">Make it more relaxed · Coming soon</button>
+              <button type="button" className="pill-btn pill-soft" disabled title="Provider price coverage is incomplete">Lower the cost · Coming soon</button>
+              <button type="button" className="pill-btn pill-soft" disabled title={conflictCount > 0 ? 'Conflict repair is not connected yet' : 'No opening-hours or overlap conflicts detected'}>Fix conflicts · {conflictCount > 0 ? `${conflictCount} found · Coming soon` : 'No conflicts detected'}</button>
               {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo last change</button>}
             </div>
           </div>

@@ -28,7 +28,7 @@ interface DestinationDiscoveryPanelProps {
   onItineraryChange: (itinerary: Itinerary) => void;
 }
 
-type DiscoveryPhase = 'idle' | 'review' | 'preview';
+type DiscoveryPhase = 'idle' | 'review' | 'preview' | 'built';
 
 const GROUPS = [
   { id: 'essentials', label: 'Essentials', matches: ['essential'] },
@@ -95,27 +95,95 @@ function CandidateCard({
         </div>
         <p className="destination-match-reason">{reasons.join(' · ')}</p>
         <div className="destination-candidate-footer">
-          <div className="destination-decision-group" role="radiogroup" aria-label={`Preference for ${candidate.name}`}>
+          <fieldset className="destination-decision-group">
+            <legend className="sr-only">Preference for {candidate.name}</legend>
             {DECISIONS.map((option) => (
-              <button
+              <label
                 key={option.id}
-                type="button"
-                role="radio"
-                aria-checked={decision === option.id}
+                className="destination-decision-option"
                 data-active={decision === option.id ? 'true' : 'false'}
-                onClick={() => onDecision(option.id)}
               >
-                {decision === option.id && <Check className="w-3.5 h-3.5" />}
-                {option.label}
-              </button>
+                <input
+                  className="destination-decision-input"
+                  type="radio"
+                  name={`candidate-decision-${candidate.id}`}
+                  value={option.id}
+                  checked={decision === option.id}
+                  onChange={() => onDecision(option.id)}
+                />
+                {decision === option.id && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
+                <span>{option.label}</span>
+              </label>
             ))}
-          </div>
+          </fieldset>
           <a href={candidate.sourceReferences[0]?.url} target="_blank" rel="noreferrer" className="destination-source-link">
             Source <ExternalLink className="w-3.5 h-3.5" />
           </a>
         </div>
       </div>
     </article>
+  );
+}
+
+const unscheduledReasonLabel = (reason: string) => {
+  if (reason === 'daily-capacity-reached') return 'Daily capacity reached';
+  if (reason === 'incompatible-location') return 'No compatible location cluster';
+  if (reason === 'insufficient-route-data') return 'Insufficient route data';
+  if (reason === 'opening-hours-conflict') return 'Opening-hours conflict';
+  if (reason === 'duplicate') return 'Duplicate place';
+  return 'No viable day found';
+};
+
+function BuiltDiscoverySummary({
+  itinerary,
+  candidates,
+  decisions,
+  onEdit,
+  onRebuild,
+}: {
+  itinerary: Itinerary;
+  candidates: PlaceCandidate[];
+  decisions: Record<string, CandidateDecision>;
+  onEdit: () => void;
+  onRebuild: () => void;
+}) {
+  const discoveryState = itinerary.discoveryState;
+  const selectedCount = Object.values(decisions).filter((decision) => decision === 'must-do' || decision === 'interested').length;
+  const scheduledCandidateIds = discoveryState?.scheduledCandidateIds || candidates
+    .filter((candidate) => itinerary.days.some((day) => day.activities.some((activity) => activity.providerPlaceId === candidate.providerPlaceId)))
+    .map((candidate) => candidate.id);
+  const unscheduled = discoveryState?.unscheduledCandidates || [];
+  const plannedDays = itinerary.days.filter((day) => day.activities.some((activity) => activity.kind === 'place')).length;
+
+  return (
+    <section className="destination-discovery-shell destination-discovery-built" aria-labelledby="destination-built-title">
+      <div className="destination-built-summary">
+        <div>
+          <span className="fixture-badge"><Check className="w-4 h-4" /> Shortlist complete</span>
+          <h3 id="destination-built-title">Your Osaka itinerary is ready</h3>
+          <p>{selectedCount} selected places · {scheduledCandidateIds.length} scheduled · {unscheduled.length} need attention · {plannedDays} days with places.</p>
+        </div>
+        <div className="destination-built-actions">
+          <button type="button" className="pill-btn pill-ghost" onClick={onEdit}>Edit selected places</button>
+          <button type="button" className="pill-btn pill-primary" onClick={onRebuild}>Rebuild itinerary</button>
+        </div>
+      </div>
+      {unscheduled.length > 0 && (
+        <div className="destination-unscheduled-panel">
+          <strong>{unscheduled.length} selected {unscheduled.length === 1 ? 'place needs' : 'places need'} attention</strong>
+          <span>Nothing was dropped silently. Review the reason before rebuilding.</span>
+          <ul>
+            {unscheduled.slice(0, 4).map((item) => (
+              <li key={item.candidateId}>
+                <span>{candidates.find((candidate) => candidate.id === item.candidateId)?.name || item.candidateId}</span>
+                <small>{unscheduledReasonLabel(item.reason)}</small>
+              </li>
+            ))}
+          </ul>
+          {unscheduled.length > 4 && <small>+ {unscheduled.length - 4} more places need review.</small>}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -175,6 +243,21 @@ function DiscoveryPreview({
         })}
       </div>
 
+      {result.unscheduledReasons.length > 0 && (
+        <div className="destination-unscheduled-panel">
+          <strong>{result.unscheduledReasons.length} selected {result.unscheduledReasons.length === 1 ? 'place was' : 'places were'} not scheduled</strong>
+          <span>Each place remains visible with a reason so you can adjust the shortlist and rebuild.</span>
+          <ul>
+            {result.unscheduledReasons.map(({ candidate, reason }) => (
+              <li key={candidate.id}>
+                <span>{candidate.name}</span>
+                <small>{unscheduledReasonLabel(reason)}</small>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="destination-route-warning">
         <Info className="w-4 h-4" />
         <span>Place identity and coordinates are source-backed. Travel minutes remain an offline straight-line fallback and overall confidence stays Low until a live route provider is connected.</span>
@@ -191,7 +274,10 @@ function DiscoveryPreview({
 export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChange }: DestinationDiscoveryPanelProps) {
   const primaryCity = profile.destinations[0]?.city || itinerary.cities[0] || '';
   const supportsFixture = primaryCity.trim().toLowerCase() === 'osaka';
-  const [phase, setPhase] = useState<DiscoveryPhase>(itinerary.discoveryState?.city.toLowerCase() === 'osaka' ? 'review' : 'idle');
+  const [phase, setPhase] = useState<DiscoveryPhase>(() => {
+    if (itinerary.discoveryState?.stage === 'itinerary-built') return 'built';
+    return itinerary.discoveryState?.city.toLowerCase() === 'osaka' ? 'review' : 'idle';
+  });
   const [candidates, setCandidates] = useState<PlaceCandidate[]>(() => supportsFixture ? OSAKA_PLACE_FIXTURE : []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +312,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         decisions: next,
         discoveredAt,
         updatedAt: new Date().toISOString(),
+        stage: 'reviewing',
       },
     });
   };
@@ -291,6 +378,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         decisions,
         discoveredAt: itinerary.discoveryState?.discoveredAt || timestamp,
         updatedAt: timestamp,
+        stage: 'itinerary-built',
+        scheduledCandidateIds: buildResult.scheduledCandidates.map((candidate) => candidate.id),
+        unscheduledCandidates: buildResult.unscheduledReasons.map(({ candidate, reason }) => ({ candidateId: candidate.id, reason })),
       },
       plannerHistory: [
         ...(itinerary.plannerHistory || []),
@@ -305,7 +395,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         },
       ].slice(-10),
     });
-    setPhase('idle');
+    setPhase('built');
     setBuildResult(null);
   };
 
@@ -323,6 +413,18 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
 
   if (phase === 'preview' && buildResult) {
     return <section className="destination-discovery-shell"><DiscoveryPreview result={buildResult} onBack={() => setPhase('review')} onApply={applyPlan} /></section>;
+  }
+
+  if (phase === 'built') {
+    return (
+      <BuiltDiscoverySummary
+        itinerary={itinerary}
+        candidates={candidates}
+        decisions={decisions}
+        onEdit={() => setPhase('review')}
+        onRebuild={() => setPhase('review')}
+      />
+    );
   }
 
   if (phase === 'idle') {

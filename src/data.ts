@@ -75,6 +75,21 @@ export interface Activity {
 
 export type DiscoveryCandidateDecision = 'must-do' | 'interested' | 'skip' | 'visited';
 
+export type DiscoveryStage = 'not-started' | 'reviewing' | 'shortlist-ready' | 'itinerary-built' | 'needs-review';
+
+export type DiscoveryUnscheduledReason =
+  | 'opening-hours-conflict'
+  | 'daily-capacity-reached'
+  | 'incompatible-location'
+  | 'insufficient-route-data'
+  | 'duplicate'
+  | 'no-viable-day';
+
+export interface DiscoveryUnscheduledCandidate {
+  candidateId: string;
+  reason: DiscoveryUnscheduledReason;
+}
+
 export interface ItineraryDiscoveryState {
   city: string;
   mode: 'fixture' | 'live';
@@ -82,6 +97,9 @@ export interface ItineraryDiscoveryState {
   decisions: Record<string, DiscoveryCandidateDecision>;
   discoveredAt: string;
   updatedAt: string;
+  stage?: DiscoveryStage;
+  scheduledCandidateIds?: string[];
+  unscheduledCandidates?: DiscoveryUnscheduledCandidate[];
 }
 
 export interface DayPhoto {

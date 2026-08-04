@@ -158,6 +158,7 @@ export interface DestinationBuildResult {
   days: DayPlan[];
   scheduledCandidates: PlaceCandidate[];
   unscheduledCandidates: PlaceCandidate[];
+  unscheduledReasons: Array<{ candidate: PlaceCandidate; reason: 'daily-capacity-reached' | 'incompatible-location' | 'no-viable-day' }>;
   warnings: string[];
   routeMode: 'offline-straight-line';
 }
@@ -186,7 +187,14 @@ export function buildDestinationItinerary(
 
   for (let index = 0; index < dayCount; index += 1) {
     const existing = itinerary.days[index];
-    const theme = themes[index] || { title: `Flexible Osaka day ${index + 1}`, cities: ['Osaka'], neighbourhoods: [], maxPlaces: 3 };
+    const theme = themes[index] || {
+      title: primaryCity.toLowerCase() === 'osaka'
+        ? (index === dayCount - 1 ? 'Flexible final day and departure buffer' : 'Flexible Osaka breathing room')
+        : `Flexible ${primaryCity || 'travel'} day ${index + 1}`,
+      cities: [primaryCity || 'Osaka'],
+      neighbourhoods: [],
+      maxPlaces: 3,
+    };
     const protectedActivities = (existing?.activities || []).filter((activity) => activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
     const matching = [...remaining.values()]
       .filter((candidate) => theme.cities.includes(candidate.city) && (theme.neighbourhoods.length === 0 || theme.neighbourhoods.includes(candidate.neighbourhood || '')))
@@ -225,10 +233,19 @@ export function buildDestinationItinerary(
     });
   }
 
+  const unscheduledReasons = [...remaining.values()].map((candidate) => ({
+    candidate,
+    reason: themes.some((theme) => theme.cities.includes(candidate.city)
+      && (theme.neighbourhoods.length === 0 || theme.neighbourhoods.includes(candidate.neighbourhood || '')))
+      ? 'daily-capacity-reached' as const
+      : 'no-viable-day' as const,
+  }));
+
   return {
     days,
     scheduledCandidates: accepted.filter((candidate) => !remaining.has(candidate.id)),
     unscheduledCandidates: [...remaining.values()],
+    unscheduledReasons,
     warnings: [
       'Fixture mode uses captured official-tourism place records.',
       'Travel times are clearly labelled straight-line fallbacks until a server route provider is connected.',

@@ -62,6 +62,8 @@ describe('destination planner vertical slice', () => {
     expect(new Set(scheduledPlaces.map((activity) => activity.providerPlaceId)).size).toBe(scheduledPlaces.length);
     expect(placeNames).not.toContain('Lunch near your base');
     expect(placeNames).not.toContain('Café and rest');
+    expect(result.scheduledCandidates.length + result.unscheduledCandidates.length).toBe(OSAKA_PLACE_FIXTURE.length);
+    expect(result.unscheduledReasons.map(({ candidate }) => candidate.id)).toEqual(result.unscheduledCandidates.map((candidate) => candidate.id));
     expect(result.routeMode).toBe('offline-straight-line');
   });
 

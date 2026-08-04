@@ -133,6 +133,7 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .destination-candidate {
+  position: relative;
   display: grid;
   grid-template-columns: 8.5rem minmax(0, 1fr);
   min-width: 0;
@@ -182,8 +183,78 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .destination-candidate-body {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   padding: 1rem;
+}
+
+.destination-discovery-built {
+  display: grid;
+  gap: 1rem;
+}
+
+.destination-built-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.destination-built-summary h3 {
+  margin-top: 0.8rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 2.5vw, 2.2rem);
+  line-height: 1.05;
+}
+
+.destination-built-summary p,
+.destination-unscheduled-panel > span {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.destination-built-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.destination-unscheduled-panel {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--accent-soft) 42%, var(--bg));
+  font-size: 0.78rem;
+}
+
+.destination-unscheduled-panel ul {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.destination-unscheduled-panel li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.destination-unscheduled-panel li small,
+.destination-unscheduled-panel > small {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
 }
 
 .destination-candidate h5 {
@@ -247,12 +318,20 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .destination-decision-group {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  pointer-events: auto;
 }
 
-.destination-decision-group button {
+.destination-decision-option {
+  position: relative;
   display: inline-flex;
   min-height: 1.85rem;
   align-items: center;
@@ -264,15 +343,37 @@ body.planner-intelligence-active .pet-overlay {
   background: var(--bg);
   font-size: 0.65rem;
   font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease, transform 160ms ease;
 }
 
-.destination-decision-group button[data-active="true"] {
+.destination-decision-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.destination-decision-option[data-active="true"] {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
 }
 
-.destination-decision-group button:focus-visible,
+.destination-decision-option:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--ink);
+}
+
+.destination-decision-option:active {
+  transform: translateY(1px);
+}
+
+.destination-decision-option:has(.destination-decision-input:focus-visible),
 .destination-source-link:focus-visible,
 .destination-back-link:focus-visible {
   outline: 2px solid var(--ink);
@@ -451,6 +552,33 @@ body.planner-intelligence-active .pet-overlay {
   text-transform: uppercase;
 }
 
+.planner-change-day {
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  padding: 0.65rem;
+}
+
+.planner-change-day > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.planner-change-day > summary span {
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.planner-organise-panel .pill-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 @media (max-width: 1100px) {
   .destination-candidate-grid {
     grid-template-columns: 1fr;
@@ -466,15 +594,22 @@ body.planner-intelligence-active .pet-overlay {
   .destination-discovery-intro,
   .destination-review-header,
   .destination-preview-header,
-  .destination-review-footer {
+  .destination-review-footer,
+  .destination-built-summary {
     align-items: stretch;
     flex-direction: column;
   }
 
   .destination-discovery-intro .pill-btn,
-  .destination-review-footer .pill-btn {
+  .destination-review-footer .pill-btn,
+  .destination-built-actions .pill-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .destination-built-actions {
+    display: grid;
+    justify-content: stretch;
   }
 
   .destination-selection-count {
@@ -514,7 +649,7 @@ body.planner-intelligence-active .pet-overlay {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .destination-decision-group button {
+  .destination-decision-option {
     justify-content: center;
   }
 

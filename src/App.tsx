@@ -15,6 +15,8 @@ import type {
   PlannerChangeRecord,
   ScheduleItemKind,
   DiscoveryCandidateDecision,
+  DiscoveryStage,
+  DiscoveryUnscheduledReason,
   ItineraryDiscoveryState,
 } from './data';
 import { ItineraryView } from './components/ItineraryView';
@@ -136,6 +138,8 @@ const VALID_BOOKING_STATUSES: BookingStatus[] = ['none', 'requested', 'confirmed
 const VALID_LOCKED_FIELDS: ActivityLockedField[] = ['schedule', 'location', 'duration', 'cost', 'booking', 'all'];
 const VALID_SCHEDULE_KINDS: ScheduleItemKind[] = ['place', 'reservation', 'transport', 'meal-window', 'rest-window', 'free-time'];
 const VALID_DISCOVERY_DECISIONS: DiscoveryCandidateDecision[] = ['must-do', 'interested', 'skip', 'visited'];
+const VALID_DISCOVERY_STAGES: DiscoveryStage[] = ['not-started', 'reviewing', 'shortlist-ready', 'itinerary-built', 'needs-review'];
+const VALID_DISCOVERY_UNSCHEDULED_REASONS: DiscoveryUnscheduledReason[] = ['opening-hours-conflict', 'daily-capacity-reached', 'incompatible-location', 'insufficient-route-data', 'duplicate', 'no-viable-day'];
 
 const stableHash = (value: string) => {
   let hash = 2166136261;
@@ -327,6 +331,21 @@ const sanitizeDiscoveryState = (value: unknown): ItineraryDiscoveryState | undef
     decisions,
     discoveredAt: typeof source.discoveredAt === 'string' ? source.discoveredAt : new Date(0).toISOString(),
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : new Date(0).toISOString(),
+    stage: VALID_DISCOVERY_STAGES.includes(source.stage as DiscoveryStage) ? source.stage as DiscoveryStage : undefined,
+    scheduledCandidateIds: Array.isArray(source.scheduledCandidateIds)
+      ? source.scheduledCandidateIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
+      : undefined,
+    unscheduledCandidates: Array.isArray(source.unscheduledCandidates)
+      ? source.unscheduledCandidates.flatMap((item) => {
+          if (!item || typeof item !== 'object') return [];
+          const candidate = item as { candidateId?: unknown; reason?: unknown };
+          return typeof candidate.candidateId === 'string'
+            && typeof candidate.reason === 'string'
+            && VALID_DISCOVERY_UNSCHEDULED_REASONS.includes(candidate.reason as DiscoveryUnscheduledReason)
+            ? [{ candidateId: candidate.candidateId, reason: candidate.reason as DiscoveryUnscheduledReason }]
+            : [];
+        })
+      : undefined,
   };
 };
 
