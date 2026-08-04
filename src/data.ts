@@ -6,6 +6,7 @@ export type ActivitySource = 'manual' | 'generated' | 'imported';
 export type BookingStatus = 'none' | 'requested' | 'confirmed' | 'cancelled';
 export type ActivityLockedField = 'schedule' | 'location' | 'duration' | 'cost' | 'booking' | 'all';
 export type ScheduleItemKind = 'place' | 'reservation' | 'transport' | 'meal-window' | 'rest-window' | 'free-time';
+export type IndoorOutdoor = 'indoor' | 'outdoor' | 'mixed';
 
 export interface ActivityOpeningHours {
   label?: string;
@@ -60,6 +61,7 @@ export interface Activity {
   lastVerifiedAt?: string;
   rating?: number;
   coordinates?: [number, number]; // [lat, lng] for manual location search
+  indoorOutdoor?: IndoorOutdoor;
   moodVotes?: {
     self?: 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
     partner?: 'see_first' | 'must_go' | 'maybe' | 'skip' | 'love' | 'funny' | 'surprised' | 'pray';
@@ -150,7 +152,7 @@ export interface PlannerOperation {
 
 export interface PlannerChangeRecord {
   id: string;
-  action: 'generate' | 'optimise-day' | 'optimise-trip';
+  action: 'generate' | 'optimise-day' | 'optimise-trip' | 'replan-day';
   createdAt: string;
   summary: string;
   affectedDayNumbers: number[];

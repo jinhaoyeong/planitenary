@@ -214,6 +214,8 @@ export interface BuildOptions {
   queueEvidence?: Record<string, number>;
   /** Explicit traveller settings, which always beat anything inferred. */
   behaviour?: TravelBehaviourProfile;
+  /** Day numbers for which live weather recommends an indoor-first order. */
+  weatherRiskDays?: number[];
 }
 
 /** Categories that describe logistics rather than the character of a day. */
@@ -361,6 +363,7 @@ export function buildDestinationItinerary(
       behaviour,
       routeResolver: options.routeResolver,
       queueEvidence: options.queueEvidence,
+      preferIndoor: options.weatherRiskDays?.includes(index + 1),
       // Arrival day starts in the afternoon; the traveller is in transit.
       startTimeOverride: index === 0 && itinerary.days.length === 0 ? '15:00' : undefined,
     });

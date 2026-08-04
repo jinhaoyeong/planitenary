@@ -4,6 +4,7 @@ import {
   capabilityFor,
   discoverPlaces,
   loadProviderRuntime,
+  parseWeatherRisk,
   resetProviderRuntimeCache,
 } from './discoveryRuntime';
 
@@ -17,6 +18,16 @@ const liveRuntime = (overrides: Partial<ProviderRuntime> = {}): ProviderRuntime 
 });
 
 describe('provider runtime', () => {
+  it('turns live precipitation data into explicit indoor-first days', () => {
+    expect(parseWeatherRisk({ payload: { daily: {
+      time: ['2026-08-04', '2026-08-05'],
+      precipitation_probability_max: [20, 80],
+      precipitation_sum: [0, 1],
+    } } })).toEqual([
+      { date: '2026-08-04', precipitationProbability: 20, precipitationMillimetres: 0, indoorRecommended: false },
+      { date: '2026-08-05', precipitationProbability: 80, precipitationMillimetres: 1, indoorRecommended: true },
+    ]);
+  });
   it('reports nothing connected when there is no backend to ask', async () => {
     expect(await loadProviderRuntime()).toEqual(EMPTY_PROVIDER_RUNTIME);
   });

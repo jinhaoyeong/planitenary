@@ -212,6 +212,8 @@ export interface DayPlanRequest {
   fixedSlots?: ScheduledSlot[];
   /** Arrival days start late; the caller can override the first departure. */
   startTimeOverride?: string;
+  /** Prefer indoor candidates when live weather indicates a wet day. */
+  preferIndoor?: boolean;
 }
 
 /**
@@ -222,7 +224,10 @@ export interface DayPlanRequest {
  * constraint that blocked it — nothing is ever dropped silently.
  */
 export function simulateDay(request: DayPlanRequest): SimulatedDay {
-  const { behaviour, candidates, routeResolver, queueEvidence = {} } = request;
+  const { behaviour, routeResolver, queueEvidence = {} } = request;
+  const candidates = request.preferIndoor
+    ? [...request.candidates].sort((a, b) => Number(b.indoorOutdoor === 'indoor') - Number(a.indoorOutdoor === 'indoor'))
+    : request.candidates;
   const paceDefaults = PACE_DEFAULTS[behaviour.pace];
   const resolveRoute: RouteResolver = routeResolver
     ? (from, to) => routeResolver(from, to) ?? estimateLeg(from, to)

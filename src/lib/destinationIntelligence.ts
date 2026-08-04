@@ -191,6 +191,7 @@ export function candidateToActivity(candidate: PlaceCandidate): Activity {
     provider: candidate.provider,
     providerPlaceId: candidate.providerPlaceId,
     coordinates: candidate.coordinates,
+    indoorOutdoor: candidate.indoorOutdoor,
     openingHours: candidate.openingHours?.periods[0],
     bookingStatus: candidate.reservationStatus === 'required' ? 'requested' : 'none',
     reservationRequirement: candidate.reservationStatus,

@@ -103,6 +103,28 @@ export interface DiscoveryOutcome {
   trends: Record<string, number>;
 }
 
+export interface WeatherRiskDay {
+  date: string;
+  precipitationProbability: number;
+  precipitationMillimetres: number;
+  indoorRecommended: boolean;
+}
+
+/** Normalise the provider response once; the planner only receives deterministic risk flags. */
+export function parseWeatherRisk(payload: unknown): WeatherRiskDay[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const daily = (payload as { payload?: { daily?: Record<string, unknown> } }).payload?.daily;
+  if (!daily || !Array.isArray(daily.time)) return [];
+  const probability = Array.isArray(daily.precipitation_probability_max) ? daily.precipitation_probability_max : [];
+  const precipitation = Array.isArray(daily.precipitation_sum) ? daily.precipitation_sum : [];
+  return daily.time.map((date, index) => ({
+    date: String(date),
+    precipitationProbability: Number(probability[index] ?? 0),
+    precipitationMillimetres: Number(precipitation[index] ?? 0),
+    indoorRecommended: Number(probability[index] ?? 0) >= 60 || Number(precipitation[index] ?? 0) >= 5,
+  }));
+}
+
 
 /**
  * Fold the raw evidence documents the backend returned into per-place

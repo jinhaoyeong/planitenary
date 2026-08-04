@@ -11,7 +11,7 @@ import { profileRevision } from './identityFields';
 import { declaredTripDays } from './tripDuration';
 import type { TripProfile } from './tripProfile';
 
-export type PlannerAction = 'generate' | 'optimise-day' | 'optimise-trip';
+export type PlannerAction = 'generate' | 'optimise-day' | 'optimise-trip' | 'replan-day';
 export type PlannerChangeKind = 'move' | 'time' | 'insert' | 'remove' | 'travel' | 'constraint' | 'budget' | 'availability';
 
 export interface ProposedChange {
@@ -58,6 +58,12 @@ export interface PlannerOptions {
   dayNumber?: number;
   allowManualMoves?: boolean;
 }
+
+export type ReplanDisruption =
+  | { kind: 'late-start'; minutes: number }
+  | { kind: 'route-delay'; minutes: number }
+  | { kind: 'rain' }
+  | { kind: 'fatigue'; walkingMinutes: number };
 
 const DEFAULT_START = 9 * 60;
 const DEFAULT_END = 20 * 60;
@@ -111,6 +117,8 @@ const isScheduleWindow = (activity: Activity) => activity.kind === 'meal-window'
 
 const isPlaceActivity = (activity: Activity) => !isScheduleWindow(activity)
   && activity.kind !== 'transport';
+
+const isOutdoor = (activity: Activity) => activity.indoorOutdoor === 'outdoor';
 
 const isLocked = (activity: Activity) => Boolean(activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
 
@@ -468,6 +476,58 @@ export function optimiseDay(itinerary: Itinerary, profile: TripProfile, dayNumbe
     profile,
     'optimise-day',
     'Locations with coordinates are clustered to reduce backtracking. Locked activities remain in place, and uncertain travel remains marked as unknown.',
+    beforeDays,
+    afterDays,
+    itinerary.unassignedActivities || [],
+    itinerary.unassignedActivities || [],
+  );
+}
+
+/**
+ * Build a disruption preview for one day. This is deliberately deterministic:
+ * the provider may report the disruption, but it never gets to move a locked
+ * booking or silently discard an activity.
+ */
+export function replanDay(
+  itinerary: Itinerary,
+  profile: TripProfile,
+  dayNumber: number,
+  disruption: ReplanDisruption,
+): ItineraryProposal {
+  const beforeDays = clone(itinerary.days);
+  const beforeDay = beforeDays.find((day) => day.day === dayNumber);
+  const delay = disruption.kind === 'late-start' || disruption.kind === 'route-delay'
+    ? Math.max(0, Math.min(240, Math.round(disruption.minutes)))
+    : 0;
+  const reason = disruption.kind === 'late-start'
+    ? `Starting ${delay} minutes late. Locked activities remain fixed while unlocked activities are rescheduled.`
+    : disruption.kind === 'route-delay'
+      ? `A ${delay}-minute route delay was reported. Unlocked activities are shifted while locked activities remain fixed.`
+      : disruption.kind === 'rain'
+        ? 'Rain is expected. Indoor activities are brought forward where the existing day allows it.'
+        : `Walking load is reported at ${disruption.walkingMinutes} minutes. The day is rebalanced without moving locked activities.`;
+  if (!beforeDay) return makeProposal(itinerary, profile, 'replan-day', reason, beforeDays, beforeDays);
+
+  const replanDayActivities = (day: DayPlan): DayPlan => {
+    if (day.day !== dayNumber) return day;
+    const unlocked = day.activities.filter((activity) => !isLocked(activity));
+    const locked = day.activities.filter(isLocked);
+    let arranged = unlocked;
+    if (disruption.kind === 'rain') {
+      arranged = [...unlocked].sort((left, right) => Number(isOutdoor(left)) - Number(isOutdoor(right)));
+    } else if (disruption.kind === 'fatigue') {
+      arranged = [...unlocked].sort((left, right) => activityDuration(left) - activityDuration(right));
+    }
+    const start = planningStartMinutes(itinerary, profile) + delay;
+    const scheduled = scheduleActivities(arranged, start, profile.transport[0]);
+    return { ...day, activities: preserveLockedSlots({ ...day, activities: [...scheduled, ...locked] }, [...scheduled, ...locked]) };
+  };
+  const afterDays = beforeDays.map(replanDayActivities);
+  return makeProposal(
+    itinerary,
+    profile,
+    'replan-day',
+    reason,
     beforeDays,
     afterDays,
     itinerary.unassignedActivities || [],

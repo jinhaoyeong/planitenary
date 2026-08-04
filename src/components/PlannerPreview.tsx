@@ -8,6 +8,7 @@ import {
   generateInitialItinerary,
   optimiseDay,
   optimiseTrip,
+  replanDay,
   undoPlannerChange,
   type ItineraryProposal,
 } from '../lib/tripIntelligence';
@@ -130,6 +131,10 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     openProposal(next);
   };
   const optimiseSelectedDay = (dayNumber: number) => openProposal(optimiseDay(itinerary, profile, dayNumber));
+  const replanSelectedDay = (disruption: Parameters<typeof replanDay>[3]) => {
+    const dayNumber = dayOptions[0]?.day || itinerary.days[0]?.day || 1;
+    openProposal(replanDay(itinerary, profile, dayNumber, disruption));
+  };
 
   const toggle = (id: string) => setSelection((current) => {
     const next = new Set(current);
@@ -325,6 +330,8 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
             <span className="planner-action-label">Improve</span>
             <div className="flex flex-wrap gap-2 mt-2">
               <button type="button" className="pill-btn pill-soft" onClick={optimiseWholeTrip}>Reduce travel and balance days</button>
+              <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'late-start', minutes: 60 })}>Replan after 60 min delay</button>
+              <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'rain' })}>Find rainy-day order</button>
               <button type="button" className="pill-btn pill-soft" disabled title="Requires live place discovery and replacement candidates">Make it more local · Coming soon</button>
               <button type="button" className="pill-btn pill-soft" disabled title="Pace-aware scheduling is not connected yet">Make it more relaxed · Coming soon</button>
               <button type="button" className="pill-btn pill-soft" disabled title="Provider price coverage is incomplete">Lower the cost · Coming soon</button>

@@ -48,6 +48,22 @@ const melbourneCandidates = (): PlaceCandidate[] => [
 const hotel = place({ id: 'hotel', name: 'Hotel', coordinates: [-37.8150, 144.9650], estimatedVisitMinutes: 0 });
 
 describe('travel time estimation', () => {
+  it('puts indoor places first when weather marks the day as rain-sensitive', () => {
+    const result = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [
+        place({ id: 'garden', indoorOutdoor: 'outdoor', openingHours: hours('08:00', '20:00') }),
+        place({ id: 'gallery', indoorOutdoor: 'indoor', openingHours: hours('08:00', '20:00') }),
+      ],
+      behaviour: deriveTravelBehaviour({
+        moods: [], styles: [], tripTypes: [], destinations: [{ city: 'Melbourne', countryCode: 'AU' }],
+        budgetTier: 'mid-range', transport: ['walking'], dayCount: 1,
+      } as never),
+      preferIndoor: true,
+    });
+    expect(result.slots.find((slot) => slot.kind === 'place')?.candidate?.id).toBe('gallery');
+  });
   it('walks short hops and takes transit for long ones', () => {
     const near = estimateLeg(
       place({ id: 'a', coordinates: [-37.8136, 144.9631] }),

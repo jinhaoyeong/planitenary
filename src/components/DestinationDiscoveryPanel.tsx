@@ -14,7 +14,7 @@ import {
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
 import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
-import { capabilityFor, discoverPlaces, loadProviderRuntime } from '../lib/discoveryRuntime';
+import { capabilityFor, discoverPlaces, loadProviderRuntime, parseWeatherRisk } from '../lib/discoveryRuntime';
 import { describePace } from '../lib/travelBehaviour';
 import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
@@ -456,6 +456,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     setRouteLoading(true);
     let routeResolver: RouteResolver | undefined;
     let routeWarning: string | undefined;
+    let weatherWarning: string | undefined;
+    const nextWeatherRiskDays: number[] = [];
     try {
       const selected = ranked
         .filter(({ candidate }) => decisions[candidate.id] === 'must-do' || decisions[candidate.id] === 'interested')
@@ -491,11 +493,36 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     } catch {
       routeWarning = 'Live routing was unavailable for this preview; travel is estimated.';
     }
+    if (capability.weather && isSupabaseConfigured()) {
+      const weatherAnchor = ranked.find(({ candidate }) => candidate.coordinates)?.candidate.coordinates;
+      if (weatherAnchor) {
+        try {
+          const weather = parseWeatherRisk(await invokeTravelFunction('travel-weather', {
+            latitude: weatherAnchor[0],
+            longitude: weatherAnchor[1],
+            startDate: profile.startDate,
+            endDate: profile.endDate,
+          }));
+          const start = profile.startDate ? new Date(`${profile.startDate}T00:00:00Z`).getTime() : NaN;
+          weather.forEach((day) => {
+            const dayIndex = Number.isFinite(start)
+              ? Math.floor((new Date(`${day.date}T00:00:00Z`).getTime() - start) / 86_400_000)
+              : -1;
+            if (dayIndex >= 0 && day.indoorRecommended) nextWeatherRiskDays.push(dayIndex + 1);
+          });
+        } catch {
+          weatherWarning = 'Live weather was unavailable for this preview; outdoor ordering is unchanged.';
+        }
+      }
+    }
     const result = buildDestinationItinerary(itinerary, profile, ranked, decisions, {
       queueEvidence,
       routeResolver,
+      weatherRiskDays: nextWeatherRiskDays,
     });
     if (routeWarning) result.warnings = [...result.warnings, routeWarning];
+    if (weatherWarning) result.warnings = [...result.warnings, weatherWarning];
+    if (nextWeatherRiskDays.length > 0) result.warnings = [...result.warnings, `Rain-sensitive days use an indoor-first order: ${nextWeatherRiskDays.join(', ')}.`];
     setBuildResult(result);
     setPhase('preview');
     setRouteLoading(false);
