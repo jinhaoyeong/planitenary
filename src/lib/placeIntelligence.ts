@@ -186,7 +186,14 @@ function practicality(
   if (evidence?.typicalQueueMinutes !== undefined) {
     score -= clamp01(evidence.typicalQueueMinutes / Math.max(1, tolerance) - 1) * 0.3;
   }
-  if (evidence?.crowdRisk) score -= evidence.crowdRisk * 0.18;
+  if (evidence?.crowdRisk) {
+    const crowdPenalty = behaviour.crowdTolerance === 'avoid'
+      ? 0.35
+      : behaviour.crowdTolerance === 'moderate'
+        ? 0.18
+        : 0.05;
+    score -= evidence.crowdRisk * crowdPenalty;
+  }
   return clamp01(score);
 }
 

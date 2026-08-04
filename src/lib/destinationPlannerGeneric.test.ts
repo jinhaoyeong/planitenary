@@ -229,6 +229,20 @@ describe('safety guarantees survive the rewrite', () => {
     expect(result.warnings.join(' ')).toMatch(/straight-line/);
   });
 
+  it('carries current event facts into the plan as a reviewable warning', () => {
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(MELBOURNE, profile);
+    const result = buildDestinationItinerary(
+      emptyItinerary(5),
+      profile,
+      ranked,
+      defaultDiscoveryDecisions(ranked),
+      { currentEventNotes: ['Laneway Festival (2026-08-05)'] },
+    );
+    expect(result.warnings.join(' ')).toContain('Laneway Festival (2026-08-05)');
+    expect(result.warnings.join(' ')).toContain('before locking');
+  });
+
   it('drops a place whose reported queue exceeds the traveller tolerance', () => {
     const profile = melbourneProfile(['calm']);
     const ranked = rankDestinationCandidates(MELBOURNE, profile);

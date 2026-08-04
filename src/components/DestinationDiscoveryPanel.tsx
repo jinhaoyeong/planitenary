@@ -464,6 +464,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     let routeWarning: string | undefined;
     let weatherWarning: string | undefined;
     let eventsWarning: string | undefined;
+    let currentEventNotes: string[] = [];
     const nextWeatherRiskDays: number[] = [];
     try {
       const selected = ranked
@@ -531,6 +532,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         }));
         if (events.length > 0) {
           eventsWarning = `${events.length} current event${events.length === 1 ? '' : 's'} found near ${capability.destination.city}; review dates before locking the itinerary.`;
+          currentEventNotes = events.slice(0, 8).map((event) => event.date ? `${event.name} (${event.date})` : event.name);
         }
       } catch {
         eventsWarning = 'Current events were unavailable for this preview; the itinerary does not assume events exist.';
@@ -540,6 +542,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       queueEvidence,
       routeResolver,
       weatherRiskDays: nextWeatherRiskDays,
+      currentEventNotes,
     });
     if (routeWarning) result.warnings = [...result.warnings, routeWarning];
     if (weatherWarning) result.warnings = [...result.warnings, weatherWarning];

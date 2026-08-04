@@ -94,6 +94,20 @@ describe('dimensions are computed independently', () => {
     }));
     expect(impatient.dimensions.practicality).toBeLessThan(patient.dimensions.practicality);
   });
+
+  it('lets crowd-averse travellers avoid places with strong crowd evidence', () => {
+    const crowdedEvidence = { a: summary({ crowdRisk: 0.9 }) };
+    const avoidCrowds = scorePlace(place({ id: 'a' }), inputs({
+      behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }, { crowdTolerance: 'avoid' }),
+      evidence: crowdedEvidence,
+    }));
+    const indifferent = scorePlace(place({ id: 'a' }), inputs({
+      behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }, { crowdTolerance: 'does-not-matter' }),
+      evidence: crowdedEvidence,
+    }));
+    expect(avoidCrowds.dimensions.practicality).toBeLessThan(indifferent.dimensions.practicality);
+    expect(avoidCrowds.cautions.join(' ')).toContain('crowded');
+  });
 });
 
 describe('penalties bite regardless of other strengths', () => {

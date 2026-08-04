@@ -216,6 +216,8 @@ export interface BuildOptions {
   behaviour?: TravelBehaviourProfile;
   /** Day numbers for which live weather recommends an indoor-first order. */
   weatherRiskDays?: number[];
+  /** Current event facts surfaced by the provider; never treated as booked time. */
+  currentEventNotes?: string[];
 }
 
 /** Categories that describe logistics rather than the character of a day. */
@@ -341,6 +343,9 @@ export function buildDestinationItinerary(
   const scheduled = new Set<string>();
   const rejections = new Map<string, { candidate: PlaceCandidate; reason: DiscoveryUnscheduledReason; detail: string }>();
   const warnings = new Set<string>();
+  (options.currentEventNotes || []).filter(Boolean).forEach((note) => {
+    warnings.add(`Current event to review before locking the plan: ${note}`);
+  });
   const usedTitles = new Set<string>();
   let usedProviderRoutes = false;
 
