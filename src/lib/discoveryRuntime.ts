@@ -68,7 +68,7 @@ export async function loadProviderRuntime(
   if (!invoke) return EMPTY_PROVIDER_RUNTIME;
 
   try {
-    const value = parseRuntime(await invoke('travel-capabilities-live'));
+    const value = parseRuntime(await invoke('travel-capabilities'));
     runtimeCache = { value, fetchedAt: now };
     return value;
   } catch {
@@ -235,9 +235,7 @@ export async function discoverPlaces(
 
   if (capability.places.status === 'live' && invoke) {
     try {
-      // The versioned endpoint is deployed independently so a stale Supabase
-      // import-map version can never silently route the client to old logic.
-      const payload = await invoke('travel-discover-live', {
+      const payload = await invoke('travel-discover', {
         city: destination.city,
         countryCode: destination.countryCode,
         provider: capability.places.provider,
@@ -248,7 +246,7 @@ export async function discoverPlaces(
         // is still worth having even if review gathering is unavailable.
         let evidencePayload: unknown = null;
         try {
-          evidencePayload = await invoke('travel-evidence-live', {
+          evidencePayload = await invoke('travel-evidence', {
             city: destination.city,
             placeIds: candidates.map((candidate) => candidate.providerPlaceId).filter(Boolean),
             placeNames: candidates.map((candidate) => candidate.name),

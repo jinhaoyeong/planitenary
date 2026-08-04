@@ -47,6 +47,7 @@ describe('provider runtime', () => {
   it('reads the connected providers the server reports', async () => {
     const invoke = vi.fn().mockResolvedValue({ googlePlaces: true, youtube: true, rubbish: true });
     const runtime = await loadProviderRuntime(invoke);
+    expect(invoke).toHaveBeenCalledWith('travel-capabilities');
     expect(runtime.googlePlaces).toBe(true);
     expect(runtime.youtube).toBe(true);
     expect(runtime.amap).toBe(false);
@@ -83,7 +84,7 @@ describe('discovering places', () => {
     const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
     expect(outcome.usingFixture).toBe(false);
     expect(outcome.candidates).toHaveLength(1);
-    expect(invoke).toHaveBeenCalledWith('travel-discover-live', expect.objectContaining({ city: 'Melbourne' }));
+    expect(invoke).toHaveBeenCalledWith('travel-discover', expect.objectContaining({ city: 'Melbourne' }));
   });
 
   it('falls back to the fixture when the live call fails, and says so', async () => {
@@ -117,7 +118,7 @@ describe('discovering places', () => {
 
   it('summarises corroborated queue times and keys them by candidate id', async () => {
     const invoke = vi.fn(async (name: string) => {
-      if (name === 'travel-discover-live') {
+      if (name === 'travel-discover') {
         return [
           { id: 'cand-1', providerPlaceId: 'g1', name: 'Corroborated' },
           { id: 'cand-2', providerPlaceId: 'g2', name: 'Single mention' },
@@ -141,7 +142,7 @@ describe('discovering places', () => {
 
   it('derives trend strength from recent evidence when the backend omits it', async () => {
     const invoke = vi.fn(async (name: string) => {
-      if (name === 'travel-discover-live') return [{ id: 'cand-1', providerPlaceId: 'g1', name: 'Place' }];
+      if (name === 'travel-discover') return [{ id: 'cand-1', providerPlaceId: 'g1', name: 'Place' }];
       return { documents: [document('g1'), document('g1'), document('g1')] };
     });
     const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
@@ -150,7 +151,7 @@ describe('discovering places', () => {
 
   it('still returns places when evidence gathering fails', async () => {
     const invoke = vi.fn(async (name: string) => {
-      if (name === 'travel-discover-live') return [{ id: 'p1', name: 'Place' }];
+      if (name === 'travel-discover') return [{ id: 'p1', name: 'Place' }];
       throw new Error('evidence provider down');
     });
     const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);

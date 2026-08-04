@@ -14,14 +14,14 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 | Function | Result | Evidence |
 | --- | --- | --- |
-| `travel-capabilities-live` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` now reports Places, Reviews, YouTube and Routes available; weather is available; events/China/social partners are false. |
-| `travel-discover-live` Melbourne | HTTP 200 | Returned current Google Places records including Fed Square, coordinates, rating, address and retrieval timestamp. |
-| `travel-evidence-live` Melbourne | HTTP 200 | Returned Google Places review documents and YouTube documents with source URLs and retrieval timestamps. |
+| `travel-capabilities` | HTTP 200 | One `GOOGLE_MAPS_API_KEY` now reports Places, Reviews, YouTube and Routes available; weather is available; events/China/social partners are false. |
+| `travel-discover` Melbourne | HTTP 200 | Returned current Google Places records including Fed Square, coordinates, rating, address and retrieval timestamp. |
+| `travel-evidence` Melbourne | HTTP 200 | Returned Google Places review documents and YouTube documents with source URLs and retrieval timestamps. |
 | `travel-weather` Melbourne | HTTP 200 | Returned Open-Meteo daily forecast and expiry timestamp. |
 | `travel-route-matrix` | HTTP 200 | Returned a real walking route of 15 minutes and 1,095 metres for the fixed Melbourne verification coordinates. |
 | `travel-route-matrix` regional path | Implemented, not live-proven | Amap/Baidu walking adapters are deployed in version 8; without regional credentials they return an honest failed-pair/unknown result rather than inventing a route. |
 | `travel-events` | HTTP 503 | `TICKETMASTER_API_KEY` is not configured. |
-| `travel-discover-live` Beijing | HTTP 503 | Neither `AMAP_API_KEY` nor `BAIDU_API_KEY` is configured. |
+| `travel-discover` Beijing | HTTP 503 | Neither `AMAP_API_KEY` nor `BAIDU_API_KEY` is configured. |
 | `travel-reasoning` | HTTP 503 | `OPENAI_API_KEY` is not configured. |
 | `travel-import-link` without a session | HTTP 401 | Authentication is enforced. Unsafe HTTPS validation is covered by tests. |
 
