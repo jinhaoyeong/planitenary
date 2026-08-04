@@ -218,6 +218,15 @@ export interface BuildOptions {
   weatherRiskDays?: number[];
   /** Current event facts surfaced by the provider; never treated as booked time. */
   currentEventNotes?: string[];
+  /** Timed event facts used only to detect conflicts with the proposed plan. */
+  currentEvents?: Array<{
+    id: string;
+    name: string;
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    url?: string;
+  }>;
 }
 
 /** Categories that describe logistics rather than the character of a day. */
@@ -225,6 +234,15 @@ const UNINFORMATIVE_CATEGORIES = new Set(['essential', 'experience', 'day-trip']
 
 const humanise = (category: string) =>
   category.replace(/-/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
+
+const clockMinutes = (value?: string) => {
+  if (!value) return null;
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null;
+};
 
 /** The category that best characterises what a day is actually about. */
 function dominantTheme(places: PlaceCandidate[]): string | undefined {
@@ -346,6 +364,7 @@ export function buildDestinationItinerary(
   (options.currentEventNotes || []).filter(Boolean).forEach((note) => {
     warnings.add(`Current event to review before locking the plan: ${note}`);
   });
+  const eventWindows = options.currentEvents || [];
   const usedTitles = new Set<string>();
   let usedProviderRoutes = false;
 
@@ -393,6 +412,24 @@ export function buildDestinationItinerary(
       }
     }
     simulated.warnings.forEach((warning) => warnings.add(warning));
+
+    // Event data is advisory unless the traveller explicitly chooses the
+    // event. We nevertheless use its factual local time to flag a collision
+    // with the proposed itinerary, never silently moving or booking anything.
+    eventWindows
+      .filter((event) => !event.date || !existing?.date || event.date === existing.date)
+      .forEach((event) => {
+        const eventStart = clockMinutes(event.startTime);
+        const eventEnd = clockMinutes(event.endTime) ?? (eventStart === null ? null : eventStart + 120);
+        if (eventStart === null || eventEnd === null) return;
+        const overlaps = discoveredActivities.some((activity) => {
+          const activityStart = clockMinutes(activity.time);
+          if (activityStart === null) return false;
+          const activityEnd = activityStart + Math.max(15, activity.durationMinutes || 90);
+          return activityStart < eventEnd && activityEnd > eventStart;
+        });
+        if (overlaps) warnings.add(`Live event ${event.name} overlaps this day's proposed activities; review before locking.`);
+      });
 
     const dayPlaces = simulated.slots
       .map((slot) => slot.candidate)

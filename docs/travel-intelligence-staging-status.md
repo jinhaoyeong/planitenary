@@ -27,11 +27,12 @@ Project: the configured Supabase project referenced by the local `VITE_SUPABASE_
 
 ## Automated verification
 
-- Vitest: 299 tests passing across 24 files.
+- Vitest: 300 tests passing across 24 files.
 - Production TypeScript/Vite build: passing.
 - Crowd evidence produces a separate `crowdRisk` signal and caution.
 - Crowd-averse behaviour now applies a stronger evidence penalty than moderate or crowd-indifferent behaviour.
 - Current event notes are passed into the plan warnings so event conflicts are visible before locking; events do not yet occupy schedule slots automatically.
+- Timed event facts now retain local start/end times and flag overlaps with proposed activities without silently booking or moving the event.
 - Weather risk changes the deterministic scheduler's indoor/outdoor ordering.
 - The regional route request selects Amap/Baidu for a China capability and explicitly falls back to walking-only semantics when public-transit routing is unavailable.
 - Replanning previews preserve locks and use existing preview/apply/undo protection.

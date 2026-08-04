@@ -116,6 +116,8 @@ export interface CurrentEventSummary {
   id: string;
   name: string;
   date?: string;
+  startTime?: string;
+  endTime?: string;
   url?: string;
 }
 
@@ -145,9 +147,19 @@ export function parseCurrentEvents(payload: unknown): CurrentEventSummary[] {
     const name = typeof item.name === 'string' ? item.name : '';
     const id = typeof item.id === 'string' ? item.id : name;
     if (!name || !id) return [];
-    const dates = item.dates as { start?: { localDate?: string } } | undefined;
+    const dates = item.dates as {
+      start?: { localDate?: string; localTime?: string };
+      end?: { localDate?: string; localTime?: string };
+    } | undefined;
     const url = typeof item.url === 'string' ? item.url : undefined;
-    return [{ id, name, date: dates?.start?.localDate, url }];
+    return [{
+      id,
+      name,
+      date: dates?.start?.localDate,
+      startTime: dates?.start?.localTime,
+      endTime: dates?.end?.localTime,
+      url,
+    }];
   });
 }
 

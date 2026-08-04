@@ -465,6 +465,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     let weatherWarning: string | undefined;
     let eventsWarning: string | undefined;
     let currentEventNotes: string[] = [];
+    let currentEvents: Array<{ id: string; name: string; date?: string; startTime?: string; endTime?: string; url?: string }> = [];
     const regionalRouteProvider = capability.routes.provider === 'amap' || capability.routes.provider === 'baidu'
       ? capability.routes.provider
       : undefined;
@@ -546,7 +547,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         }));
         if (events.length > 0) {
           eventsWarning = `${events.length} current event${events.length === 1 ? '' : 's'} found near ${capability.destination.city}; review dates before locking the itinerary.`;
-          currentEventNotes = events.slice(0, 8).map((event) => event.date ? `${event.name} (${event.date})` : event.name);
+          currentEvents = events.slice(0, 8);
+          currentEventNotes = currentEvents.map((event) => {
+            const time = event.startTime ? ` ${event.startTime}${event.endTime ? `–${event.endTime}` : ''}` : '';
+            return event.date ? `${event.name} (${event.date}${time})` : `${event.name}${time}`;
+          });
         }
       } catch {
         eventsWarning = 'Current events were unavailable for this preview; the itinerary does not assume events exist.';
@@ -557,6 +562,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       routeResolver,
       weatherRiskDays: nextWeatherRiskDays,
       currentEventNotes,
+      currentEvents,
     });
     if (routeWarning) result.warnings = [...result.warnings, routeWarning];
     if (weatherWarning) result.warnings = [...result.warnings, weatherWarning];

@@ -20,8 +20,8 @@ const liveRuntime = (overrides: Partial<ProviderRuntime> = {}): ProviderRuntime 
 
 describe('provider runtime', () => {
   it('normalises current event facts without inventing missing dates', () => {
-    expect(parseCurrentEvents({ events: [{ id: 'e1', name: 'Laneway Festival', dates: { start: { localDate: '2026-08-05' } }, url: 'https://example.com/e1' }, { name: 'Untitled' }] })).toEqual([
-      { id: 'e1', name: 'Laneway Festival', date: '2026-08-05', url: 'https://example.com/e1' },
+    expect(parseCurrentEvents({ events: [{ id: 'e1', name: 'Laneway Festival', dates: { start: { localDate: '2026-08-05', localTime: '19:00' }, end: { localTime: '22:00' } }, url: 'https://example.com/e1' }, { name: 'Untitled' }] })).toEqual([
+      { id: 'e1', name: 'Laneway Festival', date: '2026-08-05', startTime: '19:00', endTime: '22:00', url: 'https://example.com/e1' },
       { id: 'Untitled', name: 'Untitled', date: undefined, url: undefined },
     ]);
   });

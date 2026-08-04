@@ -243,6 +243,21 @@ describe('safety guarantees survive the rewrite', () => {
     expect(result.warnings.join(' ')).toContain('before locking');
   });
 
+  it('flags a timed live event that overlaps a proposed activity', () => {
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(MELBOURNE, profile);
+    const result = buildDestinationItinerary(
+      emptyItinerary(5),
+      profile,
+      ranked,
+      defaultDiscoveryDecisions(ranked),
+      {
+        currentEvents: [{ id: 'event-1', name: 'Laneway Festival', date: '2026-08-05', startTime: '10:00', endTime: '15:00' }],
+      },
+    );
+    expect(result.warnings.join(' ')).toContain('Laneway Festival overlaps');
+  });
+
   it('drops a place whose reported queue exceeds the traveller tolerance', () => {
     const profile = melbourneProfile(['calm']);
     const ranked = rankDestinationCandidates(MELBOURNE, profile);
