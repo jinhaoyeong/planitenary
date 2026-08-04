@@ -41,7 +41,7 @@ function ChangeToggle({ checked, disabled, onClick, label }: { checked: boolean;
 }
 
 const actionLabel = (proposal: ItineraryProposal) => {
-  if (proposal.action === 'generate') return 'Build my first itinerary';
+  if (proposal.action === 'generate') return 'Organise my saved places';
   if (proposal.action === 'optimise-day') return 'Optimise this day';
   return 'Optimise whole trip';
 };
@@ -56,8 +56,15 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     || proposal.baseItineraryRevision !== (itinerary.revision || 0)
   ));
   const lastHistory = itinerary.plannerHistory?.[itinerary.plannerHistory.length - 1];
-  const hasActivities = itinerary.days.some((day) => day.activities.length > 0);
-  const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.length > 0), [itinerary.days]);
+  const isPlaceActivity = (activity: (typeof itinerary.days)[number]['activities'][number]) =>
+    activity.kind !== 'meal-window'
+    && activity.kind !== 'rest-window'
+    && activity.kind !== 'free-time'
+    && activity.kind !== 'transport'
+    && !(activity.source === 'generated' && !activity.providerPlaceId && (activity.type === 'food' || activity.type === 'cafe'));
+  const hasPlaceActivities = itinerary.days.some((day) => day.activities.some(isPlaceActivity));
+  const hasInboxActivities = (itinerary.unassignedActivities?.length || 0) > 0;
+  const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.some(isPlaceActivity)), [itinerary.days]);
   const declaredDays = declaredTripDays(profile);
   const existingDaysNotice = plannerExistingDaysNotice(declaredDays, itinerary.days.length);
 
@@ -140,6 +147,21 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
           </div>
         </div>
 
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]" aria-label="Planner evidence coverage">
+          {Object.entries({
+            Places: proposal.coverage.placeVerification,
+            Coordinates: proposal.coverage.coordinates,
+            Hours: proposal.coverage.openingHours,
+            Routes: proposal.coverage.route,
+            Reservations: proposal.coverage.reservations,
+          }).map(([label, value]) => (
+            <div key={label} className="rounded-2xl p-2.5" style={{ border: '1px solid var(--border)' }}>
+              <span style={{ color: 'var(--ink-muted)' }}>{label}</span>
+              <strong className="block mt-1">{Math.round(value * 100)}%</strong>
+            </div>
+          ))}
+        </div>
+
         {proposal.warnings.length > 0 && (
           <div className="rounded-2xl p-3 text-xs" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
             {proposal.warnings.join(' ')}{proposal.unknownLegCount > 0 ? ' Unknown legs are not presented as precise routing.' : ''}
@@ -194,10 +216,10 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     <section className="rounded-3xl p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="eyebrow m-0">Trip intelligence</div>
-          <h3 className="font-display text-2xl mt-2">Make the next day make sense.</h3>
+          <div className="eyebrow m-0">Organise saved places</div>
+          <h3 className="font-display text-2xl mt-2">Keep the places you saved coherent.</h3>
           <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--ink-muted)' }}>
-            Preview a practical sequence, protect what matters, and keep every change reversible.
+            Arrange confirmed places, protect what matters, and keep every change reversible. Destination discovery is not connected yet.
           </p>
         </div>
         <Clock3 className="w-5 h-5 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
@@ -210,10 +232,9 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
       )}
 
       <div className="flex flex-wrap gap-2">
-        {!hasActivities && itinerary.days.length > 0 && (
-          <button type="button" className="pill-btn pill-primary" onClick={build}><Sparkles className="w-4 h-4" /> Build my first itinerary</button>
-        )}
-        {hasActivities && <button type="button" className="pill-btn pill-primary" onClick={optimiseWholeTrip}><Sparkles className="w-4 h-4" /> Optimise whole trip</button>}
+        {(hasPlaceActivities || hasInboxActivities) && <button type="button" className="pill-btn pill-primary" onClick={hasPlaceActivities ? optimiseWholeTrip : build}><Sparkles className="w-4 h-4" /> {hasPlaceActivities ? 'Organise my saved places' : 'Place saved activities'}</button>}
+        {!hasPlaceActivities && !hasInboxActivities && <button type="button" className="pill-btn pill-soft" disabled><Sparkles className="w-4 h-4" /> Discover and build my itinerary</button>}
+        {hasPlaceActivities && <button type="button" className="pill-btn pill-soft" disabled title="Discovery provider is not connected yet"><Sparkles className="w-4 h-4" /> Discover and build my itinerary</button>}
         {dayOptions.map((day) => (
           <button key={day.day} type="button" className="pill-btn pill-soft" onClick={() => optimiseSelectedDay(day.day)}>
             <RotateCcw className="w-4 h-4" /> Optimise day {day.day}
@@ -223,7 +244,8 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
       </div>
 
       {status && <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{status}</p>}
-      {itinerary.days.length === 0 && <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Add travel dates first, then the planner can shape your days.</p>}
+      {!hasPlaceActivities && !hasInboxActivities && <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>No places selected yet. Discover attractions and build a destination-specific itinerary, or add places manually.</p>}
+      {itinerary.days.length === 0 && <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Add travel dates first, then the organiser can shape your saved places.</p>}
     </section>
   );
 }

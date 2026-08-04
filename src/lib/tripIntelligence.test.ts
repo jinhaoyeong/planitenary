@@ -46,11 +46,13 @@ const itinerary = (activities: Activity[]): Itinerary => ({
 });
 
 describe('trip intelligence', () => {
-  it('builds a practical structure without inventing attractions', () => {
+  it('leaves empty days empty instead of inventing attraction-like placeholders', () => {
     const proposal = generateInitialItinerary(itinerary([]), profile());
-    expect(proposal.afterDays[0].activities.map((item) => item.source)).toEqual(['generated', 'generated']);
-    expect(proposal.afterDays[0].activities.map((item) => item.name)).toContain('Lunch near your base');
-    expect(proposal.reason).toContain('unknown travel details');
+    expect(proposal.afterDays.every((day) => day.activities.length === 0)).toBe(true);
+    expect(proposal.changes).toEqual([]);
+    expect(proposal.confidence).toBe('low');
+    expect(proposal.coverage.coordinates).toBe(0);
+    expect(proposal.reason).toContain('confirmed places');
   });
 
   it('orders coordinate-known places and includes travel estimates', () => {

@@ -5,6 +5,7 @@ export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 't
 export type ActivitySource = 'manual' | 'generated' | 'imported';
 export type BookingStatus = 'none' | 'requested' | 'confirmed' | 'cancelled';
 export type ActivityLockedField = 'schedule' | 'location' | 'duration' | 'cost' | 'booking' | 'all';
+export type ScheduleItemKind = 'place' | 'reservation' | 'transport' | 'meal-window' | 'rest-window' | 'free-time';
 
 export interface ActivityOpeningHours {
   label?: string;
@@ -32,6 +33,7 @@ export interface ActivityCost {
 
 export interface Activity {
   id?: string;
+  kind?: ScheduleItemKind;
   time: string;
   durationMinutes?: number;
   name: string;
@@ -51,6 +53,10 @@ export interface Activity {
   lockedFields?: ActivityLockedField[];
   fieldProvenance?: ActivityFieldProvenance;
   generatedMetadata?: ActivityGeneratedMetadata;
+  provider?: 'google' | 'official-tourism' | 'wikidata';
+  providerPlaceId?: string;
+  sourceReferences?: Array<{ label: string; url: string }>;
+  lastVerifiedAt?: string;
   rating?: number;
   coordinates?: [number, number]; // [lat, lng] for manual location search
   moodVotes?: {

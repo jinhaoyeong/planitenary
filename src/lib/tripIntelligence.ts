@@ -42,7 +42,16 @@ export interface ItineraryProposal {
   travelMinutesAfter: number;
   coordinateCoverage: number;
   unknownLegCount: number;
+  coverage: PlannerCoverage;
   warnings: string[];
+}
+
+export interface PlannerCoverage {
+  placeVerification: number;
+  coordinates: number;
+  openingHours: number;
+  route: number;
+  reservations: number;
 }
 
 export interface PlannerOptions {
@@ -95,6 +104,14 @@ const estimateTravelMinutes = (from?: [number, number], to?: [number, number], m
 
 const activityLabel = (activity: Activity) => activity.name || 'Untitled activity';
 
+const isScheduleWindow = (activity: Activity) => activity.kind === 'meal-window'
+  || activity.kind === 'rest-window'
+  || activity.kind === 'free-time'
+  || (activity.source === 'generated' && !activity.providerPlaceId && (activity.type === 'food' || activity.type === 'cafe'));
+
+const isPlaceActivity = (activity: Activity) => !isScheduleWindow(activity)
+  && activity.kind !== 'transport';
+
 const isLocked = (activity: Activity) => Boolean(activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
 
 const stableId = (prefix: string, value: string) => {
@@ -116,6 +133,7 @@ const generatedActivity = (
   durationMinutes: number,
 ): Activity => ({
   id: stableId('activity', `${itineraryId}|day-${day.day}|placeholder|${type}|${time}`),
+  kind: type === 'food' ? 'meal-window' : 'rest-window',
   time,
   durationMinutes,
   name,
@@ -134,18 +152,19 @@ const generatedActivity = (
 });
 
 const travelMetrics = (day: DayPlan, transport = 'public-transport') => {
+  const placeActivities = day.activities.filter(isPlaceActivity);
   let total = 0;
   let knownLegs = 0;
   let unknownLegs = 0;
-  for (let index = 1; index < day.activities.length; index += 1) {
-    const previous = coordinatesFor(day.activities[index - 1]);
-    const current = coordinatesFor(day.activities[index]);
+  for (let index = 1; index < placeActivities.length; index += 1) {
+    const previous = coordinatesFor(placeActivities[index - 1]);
+    const current = coordinatesFor(placeActivities[index]);
     const estimate = estimateTravelMinutes(previous, current, transport);
     if (estimate !== null) {
       total += estimate;
       knownLegs += 1;
-    } else if (day.activities[index].transportMinutes) {
-      total += day.activities[index].transportMinutes || 0;
+    } else if (placeActivities[index].transportMinutes) {
+      total += placeActivities[index].transportMinutes || 0;
       knownLegs += 1;
     } else {
       unknownLegs += 1;
@@ -221,18 +240,12 @@ const preserveLockedSlots = (day: DayPlan, candidates: Activity[]) => {
 const addBreaks = (itineraryId: string, day: DayPlan, activities: Activity[], profile: TripProfile, constraints: PlanningConstraints = {}) => {
   void profile;
   const includeMeals = constraints.includeMealBreaks !== false;
-  const includeRest = constraints.includeRestBreaks !== false;
-  if (activities.length === 0) {
-    return [
-      ...(includeMeals ? [generatedActivity(itineraryId, day, 'food', '12:30', 'Lunch near your base', 'A flexible meal window to keep the day grounded.', MEAL_MINUTES)] : []),
-      ...(includeRest ? [generatedActivity(itineraryId, day, 'cafe', '15:00', 'Café and rest', 'A deliberate pause before the next decision.', REST_MINUTES)] : []),
-    ];
-  }
-  if (!includeMeals || activities.some((activity) => activity.type === 'food')) return activities;
+  if (activities.length === 0) return [];
+  if (!includeMeals || activities.some((activity) => activity.kind === 'meal-window' || activity.type === 'food')) return activities;
   const result = [...activities];
-  const hasAfternoonPause = result.some((activity) => (parseMinutes(activity.time) || 0) >= 14 * 60 && activity.type === 'cafe');
+  const hasAfternoonPause = result.some((activity) => (parseMinutes(activity.time) || 0) >= 14 * 60 && activity.kind === 'rest-window');
   if (!hasAfternoonPause && result.length >= 2) {
-    result.splice(Math.min(2, result.length), 0, generatedActivity(itineraryId, day, 'cafe', '15:00', 'Café and rest', 'A deliberate pause between main activities.', REST_MINUTES));
+    result.splice(Math.min(2, result.length), 0, generatedActivity(itineraryId, day, 'cafe', '15:00', 'Rest window', 'A deliberate pause between main activities.', REST_MINUTES));
   }
   return result;
 };
@@ -284,6 +297,28 @@ const buildOperations = (changes: ProposedChange[], beforeDays: DayPlan[], after
   return { kind: 'lock', dayNumber: change.dayNumber, activityId: change.activityId };
 });
 
+const plannerCoverage = (days: DayPlan[], knownLegs: number, unknownLegs: number): PlannerCoverage => {
+  const places = days.flatMap((day) => day.activities).filter(isPlaceActivity);
+  const totalLegs = knownLegs + unknownLegs;
+  if (places.length === 0) {
+    return { placeVerification: 0, coordinates: 0, openingHours: 0, route: 0, reservations: 0 };
+  }
+  return {
+    placeVerification: places.filter((activity) => Boolean(activity.providerPlaceId)).length / places.length,
+    coordinates: places.filter((activity) => Boolean(activity.coordinates)).length / places.length,
+    openingHours: places.filter((activity) => Boolean(activity.openingHours?.opensAt && activity.openingHours?.closesAt)).length / places.length,
+    route: totalLegs > 0 ? knownLegs / totalLegs : places.length <= 1 ? 1 : 0,
+    reservations: places.filter((activity) => activity.bookingStatus !== undefined).length / places.length,
+  };
+};
+
+const plannerConfidence = (coverage: PlannerCoverage): ItineraryProposal['confidence'] => {
+  const values = Object.values(coverage);
+  if (coverage.placeVerification === 0 || coverage.coordinates === 0 || coverage.route === 0) return 'low';
+  if (values.every((value) => value >= 1)) return 'high';
+  return 'medium';
+};
+
 const makeProposal = (
   itinerary: Itinerary,
   profile: TripProfile,
@@ -295,7 +330,6 @@ const makeProposal = (
   afterUnassignedActivities: Activity[] = [],
 ): ItineraryProposal => {
   const changes = buildChanges(beforeDays, afterDays);
-  const lockedChanges = changes.filter((change) => change.protected);
   const beforeMetrics = beforeDays.reduce((sum, day) => {
     const metrics = travelMetrics(day, profile.transport[0]);
     return { total: sum.total + metrics.total, knownLegs: sum.knownLegs + metrics.knownLegs, unknownLegs: sum.unknownLegs + metrics.unknownLegs };
@@ -305,9 +339,15 @@ const makeProposal = (
     return { total: sum.total + metrics.total, knownLegs: sum.knownLegs + metrics.knownLegs, unknownLegs: sum.unknownLegs + metrics.unknownLegs };
   }, { total: 0, knownLegs: 0, unknownLegs: 0 });
   const totalLegs = afterMetrics.knownLegs + afterMetrics.unknownLegs;
+  const coverage = plannerCoverage(afterDays, afterMetrics.knownLegs, afterMetrics.unknownLegs);
   const warnings: string[] = afterMetrics.unknownLegs > 0
     ? [`${afterMetrics.unknownLegs} movement leg${afterMetrics.unknownLegs === 1 ? '' : 's'} lack coordinates and remain unknown.`]
     : [];
+  if (coverage.placeVerification < 1) warnings.push('Some places are not linked to a verified discovery source.');
+  if (coverage.coordinates < 1) warnings.push('Some places lack coordinates, so their movement remains approximate.');
+  if (afterDays.flatMap((day) => day.activities).filter(isPlaceActivity).length === 0) {
+    warnings.push('No real places are scheduled. Add or discover places before building a destination-specific itinerary.');
+  }
   const constraints = itinerary.planningConstraints;
   const preferredEnd = parseMinutes(constraints?.preferredEndTime);
   const currencies = new Set<string>();
@@ -317,7 +357,7 @@ const makeProposal = (
     if (preferredEnd !== null && start !== null && start + activityDuration(activity) > preferredEnd) {
       warnings.push(`${activityLabel(activity)} ends after the preferred day end.`);
     }
-    if (constraints?.maxMainActivitiesPerDay && day.activities.filter((item) => item.type !== 'food' && item.type !== 'cafe' && item.type !== 'walk').length > constraints.maxMainActivitiesPerDay) {
+    if (constraints?.maxMainActivitiesPerDay && day.activities.filter(isPlaceActivity).length > constraints.maxMainActivitiesPerDay) {
       warnings.push(`Day ${day.day} exceeds the maximum main activity limit.`);
     }
     constraints?.unavailableTimes?.forEach((window) => {
@@ -353,7 +393,7 @@ const makeProposal = (
     baseProfileRevision: profileRevision(profile),
     baseItineraryRevision: itinerary.revision || 0,
     reason,
-    confidence: lockedChanges.length > 0 ? 'medium' : 'high',
+    confidence: plannerConfidence(coverage),
     beforeDays,
     afterDays,
     beforeUnassignedActivities,
@@ -363,6 +403,7 @@ const makeProposal = (
     travelMinutesAfter: afterMetrics.total,
     coordinateCoverage: totalLegs > 0 ? afterMetrics.knownLegs / totalLegs : 0,
     unknownLegCount: afterMetrics.unknownLegs,
+    coverage,
     warnings: uniqueWarnings,
   };
 };
@@ -399,7 +440,7 @@ export function generateInitialItinerary(itinerary: Itinerary, profile: TripProf
     itinerary,
     profile,
     'generate',
-    'The plan keeps confirmed places together, adds deliberate meal and rest windows, and leaves unknown travel details visible instead of guessing.',
+    'The plan organises confirmed places, preserves locks, and leaves unknown travel details visible instead of inventing destinations.',
     beforeDays,
     scheduledDays,
     beforeUnassignedActivities,
@@ -433,12 +474,12 @@ export function optimiseTrip(itinerary: Itinerary, profile: TripProfile): Itiner
   const beforeDays = clone(itinerary.days);
   const afterDays = beforeDays.map((day) => ({
     ...day,
-    activities: day.activities.filter((activity) => isLocked(activity) || activity.source === 'generated' || activity.type === 'food' || activity.type === 'cafe'),
+    activities: day.activities.filter((activity) => isLocked(activity) || isScheduleWindow(activity)),
   }));
-  const movable = beforeDays.flatMap((day) => day.activities.filter((activity) => !isLocked(activity) && activity.source !== 'generated' && activity.type !== 'food' && activity.type !== 'cafe').map((activity) => ({ activity, originalDay: day.day })));
+  const movable = beforeDays.flatMap((day) => day.activities.filter((activity) => !isLocked(activity) && isPlaceActivity(activity)).map((activity) => ({ activity, originalDay: day.day })));
   const maxMain = itinerary.planningConstraints?.maxMainActivitiesPerDay || 4;
   const destinationPoints = profile.destinations.filter((destination) => typeof destination.lat === 'number' && typeof destination.lng === 'number');
-  const dayLoad = (day: DayPlan) => day.activities.filter((activity) => activity.type !== 'food' && activity.type !== 'cafe' && activity.type !== 'walk').length;
+  const dayLoad = (day: DayPlan) => day.activities.filter(isPlaceActivity).length;
   const dayScore = (day: DayPlan, activity: Activity, originalDay: number) => {
     const coords = coordinatesFor(activity);
     const destination = coords && destinationPoints.length > 0

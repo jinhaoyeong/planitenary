@@ -1664,7 +1664,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                     </span>
                   ))}
                 </div>
-                <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Build my first itinerary will distribute these confirmed activities across available days. Nothing is discarded if it cannot be scheduled.</p>
+                <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Organise my saved places will distribute these confirmed activities across available days. Nothing is discarded if it cannot be scheduled.</p>
               </section>
             )}
           <PlannerPreview
