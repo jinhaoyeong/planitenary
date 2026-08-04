@@ -459,6 +459,12 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     persistDecisions(next);
   };
 
+  const clearAllDecisions = () => {
+    const next: Record<string, CandidateDecision> = {};
+    setDecisions(next);
+    persistDecisions(next);
+  };
+
   const previewPlan = async () => {
     // Queue evidence feeds the scheduler so a famous place with a 90-minute
     // wait costs 90 minutes of the day, not zero.
@@ -701,6 +707,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         <div className="destination-review-summary">
           <div className="destination-selection-count"><strong>{selectedCount}</strong><span>selected</span></div>
           <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Use recommended shortlist</button>
+          <button
+            type="button"
+            className="pill-btn pill-ghost"
+            onClick={clearAllDecisions}
+            disabled={selectedCount === 0 && Object.keys(decisions).length === 0}
+            aria-label="Clear all place decisions"
+          >
+            Clear all
+          </button>
         </div>
       </div>
 
