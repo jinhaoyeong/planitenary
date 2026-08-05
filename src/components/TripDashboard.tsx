@@ -388,12 +388,14 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                 <h2 className="trip-card-title font-display">{trip.title}</h2>
                 <span className="trip-card-arrow p-2 rounded-full" style={{ color: 'var(--ink-muted)' }}><ArrowRight className="w-5 h-5" /></span>
               </div>
-              <p className="mt-3 line-clamp-2" style={{ color: 'var(--ink-muted)' }}>{trip.description}</p>
-              <div className="trip-card-metrics flex flex-wrap gap-3 mt-6 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
-                <span className="inline-flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> {trip.dayCount} days</span>
-                <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {trip.cityCount} cities</span>
+              <div className="trip-card-body">
+                <p className="line-clamp-2" style={{ color: 'var(--ink-muted)' }}>{trip.description}</p>
+                <div className="trip-card-metrics flex flex-wrap gap-3 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
+                  <span className="inline-flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> {trip.dayCount} days</span>
+                  <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {trip.cityCount} cities</span>
+                </div>
               </div>
-              <div className="trip-card-actions flex flex-wrap mt-5">
+              <div className="trip-card-actions flex flex-wrap">
                 <button
                   type="button"
                   onClick={(event) => void renameTrip(event, trip)}

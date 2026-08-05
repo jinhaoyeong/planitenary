@@ -1492,70 +1492,73 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
   // Overview Mode (Default)
   if (selectedDay === null) {
     return (
-      <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        {/* Search Bar */}
-        <div className="max-w-2xl mx-auto relative">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search className="h-5 w-5 text-slate-400" />
-          </div>
-          <input
-            type="text"
-            className="editorial-input block w-full" style={{ paddingLeft: '2.75rem' }}
-            placeholder={customItinerary.searchPlaceholder || 'Search itinerary, phrases, locations...'}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-
-        <div className="text-center space-y-4">
-          <span className="eyebrow">{customItinerary.overviewEyebrow || 'The itinerary · day by day'}</span>
-          {isEditingMode && isTitleEditing ? (
-            <div className="flex items-center justify-center gap-2">
+      <div className="itinerary-overview animate-in fade-in slide-in-from-bottom-4 duration-500">
+        {/* Lead chrome + title: even vertical rhythm above the trip name */}
+        <div className="itinerary-overview-intro">
+          <div className="itinerary-overview-lead">
+            <div className="itinerary-overview-search max-w-2xl w-full mx-auto relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Search className="h-5 w-5 text-slate-400" />
+              </div>
               <input
-                autoFocus
                 type="text"
-                value={editedTitle}
-                onChange={(e) => setEditedTitle(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleTitleEdit(editedTitle)}
-                className="font-display text-5xl md:text-6xl bg-transparent border-b-2 border-[color:var(--accent)] text-center focus:outline-none"
-                style={{ color: 'var(--ink)' }}
+                className="editorial-input block w-full" style={{ paddingLeft: '2.75rem' }}
+                placeholder={customItinerary.searchPlaceholder || 'Search itinerary, phrases, locations...'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
               />
-              <button
-                onClick={() => handleTitleEdit(editedTitle)}
-                className="p-1 rounded-xl"
-                style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
-              >
-                <Save className="w-4 h-4" />
-              </button>
             </div>
-          ) : (
-            <h2
-              className={clsx(
-                "font-display text-5xl md:text-7xl leading-[0.95] tracking-tight flex items-center justify-center gap-3",
-                isEditingMode && "cursor-pointer transition-colors"
-              )}
-              style={{ color: 'var(--ink)' }}
-              onClick={() => {
-                if (isEditingMode) {
-                  setEditedTitle(customItinerary.name || `${customItinerary.days.length}-Day Adventure`);
-                  setIsTitleEditing(true);
-                }
-              }}
-            >
-              {customItinerary.name || `${customItinerary.days.length}-Day Adventure`}
-              {isEditingMode && <Edit2 className="w-5 h-5 opacity-50" />}
-            </h2>
-          )}
+            <span className="eyebrow itinerary-overview-eyebrow">{customItinerary.overviewEyebrow || 'The itinerary · day by day'}</span>
+          </div>
 
-          <p className="text-base md:text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-            {customItinerary.overviewDescription ? (
-              customItinerary.overviewDescription
+          <div className="itinerary-overview-heading text-center">
+            {isEditingMode && isTitleEditing ? (
+              <div className="flex items-center justify-center gap-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleTitleEdit(editedTitle)}
+                  className="font-display text-5xl md:text-6xl bg-transparent border-b-2 border-[color:var(--accent)] text-center focus:outline-none"
+                  style={{ color: 'var(--ink)' }}
+                />
+                <button
+                  onClick={() => handleTitleEdit(editedTitle)}
+                  className="p-1 rounded-xl"
+                  style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+                >
+                  <Save className="w-4 h-4" />
+                </button>
+              </div>
             ) : (
-              <>
-                A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
-              </>
+              <h2
+                className={clsx(
+                  "font-display text-5xl md:text-7xl leading-[0.95] tracking-tight flex items-center justify-center gap-3",
+                  isEditingMode && "cursor-pointer transition-colors"
+                )}
+                style={{ color: 'var(--ink)' }}
+                onClick={() => {
+                  if (isEditingMode) {
+                    setEditedTitle(customItinerary.name || `${customItinerary.days.length}-Day Adventure`);
+                    setIsTitleEditing(true);
+                  }
+                }}
+              >
+                {customItinerary.name || `${customItinerary.days.length}-Day Adventure`}
+                {isEditingMode && <Edit2 className="w-5 h-5 opacity-50" />}
+              </h2>
             )}
-          </p>
+
+            <p className="text-base md:text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+              {customItinerary.overviewDescription ? (
+                customItinerary.overviewDescription
+              ) : (
+                <>
+                  A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
+                </>
+              )}
+            </p>
 
           {longTripNotice && (
             <p
@@ -1642,6 +1645,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
               </button>
             )}
           </div>
+        </div>
         </div>
 
         {plannerProfile && (

@@ -1619,7 +1619,10 @@ function App() {
       />
 
       {/* Main Content Area */}
-      <main id="main-content" data-adaptive-handbook-content="true" className="max-w-7xl mx-auto px-4 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10">
+      <main id="main-content" data-adaptive-handbook-content="true" className={clsx(
+        "max-w-7xl mx-auto px-4 md:px-10 pb-24 md:pb-20 relative z-10",
+        activeTab === 'itinerary' ? "pt-0 md:pt-2" : "pt-8 md:pt-14"
+      )}>
         
         {/* Tab Content Wrapper with Glass Effect for overlapping sections */}
         <AnimatePresence mode="wait">
