@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Check,
   ChevronDown,
-  Clock3,
   Database,
   ExternalLink,
+  LayoutGrid,
+  Layers,
   MapPinned,
   Sparkles,
+  Star,
   Undo2,
   X,
 } from 'lucide-react';
@@ -67,6 +69,8 @@ const formatDuration = (minutes: number) => minutes >= 120 && minutes % 60 === 0
   ? `${minutes / 60} hr`
   : `${minutes} min`;
 
+const DESKTOP_REVIEW_MODE_KEY = 'planitenary:destination-review-mode';
+
 const formatPrice = (priceLevel?: number) => {
   if (priceLevel === undefined) return 'Cost unknown';
   if (priceLevel === 0) return 'Free';
@@ -77,6 +81,25 @@ const openingSummary = (candidate: PlaceCandidate) => {
   const period = candidate.openingHours?.periods[0];
   if (!period?.opensAt || !period.closesAt) return 'Hours need live verification';
   return `${period.opensAt}–${period.closesAt} · ${candidate.openingHours?.sourceConfidence} confidence`;
+};
+
+const RESERVATION_LABEL: Record<PlaceCandidate['reservationStatus'], string | null> = {
+  required: 'Booking required',
+  recommended: 'Booking recommended',
+  'not-needed': 'No booking needed',
+  unknown: null,
+};
+
+const INDOOR_LABEL: Record<PlaceCandidate['indoorOutdoor'], string> = {
+  indoor: 'Indoor · fine in rain',
+  outdoor: 'Outdoor · weather matters',
+  mixed: 'Indoor and outdoor',
+};
+
+const formatVerifiedAt = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
 const useIsMobileReview = () => {
@@ -98,203 +121,266 @@ interface UndoState {
   next: CandidateDecision;
 }
 
+/** Extra, honestly-sourced context a card can show when there is room for it. */
+interface CandidateContext {
+  evidence?: PlaceEvidenceSummary;
+  queueMinutes?: number;
+}
+
+/**
+ * A real photograph of the place when a provider supplied one, and a labelled
+ * neighbourhood placard when it did not. Never a stand-in image of somewhere
+ * else — a traveller has to be able to trust that the picture is the place.
+ */
+function PlaceMedia({ candidate, className }: { candidate: PlaceCandidate; className?: string }) {
+  // Remember which URL broke rather than a bare flag, so a new place starts
+  // trusted again without an effect to reset it.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showPhoto = Boolean(candidate.photoUrl) && failedUrl !== candidate.photoUrl;
+
+  return (
+    <div className={`destination-place-media${className ? ` ${className}` : ''}`} data-has-photo={showPhoto ? 'true' : 'false'}>
+      {showPhoto ? (
+        <img
+          src={candidate.photoUrl}
+          alt={`${candidate.name}, ${candidate.neighbourhood || candidate.city}`}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailedUrl(candidate.photoUrl ?? null)}
+        />
+      ) : (
+        <div className="destination-place-media-fallback" aria-hidden="true">
+          <MapPinned className="w-5 h-5" />
+          <span>{candidate.neighbourhood || candidate.city}</span>
+        </div>
+      )}
+      {showPhoto && candidate.photoAttribution && (
+        <small className="destination-photo-credit">{candidate.photoAttribution}</small>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Everything worth knowing before keeping or skipping a place: what it costs in
+ * time and money, when it is open, how crowded it gets, what other travellers
+ * consistently say, and where all of that came from. Facts with no source are
+ * simply omitted rather than filled with a plausible guess.
+ */
+function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; context?: CandidateContext }) {
+  const { candidate, reasons, cautions = [] } = ranked;
+  const evidence = context?.evidence;
+  const queueMinutes = context?.queueMinutes ?? evidence?.typicalQueueMinutes;
+  const bestWindow = candidate.bestTimeWindows?.[0];
+  const reservation = RESERVATION_LABEL[candidate.reservationStatus];
+  const verifiedAt = formatVerifiedAt(candidate.lastVerifiedAt);
+  const crowdLabel = evidence?.crowdRisk === undefined
+    ? null
+    : evidence.crowdRisk >= 0.66 ? 'Busy most of the day'
+      : evidence.crowdRisk >= 0.33 ? 'Moderately busy' : 'Rarely crowded';
+  const tags = candidate.experienceTags.slice(0, 5);
+
+  const specs: Array<{ label: string; value: string }> = [
+    { label: 'Time needed', value: formatDuration(evidence?.typicalVisitMinutes || candidate.estimatedVisitMinutes) },
+    { label: 'Cost', value: formatPrice(candidate.priceLevel) },
+    { label: 'Opening hours', value: openingSummary(candidate) },
+  ];
+  if (queueMinutes) specs.push({ label: 'Typical queue', value: `${Math.round(queueMinutes)} min reported` });
+  if (bestWindow) specs.push({ label: 'Best time', value: `${bestWindow.start}–${bestWindow.end}` });
+  if (crowdLabel) specs.push({ label: 'Crowding', value: crowdLabel });
+  if (reservation) specs.push({ label: 'Booking', value: reservation });
+  specs.push({ label: 'Weather', value: INDOOR_LABEL[candidate.indoorOutdoor] });
+  specs.push({ label: 'Area', value: candidate.neighbourhood || candidate.city });
+
+  return (
+    <div className="destination-detail">
+      {candidate.description && <p className="destination-detail-description">{candidate.description}</p>}
+
+      {(candidate.rating || tags.length > 0) && (
+        <div className="destination-detail-chips">
+          {candidate.rating && (
+            <span className="destination-detail-chip is-rating">
+              <Star className="w-3 h-3" aria-hidden="true" />
+              {candidate.rating.toFixed(1)}
+              {candidate.reviewCount ? ` · ${candidate.reviewCount.toLocaleString()} reviews` : ''}
+            </span>
+          )}
+          {tags.map((tag) => (
+            <span key={tag} className="destination-detail-chip">{tag.replace(/-/g, ' ')}</span>
+          ))}
+        </div>
+      )}
+
+      <dl className="destination-detail-specs">
+        {specs.map((spec) => (
+          <div key={spec.label}>
+            <dt>{spec.label}</dt>
+            <dd>{spec.value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {reasons.length > 0 && (
+        <div className="destination-detail-section">
+          <h6>Why it ranks here</h6>
+          <ul className="destination-detail-list">
+            {reasons.slice(0, 4).map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {evidence && (evidence.positiveThemes.length > 0 || evidence.negativeThemes.length > 0) && (
+        <div className="destination-detail-section">
+          <h6>What travellers repeat</h6>
+          <ul className="destination-detail-list">
+            {evidence.positiveThemes.slice(0, 3).map((theme) => (
+              <li key={`positive-${theme}`} className="is-positive">{theme}</li>
+            ))}
+            {evidence.negativeThemes.slice(0, 3).map((theme) => (
+              <li key={`negative-${theme}`} className="is-negative">{theme}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {cautions.length > 0 && <p className="destination-match-caution">{cautions.join(' ')}</p>}
+
+      <p className="destination-detail-provenance">
+        {evidence?.sourceCount
+          ? `${evidence.sourceCount} independent ${evidence.sourceCount === 1 ? 'source' : 'sources'}`
+          : `${candidate.sourceReferences.length} ${candidate.sourceReferences.length === 1 ? 'source' : 'sources'}`}
+        {` · ${candidate.sourceConfidence} confidence`}
+        {verifiedAt ? ` · checked ${verifiedAt}` : ''}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The desktop browse-list row. Deliberately short: a photo, the name, the two
+ * numbers that decide most choices, and the four decisions. Everything else
+ * lives behind "Details" so a sixty-place list stays scannable instead of
+ * filling several screens with prose.
+ */
 function CandidateCard({
   ranked,
   decision,
   onDecision,
-  compact,
-  expanded,
-  onToggleExpand,
-  swipeEnabled,
+  context,
 }: {
   ranked: RankedCandidate;
   decision?: DiscoveryCandidateDecision;
   onDecision: (decision: DiscoveryCandidateDecision) => void;
-  compact?: boolean;
-  expanded?: boolean;
-  onToggleExpand?: () => void;
-  swipeEnabled?: boolean;
+  context?: CandidateContext;
 }) {
-  const { candidate, score, reasons, cautions = [] } = ranked;
-  const reduceMotion = useReducedMotion();
-  const x = useMotionValue(0);
-  const mustOpacity = useTransform(x, [0, SWIPE_COMMIT_PX], [0, 1]);
-  const skipOpacity = useTransform(x, [-SWIPE_COMMIT_PX, 0], [1, 0]);
-  const decided = Boolean(decision);
-  const showCompact = Boolean(compact);
-  const showDetails = !showCompact || Boolean(expanded);
-
-  if (showCompact && decided && !expanded) {
-    return (
-      <article className="destination-candidate is-compact is-decided" data-decision={decision}>
-        <button type="button" className="destination-candidate-compact-hit" onClick={onToggleExpand}>
-          <span className="destination-match-score" aria-label={`${score} percent match`}>{score}</span>
-          <div className="destination-candidate-compact-copy">
-            <h5>{candidate.name}</h5>
-            <p>{DECISION_LABEL[decision!]} · {candidate.neighbourhood || candidate.city} · {formatDuration(candidate.estimatedVisitMinutes)}</p>
-          </div>
-          <ChevronDown className="w-4 h-4 destination-candidate-chevron" aria-hidden="true" />
-        </button>
-      </article>
-    );
-  }
-
-  const body = (
-    <>
-      {!showCompact && (
-        <div className="destination-candidate-map" aria-hidden="true">
-          <MapPinned className="w-5 h-5" />
-          <span>{candidate.neighbourhood || candidate.city}</span>
-          {candidate.coordinates && <small>{candidate.coordinates[0].toFixed(3)}, {candidate.coordinates[1].toFixed(3)}</small>}
-        </div>
-      )}
-      <div className="destination-candidate-body">
-        {showCompact && (
-          <div className="destination-swipe-hints" aria-hidden="true">
-            <motion.span style={{ opacity: mustOpacity }} className="destination-swipe-hint is-must">Must do</motion.span>
-            <motion.span style={{ opacity: skipOpacity }} className="destination-swipe-hint is-skip">Skip</motion.span>
-          </div>
-        )}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            {showCompact && (
-              <p className="destination-candidate-meta-line">
-                {candidate.neighbourhood || candidate.city}
-                {' · '}
-                {formatDuration(candidate.estimatedVisitMinutes)}
-              </p>
-            )}
-            <h5>{candidate.name}</h5>
-            {showDetails && <p className="destination-candidate-description">{candidate.description}</p>}
-          </div>
-          <span className="destination-match-score" aria-label={`${score} percent match`}>{score}</span>
-        </div>
-        {showCompact && !expanded && !decided && (
-          <p className="destination-match-reason destination-match-reason-compact">
-            {reasons[0] || 'Tap for details · swipe to decide'}
-          </p>
-        )}
-        {showDetails && (
-          <>
-            <div className="destination-facts" aria-label="Place details">
-              <span><Clock3 className="w-3.5 h-3.5" />{formatDuration(candidate.estimatedVisitMinutes)}</span>
-              <span>{formatPrice(candidate.priceLevel)}</span>
-              <span>{openingSummary(candidate)}</span>
-            </div>
-            <p className="destination-match-reason">{reasons.join(' · ')}</p>
-            {cautions.length > 0 && (
-              <p className="destination-match-caution">{cautions.join(' ')}</p>
-            )}
-          </>
-        )}
-        <div className="destination-candidate-footer">
-          {showCompact && !expanded ? (
-            <div className="destination-quick-actions">
-              <button type="button" className="destination-quick-action is-skip" onClick={() => onDecision('skip')}>Skip</button>
-              <button type="button" className="destination-quick-action is-must" onClick={() => onDecision('must-do')}>Must do</button>
-              <button type="button" className="destination-quick-action is-detail" onClick={onToggleExpand}>Details</button>
-            </div>
-          ) : (
-            <>
-              <fieldset className="destination-decision-group">
-                <legend className="sr-only">Preference for {candidate.name}</legend>
-                {DECISIONS.map((option) => (
-                  <label
-                    key={option.id}
-                    className="destination-decision-option"
-                    data-active={decision === option.id ? 'true' : 'false'}
-                  >
-                    <input
-                      className="destination-decision-input"
-                      type="radio"
-                      name={`candidate-decision-${candidate.id}`}
-                      value={option.id}
-                      checked={decision === option.id}
-                      onChange={() => onDecision(option.id)}
-                    />
-                    {decision === option.id && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
-                    <span>{option.label}</span>
-                  </label>
-                ))}
-              </fieldset>
-              <a href={candidate.sourceReferences[0]?.url} target="_blank" rel="noreferrer" className="destination-source-link">
-                Source <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            </>
-          )}
-        </div>
-        {showCompact && expanded && (
-          <button type="button" className="destination-collapse-link" onClick={onToggleExpand}>
-            Hide details <ChevronDown className="w-3.5 h-3.5 rotate-180" aria-hidden="true" />
-          </button>
-        )}
-      </div>
-    </>
-  );
-
-  if (!showCompact || !swipeEnabled || decided || expanded || reduceMotion) {
-    return (
-      <article
-        className={`destination-candidate${showCompact ? ' is-compact' : ''}${expanded ? ' is-expanded' : ''}`}
-        data-decision={decision || 'undecided'}
-      >
-        {body}
-      </article>
-    );
-  }
+  const { candidate, score } = ranked;
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <motion.article
-      className="destination-candidate is-compact is-swipeable"
-      data-decision={decision || 'undecided'}
-      style={{ x }}
-      drag="x"
-      dragDirectionLock
-      dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.85}
-      onDragEnd={(_, info) => {
-        if (info.offset.x >= SWIPE_COMMIT_PX || info.velocity.x > 700) {
-          onDecision('must-do');
-          return;
-        }
-        if (info.offset.x <= -SWIPE_COMMIT_PX || info.velocity.x < -700) {
-          onDecision('skip');
-        }
-      }}
-    >
-      {body}
-    </motion.article>
+    <article className="destination-candidate" data-decision={decision || 'undecided'}>
+      <PlaceMedia candidate={candidate} className="destination-candidate-photo" />
+      <div className="destination-candidate-body">
+        <div className="destination-candidate-headline">
+          <div className="min-w-0">
+            <p className="destination-candidate-meta-line">
+              {candidate.neighbourhood || candidate.city}
+              {' · '}
+              {formatDuration(context?.evidence?.typicalVisitMinutes || candidate.estimatedVisitMinutes)}
+              {candidate.rating ? ` · ${candidate.rating.toFixed(1)}★` : ''}
+            </p>
+            <h5>{candidate.name}</h5>
+          </div>
+          <span className="destination-match-score" aria-label={`${score} percent match`}>{score}</span>
+        </div>
+
+        {expanded
+          ? <CandidateDetails ranked={ranked} context={context} />
+          : <p className="destination-candidate-description">{candidate.description || openingSummary(candidate)}</p>}
+
+        <div className="destination-candidate-footer">
+          <fieldset className="destination-decision-group">
+            <legend className="sr-only">Preference for {candidate.name}</legend>
+            {DECISIONS.map((option) => (
+              <label
+                key={option.id}
+                className="destination-decision-option"
+                data-active={decision === option.id ? 'true' : 'false'}
+              >
+                <input
+                  className="destination-decision-input"
+                  type="radio"
+                  name={`candidate-decision-${candidate.id}`}
+                  value={option.id}
+                  checked={decision === option.id}
+                  onChange={() => onDecision(option.id)}
+                />
+                {decision === option.id && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="destination-candidate-links">
+            <button
+              type="button"
+              className="destination-collapse-link"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((open) => !open)}
+            >
+              {expanded ? 'Less' : 'Details'}
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform${expanded ? ' rotate-180' : ''}`} aria-hidden="true" />
+            </button>
+            {candidate.sourceReferences[0]?.url && (
+              <a href={candidate.sourceReferences[0].url} target="_blank" rel="noreferrer" className="destination-source-link">
+                Source <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 
+/**
+ * One place, one decision. The front is the photograph and the two facts that
+ * frame a snap judgement; the back is the full evidence for the times a snap
+ * judgement is not enough. Used on both mobile (swipe) and desktop (a wider
+ * card driven by the keyboard and the rail beside it).
+ */
 function DeckCard({
   ranked,
   onDecision,
+  context,
+  variant = 'mobile',
+  flipped,
+  onFlippedChange,
 }: {
   ranked: RankedCandidate;
   onDecision: (decision: DiscoveryCandidateDecision) => void;
+  context?: CandidateContext;
+  variant?: 'mobile' | 'desktop';
+  flipped: boolean;
+  onFlippedChange: (flipped: boolean) => void;
 }) {
-  const { candidate, score, reasons, cautions = [] } = ranked;
+  const { candidate, score } = ranked;
   const reduceMotion = useReducedMotion();
-  const [flipped, setFlipped] = useState(false);
   const x = useMotionValue(0);
   const rotate = useTransform(x, [-220, 0, 220], [-8, 0, 8]);
   const mustOpacity = useTransform(x, [20, SWIPE_COMMIT_PX], [0, 1]);
   const skipOpacity = useTransform(x, [-SWIPE_COMMIT_PX, -20], [1, 0]);
-  const photoUrl = candidate.photoUrl;
+  const isDesktop = variant === 'desktop';
 
   useEffect(() => {
-    setFlipped(false);
     x.set(0);
   }, [candidate.id, x]);
 
-  const commit = (decision: DiscoveryCandidateDecision) => {
-    onDecision(decision);
-  };
+  const commit = (decision: DiscoveryCandidateDecision) => onDecision(decision);
+  const flip = (next: boolean) => { onFlippedChange(next); hapticTap(); };
 
   return (
     <motion.div
       className="destination-deck-pop"
+      data-variant={variant}
       initial={reduceMotion ? false : { opacity: 0, scale: 0.88, y: 28 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={reduceMotion ? undefined : { opacity: 0, scale: 0.92, y: -12 }}
@@ -303,7 +389,7 @@ function DeckCard({
       <motion.article
         className="destination-deck-card"
         style={{ x, rotate }}
-        drag={flipped || reduceMotion ? false : 'x'}
+        drag={flipped || reduceMotion || isDesktop ? false : 'x'}
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.92}
         onDragEnd={(_, info) => {
@@ -324,73 +410,63 @@ function DeckCard({
             <button
               type="button"
               className="destination-flip-face is-front"
-              onClick={() => { setFlipped(true); hapticTap(); }}
+              onClick={() => flip(true)}
               aria-label={`Show details for ${candidate.name}`}
             >
-              <div
-                className="destination-deck-photo"
-                style={photoUrl ? { backgroundImage: `url(${photoUrl})` } : undefined}
-                data-has-photo={photoUrl ? 'true' : 'false'}
-              >
-                {!photoUrl && (
-                  <div className="destination-deck-photo-fallback" aria-hidden="true">
-                    <MapPinned className="w-8 h-8" />
-                    <span>{candidate.neighbourhood || candidate.city}</span>
-                  </div>
-                )}
-                <span className="destination-match-score" aria-label={`${score} percent match`}>{score}</span>
-              </div>
+              <PlaceMedia candidate={candidate} className="destination-deck-photo" />
+              <span className="destination-match-score destination-deck-score" aria-label={`${score} percent match`}>{score}</span>
               <div className="destination-deck-front-copy">
                 <p className="destination-candidate-meta-line">
                   {candidate.neighbourhood || candidate.city}
                   {' · '}
-                  {formatDuration(candidate.estimatedVisitMinutes)}
+                  {formatDuration(context?.evidence?.typicalVisitMinutes || candidate.estimatedVisitMinutes)}
+                  {candidate.rating ? ` · ${candidate.rating.toFixed(1)}★` : ''}
                 </p>
                 <h5>{candidate.name}</h5>
-                <p className="destination-deck-tap-hint">Tap to flip for details</p>
+                <p className="destination-deck-tap-hint">
+                  {isDesktop ? 'Click or press Space for full details' : 'Tap to flip for details'}
+                </p>
               </div>
             </button>
 
             <div className="destination-flip-face is-back" aria-hidden={!flipped}>
-              <button type="button" className="destination-flip-back-close" onClick={() => setFlipped(false)} aria-label="Flip card back">
+              <button type="button" className="destination-flip-back-close" onClick={() => flip(false)} aria-label="Flip card back">
                 <X className="w-4 h-4" />
               </button>
-              <p className="destination-candidate-meta-line">
-                {candidate.neighbourhood || candidate.city}
-                {' · '}
-                {formatDuration(candidate.estimatedVisitMinutes)}
-              </p>
-              <h5>{candidate.name}</h5>
-              <p className="destination-candidate-description">{candidate.description}</p>
-              <div className="destination-facts" aria-label="Place details">
-                <span><Clock3 className="w-3.5 h-3.5" />{formatDuration(candidate.estimatedVisitMinutes)}</span>
-                <span>{formatPrice(candidate.priceLevel)}</span>
-                <span>{openingSummary(candidate)}</span>
+              <div className="destination-flip-back-scroll">
+                <p className="destination-candidate-meta-line">{candidate.neighbourhood || candidate.city}</p>
+                <h5>{candidate.name}</h5>
+                {candidate.localName && candidate.localName !== candidate.name && (
+                  <p className="destination-candidate-meta-line">{candidate.localName}</p>
+                )}
+                <CandidateDetails ranked={ranked} context={context} />
+                {candidate.sourceReferences[0]?.url && (
+                  <a href={candidate.sourceReferences[0].url} target="_blank" rel="noreferrer" className="destination-source-link">
+                    Open source <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
               </div>
-              <p className="destination-match-reason">{reasons.join(' · ')}</p>
-              {cautions.length > 0 && <p className="destination-match-caution">{cautions.join(' ')}</p>}
               <div className="destination-deck-back-actions">
                 <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
                 <button type="button" className="destination-quick-action is-detail" onClick={() => commit('interested')}>Interested</button>
                 <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
               </div>
-              {candidate.sourceReferences[0]?.url && (
-                <a href={candidate.sourceReferences[0].url} target="_blank" rel="noreferrer" className="destination-source-link">
-                  Source <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
             </div>
           </div>
         </div>
 
         {!flipped && (
-          <div className="destination-deck-actions">
-            <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
-            <button type="button" className="destination-quick-action is-detail" onClick={() => { setFlipped(true); hapticTap(); }}>Flip</button>
-            <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
-          </div>
+          <>
+            <div className="destination-deck-actions">
+              <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
+              <button type="button" className="destination-quick-action is-detail" onClick={() => flip(true)}>Details</button>
+              <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
+            </div>
+            <p className="destination-deck-hint">
+              {isDesktop ? '← skip · → must do · ↑ interested · Space details' : 'Swipe right to keep · left to skip'}
+            </p>
+          </>
         )}
-        {!flipped && <p className="destination-deck-hint">Swipe right to keep · left to skip</p>}
       </motion.article>
     </motion.div>
   );
@@ -651,17 +727,60 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const [decisions, setDecisions] = useState<Record<string, CandidateDecision>>(() => (
     savedStateMatchesCity ? itinerary.discoveryState!.decisions : {}
   ));
+  const decisionsRef = useRef(decisions);
   const [buildResult, setBuildResult] = useState<DestinationBuildResult | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const undoTimerRef = useRef<number | null>(null);
   const isMobileReview = useIsMobileReview();
+  /**
+   * Every decision in the order it was made, so "Back" can walk as far back as
+   * the traveller wants. The transient undo toast only ever covers the most
+   * recent one, and it disappears — this does not.
+   */
+  const [decisionHistory, setDecisionHistory] = useState<UndoState[]>([]);
+  /**
+   * When you step back, the deck must show *that* place again rather than the
+   * next-highest ranked one it would otherwise fall to.
+   */
+  const [focusedCandidateId, setFocusedCandidateId] = useState<string | null>(null);
+  const [deckFlipped, setDeckFlipped] = useState(false);
+  /** Desktop review defaults to the same one-at-a-time deck as mobile. */
+  const [desktopMode, setDesktopMode] = useState<'deck' | 'list'>(() => {
+    if (typeof window === 'undefined') return 'deck';
+    try {
+      return window.localStorage.getItem(DESKTOP_REVIEW_MODE_KEY) === 'list' ? 'list' : 'deck';
+    } catch {
+      return 'deck';
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DESKTOP_REVIEW_MODE_KEY, desktopMode);
+    } catch {
+      // Preference persistence is optional; the in-memory choice still works.
+    }
+  }, [desktopMode]);
   const selectedCount = Object.values(decisions).filter((decision) => decision === 'must-do' || decision === 'interested').length;
   const reviewedCount = Object.keys(decisions).length;
   const pendingDeck = useMemo(
     () => ranked.filter(({ candidate }) => !decisions[candidate.id]),
     [ranked, decisions],
   );
-  const currentDeckCard = pendingDeck[0] || null;
+  const currentDeckCard = (focusedCandidateId
+    ? pendingDeck.find(({ candidate }) => candidate.id === focusedCandidateId)
+    : undefined) || pendingDeck[0] || null;
+  const deckContext = useMemo<CandidateContext | undefined>(() => {
+    if (!currentDeckCard) return undefined;
+    const id = currentDeckCard.candidate.id;
+    return { evidence: evidenceSummaries[id], queueMinutes: queueEvidence[id] };
+  }, [currentDeckCard, evidenceSummaries, queueEvidence]);
+  /** Decided places, most recent first — the desktop rail's running record. */
+  const recentDecisions = useMemo(
+    () => [...decisionHistory].reverse().slice(0, 8),
+    [decisionHistory],
+  );
+
+  useEffect(() => { setDeckFlipped(false); }, [currentDeckCard?.candidate.id]);
 
   const persistDecisions = (next: Record<string, CandidateDecision>, discoveredAt = itinerary.discoveryState?.discoveredAt || new Date().toISOString()) => {
     onItineraryChange({
@@ -721,6 +840,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       }
       const nextDecisions = Object.keys(decisions).length > 0 ? decisions : {};
       setCandidates(discovered);
+      decisionsRef.current = nextDecisions;
       setDecisions(nextDecisions);
       setPhase('review');
       persistDecisions(nextDecisions, new Date().toISOString());
@@ -732,46 +852,114 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   };
 
   const updateDecision = (candidateId: string, decision: CandidateDecision, options?: { name?: string; silent?: boolean }) => {
-    const previous = decisions[candidateId];
-    const next = { ...decisions, [candidateId]: decision };
+    const previous = decisionsRef.current[candidateId];
+    const next = { ...decisionsRef.current, [candidateId]: decision };
+    decisionsRef.current = next;
     setDecisions(next);
     persistDecisions(next);
+    // A fresh decision always releases the deck back to ranked order.
+    setFocusedCandidateId(null);
     if (options?.silent) return;
     if (decision === 'must-do') hapticSuccess();
     else hapticMedium();
     const name = options?.name || ranked.find((item) => item.candidate.id === candidateId)?.candidate.name || 'Place';
-    setUndoState({ candidateId, name, previous, next: decision });
+    const entry: UndoState = { candidateId, name, previous, next: decision };
+    setDecisionHistory((history) => [...history.filter((item) => item.candidateId !== candidateId), entry]);
+    setUndoState(entry);
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
     undoTimerRef.current = window.setTimeout(() => setUndoState(null), 4200);
+  };
+
+  /** Revert one decision and put that place back in front of the traveller. */
+  const revert = (entry: UndoState) => {
+    const next = { ...decisionsRef.current };
+    if (entry.previous) next[entry.candidateId] = entry.previous;
+    else delete next[entry.candidateId];
+    decisionsRef.current = next;
+    setDecisions(next);
+    persistDecisions(next);
+    setDecisionHistory((history) => history.filter((item) => item !== entry));
+    setUndoState(null);
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
   };
 
   const undoLastDecision = () => {
     if (!undoState) return;
     hapticTap();
-    const next = { ...decisions };
-    if (undoState.previous) next[undoState.candidateId] = undoState.previous;
-    else delete next[undoState.candidateId];
-    setDecisions(next);
-    persistDecisions(next);
-    setUndoState(null);
-    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    revert(undoState);
+    setFocusedCandidateId(undoState.previous ? null : undoState.candidateId);
   };
+
+  /**
+   * Walk backwards through the review, one place per press, with no dependence
+   * on having caught the undo toast before it faded.
+   */
+  const stepBack = useCallback(() => {
+    const previousEntry = decisionHistory[decisionHistory.length - 1];
+    if (!previousEntry) return;
+    hapticTap();
+    revert(previousEntry);
+    setFocusedCandidateId(previousEntry.candidateId);
+    setDeckFlipped(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decisionHistory, decisions]);
 
   useEffect(() => () => {
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
   }, []);
 
+  /**
+   * Desktop has no swipe, so the deck is driven from the keyboard instead.
+   * Bindings stay off while a field is focused so typing is never hijacked.
+   */
+  useEffect(() => {
+    if (isMobileReview || phase !== 'review' || desktopMode !== 'deck' || !currentDeckCard) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const decide = (decision: CandidateDecision) => {
+        event.preventDefault();
+        updateDecision(currentDeckCard.candidate.id, decision, { name: currentDeckCard.candidate.name });
+      };
+      if (event.key === 'ArrowLeft') return decide('skip');
+      if (event.key === 'ArrowRight') return decide('must-do');
+      if (event.key === 'ArrowUp') return decide('interested');
+      if (event.key === 'ArrowDown') return decide('visited');
+      if (event.key === ' ') {
+        event.preventDefault();
+        setDeckFlipped((open) => !open);
+        return;
+      }
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        stepBack();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobileReview, phase, desktopMode, currentDeckCard, stepBack, decisions]);
+
   const selectRecommended = () => {
     const next = defaultDiscoveryDecisions(ranked);
+    decisionsRef.current = next;
     setDecisions(next);
     persistDecisions(next);
+    // A bulk shortlist is not a sequence of choices, so step-back history that
+    // no longer describes how the current selection was reached is dropped.
+    setDecisionHistory([]);
+    setFocusedCandidateId(null);
     hapticSuccess();
   };
 
   const clearAllDecisions = () => {
     const next: Record<string, CandidateDecision> = {};
+    decisionsRef.current = next;
     setDecisions(next);
     persistDecisions(next);
+    setDecisionHistory([]);
+    setFocusedCandidateId(null);
     setUndoState(null);
     hapticTap();
   };
@@ -1001,10 +1189,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     const canResumeReview = Boolean(candidates.length > 0 || (savedStateMatchesCity && itinerary.discoveryState?.stage === 'reviewing'));
     return (
       <section className="destination-discovery-shell destination-discovery-intro">
-        <div>
-          <span className="fixture-badge"><Database className="w-4 h-4" /> Official tourism sources</span>
+        <div className="destination-intro-copy">
           <h3>Build a {cityLabel} itinerary</h3>
-          <p>Review real places one by one, flip for details, then build neighbourhood-led days around what you keep.</p>
+          <p>Verified places, one at a time.</p>
         </div>
         <div className="destination-intro-actions">
           {canResumeReview && candidates.length > 0 && (
@@ -1013,7 +1200,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
             </button>
           )}
           <button type="button" className={`pill-btn ${canResumeReview && candidates.length > 0 ? 'pill-ghost' : 'pill-primary'}`} onClick={beginDiscovery} disabled={loading}>
-            <Sparkles className="w-4 h-4" /> {loading ? 'Loading verified places…' : `Discover ${cityLabel} places`}
+            <Sparkles className="w-4 h-4" /> {loading ? 'Loading places…' : 'Start'}
           </button>
         </div>
         {error && <p className="destination-discovery-error" role="alert">{error} Try again; your itinerary has not changed.</p>}
@@ -1026,6 +1213,18 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       <section className="destination-discovery-shell destination-discovery-review is-deck-only" aria-label={`Review places for ${cityLabel}`}>
         <div className="destination-deck-chrome">
           <div className="destination-deck-chrome-top">
+            <button
+              type="button"
+              className="destination-deck-back"
+              onClick={stepBack}
+              disabled={decisionHistory.length === 0}
+              aria-label={decisionHistory.length > 0
+                ? `Go back to ${decisionHistory[decisionHistory.length - 1].name}`
+                : 'No earlier place to go back to'}
+            >
+              <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+              Back
+            </button>
             <span className="fixture-badge">
               <Database className="w-4 h-4" /> {ranked.length} verified
             </span>
@@ -1059,6 +1258,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
               <DeckCard
                 key={currentDeckCard.candidate.id}
                 ranked={currentDeckCard}
+                context={deckContext}
+                flipped={deckFlipped}
+                onFlippedChange={setDeckFlipped}
                 onDecision={(decision) => updateDecision(currentDeckCard.candidate.id, decision, { name: currentDeckCard.candidate.name })}
               />
             </AnimatePresence>
@@ -1071,10 +1273,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
             <strong>Shortlist ready</strong>
             <p>{selectedCount} places selected. Build your itinerary, or keep adjusting with recommended picks.</p>
             <div className="destination-deck-complete-actions">
-              <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Use recommended shortlist</button>
               <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={selectedCount < 2 || routeLoading}>
                 {routeLoading ? 'Checking routes…' : 'Build itinerary'}
               </button>
+              {decisionHistory.length > 0 && (
+                <button type="button" className="pill-btn pill-ghost" onClick={stepBack}>
+                  <ArrowLeft className="w-4 h-4" /> Reconsider {decisionHistory[decisionHistory.length - 1].name}
+                </button>
+              )}
+              <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Use recommended shortlist</button>
               <button type="button" className="pill-btn pill-ghost" onClick={() => { hapticTap(); setPhase('idle'); }}>Close</button>
             </div>
           </div>
@@ -1115,12 +1322,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   return (
     <section className="destination-discovery-shell destination-discovery-review" data-mobile-review="false">
       <div className="destination-review-header">
-        <div>
+        <div className="destination-review-headline">
           <span className="fixture-badge">
-            <Database className="w-4 h-4" /> {ranked.length} verified places{usingFixture ? ' · may be out of date' : ''}
+            <Database className="w-4 h-4" /> {ranked.length} verified{usingFixture ? ' · may be out of date' : ''}
           </span>
           <h3>Choose what belongs in your {cityLabel} trip</h3>
-          <p>Nothing is scheduled until you review it. Ranking uses your interests, budget, data completeness and neighbourhood fit.</p>
           <div className="destination-review-progress" aria-label={`${reviewedCount} of ${ranked.length} places reviewed`}>
             <div className="destination-review-progress-track">
               <div
@@ -1128,47 +1334,135 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
                 style={{ width: ranked.length ? `${Math.min(100, (reviewedCount / ranked.length) * 100)}%` : '0%' }}
               />
             </div>
-            <span>{reviewedCount} of {ranked.length} reviewed</span>
+            <span>{reviewedCount} of {ranked.length} reviewed · {selectedCount} selected</span>
           </div>
         </div>
         <div className="destination-review-summary">
-          <div className="destination-selection-count"><strong>{selectedCount}</strong><span>selected</span></div>
-          <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Use recommended shortlist</button>
-          <button
-            type="button"
-            className="pill-btn pill-ghost"
-            onClick={clearAllDecisions}
-            disabled={selectedCount === 0 && reviewedCount === 0}
-            aria-label="Clear all place decisions"
-          >
-            Clear all
-          </button>
+          <div className="destination-review-mode-toggle" role="group" aria-label="Review layout">
+            <button
+              type="button"
+              className={desktopMode === 'deck' ? 'is-active' : ''}
+              aria-pressed={desktopMode === 'deck'}
+              onClick={() => setDesktopMode('deck')}
+            >
+              <Layers className="w-4 h-4" aria-hidden="true" /> One at a time
+            </button>
+            <button
+              type="button"
+              className={desktopMode === 'list' ? 'is-active' : ''}
+              aria-pressed={desktopMode === 'list'}
+              onClick={() => setDesktopMode('list')}
+            >
+              <LayoutGrid className="w-4 h-4" aria-hidden="true" /> Browse all
+            </button>
+          </div>
+          <div className="destination-review-summary-actions">
+            <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Recommended shortlist</button>
+            <button
+              type="button"
+              className="pill-btn pill-ghost"
+              onClick={clearAllDecisions}
+              disabled={selectedCount === 0 && reviewedCount === 0}
+              aria-label="Clear all place decisions"
+            >
+              Clear all
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="destination-review-groups">
-        {groupedRanked.map((group) => {
-          if (group.items.length === 0) return null;
-          return (
-            <section key={group.id} className="destination-review-group">
-              <div className="destination-group-heading">
-                <h4>{group.label}</h4>
-                <span>{group.items.length} places</span>
+      {desktopMode === 'deck' ? (
+        <div className="destination-desk-review">
+          <div className="destination-deck-stage is-desktop">
+            {currentDeckCard ? (
+              <AnimatePresence mode="wait">
+                <DeckCard
+                  key={currentDeckCard.candidate.id}
+                  ranked={currentDeckCard}
+                  context={deckContext}
+                  variant="desktop"
+                  flipped={deckFlipped}
+                  onFlippedChange={setDeckFlipped}
+                  onDecision={(decision) => updateDecision(currentDeckCard.candidate.id, decision, { name: currentDeckCard.candidate.name })}
+                />
+              </AnimatePresence>
+            ) : (
+              <div className="destination-deck-complete">
+                <strong>Every place reviewed</strong>
+                <p>{selectedCount} selected. Build the itinerary, step back through your choices, or browse the full list.</p>
               </div>
-              <div className="destination-candidate-grid">
-                {group.items.map((item) => (
-                  <CandidateCard
-                    key={item.candidate.id}
-                    ranked={item}
-                    decision={decisions[item.candidate.id]}
-                    onDecision={(decision) => updateDecision(item.candidate.id, decision, { name: item.candidate.name })}
-                  />
-                ))}
+            )}
+          </div>
+
+          <aside className="destination-deck-rail" aria-label="Review progress">
+            <div className="destination-deck-rail-head">
+              <div className="destination-selection-count"><strong>{selectedCount}</strong><span>selected</span></div>
+              <p>{pendingDeck.length} still to review</p>
+            </div>
+
+            <div className="destination-deck-rail-nav">
+              <button
+                type="button"
+                className="pill-btn pill-ghost"
+                onClick={stepBack}
+                disabled={decisionHistory.length === 0}
+              >
+                <ArrowLeft className="w-4 h-4" /> Back
+              </button>
+              <span>{decisionHistory.length} to step back through</span>
+            </div>
+
+            {recentDecisions.length > 0 && (
+              <div className="destination-deck-rail-history">
+                <h6>Recent choices</h6>
+                <ul>
+                  {recentDecisions.map((entry) => (
+                    <li key={entry.candidateId}>
+                      <span className="destination-history-name">{entry.name}</span>
+                      <span className="destination-history-decision" data-decision={entry.next}>{DECISION_LABEL[entry.next]}</span>
+                      <button
+                        type="button"
+                        onClick={() => { revert(entry); setFocusedCandidateId(entry.candidateId); setDeckFlipped(false); }}
+                      >
+                        Change
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </section>
-          );
-        })}
-      </div>
+            )}
+
+            <p className="destination-deck-rail-hint">
+              Keyboard: <kbd>←</kbd> skip · <kbd>→</kbd> must do · <kbd>↑</kbd> interested · <kbd>Space</kbd> details · <kbd>Backspace</kbd> back
+            </p>
+          </aside>
+        </div>
+      ) : (
+        <div className="destination-review-groups">
+          {groupedRanked.map((group) => {
+            if (group.items.length === 0) return null;
+            return (
+              <section key={group.id} className="destination-review-group">
+                <div className="destination-group-heading">
+                  <h4>{group.label}</h4>
+                  <span>{group.items.length} places</span>
+                </div>
+                <div className="destination-candidate-grid">
+                  {group.items.map((item) => (
+                    <CandidateCard
+                      key={item.candidate.id}
+                      ranked={item}
+                      decision={decisions[item.candidate.id]}
+                      context={{ evidence: evidenceSummaries[item.candidate.id], queueMinutes: queueEvidence[item.candidate.id] }}
+                      onDecision={(decision) => updateDecision(item.candidate.id, decision, { name: item.candidate.name })}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
 
       <AnimatePresence>
         {undoState && (

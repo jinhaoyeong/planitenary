@@ -88,7 +88,13 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
   const [improveExpanded, setImproveExpanded] = useState(false);
-  const [organiseOpen, setOrganiseOpen] = useState(() => itinerary.discoveryState?.stage !== 'itinerary-built');
+  // On a phone this panel is a secondary tool, not the main event: it starts
+  // folded down to its header so the discovery card and the itinerary below it
+  // stay reachable without scrolling past a wall of buttons.
+  const [organiseOpen, setOrganiseOpen] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches) return false;
+    return itinerary.discoveryState?.stage !== 'itinerary-built';
+  });
   const currentRevision = profileRevision(profile);
   const isStale = Boolean(proposal && (
     proposal.baseProfileRevision !== currentRevision
@@ -118,11 +124,6 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     document.body.classList.add('planner-intelligence-active');
     return () => document.body.classList.remove('planner-intelligence-active');
   }, []);
-
-  useEffect(() => {
-    if (!discoveryBuilt || typeof window === 'undefined') return;
-    if (window.matchMedia('(max-width: 639px)').matches) setOrganiseOpen(false);
-  }, [discoveryBuilt]);
 
   const openProposal = (next: ItineraryProposal) => {
     setProposal(next);
@@ -311,7 +312,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   return (
     <div className="space-y-4">
       <DestinationDiscoveryPanel itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
-      <section className="planner-organise-panel rounded-3xl p-4 sm:p-5 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+      <section className={`planner-organise-panel rounded-3xl p-4 sm:p-5 space-y-3 ${organiseOpen ? 'is-open' : 'is-collapsed'}`} style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
