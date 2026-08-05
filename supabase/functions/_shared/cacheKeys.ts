@@ -43,6 +43,76 @@ export function weatherLocationKey(coordinates: [number, number]): string {
   return coordinateKey(coordinates);
 }
 
+/**
+ * Cache key for one city's discovery results. Case and surrounding whitespace
+ * must not split the cache — "osaka" and "Osaka " are the same search — but the
+ * country code stays, because city names repeat across the world.
+ */
+export function discoveryCityKey(city: string, countryCode?: string): string {
+  return `${city.trim().toLowerCase()}|${(countryCode || '').trim().toUpperCase()}`;
+}
+
+/**
+ * A stable identity for one review inside a place.
+ *
+ * Index position is *not* stable: providers order reviews by relevance, so the
+ * same review moves between fetches and an index-based key would rewrite every
+ * row on every refresh. Publication time plus author survives reordering, and
+ * falls back to the index only when neither is present.
+ */
+export function reviewItemKey(
+  placeId: string,
+  review: { publishTime?: string; author?: string },
+  index: number,
+): string {
+  const stable = [review.publishTime, review.author].filter(Boolean).join('~');
+  return `${placeId}:${stable || `i${index}`}`;
+}
+
+/** Set key for "was this place asked of this source recently". */
+export function probeKey(canonicalPlaceId: string, source: string): string {
+  return `${canonicalPlaceId}|${source}`;
+}
+
+/**
+ * Whether one place's one evidence source is worth paying for right now.
+ *
+ * This is the decision that spends money, so it lives here as a pure function
+ * with its own tests rather than as a condition buried in a request handler.
+ *
+ * - An unconfigured provider is never called, and — importantly — is never
+ *   recorded as probed, or adding the key later would be ignored until the
+ *   probe expired.
+ * - A place with no canonical identity cannot be cached at all, so it is always
+ *   fetched. That is the honest trade: correct data, uncached.
+ * - A fresh probe means we asked recently. That answer stands even when the
+ *   provider returned nothing, which is the case a document cache cannot record.
+ */
+export function shouldFetchEvidence(input: {
+  configured: boolean;
+  canonicalPlaceId?: string;
+  source: string;
+  freshProbes: ReadonlySet<string>;
+}): boolean {
+  if (!input.configured) return false;
+  if (!input.canonicalPlaceId) return true;
+  return !input.freshProbes.has(probeKey(input.canonicalPlaceId, input.source));
+}
+
+/**
+ * `source_documents` is unique on (source, source_url), but every review of one
+ * place shares that place's page URL. Without a distinguishing fragment all five
+ * reviews collapse onto a single row and four are silently lost.
+ *
+ * The fragment keeps the URL pointing at the same page a traveller would open,
+ * while making each review its own cache row.
+ */
+export function evidenceSourceUrl(pageUrl: string, itemKey?: string): string {
+  if (!itemKey) return pageUrl;
+  const [base] = pageUrl.split('#');
+  return `${base}#${encodeURIComponent(itemKey)}`;
+}
+
 /** True while `expiresAt` is still in the future. Absent/invalid → stale. */
 export function isFresh(expiresAt: string | null | undefined, now: number = Date.now()): boolean {
   if (!expiresAt) return false;

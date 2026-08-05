@@ -3,11 +3,13 @@ import { EMPTY_PROVIDER_RUNTIME, type ProviderRuntime } from './destinationCapab
 import {
   capabilityFor,
   discoverPlaces,
+  fetchPlaceEvidence,
   loadProviderRuntime,
   parseCurrentEvents,
   parseWeatherRisk,
   resetProviderRuntimeCache,
 } from './discoveryRuntime';
+import type { PlaceCandidate } from './destinationIntelligence';
 
 beforeEach(() => resetProviderRuntimeCache());
 
@@ -116,47 +118,90 @@ describe('discovering places', () => {
     }],
   });
 
+  const candidate = (id: string, providerPlaceId?: string): PlaceCandidate =>
+    ({ id, providerPlaceId, name: `Place ${id}` } as PlaceCandidate);
+
+  it('does not buy evidence for the whole shortlist at discovery time', async () => {
+    const invoke = vi.fn().mockResolvedValue([
+      { id: 'cand-1', providerPlaceId: 'g1', name: 'One' },
+      { id: 'cand-2', providerPlaceId: 'g2', name: 'Two' },
+    ]);
+    const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
+
+    expect(outcome.candidates).toHaveLength(2);
+    // Reviews are the most expensive data the app buys. Discovery must never
+    // trigger them for places the traveller has not looked at.
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalledWith('travel-evidence', expect.anything());
+    expect(outcome.evidenceSummaries).toEqual({});
+  });
+
   it('summarises corroborated queue times and keys them by candidate id', async () => {
-    const invoke = vi.fn(async (name: string) => {
-      if (name === 'travel-discover') {
-        return [
-          { id: 'cand-1', providerPlaceId: 'g1', name: 'Corroborated' },
-          { id: 'cand-2', providerPlaceId: 'g2', name: 'Single mention' },
-        ];
-      }
-      return {
-        documents: [
-          document('g1', 40), document('g1', 50), document('g1', 45),
-          // One lone mention must not be allowed to reshape a day.
-          document('g2', 120),
-        ],
-      };
+    const invoke = vi.fn().mockResolvedValue({
+      documents: [
+        document('g1', 40), document('g1', 50), document('g1', 45),
+        // One lone mention must not be allowed to reshape a day.
+        document('g2', 120),
+      ],
     });
 
-    const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
+    const digest = await fetchPlaceEvidence(
+      { city: 'Melbourne', countryCode: 'AU' },
+      [candidate('cand-1', 'g1'), candidate('cand-2', 'g2')],
+      invoke,
+    );
     // Keyed by candidate id, not the provider's place id.
-    expect(outcome.queueEvidence).toEqual({ 'cand-1': 45 });
-    expect(outcome.evidenceSummaries['cand-1'].sourceCount).toBe(3);
-    expect(outcome.evidenceSummaries['cand-1'].canonicalPlaceId).toBe('cand-1');
+    expect(digest.queueEvidence).toEqual({ 'cand-1': 45 });
+    expect(digest.evidenceSummaries['cand-1'].sourceCount).toBe(3);
+    expect(digest.evidenceSummaries['cand-1'].canonicalPlaceId).toBe('cand-1');
+  });
+
+  it('asks only for the candidates it was given', async () => {
+    const invoke = vi.fn().mockResolvedValue({ documents: [] });
+    await fetchPlaceEvidence(
+      { city: 'Melbourne', countryCode: 'AU' },
+      [candidate('cand-1', 'g1'), candidate('cand-2', 'g2')],
+      invoke,
+      { provider: 'google' },
+    );
+    expect(invoke).toHaveBeenCalledWith('travel-evidence', expect.objectContaining({
+      placeIds: ['g1', 'g2'],
+      provider: 'google',
+    }));
+  });
+
+  it('never calls the provider for candidates with no provider id', async () => {
+    const invoke = vi.fn();
+    const digest = await fetchPlaceEvidence(
+      { city: 'Melbourne', countryCode: 'AU' },
+      [candidate('cand-1')],
+      invoke,
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    expect(digest.evidenceSummaries).toEqual({});
   });
 
   it('derives trend strength from recent evidence when the backend omits it', async () => {
-    const invoke = vi.fn(async (name: string) => {
-      if (name === 'travel-discover') return [{ id: 'cand-1', providerPlaceId: 'g1', name: 'Place' }];
-      return { documents: [document('g1'), document('g1'), document('g1')] };
+    const invoke = vi.fn().mockResolvedValue({
+      documents: [document('g1'), document('g1'), document('g1')],
     });
-    const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
-    expect(outcome.trends['cand-1']).toBeGreaterThan(0);
+    const digest = await fetchPlaceEvidence(
+      { city: 'Melbourne', countryCode: 'AU' },
+      [candidate('cand-1', 'g1')],
+      invoke,
+    );
+    expect(digest.trends['cand-1']).toBeGreaterThan(0);
   });
 
-  it('still returns places when evidence gathering fails', async () => {
-    const invoke = vi.fn(async (name: string) => {
-      if (name === 'travel-discover') return [{ id: 'p1', name: 'Place' }];
-      throw new Error('evidence provider down');
-    });
-    const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
-    expect(outcome.candidates).toHaveLength(1);
-    expect(outcome.queueEvidence).toEqual({});
+  it('degrades to an empty digest when evidence gathering fails', async () => {
+    const invoke = vi.fn().mockRejectedValue(new Error('evidence provider down'));
+    const digest = await fetchPlaceEvidence(
+      { city: 'Melbourne', countryCode: 'AU' },
+      [candidate('cand-1', 'g1')],
+      invoke,
+    );
+    expect(digest.queueEvidence).toEqual({});
+    expect(digest.evidenceSummaries).toEqual({});
   });
 
   it('returns an honest empty result when there is no provider and no fixture', async () => {

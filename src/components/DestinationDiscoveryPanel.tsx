@@ -17,7 +17,7 @@ import { AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
 import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
-import { capabilityFor, discoverPlaces, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
+import { capabilityFor, discoverPlaces, fetchPlaceEvidence, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
 import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { hapticMedium, hapticSuccess, hapticTap } from '../lib/haptics';
 import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
@@ -70,6 +70,13 @@ const formatDuration = (minutes: number) => minutes >= 120 && minutes % 60 === 0
   : `${minutes} min`;
 
 const DESKTOP_REVIEW_MODE_KEY = 'planitenary:destination-review-mode';
+
+/**
+ * How far ahead of the current card evidence is gathered. Enough that swiping
+ * feels instant, small enough that a shortlist the traveller abandons early
+ * costs almost nothing.
+ */
+const EVIDENCE_PREFETCH_COUNT = 4;
 
 const formatPrice = (priceLevel?: number) => {
   if (priceLevel === undefined) return 'Cost unknown';
@@ -769,6 +776,45 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const currentDeckCard = (focusedCandidateId
     ? pendingDeck.find(({ candidate }) => candidate.id === focusedCandidateId)
     : undefined) || pendingDeck[0] || null;
+
+  /**
+   * Evidence is gathered for the cards the traveller is actually looking at,
+   * never for the whole shortlist. Reviews are the most expensive data the app
+   * buys, so a sixty-place list abandoned after four cards must cost four
+   * places' worth of provider calls, not sixty.
+   *
+   * Ids already asked for are remembered so re-ranking — which happens every
+   * time evidence arrives — cannot re-request them.
+   */
+  const evidenceRequestedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (phase !== 'review' || usingFixture || !isSupabaseConfigured()) return;
+    const visible = [
+      ...(currentDeckCard ? [currentDeckCard] : []),
+      ...pendingDeck.slice(0, EVIDENCE_PREFETCH_COUNT),
+    ];
+    const wanted = visible
+      .map(({ candidate }) => candidate)
+      .filter((candidate) => candidate.providerPlaceId && !evidenceRequestedRef.current.has(candidate.id));
+    const unique = [...new Map(wanted.map((candidate) => [candidate.id, candidate])).values()];
+    if (unique.length === 0) return;
+
+    unique.forEach((candidate) => evidenceRequestedRef.current.add(candidate.id));
+    let active = true;
+    void fetchPlaceEvidence(
+      { city: capability.destination.city, countryCode: capability.destination.countryCode },
+      unique,
+      invokeTravelFunction,
+      { provider: capability.places.provider },
+    ).then((digest) => {
+      if (!active) return;
+      // Merged, not replaced: each batch only carries the places it asked for.
+      setQueueEvidence((previous) => ({ ...previous, ...digest.queueEvidence }));
+      setEvidenceSummaries((previous) => ({ ...previous, ...digest.evidenceSummaries }));
+      setTrends((previous) => ({ ...previous, ...digest.trends }));
+    });
+    return () => { active = false; };
+  }, [phase, usingFixture, currentDeckCard, pendingDeck, capability.destination.city, capability.destination.countryCode, capability.places.provider]);
   const deckContext = useMemo<CandidateContext | undefined>(() => {
     if (!currentDeckCard) return undefined;
     const id = currentDeckCard.candidate.id;
@@ -818,6 +864,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         isSupabaseConfigured() ? invokeTravelFunction : undefined,
       );
       setUsingFixture(outcome.usingFixture);
+      // Discovery no longer carries evidence; it arrives per card from the
+      // effect below. Clear the previous run's evidence and the record of what
+      // was asked for, so a new city starts genuinely empty.
+      evidenceRequestedRef.current = new Set();
       setQueueEvidence(outcome.queueEvidence);
       setEvidenceSummaries(outcome.evidenceSummaries);
       setTrends(outcome.trends);

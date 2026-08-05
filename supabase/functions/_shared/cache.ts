@@ -13,7 +13,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { routePairKey } from './cacheKeys.ts';
+import { probeKey, routePairKey } from './cacheKeys.ts';
 
 let cachedClient: SupabaseClient | null | undefined;
 
@@ -152,5 +152,380 @@ export async function writeWeatherCache(client: SupabaseClient, rows: WeatherCac
       );
   } catch {
     // Best-effort.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Discovery cache
+// ---------------------------------------------------------------------------
+
+/**
+ * The cached candidate list for one city and provider, or null on a miss. The
+ * payload is returned verbatim: it is exactly what the function would have
+ * produced live, so the caller needs no separate cached/live code path.
+ */
+export async function readDiscoveryCache(
+  client: SupabaseClient,
+  cityKey: string,
+  provider: string,
+): Promise<unknown[] | null> {
+  try {
+    const { data, error } = await client
+      .from('discovery_cache')
+      .select('payload')
+      .eq('city_key', cityKey)
+      .eq('provider', provider)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+    if (error || !data || !Array.isArray(data.payload)) return null;
+    return data.payload as unknown[];
+  } catch {
+    return null;
+  }
+}
+
+export async function writeDiscoveryCache(
+  client: SupabaseClient,
+  cityKey: string,
+  provider: string,
+  payload: unknown[],
+  expiresAt: string,
+): Promise<void> {
+  if (payload.length === 0) return;
+  try {
+    await client
+      .from('discovery_cache')
+      .upsert(
+        { city_key: cityKey, provider, payload, expires_at: expiresAt, retrieved_at: new Date().toISOString() },
+        { onConflict: 'city_key,provider' },
+      );
+  } catch {
+    // Best-effort.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Canonical place identity
+// ---------------------------------------------------------------------------
+
+/** The minimum a candidate must carry to become a canonical place row. */
+export interface CanonicalPlaceInput {
+  providerPlaceId: string;
+  name: string;
+  city: string;
+  countryCode: string;
+  coordinates: [number, number];
+  region?: string;
+  neighbourhood?: string;
+  address?: string;
+  website?: string;
+  phone?: string;
+}
+
+/** Provider place id → canonical place uuid, for ids already linked. */
+export async function readCanonicalPlaceIds(
+  client: SupabaseClient,
+  provider: string,
+  providerPlaceIds: string[],
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const ids = [...new Set(providerPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return result;
+  try {
+    const { data, error } = await client
+      .from('place_provider_links')
+      .select('provider_place_id, canonical_place_id')
+      .eq('provider', provider)
+      .in('provider_place_id', ids);
+    if (error || !data) return result;
+    for (const row of data) {
+      if (row.provider_place_id && row.canonical_place_id) {
+        result.set(String(row.provider_place_id), String(row.canonical_place_id));
+      }
+    }
+  } catch {
+    // Best-effort: an unresolved id simply misses the cache.
+  }
+  return result;
+}
+
+/**
+ * Ensure every candidate has a canonical place and a provider link, and return
+ * the full provider-id → canonical-id map.
+ *
+ * Identity resolution across providers (the same museum found by both Google and
+ * Amap) is deliberately *not* attempted here. Collapsing two providers onto one
+ * canonical place is a matching problem with real false-positive cost, and
+ * `place_provider_links.match_confidence` exists to record that judgement when
+ * it is made. Until then one provider id maps to one canonical place, which is
+ * always correct if sometimes redundant.
+ */
+export async function linkCanonicalPlaces(
+  client: SupabaseClient,
+  provider: string,
+  places: CanonicalPlaceInput[],
+): Promise<Map<string, string>> {
+  const known = await readCanonicalPlaceIds(client, provider, places.map((place) => place.providerPlaceId));
+  const missing = places.filter((place) => !known.has(place.providerPlaceId));
+  if (missing.length === 0) return known;
+
+  try {
+    // Ids are generated here rather than read back from `RETURNING`, so the
+    // place → id mapping never depends on the database preserving insert order.
+    const rows = missing.map((place) => ({
+      id: crypto.randomUUID(),
+      providerPlaceId: place.providerPlaceId,
+      primary_name: place.name,
+      city: place.city,
+      region: place.region ?? null,
+      country_code: place.countryCode || 'ZZ',
+      neighbourhood: place.neighbourhood ?? null,
+      latitude: place.coordinates[0],
+      longitude: place.coordinates[1],
+      address: place.address ?? null,
+      website: place.website ?? null,
+      phone: place.phone ?? null,
+    }));
+
+    const { error } = await client
+      .from('canonical_places')
+      .insert(rows.map(({ providerPlaceId: _ignored, ...row }) => row));
+    if (error) return known;
+
+    const links = rows.map((row) => ({
+      provider,
+      provider_place_id: row.providerPlaceId,
+      canonical_place_id: row.id,
+      match_confidence: 1,
+      matched_by: ['provider-id'],
+    }));
+    const { error: linkError } = await client
+      .from('place_provider_links')
+      .upsert(links, { onConflict: 'provider,provider_place_id' });
+    if (linkError) return known;
+
+    for (const link of links) known.set(link.provider_place_id, link.canonical_place_id);
+  } catch {
+    // Best-effort: unlinked places still work, they just are not cached.
+  }
+  return known;
+}
+
+// ---------------------------------------------------------------------------
+// Evidence cache
+// ---------------------------------------------------------------------------
+
+export interface CachedClaim {
+  type: string;
+  summary: string;
+  value?: number;
+  unit?: string;
+  strength: number;
+  excerpt?: string;
+}
+
+export interface CachedEvidence {
+  canonicalPlaceId: string;
+  source: string;
+  sourceUrl: string;
+  sourceItemId?: string;
+  publishedAt?: string;
+  retrievedAt: string;
+  authorType: string;
+  disclosure: string;
+  confidence: number;
+  claims: CachedClaim[];
+}
+
+/**
+ * Every live evidence document for the given canonical places, with its claims,
+ * grouped by canonical place id. Expired rows are excluded rather than returned
+ * and relabelled: this is the cost cache, and a stale row here means we pay the
+ * provider again, which is the correct trade.
+ */
+export async function readEvidenceCache(
+  client: SupabaseClient,
+  canonicalPlaceIds: string[],
+): Promise<Map<string, CachedEvidence[]>> {
+  const result = new Map<string, CachedEvidence[]>();
+  const ids = [...new Set(canonicalPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return result;
+
+  try {
+    // Documents and claims are read separately rather than as one embedded
+    // select. PostgREST resolves the embed happily at runtime, but without
+    // generated database types supabase-js cannot infer the nested shape and
+    // the whole row degrades to an error type. Two flat queries stay typed.
+    // One string literal, never a concatenation: supabase-js infers the row
+    // shape from the *literal type* of this argument, and a built-up string
+    // collapses every column to an error type.
+    const { data: documentRows, error } = await client
+      .from('source_documents')
+      .select('id, canonical_place_id, source, source_url, source_item_id, published_at, retrieved_at, author_type, disclosure, confidence')
+      .in('canonical_place_id', ids)
+      .gt('expires_at', new Date().toISOString());
+    if (error || !documentRows || documentRows.length === 0) return result;
+
+    const documentIds = documentRows.map((row) => String(row.id));
+    const claimsByDocument = new Map<string, CachedClaim[]>();
+    const { data: claimRows } = await client
+      .from('travel_claims')
+      .select('source_document_id, claim_type, summary, value, unit, strength, excerpt')
+      .in('source_document_id', documentIds);
+
+    for (const claim of claimRows || []) {
+      const documentId = String(claim.source_document_id);
+      const parsed: CachedClaim = {
+        type: String(claim.claim_type),
+        summary: String(claim.summary),
+        // Postgres `numeric` arrives as a string; a claim's value is what makes
+        // a queue schedulable, so it must survive the round trip as a number.
+        value: claim.value != null && Number.isFinite(Number(claim.value)) ? Number(claim.value) : undefined,
+        unit: claim.unit ? String(claim.unit) : undefined,
+        strength: Number.isFinite(Number(claim.strength)) ? Number(claim.strength) : 0.5,
+        excerpt: claim.excerpt ? String(claim.excerpt) : undefined,
+      };
+      const bucket = claimsByDocument.get(documentId);
+      if (bucket) bucket.push(parsed);
+      else claimsByDocument.set(documentId, [parsed]);
+    }
+
+    for (const row of documentRows) {
+      const placeId = row.canonical_place_id ? String(row.canonical_place_id) : '';
+      if (!placeId) continue;
+      const entry: CachedEvidence = {
+        canonicalPlaceId: placeId,
+        source: String(row.source),
+        sourceUrl: String(row.source_url),
+        sourceItemId: row.source_item_id ? String(row.source_item_id) : undefined,
+        publishedAt: row.published_at ? String(row.published_at) : undefined,
+        retrievedAt: String(row.retrieved_at),
+        authorType: String(row.author_type),
+        disclosure: String(row.disclosure),
+        confidence: Number.isFinite(Number(row.confidence)) ? Number(row.confidence) : 0.5,
+        claims: claimsByDocument.get(String(row.id)) || [],
+      };
+      const bucket = result.get(placeId);
+      if (bucket) bucket.push(entry);
+      else result.set(placeId, [entry]);
+    }
+  } catch {
+    // Best-effort: a read failure just means we fetch live.
+  }
+  return result;
+}
+
+/**
+ * Which (place, source) pairs were asked recently enough that asking again
+ * would be waste, as a set of `probeKey` strings.
+ *
+ * This is what makes "this place has no reviews" a cacheable answer. Without it
+ * an empty result is indistinguishable from a cache miss and the provider is
+ * called again on every run.
+ */
+export async function readEvidenceProbes(
+  client: SupabaseClient,
+  canonicalPlaceIds: string[],
+): Promise<Set<string>> {
+  const fresh = new Set<string>();
+  const ids = [...new Set(canonicalPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return fresh;
+  try {
+    const { data, error } = await client
+      .from('evidence_probes')
+      .select('canonical_place_id, source')
+      .in('canonical_place_id', ids)
+      .gt('expires_at', new Date().toISOString());
+    if (error || !data) return fresh;
+    for (const row of data) {
+      fresh.add(probeKey(String(row.canonical_place_id), String(row.source)));
+    }
+  } catch {
+    // Best-effort: an unreadable probe log just means we re-ask.
+  }
+  return fresh;
+}
+
+export async function writeEvidenceProbes(
+  client: SupabaseClient,
+  probes: Array<{ canonicalPlaceId: string; source: string }>,
+  expiresAt: string,
+): Promise<void> {
+  if (probes.length === 0) return;
+  try {
+    await client
+      .from('evidence_probes')
+      .upsert(
+        probes.map((probe) => ({
+          canonical_place_id: probe.canonicalPlaceId,
+          source: probe.source,
+          retrieved_at: new Date().toISOString(),
+          expires_at: expiresAt,
+        })),
+        { onConflict: 'canonical_place_id,source' },
+      );
+  } catch {
+    // Best-effort.
+  }
+}
+
+/**
+ * Persist freshly fetched evidence and its claims.
+ *
+ * Documents upsert on (source, source_url), so a refreshed review updates in
+ * place. Claims are deleted and reinserted for the affected documents rather
+ * than merged — re-extraction can legitimately *remove* a claim, and a merge
+ * would leave the retracted one behind forever.
+ */
+export async function writeEvidenceCache(
+  client: SupabaseClient,
+  documents: CachedEvidence[],
+  expiresAt: string,
+): Promise<void> {
+  if (documents.length === 0) return;
+  try {
+    const { data, error } = await client
+      .from('source_documents')
+      .upsert(
+        documents.map((document) => ({
+          canonical_place_id: document.canonicalPlaceId,
+          source: document.source,
+          source_url: document.sourceUrl,
+          source_item_id: document.sourceItemId ?? null,
+          published_at: document.publishedAt ?? null,
+          retrieved_at: document.retrievedAt,
+          author_type: document.authorType,
+          disclosure: document.disclosure,
+          confidence: document.confidence,
+          expires_at: expiresAt,
+        })),
+        { onConflict: 'source,source_url' },
+      )
+      .select('id, source_url');
+    if (error || !data) return;
+
+    const idByUrl = new Map(data.map((row) => [String(row.source_url), String(row.id)]));
+    const documentIds = [...idByUrl.values()];
+    if (documentIds.length > 0) {
+      await client.from('travel_claims').delete().in('source_document_id', documentIds);
+    }
+
+    const claimRows = documents.flatMap((document) => {
+      const documentId = idByUrl.get(document.sourceUrl);
+      if (!documentId) return [];
+      return document.claims.map((claim) => ({
+        source_document_id: documentId,
+        canonical_place_id: document.canonicalPlaceId,
+        claim_type: claim.type,
+        summary: claim.summary,
+        value: claim.value ?? null,
+        unit: claim.unit ?? null,
+        strength: claim.strength,
+        excerpt: claim.excerpt ?? null,
+      }));
+    });
+    if (claimRows.length > 0) await client.from('travel_claims').insert(claimRows);
+  } catch {
+    // Best-effort: a failed write means the next request re-fetches.
   }
 }

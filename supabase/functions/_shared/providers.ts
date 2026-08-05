@@ -137,6 +137,22 @@ export async function fetchJson(
 }
 
 /**
+ * Whether the Routes API is enabled is a deployment fact, not a per-request one:
+ * it changes when someone edits the Cloud console, not between page loads. The
+ * probe is a real, billable Routes call, so re-running it for every capability
+ * request means paying repeatedly to re-learn the same answer.
+ *
+ * Held in module scope, which an Edge Function instance reuses across requests.
+ * A cold start re-probes, which is the correct trade: at most one call per
+ * instance per hour rather than one per capability request.
+ */
+let routesProbe: { value: boolean; checkedAt: number } | null = null;
+const ROUTES_PROBE_TTL_MS = 60 * 60 * 1000;
+
+/** Test seam: drop the memoised probe result. */
+export const resetGoogleRoutesProbe = () => { routesProbe = null; };
+
+/**
  * Verify Routes with fixed public coordinates, never user-supplied locations.
  * This prevents a configured-but-disabled Routes API from being presented as
  * live while keeping health checks free of private trip data.
@@ -144,6 +160,7 @@ export async function fetchJson(
 export async function probeGoogleRoutes(): Promise<boolean> {
   const key = secrets.google();
   if (!key) return false;
+  if (routesProbe && Date.now() - routesProbe.checkedAt < ROUTES_PROBE_TTL_MS) return routesProbe.value;
   try {
     await fetchJson('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
       method: 'POST',
@@ -158,8 +175,12 @@ export async function probeGoogleRoutes(): Promise<boolean> {
         travelMode: 'WALK',
       }),
     }, 5000);
+    routesProbe = { value: true, checkedAt: Date.now() };
     return true;
   } catch {
+    // A negative result is cached too. Without that, a deployment with Routes
+    // disabled retries the failing (still billable) call on every request.
+    routesProbe = { value: false, checkedAt: Date.now() };
     return false;
   }
 }

@@ -14,6 +14,14 @@ import {
   ProviderError,
   secrets,
 } from '../_shared/providers.ts';
+import {
+  type CanonicalPlaceInput,
+  linkCanonicalPlaces,
+  readDiscoveryCache,
+  serviceClient,
+  writeDiscoveryCache,
+} from '../_shared/cache.ts';
+import { discoveryCityKey } from '../_shared/cacheKeys.ts';
 
 interface DiscoverBody {
   city?: string;
@@ -378,6 +386,53 @@ Deno.serve(async (request) => {
       ? body.provider
       : countryCode === 'CN' && secrets.amap() ? 'amap'
         : countryCode === 'CN' && secrets.baidu() ? 'baidu' : 'google';
+
+    // Read-through: repeating a search for the same city must not re-buy the
+    // provider's results. Place identity is the slowest-moving data the app
+    // holds — 30 days normally, 7 near travel — so this is the single largest
+    // reduction in provider calls available.
+    const cache = serviceClient();
+    const cityKey = discoveryCityKey(city, countryCode);
+
+    /**
+     * Give every candidate a canonical identity while we hold the full record.
+     * The evidence cache keys on canonical place id and has no coordinates of
+     * its own to create one from later, so a place that never gets linked here
+     * can never have its (expensive) reviews cached.
+     *
+     * Runs on the cache-hit path too: linking is best-effort, and if it failed
+     * once, leaving it unrepaired would mean paying for that place's reviews on
+     * every single run until the discovery cache expires.
+     */
+    const ensureCanonicalPlaces = async (records: unknown[]) => {
+      if (!cache) return;
+      const places: CanonicalPlaceInput[] = records.flatMap((record) => {
+        const candidate = record as Partial<CanonicalPlaceInput> & { coordinates?: [number, number] };
+        if (!candidate.providerPlaceId || !candidate.name || !candidate.coordinates) return [];
+        return [{
+          providerPlaceId: candidate.providerPlaceId,
+          name: candidate.name,
+          city: candidate.city || city,
+          countryCode: candidate.countryCode || countryCode,
+          coordinates: candidate.coordinates,
+          neighbourhood: candidate.neighbourhood,
+          address: candidate.address,
+          website: candidate.website,
+          phone: candidate.phone,
+        }];
+      });
+      if (places.length > 0) await linkCanonicalPlaces(cache, selectedProvider, places);
+    };
+
+    if (cache) {
+      const cached = await readDiscoveryCache(cache, cityKey, selectedProvider);
+      if (cached && cached.length > 0) {
+        const served = cached.slice(0, limit);
+        await ensureCanonicalPlaces(served);
+        return json(served);
+      }
+    }
+
     const candidates = selectedProvider === 'amap'
       ? await searchAmap(city, countryCode, limit, body.travelStartsInDays)
       : selectedProvider === 'baidu'
@@ -386,6 +441,18 @@ Deno.serve(async (request) => {
     if (candidates.length === 0) {
       return json({ error: `No places were returned for ${city}.` }, 404);
     }
+
+    if (cache) {
+      await writeDiscoveryCache(
+        cache,
+        cityKey,
+        selectedProvider,
+        candidates,
+        expiryFor('placeIdentity', body.travelStartsInDays),
+      );
+      await ensureCanonicalPlaces(candidates);
+    }
+
     return json(candidates);
   } catch (error) {
     const status = error instanceof ProviderError ? error.status : 502;

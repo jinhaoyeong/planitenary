@@ -222,9 +222,56 @@ function digestEvidence(
   return { queueEvidence, evidenceSummaries, trends };
 }
 
+/** The empty digest, used whenever evidence is unavailable or not yet fetched. */
+export const EMPTY_EVIDENCE_DIGEST: EvidenceDigest = {
+  queueEvidence: {},
+  evidenceSummaries: {},
+  trends: {},
+};
+
+export type EvidenceDigest = Pick<DiscoveryOutcome, 'queueEvidence' | 'evidenceSummaries' | 'trends'>;
+
+/**
+ * Gather evidence for a specific handful of candidates.
+ *
+ * Deliberately *not* called for the whole shortlist at discovery time. Reviews
+ * are the most expensive data the app buys and each place also costs YouTube
+ * quota, so evidence is fetched for the places a traveller is actually looking
+ * at. A sixty-place shortlist that the traveller abandons after four cards must
+ * not cost sixty places' worth of provider calls.
+ *
+ * Never throws: a plan built from real places is still worth having even when
+ * review gathering is down.
+ */
+export async function fetchPlaceEvidence(
+  destination: Pick<TripDestination, 'city' | 'countryCode'>,
+  candidates: PlaceCandidate[],
+  invoke?: (name: string, body: unknown) => Promise<unknown>,
+  options?: { provider?: string; travelStartsInDays?: number },
+): Promise<EvidenceDigest> {
+  const withProviderId = candidates.filter((candidate) => candidate.providerPlaceId);
+  if (!invoke || withProviderId.length === 0) return EMPTY_EVIDENCE_DIGEST;
+
+  try {
+    const payload = await invoke('travel-evidence', {
+      city: destination.city,
+      placeIds: withProviderId.map((candidate) => candidate.providerPlaceId),
+      placeNames: withProviderId.map((candidate) => candidate.name),
+      provider: options?.provider,
+      travelStartsInDays: options?.travelStartsInDays,
+    });
+    return digestEvidence(payload, withProviderId);
+  } catch {
+    return EMPTY_EVIDENCE_DIGEST;
+  }
+}
+
 /**
  * Fetch place candidates for a destination through whichever path is available.
  * Live provider first; captured fixture second; honest empty result last.
+ *
+ * Returns no evidence: that is a separate, lazy call. See
+ * {@link fetchPlaceEvidence}.
  */
 export async function discoverPlaces(
   destination: Pick<TripDestination, 'city' | 'region' | 'countryCode'>,
@@ -243,23 +290,11 @@ export async function discoverPlaces(
       });
       const candidates = Array.isArray(payload) ? (payload as PlaceCandidate[]) : [];
       if (candidates.length > 0) {
-        // Evidence is a separate, optional call: a plan built from real places
-        // is still worth having even if review gathering is unavailable.
-        let evidencePayload: unknown = null;
-        try {
-          evidencePayload = await invoke('travel-evidence', {
-            city: destination.city,
-            placeIds: candidates.map((candidate) => candidate.providerPlaceId).filter(Boolean),
-            placeNames: candidates.map((candidate) => candidate.name),
-          });
-        } catch {
-          evidencePayload = null;
-        }
         return {
           candidates,
           capability,
           usingFixture: false,
-          ...digestEvidence(evidencePayload, candidates),
+          ...EMPTY_EVIDENCE_DIGEST,
         };
       }
     } catch (error) {

@@ -6,11 +6,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   coordinateKey,
+  discoveryCityKey,
   enumerateDates,
+  evidenceSourceUrl,
   isFresh,
   pairsNeedingProvider,
+  probeKey,
+  reviewItemKey,
   routePairKey,
   routePointKey,
+  shouldFetchEvidence,
 } from '../../supabase/functions/_shared/cacheKeys';
 
 describe('coordinate keys', () => {
@@ -21,6 +26,99 @@ describe('coordinate keys', () => {
 
   it('keeps genuinely different places apart', () => {
     expect(coordinateKey([-37.8136, 144.9631])).not.toBe(coordinateKey([-37.8677, 144.9740]));
+  });
+});
+
+describe('discovery city keys', () => {
+  it('does not split the cache on case or stray whitespace', () => {
+    expect(discoveryCityKey(' Osaka ', 'jp')).toBe(discoveryCityKey('osaka', 'JP'));
+  });
+
+  it('keeps the two Georgetowns apart', () => {
+    expect(discoveryCityKey('Georgetown', 'MY')).not.toBe(discoveryCityKey('Georgetown', 'GY'));
+  });
+
+  it('tolerates a missing country code rather than throwing', () => {
+    expect(discoveryCityKey('Osaka')).toBe('osaka|');
+  });
+});
+
+describe('evidence keys', () => {
+  it('identifies a review by publication and author, not by position', () => {
+    const review = { publishTime: '2026-07-01T00:00:00Z', author: 'Aiko' };
+    // Providers order reviews by relevance, so the same review moves between
+    // fetches. An index-based key would rewrite every row on every refresh.
+    expect(reviewItemKey('g1', review, 0)).toBe(reviewItemKey('g1', review, 4));
+  });
+
+  it('falls back to position only when there is nothing stable to use', () => {
+    expect(reviewItemKey('g1', {}, 2)).toBe('g1:i2');
+  });
+
+  it('keeps two reviews of one place on separate cache rows', () => {
+    // source_documents is unique on (source, source_url) and every review of a
+    // place shares that place's page URL — without a fragment, four of five
+    // reviews are silently lost.
+    const page = 'https://maps.google/place/x';
+    expect(evidenceSourceUrl(page, 'g1:a')).not.toBe(evidenceSourceUrl(page, 'g1:b'));
+    expect(evidenceSourceUrl(page, 'g1:a').startsWith(page)).toBe(true);
+  });
+
+  it('leaves a URL alone when there is no item key', () => {
+    expect(evidenceSourceUrl('https://maps.google/place/x')).toBe('https://maps.google/place/x');
+  });
+
+  it('does not let one fresh source suppress another', () => {
+    expect(probeKey('place-1', 'youtube')).not.toBe(probeKey('place-1', 'google-places'));
+  });
+});
+
+describe('deciding whether to pay a provider', () => {
+  const fetchFor = (input: Partial<Parameters<typeof shouldFetchEvidence>[0]> = {}) =>
+    shouldFetchEvidence({
+      configured: true,
+      canonicalPlaceId: 'place-1',
+      source: 'google-places',
+      freshProbes: new Set<string>(),
+      ...input,
+    });
+
+  it('fetches when nothing has been asked recently', () => {
+    expect(fetchFor()).toBe(true);
+  });
+
+  it('does not re-ask a source probed within its freshness window', () => {
+    expect(fetchFor({ freshProbes: new Set([probeKey('place-1', 'google-places')]) })).toBe(false);
+  });
+
+  it('treats "asked and got nothing" as an answer', () => {
+    // The whole point of the probe log: an empty result is cacheable, and a
+    // place with no reviews must not be re-bought on every discovery run.
+    const freshProbes = new Set([probeKey('place-1', 'google-places')]);
+    expect(fetchFor({ freshProbes })).toBe(false);
+  });
+
+  it('lets a fresh probe for one source not suppress another', () => {
+    const freshProbes = new Set([probeKey('place-1', 'youtube')]);
+    expect(fetchFor({ freshProbes, source: 'google-places' })).toBe(true);
+  });
+
+  it('never calls an unconfigured provider', () => {
+    expect(fetchFor({ configured: false })).toBe(false);
+  });
+
+  it('does not let an unconfigured provider look probed', () => {
+    // If an absent key recorded a probe, adding that key later would be ignored
+    // until the probe expired — days of silently missing evidence.
+    const freshProbes = new Set<string>();
+    shouldFetchEvidence({
+      configured: false, canonicalPlaceId: 'place-1', source: 'google-places', freshProbes,
+    });
+    expect(freshProbes.size).toBe(0);
+  });
+
+  it('still fetches for a place that has no canonical identity to cache under', () => {
+    expect(fetchFor({ canonicalPlaceId: undefined })).toBe(true);
   });
 });
 
