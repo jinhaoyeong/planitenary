@@ -1004,7 +1004,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         <section className="destination-discovery-shell destination-discovery-intro is-compact">
           <details className="destination-build-fold">
             <summary>
-              <span>Build itinerary</span>
+              <span className="font-display">Build itinerary</span>
               <ChevronDown className="w-4 h-4 destination-build-fold-chevron" aria-hidden="true" />
             </summary>
             <div className="destination-build-fold-body">

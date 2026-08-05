@@ -41,8 +41,11 @@ body.planner-intelligence-active .pet-overlay {
   list-style: none;
   cursor: pointer;
   color: var(--ink);
-  font-family: var(--font-serif);
-  font-size: 1.25rem;
+}
+
+.destination-build-fold > summary .font-display {
+  font-family: var(--font-serif) !important;
+  font-size: 1.5rem;
   font-weight: 400;
   letter-spacing: -0.01em;
   line-height: 1.15;
@@ -1207,17 +1210,75 @@ body.planner-intelligence-active .pet-overlay {
   border-top: 1px solid var(--border);
   background: transparent;
   color: var(--ink);
-  font-family: var(--font-serif);
-  font-size: 1.25rem;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
   cursor: pointer;
   text-align: left;
 }
 
-.planner-improve-section-toggle span {
+.planner-improve-section-toggle .font-display {
+  font-family: var(--font-serif) !important;
+  font-size: 1.5rem;
+  font-weight: 400;
   letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.planner-organise-panel h3.font-display {
+  font-family: var(--font-serif) !important;
+}
+
+.itinerary-day-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 0.65rem;
+  row-gap: 0;
+}
+
+.itinerary-day-drag {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+}
+
+.itinerary-day-heading:has(.itinerary-day-drag) {
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+}
+
+.itinerary-day-heading:has(.itinerary-day-drag) .itinerary-day-number {
+  grid-column: 2;
+}
+
+.itinerary-day-heading:has(.itinerary-day-drag) .itinerary-day-title {
+  grid-column: 3;
+}
+
+.itinerary-day-heading:has(.itinerary-day-drag) .itinerary-day-date {
+  grid-column: 4;
+}
+
+.itinerary-day-number {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: clamp(2rem, 7vw, 3rem);
+  line-height: 0.95;
+  white-space: nowrap;
+}
+
+.itinerary-day-title {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+  padding-top: 0.2rem;
+  font-size: clamp(1.35rem, 5vw, 1.85rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.itinerary-day-date {
+  grid-column: 3;
+  grid-row: 1;
+  padding-top: 0.35rem;
+  white-space: nowrap;
 }
 
 @media (max-width: 639px) {
@@ -1227,7 +1288,7 @@ body.planner-intelligence-active .pet-overlay {
   }
 
   .planner-organise-panel h3 {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     line-height: 1.15;
   }
 

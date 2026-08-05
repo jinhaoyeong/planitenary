@@ -366,7 +366,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
                     aria-expanded={improveOpen}
                     onClick={() => setImproveOpen((open) => !open)}
                   >
-                    <span>Improve itinerary</span>
+                    <span className="font-display">Improve itinerary</span>
                     <ChevronDown className={`w-4 h-4 transition-transform ${improveOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </button>
                 )}
