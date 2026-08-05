@@ -1596,23 +1596,23 @@ function App() {
                 </span>
               </div>
             </div>
-            {/* Sticker badge — hidden until the trip has a duration */}
+            {/* Duration seal — hidden until the trip has a duration */}
             {showDayBadge && (
               <motion.div
-                initial={{ scale: 0, rotate: -10 }}
-                animate={{ scale: 1, rotate: 8 }}
-                transition={{ delay: 0.5, type: 'spring', stiffness: 180, damping: 12 }}
-                className="absolute -top-6 -right-4 md:-top-8 md:-right-6 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
-                style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+                initial={{ scale: 0.72, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.45, type: 'spring', stiffness: 260, damping: 18 }}
+                className="hero-day-badge"
+                aria-label={`${dayBadgeValue || '—'} ${dayBadge.unit || displayItinerary.heroDayBadgeUnit || 'days'}`}
               >
                 <span
-                  className="font-display text-3xl md:text-4xl leading-none cursor-text rounded px-1 outline-none focus:bg-black/10"
+                  className="hero-day-badge-value cursor-text rounded px-1 outline-none focus:bg-black/10"
                   contentEditable={isHomeHeroEditing}
                   suppressContentEditableWarning
                   onBlur={(event) => commitHeroText('heroDayBadge', event.currentTarget.textContent || '')}
                   title={isHomeHeroEditing ? 'Click to edit' : undefined}
                 >{dayBadgeValue || '—'}</span>
-                <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{dayBadge.unit || displayItinerary.heroDayBadgeUnit || 'days'}</span>
+                <span className="hero-day-badge-unit">{dayBadge.unit || displayItinerary.heroDayBadgeUnit || 'days'}</span>
               </motion.div>
             )}
           </motion.div>

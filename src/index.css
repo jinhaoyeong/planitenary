@@ -2231,6 +2231,60 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
 }
 .pill-btn:active { transform: scale(0.97); }
 
+/* Cover day badge — solid accent seal like a field-guide duration mark. */
+.hero-day-badge {
+  position: absolute;
+  top: -0.85rem;
+  right: -0.55rem;
+  z-index: 3;
+  width: 5.75rem;
+  height: 5.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-radius: 9999px;
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--ink) 8%, transparent),
+    0 10px 28px -10px color-mix(in srgb, var(--accent) 70%, transparent),
+    0 4px 10px -4px rgba(15, 14, 13, 0.22);
+  line-height: 1;
+  pointer-events: auto;
+}
+@media (min-width: 768px) {
+  .hero-day-badge {
+    top: -1.15rem;
+    right: -0.85rem;
+    width: 7rem;
+    height: 7rem;
+  }
+}
+.hero-day-badge-value {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 2.45rem;
+  line-height: 0.88;
+  letter-spacing: -0.04em;
+}
+@media (min-width: 768px) {
+  .hero-day-badge-value {
+    font-size: 3.05rem;
+  }
+}
+.hero-day-badge-unit {
+  margin-top: 0.2rem;
+  font-family: var(--font-sans);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  line-height: 1;
+  opacity: 0.92;
+}
+
 /* Solid accent fills — match trip "01" / day-badge pink exactly (no pastel mix). */
 .pill-primary,
 .accent-button,

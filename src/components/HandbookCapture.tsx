@@ -368,11 +368,11 @@ export function HandbookCapture() {
               </div>
               {dayBadge.visible && (
                 <div
-                  className="absolute -top-6 -right-4 md:-top-8 md:-right-6 w-24 h-24 md:w-28 md:h-28 rounded-full flex flex-col items-center justify-center text-center shadow-xl"
-                  style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+                  className="hero-day-badge"
+                  aria-label={`${dayBadge.value} ${dayBadge.unit}`}
                 >
-                  <span className="font-display text-3xl leading-none">{dayBadge.value}</span>
-                  <span className="text-[10px] font-bold uppercase tracking-widest mt-1">{dayBadge.unit}</span>
+                  <span className="hero-day-badge-value">{dayBadge.value}</span>
+                  <span className="hero-day-badge-unit">{dayBadge.unit}</span>
                 </div>
               )}
             </div>
