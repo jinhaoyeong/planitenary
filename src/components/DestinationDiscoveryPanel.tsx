@@ -6,10 +6,7 @@ import {
   Clock3,
   Database,
   ExternalLink,
-  Info,
   MapPinned,
-  Route,
-  ShieldCheck,
   Sparkles,
   Undo2,
   X,
@@ -19,7 +16,6 @@ import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
 import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
 import { capabilityFor, discoverPlaces, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
-import { describePace } from '../lib/travelBehaviour';
 import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { hapticMedium, hapticSuccess, hapticTap } from '../lib/haptics';
 import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
@@ -401,17 +397,16 @@ function DeckCard({
 }
 
 const unscheduledReasonLabel = (reason: string) => {
-  if (reason === 'daily-capacity-reached') return 'Daily capacity reached';
-  if (reason === 'incompatible-location') return 'No compatible location cluster';
-  if (reason === 'insufficient-route-data') return 'Insufficient route data';
-  if (reason === 'opening-hours-conflict') return 'Opening-hours conflict';
-  if (reason === 'duplicate') return 'Duplicate place';
-  // These are the traveller's own comfort limits, phrased so it is clear the
-  // limit can be relaxed rather than implying the place is unavailable.
-  if (reason === 'walking-limit-exceeded') return 'Beyond your walking limit';
-  if (reason === 'return-time-exceeded') return 'Past your return time';
-  if (reason === 'queue-exceeds-tolerance') return 'Longer wait than you wanted';
-  return 'No viable day found';
+  if (reason === 'daily-capacity-reached') return 'Days are already full';
+  if (reason === 'incompatible-location') return 'Too far from other stops that day';
+  if (reason === 'insufficient-route-data') return 'Travel time unclear';
+  if (reason === 'opening-hours-conflict') return 'Opening hours don’t fit';
+  if (reason === 'duplicate') return 'Already covered by another stop';
+  if (reason === 'walking-limit-exceeded') return 'Would mean too much walking';
+  if (reason === 'return-time-exceeded') return 'Would finish too late';
+  if (reason === 'queue-exceeds-tolerance') return 'Wait time is longer than you wanted';
+  if (reason === 'no-viable-day') return 'No free day left in this trip';
+  return 'Couldn’t fit into this trip';
 };
 
 function BuiltDiscoverySummary({
@@ -436,37 +431,46 @@ function BuiltDiscoverySummary({
     .map((candidate) => candidate.id);
   const unscheduled = discoveryState?.unscheduledCandidates || [];
   const plannedDays = itinerary.days.filter((day) => day.activities.some((activity) => activity.kind === 'place')).length;
+  const nameFor = (candidateId: string) => {
+    const fromCandidates = candidates.find((candidate) => candidate.id === candidateId)?.name;
+    if (fromCandidates) return fromCandidates;
+    const fromDays = itinerary.days
+      .flatMap((day) => day.activities)
+      .find((activity) => activity.providerPlaceId && candidateId.includes(activity.providerPlaceId))?.name;
+    return fromDays || 'Selected place';
+  };
 
   return (
     <section className="destination-discovery-shell destination-discovery-built" aria-labelledby="destination-built-title">
       <div className="destination-built-summary">
         <div>
-          <span className="fixture-badge"><Check className="w-4 h-4" /> Shortlist complete</span>
+          <span className="fixture-badge"><Check className="w-4 h-4" /> Plan ready</span>
           <h3 id="destination-built-title">Your {cityLabel} itinerary is ready</h3>
           <p>
-            {selectedCount} selected · {scheduledCandidateIds.length} scheduled
-            {unscheduled.length > 0 ? ` · ${unscheduled.length} need attention` : ''}
+            {scheduledCandidateIds.length} on the plan
+            {unscheduled.length > 0 ? ` · ${unscheduled.length} couldn’t fit` : ''}
             {' · '}{plannedDays} {plannedDays === 1 ? 'day' : 'days'}
+            {selectedCount > scheduledCandidateIds.length ? ` · ${selectedCount} selected` : ''}
           </p>
         </div>
         <div className="destination-built-actions">
-          <button type="button" className="pill-btn pill-ghost" onClick={onEdit}>Edit selected places</button>
-          <button type="button" className="pill-btn pill-primary" onClick={onRebuild}>Rebuild itinerary</button>
+          <button type="button" className="pill-btn pill-ghost" onClick={onEdit}>Change places</button>
+          <button type="button" className="pill-btn pill-primary" onClick={onRebuild}>Rebuild</button>
         </div>
       </div>
       {unscheduled.length > 0 && (
         <div className="destination-unscheduled-panel">
-          <strong>{unscheduled.length} {unscheduled.length === 1 ? 'place needs' : 'places need'} attention</strong>
-          <span>Review why before rebuilding.</span>
+          <strong>{unscheduled.length} {unscheduled.length === 1 ? 'place didn’t fit' : 'places didn’t fit'}</strong>
+          <span>They’re still saved. Remove a few or add a day, then rebuild.</span>
           <ul>
-            {unscheduled.slice(0, 4).map((item) => (
+            {unscheduled.slice(0, 3).map((item) => (
               <li key={item.candidateId}>
-                <span>{candidates.find((candidate) => candidate.id === item.candidateId)?.name || item.candidateId}</span>
+                <span>{nameFor(item.candidateId)}</span>
                 <small>{unscheduledReasonLabel(item.reason)}</small>
               </li>
             ))}
           </ul>
-          {unscheduled.length > 4 && <small>+ {unscheduled.length - 4} more places need review.</small>}
+          {unscheduled.length > 3 && <small>+{unscheduled.length - 3} more</small>}
         </div>
       )}
     </section>
@@ -484,35 +488,33 @@ function DiscoveryPreview({
   onBack: () => void;
   onApply: () => void;
 }) {
+  const [showAllUnscheduled, setShowAllUnscheduled] = useState(false);
   const placeCount = result.days.reduce((total, day) => total + day.activities.filter((activity) => activity.kind === 'place').length, 0);
+  const plannedDays = result.days.filter((day) => day.activities.some((activity) => activity.kind === 'place')).length;
+  const unscheduled = result.unscheduledReasons;
+  const visibleUnscheduled = showAllUnscheduled ? unscheduled : unscheduled.slice(0, 3);
+  const sharedReason = unscheduled.length > 0 && unscheduled.every((item) => item.reason === unscheduled[0].reason)
+    ? unscheduledReasonLabel(unscheduled[0].reason)
+    : null;
   const activeLoads = result.dayLoads.filter((load) => load.mainActivities > 0);
-  const totals = {
-    walkingKm: activeLoads.length
-      ? (activeLoads.reduce((sum, load) => sum + load.walkingDistanceMeters, 0) / activeLoads.length / 1000).toFixed(1)
-      : '0.0',
-    averageTransport: activeLoads.length
-      ? Math.round(activeLoads.reduce((sum, load) => sum + load.transportMinutes, 0) / activeLoads.length)
-      : 0,
-  };
+  const averageWalkingKm = activeLoads.length
+    ? (activeLoads.reduce((sum, load) => sum + load.walkingDistanceMeters, 0) / activeLoads.length / 1000).toFixed(1)
+    : '0.0';
+
   return (
     <div className="destination-plan-preview">
       <div className="destination-preview-header">
         <div>
-          <button type="button" className="destination-back-link" onClick={onBack}><ArrowLeft className="w-4 h-4" /> Back to shortlist</button>
-          <h4>Your {cityLabel} itinerary is ready to review</h4>
-          <p>{placeCount} source-backed places across {result.days.filter((day) => day.activities.some((activity) => activity.kind === 'place')).length} themed days.</p>
+          <button type="button" className="destination-back-link" onClick={onBack}><ArrowLeft className="w-4 h-4" /> Back</button>
+          <h4>Your {cityLabel} plan</h4>
+          <p>{placeCount} places across {plannedDays} {plannedDays === 1 ? 'day' : 'days'}.</p>
         </div>
-        <span className="fixture-badge"><Database className="w-4 h-4" /> Verified places</span>
       </div>
 
-      <div className="destination-evidence-strip">
-        <span><ShieldCheck className="w-4 h-4" /><strong>{placeCount}/{placeCount}</strong> verified places</span>
-        <span><MapPinned className="w-4 h-4" /><strong>{totals.walkingKm} km</strong> average walking</span>
-        <span><Clock3 className="w-4 h-4" /><strong>{totals.averageTransport} min</strong> average travel</span>
-        <span><Route className="w-4 h-4" /><strong>{result.routeMode === 'provider' ? 'Live' : 'Estimated'}</strong> routing</span>
-      </div>
-
-      <p className="destination-pace-summary">{describePace(result.behaviour)}</p>
+      <p className="destination-preview-stats">
+        About {averageWalkingKm} km walking a day
+        {result.routeMode === 'provider' ? ' · live travel times' : ' · estimated travel times'}
+      </p>
 
       <div className="destination-day-list">
         {result.days.map((day, dayIndex) => {
@@ -526,54 +528,59 @@ function DiscoveryPreview({
                 <h5>{day.title}</h5>
                 {load && (
                   <p className="destination-day-load">
-                    {load.transportMinutes} min travel · {(load.walkingDistanceMeters / 1000).toFixed(1)} km walking
+                    {places.length} {places.length === 1 ? 'place' : 'places'}
+                    {' · '}{(load.walkingDistanceMeters / 1000).toFixed(1)} km walking
                     {' · '}back by {load.expectedReturnTime}
-                    {load.fatigueScore > 0.8 ? ' · demanding day' : ''}
                   </p>
                 )}
                 <div className="destination-day-places">
                   {places.map((activity) => (
                     <div key={activity.id}>
                       <strong>{activity.time} · {activity.name}</strong>
-                      <span>{activity.generatedMetadata?.reason}</span>
-                      {activity.sourceReferences?.[0] && (
-                        <a href={activity.sourceReferences[0].url} target="_blank" rel="noreferrer">Source <ExternalLink className="w-3 h-3" /></a>
-                      )}
                     </div>
                   ))}
                 </div>
               </div>
-              <span>{places.length} verified {places.length === 1 ? 'place' : 'places'}</span>
             </article>
           );
         })}
       </div>
 
-      {result.unscheduledReasons.length > 0 && (
+      {unscheduled.length > 0 && (
         <div className="destination-unscheduled-panel">
-          <strong>{result.unscheduledReasons.length} selected {result.unscheduledReasons.length === 1 ? 'place was' : 'places were'} not scheduled</strong>
-          <span>Each place remains visible with a reason so you can adjust the shortlist and rebuild.</span>
+          <strong>
+            {unscheduled.length === 1
+              ? '1 place couldn’t fit this trip'
+              : `${unscheduled.length} places couldn’t fit this trip`}
+          </strong>
+          <span>
+            {sharedReason
+              ? `${sharedReason}. Keep this plan, or choose fewer places and rebuild.`
+              : 'Keep this plan, or choose fewer places and rebuild.'}
+          </span>
           <ul>
-            {result.unscheduledReasons.map(({ candidate, reason, detail }) => (
+            {visibleUnscheduled.map(({ candidate, reason }) => (
               <li key={candidate.id}>
                 <span>{candidate.name}</span>
-                <small title={detail}>{unscheduledReasonLabel(reason)}</small>
+                {!sharedReason && <small>{unscheduledReasonLabel(reason)}</small>}
               </li>
             ))}
           </ul>
+          {unscheduled.length > 3 && (
+            <button
+              type="button"
+              className="destination-unscheduled-toggle"
+              onClick={() => setShowAllUnscheduled((open) => !open)}
+            >
+              {showAllUnscheduled ? 'Show less' : `Show all ${unscheduled.length}`}
+            </button>
+          )}
         </div>
       )}
 
-      <div className="destination-route-warning">
-        <Info className="w-4 h-4" />
-        <span>{result.routeMode === 'provider'
-          ? 'Place identity, coordinates and travel minutes are backed by the connected route provider. Recheck conditions near departure.'
-          : 'Place identity and coordinates are source-backed. Travel minutes are an offline straight-line estimate until a live route provider is connected.'}</span>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="pill-btn pill-primary" onClick={onApply}><Check className="w-4 h-4" /> Apply this itinerary</button>
-        <button type="button" className="pill-btn pill-ghost" onClick={onBack}>Change selections</button>
+      <div className="destination-preview-actions">
+        <button type="button" className="pill-btn pill-primary" onClick={onApply}><Check className="w-4 h-4" /> Keep this plan</button>
+        <button type="button" className="pill-btn pill-ghost" onClick={onBack}>Choose fewer places</button>
       </div>
     </div>
   );

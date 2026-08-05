@@ -763,6 +763,36 @@ body.planner-intelligence-active .pet-overlay {
   font-size: 0.68rem;
 }
 
+.destination-unscheduled-toggle {
+  margin-top: 0.35rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 750;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.destination-preview-stats {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.destination-preview-actions {
+  display: grid;
+  gap: 0.55rem;
+}
+
+@media (min-width: 640px) {
+  .destination-preview-actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
 .destination-candidate h5 {
   font-size: 0.95rem;
   font-weight: 750;
