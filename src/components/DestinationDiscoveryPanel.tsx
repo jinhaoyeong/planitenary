@@ -999,6 +999,38 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
 
   if (phase === 'idle') {
     const canResumeReview = Boolean(candidates.length > 0 || (savedStateMatchesCity && itinerary.discoveryState?.stage === 'reviewing'));
+    if (isMobileReview) {
+      return (
+        <section className="destination-discovery-shell destination-discovery-intro is-compact">
+          <details className="destination-build-fold">
+            <summary>
+              <span>Build itinerary</span>
+              <ChevronDown className="w-4 h-4 destination-build-fold-chevron" aria-hidden="true" />
+            </summary>
+            <div className="destination-build-fold-body">
+              <p>Flip places one by one, then build days around what you keep.</p>
+              <div className="destination-intro-actions">
+                {canResumeReview && candidates.length > 0 && (
+                  <button type="button" className="pill-btn pill-primary" onClick={() => { hapticTap(); setPhase('review'); }}>
+                    Continue reviewing
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={`pill-btn ${canResumeReview && candidates.length > 0 ? 'pill-ghost' : 'pill-primary'}`}
+                  onClick={beginDiscovery}
+                  disabled={loading}
+                >
+                  <Sparkles className="w-4 h-4" /> {loading ? 'Loading…' : `Discover ${cityLabel}`}
+                </button>
+              </div>
+              {error && <p className="destination-discovery-error" role="alert">{error}</p>}
+            </div>
+          </details>
+        </section>
+      );
+    }
+
     return (
       <section className="destination-discovery-shell destination-discovery-intro">
         <div>

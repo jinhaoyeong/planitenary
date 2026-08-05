@@ -23,6 +23,63 @@ body.planner-intelligence-active .pet-overlay {
   gap: 2rem;
 }
 
+.destination-discovery-intro.is-compact {
+  display: block;
+  padding: 0.15rem 0.95rem;
+}
+
+.destination-build-fold {
+  margin: 0;
+}
+
+.destination-build-fold > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  list-style: none;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.destination-build-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.destination-build-fold-chevron {
+  color: var(--ink-muted);
+  transition: transform 180ms ease;
+}
+
+.destination-build-fold[open] > summary .destination-build-fold-chevron {
+  transform: rotate(180deg);
+}
+
+.destination-build-fold-body {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0 0 0.75rem;
+}
+
+.destination-build-fold-body p {
+  margin: 0;
+  max-width: none;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.destination-build-fold-body .pill-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 0.48rem 0.85rem;
+  font-size: 0.78rem;
+}
+
 .destination-discovery-intro h3,
 .destination-review-header h3,
 .destination-preview-header h4 {
