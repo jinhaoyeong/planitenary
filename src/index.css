@@ -1131,17 +1131,66 @@ body.planner-intelligence-active .pet-overlay {
   gap: 0.75rem;
 }
 
-.planner-improve-toggle {
+.planner-improve-block {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.planner-improve-section-toggle {
+  display: flex;
   width: 100%;
-  justify-content: center;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.15rem;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 750;
+  cursor: pointer;
+  text-align: left;
+}
+
+.planner-improve-section-toggle span {
+  letter-spacing: 0.01em;
 }
 
 @media (max-width: 639px) {
+  .planner-organise-panel {
+    padding: 0.85rem 0.95rem !important;
+    border-radius: 1.15rem;
+  }
+
+  .planner-organise-panel h3 {
+    font-size: 1.25rem;
+    line-height: 1.15;
+  }
+
+  .planner-organise-panel .pill-btn {
+    padding: 0.48rem 0.85rem;
+    font-size: 0.78rem;
+    gap: 0.35rem;
+  }
+
+  .planner-organise-body {
+    gap: 0.55rem;
+  }
+
+  .planner-action-groups {
+    gap: 0.65rem;
+  }
+
+  .planner-improve-desktop-label {
+    display: none;
+  }
+
   .planner-organise-body[data-open="false"] {
     display: none;
   }
 
-  .planner-improve-actions[data-expanded="false"] .planner-improve-action-extra {
+  .planner-improve-section[data-open="false"] {
     display: none;
   }
 }
@@ -1154,6 +1203,15 @@ body.planner-intelligence-active .pet-overlay {
   .planner-organise-header {
     cursor: default;
     pointer-events: none;
+  }
+
+  .planner-improve-section-toggle {
+    display: none;
+  }
+
+  .planner-improve-section {
+    display: grid !important;
+    gap: 0.55rem;
   }
 }
 
