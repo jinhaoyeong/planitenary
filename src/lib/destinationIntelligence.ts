@@ -38,6 +38,14 @@ export interface DateAwareOpeningHours {
   timezone?: string;
   periods: Array<{
     date?: string;
+    /**
+     * Weekdays this window applies to, as `Date.getDay()` values (0 is Sunday).
+     * Absent means every day.
+     *
+     * Without this, a place open `Tu-Su` reads as open on Monday too, and the
+     * planner builds a day around a closed door.
+     */
+    daysOfWeek?: number[];
     opensAt?: string;
     closesAt?: string;
     closed?: boolean;

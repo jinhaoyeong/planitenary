@@ -7,6 +7,7 @@ import {
   simulateDay,
   toMinutes,
   toTime,
+  weekdayOf,
 } from './humanScheduler';
 import { deriveTravelBehaviour } from './travelBehaviour';
 
@@ -312,5 +313,226 @@ describe('time helpers', () => {
     expect(toTime(toMinutes('09:30'))).toBe('09:30');
     expect(toTime(-10)).toBe('00:00');
     expect(toTime(99_999)).toBe('23:59');
+  });
+
+  it('reads a weekday from a date without drifting with the local timezone', () => {
+    // 2026-08-03 is a Monday. This must hold wherever the tests run.
+    expect(weekdayOf('2026-08-03')).toBe(1);
+    expect(weekdayOf('2026-08-09')).toBe(0);
+    expect(weekdayOf(undefined)).toBeUndefined();
+    expect(weekdayOf('not-a-date')).toBeUndefined();
+  });
+});
+
+describe('weekly closures', () => {
+  const behaviourFor = (moods: Parameters<typeof deriveTravelBehaviour>[0]['moods'] = []) =>
+    deriveTravelBehaviour({ moods, styles: [], tripTypes: [], destinations: [{ city: 'Melbourne', countryCode: 'AU' }] } as never);
+
+  /** A museum that shuts on Mondays, written the way OSM writes it. */
+  const mondayClosedMuseum = place({
+    id: 'museum',
+    name: 'Closed Mondays Museum',
+    openingHours: {
+      periods: [{ daysOfWeek: [0, 2, 3, 4, 5, 6], opensAt: '10:00', closesAt: '18:00' }],
+      sourceConfidence: 'low',
+    },
+  });
+
+  it('never schedules a place on a weekday it is closed', () => {
+    const monday = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [mondayClosedMuseum],
+      behaviour: behaviourFor(),
+      date: '2026-08-03',
+    });
+    expect(monday.slots.filter((slot) => slot.kind === 'place')).toHaveLength(0);
+    expect(monday.rejections[0].reason).toBe('closed-on-this-day');
+    expect(monday.rejections[0].detail).toContain('Monday');
+  });
+
+  it('schedules the same place on a day it is open', () => {
+    const tuesday = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [mondayClosedMuseum],
+      behaviour: behaviourFor(),
+      date: '2026-08-04',
+    });
+    expect(tuesday.slots.filter((slot) => slot.kind === 'place')).toHaveLength(1);
+  });
+
+  it('picks the window belonging to the day, not the first one published', () => {
+    const shortSaturday = place({
+      id: 'market',
+      openingHours: {
+        periods: [
+          { daysOfWeek: [1, 2, 3, 4, 5], opensAt: '09:00', closesAt: '17:00' },
+          { daysOfWeek: [6], opensAt: '09:00', closesAt: '11:00' },
+        ],
+        sourceConfidence: 'low',
+      },
+      estimatedVisitMinutes: 180,
+    });
+    // Saturday 2026-08-08: the 3-hour visit cannot fit an 09:00–11:00 window.
+    const saturday = simulateDay({
+      dayNumber: 1, city: 'Melbourne', candidates: [shortSaturday], behaviour: behaviourFor(), date: '2026-08-08',
+    });
+    expect(saturday.rejections[0]?.reason).toBe('opening-hours-conflict');
+  });
+
+  it('falls back to the published window when the trip has no dates', () => {
+    // An undated trip is a real case and must still produce a plan.
+    const undated = simulateDay({
+      dayNumber: 1, city: 'Melbourne', candidates: [mondayClosedMuseum], behaviour: behaviourFor(),
+    });
+    expect(undated.slots.filter((slot) => slot.kind === 'place')).toHaveLength(1);
+  });
+
+  it('still treats absent hours as unknown rather than closed', () => {
+    const noHours = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [place({ id: 'unknown-hours' })],
+      behaviour: behaviourFor(),
+      date: '2026-08-03',
+    });
+    expect(noHours.slots.filter((slot) => slot.kind === 'place')).toHaveLength(1);
+    expect(noHours.warnings.join(' ')).toContain('unverified opening hours');
+  });
+});
+
+describe('pace limits that used to be declared but never enforced', () => {
+  const behaviourFor = (moods: string[]) =>
+    deriveTravelBehaviour({ moods, styles: [], tripTypes: [], destinations: [{ city: 'Melbourne', countryCode: 'AU' }] } as never);
+
+  /**
+   * A calm stop. Deliberately not `essential`: that category implies a
+   * 20-minute wait, which alone exceeds a very-relaxed traveller's 15-minute
+   * queue tolerance and would reject every candidate before the limit under
+   * test was ever reached.
+   */
+  const calm = (id: string, visitMinutes: number, overrides: Partial<PlaceCandidate> = {}) => place({
+    id,
+    categories: ['park'],
+    estimatedVisitMinutes: visitMinutes,
+    openingHours: hours('08:00', '22:00'),
+    ...overrides,
+  });
+
+  it('keeps a relaxed day from filling up to its return time', () => {
+    // very-relaxed promises 150 unscheduled minutes on a 10:30–19:30 day.
+    // Before this was enforced the number was reported and then ignored.
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [calm('long-1', 150), calm('long-2', 150)],
+      behaviour: behaviourFor(['slow-living']),
+    });
+    expect(day.load.freeTimeMinutes).toBeGreaterThanOrEqual(150);
+    expect(day.rejections.some((rejection) => rejection.reason === 'free-time-floor')).toBe(true);
+  });
+
+  it('does not apply the floor at a pace that does not promise one', () => {
+    // intensive sets the floor to 0; the same day must fill up.
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [calm('long-1', 150), calm('long-2', 150)],
+      behaviour: behaviourFor(['fast-paced']),
+    });
+    expect(day.rejections.some((rejection) => rejection.reason === 'free-time-floor')).toBe(false);
+  });
+
+  it('never leaves a day empty to satisfy the free-time floor', () => {
+    // An empty day is not a relaxing day. The floor limits filling, not
+    // starting — so a single stop that consumes the floor is still scheduled.
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [calm('all-day', 320)],
+      behaviour: behaviourFor(['slow-living']),
+    });
+    expect(day.slots.filter((slot) => slot.kind === 'place')).toHaveLength(1);
+    // Proves the guard did the work: this day genuinely breaches the floor.
+    expect(day.load.freeTimeMinutes).toBeLessThan(150);
+  });
+
+  it('adds a breather after a single walk longer than the traveller tolerates', () => {
+    // very-relaxed allows 15 continuous walking minutes. ~1 km apart is a
+    // 19-minute walk — still a walk, but past what this traveller wants in one go.
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [
+        calm('start', 30, { coordinates: [-37.8136, 144.9631] }),
+        calm('far', 30, { coordinates: [-37.8226, 144.9631] }),
+      ],
+      behaviour: behaviourFor(['slow-living']),
+    });
+    const breather = day.slots.find((slot) => slot.kind === 'rest' && slot.reason.includes('in one go'));
+    expect(breather).toBeDefined();
+    expect(day.slots.filter((slot) => slot.kind === 'place')).toHaveLength(2);
+  });
+
+  it('does not interrupt a walk the traveller is happy with', () => {
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [calm('a', 30), calm('b', 30)],
+      behaviour: behaviourFor(['slow-living']),
+    });
+    expect(day.slots.some((slot) => slot.kind === 'rest' && slot.reason.includes('in one go'))).toBe(false);
+  });
+
+  it('lets a short nearby stop join an already-full day, and counts it', () => {
+    // very-relaxed holds 2 main stops plus 1 optional.
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [calm('main-1', 60), calm('main-2', 60), calm('viewpoint', 30, { categories: ['view'] })],
+      behaviour: behaviourFor(['slow-living']),
+    });
+    expect(day.load.mainActivities).toBe(2);
+    expect(day.load.optionalActivities).toBe(1);
+  });
+
+  it('does not let a long stop sneak in as an optional extra', () => {
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [calm('main-1', 60), calm('main-2', 60), calm('another-museum', 120)],
+      behaviour: behaviourFor(['slow-living']),
+    });
+    expect(day.load.optionalActivities).toBe(0);
+    expect(day.rejections.some((rejection) => rejection.reason === 'daily-capacity-reached')).toBe(true);
+  });
+
+  it('keeps a relaxed day inside one city', () => {
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [
+        calm('home', 60),
+        calm('away', 60, { city: 'Geelong', coordinates: [-38.1499, 144.3617] }),
+      ],
+      behaviour: behaviourFor(['slow-living']),
+    });
+    const crossCity = day.rejections.find((rejection) => rejection.candidate.id === 'away');
+    expect(crossCity?.reason).toBe('incompatible-location');
+    expect(crossCity?.detail).toContain('Geelong');
+  });
+
+  it('allows a cross-city day at a pace that permits one', () => {
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [
+        calm('home', 60),
+        calm('away', 60, { city: 'Geelong', coordinates: [-38.1499, 144.3617] }),
+      ],
+      behaviour: behaviourFor(['fast-paced']),
+    });
+    expect(day.rejections.some((rejection) => rejection.reason === 'incompatible-location')).toBe(false);
   });
 });

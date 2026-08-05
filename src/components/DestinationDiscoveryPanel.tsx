@@ -488,6 +488,8 @@ const unscheduledReasonLabel = (reason: string) => {
   if (reason === 'walking-limit-exceeded') return 'Would mean too much walking';
   if (reason === 'return-time-exceeded') return 'Would finish too late';
   if (reason === 'queue-exceeds-tolerance') return 'Wait time is longer than you wanted';
+  if (reason === 'closed-on-this-day') return 'Closed on the days left in your trip';
+  if (reason === 'free-time-floor') return 'Would leave your days with no breathing room';
   if (reason === 'no-viable-day') return 'No free day left in this trip';
   return 'Couldn’t fit into this trip';
 };

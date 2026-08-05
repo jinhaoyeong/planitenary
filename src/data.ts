@@ -91,6 +91,13 @@ export type DiscoveryUnscheduledReason =
   | 'walking-limit-exceeded'
   | 'return-time-exceeded'
   | 'queue-exceeds-tolerance'
+  // Published hours name no window for that weekday. Unlike the limits above
+  // this is about the place, not the traveller — and it is specific to the day,
+  // so the planner rolls the place forward rather than dropping it.
+  | 'closed-on-this-day'
+  // Adding it would have left the day with less unscheduled time than the
+  // chosen pace guarantees.
+  | 'free-time-floor'
   | 'no-viable-day';
 
 export interface DiscoveryUnscheduledCandidate {

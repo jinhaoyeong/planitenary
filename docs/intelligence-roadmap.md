@@ -230,6 +230,19 @@ reserved up front, and it reports every rejection with a reason. Keep all of it.
 
 These are the concrete gaps found by reading it.
 
+> **Phase 5a closed §5.1 and the weekly-closure half of §5.3.** The findings
+> below are kept as the record of what was wrong and why it mattered.
+>
+> Two things worth carrying forward from doing it:
+>
+> - **`tsc --noEmit -p tsconfig.json` checks nothing in this repo.** The root
+>   config is `{"files": [], "references": [...]}`, so that command silently
+>   succeeds on broken code. The real check is `npm run build`'s `tsc -b`.
+> - **Parallel type unions drift.** `RejectionReason` (scheduler) and
+>   `DiscoveryUnscheduledReason` (persisted, in `data.ts`) list the same
+>   concepts twice, as do `DiscoveryProvider` and the `provider` field on
+>   `Activity`. Both pairs have now drifted once each. Worth collapsing.
+
 ### 5.1 Config that is defined but never enforced
 
 `PACE_DEFAULTS` declares four fields `simulateDay` never reads:
@@ -388,10 +401,12 @@ Notes worth carrying forward:
 12. Extract `visit-duration`, `best-time`, `accessibility`, `price`
 13. Nightly `travel-refresh` for expired evidence on active trips
 
-**Phase 5 — Scheduling intelligence**
-14. Enforce the four dead `PACE_DEFAULTS` fields
-15. Real restaurants in meal slots; add breakfast
-16. Day-of-week opening hours (fixes the Monday-closure bug)
+**Phase 5a — Weekly closures and the dead pace config — DONE (2026-08-06)**
+14. ✅ Day-of-week opening hours, end to end (fixes the Monday-closure bug)
+15. ✅ All four dead `PACE_DEFAULTS` fields enforced
+
+**Phase 5b — Remaining scheduling intelligence**
+16. Real restaurants in meal slots; add breakfast
 17. Weather-aware and best-time-aware day assignment
 18. Cross-day fatigue rebalancing
 19. Arrival/departure/jet-lag day shaping

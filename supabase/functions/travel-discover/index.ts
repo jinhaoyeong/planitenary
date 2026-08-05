@@ -32,7 +32,7 @@ import {
   osmPlaceId,
   osmPriceLevel,
   osmVisitMinutes,
-  parseOsmOpeningHours,
+  parseOsmOpeningRules,
   type OsmElement,
 } from '../_shared/osmPlaces.ts';
 import {
@@ -121,8 +121,9 @@ interface GooglePlace {
   editorialSummary?: { text?: string };
   regularOpeningHours?: {
     periods?: Array<{
-      open?: { hour?: number; minute?: number };
-      close?: { hour?: number; minute?: number };
+      // `day` is 0–6 with 0 as Sunday, matching Date.getDay().
+      open?: { day?: number; hour?: number; minute?: number };
+      close?: { day?: number; hour?: number; minute?: number };
     }>;
   };
   businessStatus?: string;
@@ -160,16 +161,27 @@ const PRICE_LEVELS: Record<string, number> = {
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
+/**
+ * Google publishes one period per weekday. Reading only `periods[0]` applied
+ * one day's hours to the whole week, so a place shut on Mondays looked open —
+ * the same weekly-closure bug the OSM parser now avoids.
+ */
 function toOpeningHours(place: GooglePlace) {
-  const period = place.regularOpeningHours?.periods?.[0];
-  if (!period?.open || period.close === undefined) return undefined;
-  const { open, close } = period;
-  if (open.hour === undefined || close?.hour === undefined) return undefined;
-  return {
-    periods: [{
+  const periods = (place.regularOpeningHours?.periods || []).flatMap((period) => {
+    const { open, close } = period;
+    if (open?.hour === undefined || close?.hour === undefined) return [];
+    // A period that closes on a different day crosses midnight, which the
+    // scheduler cannot represent; omitted rather than truncated.
+    if (close.day !== undefined && open.day !== undefined && close.day !== open.day) return [];
+    return [{
+      daysOfWeek: open.day === undefined ? undefined : [open.day],
       opensAt: `${pad(open.hour)}:${pad(open.minute ?? 0)}`,
       closesAt: `${pad(close.hour)}:${pad(close.minute ?? 0)}`,
-    }],
+    }];
+  });
+  if (periods.length === 0) return undefined;
+  return {
+    periods,
     // Provider hours are good but not authoritative for a specific date.
     sourceConfidence: 'medium' as const,
   };
@@ -422,7 +434,10 @@ interface OpenCandidate {
   experienceTags: string[];
   notability: number;
   priceLevel?: number;
-  openingHours?: { periods: Array<{ opensAt: string; closesAt: string }>; sourceConfidence: 'low' };
+  openingHours?: {
+    periods: Array<{ daysOfWeek: number[]; opensAt: string; closesAt: string }>;
+    sourceConfidence: 'low';
+  };
   estimatedVisitMinutes: number;
   indoorOutdoor: 'indoor' | 'outdoor' | 'mixed';
   reservationStatus: 'unknown';
@@ -586,7 +601,10 @@ async function searchOsm(
   for (const listing of listings) {
     if (usedListings.has(listing) || !listing.coordinates) continue;
     const categories = WIKIVOYAGE_CATEGORIES[listing.kind];
-    const hours = parseOsmOpeningHours(listing.hours);
+    // Wikivoyage `hours` is free text written by an editor, but it follows the
+    // same shapes often enough ("Tu-Su 10:00-18:00") to be worth reading, and
+    // anything unrecognised yields no rule rather than a guess.
+    const hours = parseOsmOpeningRules(listing.hours);
     byKey.set(`wv|${listing.name.toLowerCase()}`, {
       id: `wikivoyage-${encodeURIComponent(listing.name)}`,
       provider: 'wikivoyage' as const,
@@ -601,8 +619,8 @@ async function searchOsm(
       // A hand-written guidebook entry is a strong significance signal on its own.
       notability: 0.6,
       priceLevel: undefined,
-      openingHours: hours
-        ? { periods: [hours], sourceConfidence: 'low' as const }
+      openingHours: hours.length > 0
+        ? { periods: hours, sourceConfidence: 'low' as const }
         : undefined,
       estimatedVisitMinutes: osmVisitMinutes(categories),
       indoorOutdoor: 'mixed' as const,
@@ -648,7 +666,7 @@ function buildOsmCandidate(
   const listing = matchListing({ name, coordinates }, listings);
   if (listing) usedListings.add(listing);
 
-  const hours = parseOsmOpeningHours(tags.opening_hours);
+  const hours = parseOsmOpeningRules(tags.opening_hours);
   // A guidebook entry is independent corroboration, so it lifts significance.
   const notability = Math.min(1, osmNotability(tags) + (listing ? 0.35 : 0));
 
@@ -668,10 +686,10 @@ function buildOsmCandidate(
     experienceTags: categories,
     notability,
     priceLevel: osmPriceLevel(tags),
-    openingHours: hours
-      // Low, deliberately: OSM hours are community-maintained and this parser
-      // does not yet model weekly closures.
-      ? { periods: [hours], sourceConfidence: 'low' as const }
+    openingHours: hours.length > 0
+      // Low, deliberately: OSM hours are community-maintained, and this parser
+      // reads weekdays but not holidays, seasons or sunrise-relative times.
+      ? { periods: hours, sourceConfidence: 'low' as const }
       : undefined,
     estimatedVisitMinutes: osmVisitMinutes(categories),
     indoorOutdoor: osmIndoorOutdoor(tags),

@@ -77,9 +77,13 @@ export interface ScheduledSlot {
 export type RejectionReason =
   | 'daily-capacity-reached'
   | 'opening-hours-conflict'
+  /** Published hours name no window for this weekday. */
+  | 'closed-on-this-day'
   | 'walking-limit-exceeded'
   | 'return-time-exceeded'
   | 'queue-exceeds-tolerance'
+  /** Would leave the day with less unscheduled time than the pace guarantees. */
+  | 'free-time-floor'
   | 'incompatible-location'
   | 'insufficient-route-data'
   | 'duplicate';
@@ -176,19 +180,64 @@ export function queueMinutesFor(
 const ARRIVAL_BUFFER_MINUTES = 5;
 const EXIT_BUFFER_MINUTES = 5;
 
+/** Sitting down for a moment after a walk longer than the traveller's limit. */
+const WALK_BREAK_MINUTES = 15;
+
+/**
+ * What counts as a low-commitment stop, for the optional allowance: short
+ * enough to drop into a full day, and close enough to be genuinely on the way.
+ */
+const OPTIONAL_VISIT_MINUTES = 45;
+const OPTIONAL_WALK_MINUTES = 12;
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
 interface OpeningWindow {
   opensAt: number;
   closesAt: number;
   known: boolean;
+  /** True when the place has published hours and none cover this weekday. */
+  closedToday: boolean;
 }
 
-function openingWindow(candidate: PlaceCandidate): OpeningWindow {
-  const period = candidate.openingHours?.periods[0];
-  if (!period?.opensAt || !period.closesAt || period.closed) {
-    // Unknown hours: assume a generous window but mark it, so confidence drops.
-    return { opensAt: 0, closesAt: MINUTES_PER_DAY, known: false };
+/**
+ * The opening window that applies on a specific weekday.
+ *
+ * Previously this read `periods[0]` and applied it to every day, so a museum
+ * published as `Tu-Su 10:00-18:00` looked open on Monday. That produced plans
+ * built entirely around closed doors — an error the traveller only discovers
+ * once they are standing outside.
+ *
+ * A place with published hours that name no window for `weekday` is *closed*
+ * that day, which is a different answer from "hours unknown" and must not be
+ * quietly treated as a generous window.
+ */
+function openingWindow(candidate: PlaceCandidate, weekday?: number): OpeningWindow {
+  const unknown: OpeningWindow = { opensAt: 0, closesAt: MINUTES_PER_DAY, known: false, closedToday: false };
+  const periods = candidate.openingHours?.periods || [];
+  if (periods.length === 0) return unknown;
+
+  const usable = periods.filter((period) => period.opensAt && period.closesAt && !period.closed);
+  if (usable.length === 0) return unknown;
+
+  // No weekday to reason about (an undated trip): fall back to the first
+  // window, which is the old behaviour and the best available answer.
+  if (weekday === undefined) {
+    const period = usable[0];
+    return { opensAt: toMinutes(period.opensAt!), closesAt: toMinutes(period.closesAt!), known: true, closedToday: false };
   }
-  return { opensAt: toMinutes(period.opensAt), closesAt: toMinutes(period.closesAt), known: true };
+
+  const matching = usable.find((period) => !period.daysOfWeek || period.daysOfWeek.includes(weekday));
+  if (!matching) {
+    // Hours are published and none of them cover today.
+    return { opensAt: 0, closesAt: 0, known: true, closedToday: true };
+  }
+  return {
+    opensAt: toMinutes(matching.opensAt!),
+    closesAt: toMinutes(matching.closesAt!),
+    known: true,
+    closedToday: false,
+  };
 }
 
 /** A place's own preferred window, e.g. a night market that only works after dark. */
@@ -214,6 +263,20 @@ export interface DayPlanRequest {
   startTimeOverride?: string;
   /** Prefer indoor candidates when live weather indicates a wet day. */
   preferIndoor?: boolean;
+  /**
+   * The calendar date this day falls on, `YYYY-MM-DD`. Supplies the weekday
+   * that opening hours are resolved against; without it, weekly closures cannot
+   * be honoured and the planner falls back to the first published window.
+   */
+  date?: string;
+}
+
+/** Weekday for a `YYYY-MM-DD` date, or undefined when it is absent or invalid. */
+export function weekdayOf(date?: string): number | undefined {
+  if (!date) return undefined;
+  // Parsed as UTC so the weekday does not shift with the runner's timezone.
+  const parsed = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(parsed) ? new Date(parsed).getUTCDay() : undefined;
 }
 
 /**
@@ -240,6 +303,16 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
   const walkingCeiling = behaviour.walking.maximumDailyMinutes ?? paceDefaults.maximumWalkingMinutes;
   const diningMinutes = behaviour.meals.preferredDiningMinutes ?? paceDefaults.diningMinutes;
   const queueTolerance = behaviour.meals.maximumQueueMinutes ?? paceDefaults.maximumQueueMinutes;
+  const continuousWalkCeiling = behaviour.walking.maximumContinuousMinutes ?? paceDefaults.maximumContinuousWalkMinutes;
+  /**
+   * Unscheduled minutes the day must keep. This is the single field that most
+   * expresses "do not pack my day" — a very-relaxed traveller is promised 150
+   * of them — and it is enforced as a constraint, not merely reported.
+   */
+  const freeTimeFloor = paceDefaults.minimumFreeTimeMinutes;
+  const optionalAllowance = paceDefaults.optionalActivities;
+  const weekday = weekdayOf(request.date);
+  const dayCity = request.origin?.city || candidates[0]?.city;
 
   const slots: ScheduledSlot[] = [...(request.fixedSlots || [])].sort((a, b) => a.startMinutes - b.startMinutes);
   const rejections: SchedulingRejection[] = [];
@@ -247,6 +320,7 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
 
   let clock = startMinutes;
   let mainCount = slots.filter((slot) => slot.kind === 'place').length;
+  let optionalCount = 0;
   let visitMinutes = 0;
   let transportMinutes = 0;
   let walkingMinutes = 0;
@@ -308,7 +382,25 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
       rejections.push({ candidate, reason: 'duplicate', detail: 'Already scheduled on this day.' });
       continue;
     }
-    if (mainCount >= maxMain) {
+    // A day should stay in one part of one city unless the pace allows
+    // otherwise; a relaxed traveller did not ask for an intercity hop.
+    if (!paceDefaults.allowCrossCityDays && dayCity && candidate.city && candidate.city !== dayCity) {
+      rejections.push({
+        candidate,
+        reason: 'incompatible-location',
+        detail: `A ${behaviour.pace} day stays in ${dayCity} rather than crossing to ${candidate.city}.`,
+      });
+      continue;
+    }
+
+    /**
+     * Beyond the main allowance a day can still absorb a few low-commitment
+     * stops — a viewpoint, a coffee, a short walk through a market. That is
+     * what `optionalActivities` was always meant to express.
+     */
+    const isLowCommitment = candidate.estimatedVisitMinutes <= OPTIONAL_VISIT_MINUTES;
+    const asOptional = mainCount >= maxMain;
+    if (asOptional && (!isLowCommitment || optionalCount >= optionalAllowance)) {
       rejections.push({
         candidate,
         reason: 'daily-capacity-reached',
@@ -352,10 +444,26 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
       continue;
     }
 
+    // An optional extra is only worth it if it is genuinely on the way.
+    if (asOptional && legWalkMinutes > OPTIONAL_WALK_MINUTES) {
+      rejections.push({
+        candidate,
+        reason: 'daily-capacity-reached',
+        detail: `A ${behaviour.pace} day holds ${maxMain} main ${maxMain === 1 ? 'stop' : 'stops'}, and this is too far to add as a short extra.`,
+      });
+      continue;
+    }
+
+    /**
+     * A single long walk needs a breather, whatever the daily total says. The
+     * pace table has always specified this ceiling; nothing read it until now.
+     */
+    const walkBreakMinutes = legWalkMinutes > continuousWalkCeiling ? WALK_BREAK_MINUTES : 0;
+
     // --- Meals happen on the way, not after the day is over --------------
     // Projected end of this visit, used to decide whether a meal window would
     // otherwise be skipped entirely.
-    const projectedEnd = clock + legMinutes + (leg ? buffer : 0)
+    const projectedEnd = clock + legMinutes + (leg ? buffer : 0) + walkBreakMinutes
       + queueMinutesFor(candidate, queueEvidence[candidate.id])
       + ARRIVAL_BUFFER_MINUTES + candidate.estimatedVisitMinutes;
     maybeInsertMeal(candidate.neighbourhood || candidate.city, projectedEnd);
@@ -363,10 +471,21 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
     const arrival = clock + legMinutes + (leg ? buffer : 0);
 
     // --- Opening hours and the place's own best window -------------------
-    const hours = openingWindow(candidate);
+    const hours = openingWindow(candidate, weekday);
+    // Published hours that name no window today mean closed — a different
+    // answer from "unknown", and the one that used to build plans around a
+    // locked door.
+    if (hours.closedToday) {
+      rejections.push({
+        candidate,
+        reason: 'closed-on-this-day',
+        detail: `Closed on ${WEEKDAY_NAMES[weekday ?? 0]}s.`,
+      });
+      continue;
+    }
     if (!hours.known) unknownHours += 1;
     const preferred = preferredWindow(candidate);
-    const entry = Math.max(arrival, clock, hours.opensAt, preferred?.start ?? 0);
+    const entry = Math.max(arrival + walkBreakMinutes, clock, hours.opensAt, preferred?.start ?? 0);
 
     const queue = queueMinutesFor(candidate, queueEvidence[candidate.id]);
     if (queue > queueTolerance) {
@@ -410,6 +529,39 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
       continue;
     }
 
+    /**
+     * The free-time floor, measured exactly as the final `DayLoad` measures it
+     * so the reported number and the constraint cannot disagree.
+     *
+     * An empty day is not a relaxing day, so the floor never blocks the first
+     * stop — it stops a day filling up, it does not stop it starting.
+     */
+    if (freeTimeFloor > 0 && mainCount > 0) {
+      const projectedBusy = visitMinutes + candidate.estimatedVisitMinutes
+        + transportMinutes + legMinutes + returnMinutes
+        + queueTotal + queue
+        + mealMinutes + walkBreakMinutes;
+      const projectedAvailable = Math.max(1, Math.max(returnLimit, visitEnd + EXIT_BUFFER_MINUTES + returnMinutes) - startMinutes);
+      if (projectedAvailable - projectedBusy < freeTimeFloor) {
+        rejections.push({
+          candidate,
+          reason: 'free-time-floor',
+          detail: `A ${behaviour.pace} day keeps at least ${freeTimeFloor} minutes unscheduled; adding this would not leave them.`,
+        });
+        continue;
+      }
+    }
+
+    if (walkBreakMinutes > 0) {
+      slots.push({
+        kind: 'rest',
+        startMinutes: arrival,
+        endMinutes: arrival + walkBreakMinutes,
+        label: 'Breather',
+        reason: `Added after a ${legWalkMinutes} minute walk, longer than your ${continuousWalkCeiling} minute limit in one go.`,
+      });
+    }
+
     slots.push({
       kind: 'place',
       startMinutes: visitStart,
@@ -422,7 +574,10 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
     });
 
     seen.add(candidate.id);
-    mainCount += 1;
+    // An optional extra sits alongside the main allowance rather than
+    // consuming it, which is what lets a short stop join an already-full day.
+    if (asOptional) optionalCount += 1;
+    else mainCount += 1;
     visitMinutes += candidate.estimatedVisitMinutes;
     transportMinutes += legMinutes;
     walkingMinutes += legWalkMinutes;
@@ -483,7 +638,9 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
   // your feet, time in transit, and how full the day is.
   const walkingLoad = walkingMinutes / Math.max(1, walkingCeiling);
   const transitLoad = transportMinutes / 180;
-  const densityLoad = mainCount / Math.max(1, maxMain);
+  // Optional stops are short and nearby, so they tire a traveller less than a
+  // main one — but not nothing, which is why they are not free here.
+  const densityLoad = (mainCount + optionalCount * 0.5) / Math.max(1, maxMain);
   const fatigueScore = Math.max(0, Math.min(1, walkingLoad * 0.45 + transitLoad * 0.25 + densityLoad * 0.3));
 
   // Rush risk: how little slack there is if one thing overruns.
@@ -525,7 +682,7 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
     slots,
     load: {
       mainActivities: mainCount,
-      optionalActivities: 0,
+      optionalActivities: optionalCount,
       visitMinutes,
       transportMinutes,
       walkingMinutes,

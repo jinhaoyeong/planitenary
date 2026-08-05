@@ -14,7 +14,7 @@ import {
   osmPlaceId,
   osmPriceLevel,
   osmVisitMinutes,
-  parseOsmOpeningHours,
+  parseOsmOpeningRules,
 } from '../../supabase/functions/_shared/osmPlaces';
 
 describe('categorising an OSM place', () => {
@@ -102,33 +102,74 @@ describe('names', () => {
 });
 
 describe('opening hours', () => {
-  it('reads a simple daily range', () => {
-    expect(parseOsmOpeningHours('09:00-17:00')).toEqual({ opensAt: '09:00', closesAt: '17:00' });
+  /** Weekdays a rule set says the place is open, as Date.getDay() values. */
+  const openDays = (value: string) =>
+    parseOsmOpeningRules(value).flatMap((rule) => rule.daysOfWeek).sort((a, b) => a - b);
+
+  it('applies an unqualified range to every day', () => {
+    expect(parseOsmOpeningRules('09:00-17:00')).toEqual([
+      { daysOfWeek: [0, 1, 2, 3, 4, 5, 6], opensAt: '09:00', closesAt: '17:00' },
+    ]);
   });
 
-  it('reads the first range out of a day-qualified string', () => {
-    expect(parseOsmOpeningHours('Mo-Fr 09:00-17:00')).toEqual({ opensAt: '09:00', closesAt: '17:00' });
+  it('keeps a weekday range to its weekdays', () => {
+    expect(openDays('Mo-Fr 09:00-17:00')).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('knows a museum shut on Mondays is shut on Mondays', () => {
+    // The bug this whole change exists for: `Tu-Su` used to read as open all
+    // week, and a Monday was planned around a locked door.
+    expect(openDays('Tu-Su 10:00-18:00')).toEqual([0, 2, 3, 4, 5, 6]);
+  });
+
+  it('lets a later rule close a day an earlier rule opened', () => {
+    expect(openDays('Mo-Su 09:00-18:00; Mo off')).toEqual([0, 2, 3, 4, 5, 6]);
+    expect(openDays('Mo-Su 09:00-18:00; We closed')).toEqual([0, 1, 2, 4, 5, 6]);
+  });
+
+  it('reads different hours on different days', () => {
+    const rules = parseOsmOpeningRules('Mo-Fr 09:00-17:00; Sa 10:00-14:00');
+    expect(rules).toHaveLength(2);
+    expect(rules.find((rule) => rule.daysOfWeek.includes(6))).toMatchObject({ opensAt: '10:00', closesAt: '14:00' });
+    expect(rules.find((rule) => rule.daysOfWeek.includes(1))).toMatchObject({ opensAt: '09:00', closesAt: '17:00' });
+    // Sunday appears in neither rule, so the place is closed then.
+    expect(openDays('Mo-Fr 09:00-17:00; Sa 10:00-14:00')).not.toContain(0);
+  });
+
+  it('handles a comma-separated day list', () => {
+    expect(openDays('Mo,We,Fr 09:00-17:00')).toEqual([1, 3, 5]);
+  });
+
+  it('walks a range that wraps the week', () => {
+    expect(openDays('Fr-Mo 10:00-16:00')).toEqual([0, 1, 5, 6]);
   });
 
   it('pads a single-digit hour so times compare correctly', () => {
-    expect(parseOsmOpeningHours('Mo-Su 9:30-18:00')).toEqual({ opensAt: '09:30', closesAt: '18:00' });
+    expect(parseOsmOpeningRules('Mo-Su 9:30-18:00')[0]).toMatchObject({ opensAt: '09:30', closesAt: '18:00' });
   });
 
   it('understands always open', () => {
-    expect(parseOsmOpeningHours('24/7')).toEqual({ opensAt: '00:00', closesAt: '23:59' });
+    expect(parseOsmOpeningRules('24/7')).toEqual([
+      { daysOfWeek: [0, 1, 2, 3, 4, 5, 6], opensAt: '00:00', closesAt: '23:59' },
+    ]);
   });
 
-  it('reports unknown rather than inventing a window it cannot read', () => {
-    // A wrong window silently builds a plan around a closed door; an unknown
-    // one is handled honestly by the scheduler.
-    expect(parseOsmOpeningHours('sunrise-sunset')).toBeUndefined();
-    expect(parseOsmOpeningHours('')).toBeUndefined();
-    expect(parseOsmOpeningHours(undefined)).toBeUndefined();
-    expect(parseOsmOpeningHours('closed')).toBeUndefined();
+  it('skips public holidays rather than applying them to a weekday', () => {
+    // The planner has no holiday calendar, so PH must not become a weekly rule.
+    expect(openDays('Mo-Su 09:00-17:00; PH off')).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it('reports nothing rather than inventing a window it cannot read', () => {
+    // A wrong window silently builds a plan around a closed door; no window is
+    // handled honestly by the scheduler as "hours unknown".
+    expect(parseOsmOpeningRules('sunrise-sunset')).toEqual([]);
+    expect(parseOsmOpeningRules('')).toEqual([]);
+    expect(parseOsmOpeningRules(undefined)).toEqual([]);
+    expect(parseOsmOpeningRules('closed')).toEqual([]);
   });
 
   it('refuses a range that crosses midnight instead of inverting it', () => {
-    expect(parseOsmOpeningHours('22:00-02:00')).toBeUndefined();
+    expect(parseOsmOpeningRules('22:00-02:00')).toEqual([]);
   });
 });
 

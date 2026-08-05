@@ -161,33 +161,115 @@ export function osmPriceLevel(tags: OsmTags): number | undefined {
 const TIME_RANGE = /\b([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)\b/;
 const pad = (value: string) => value.padStart(2, '0');
 
-/**
- * Read a usable opening window out of an OSM `opening_hours` string.
- *
- * The real grammar is large ("Mo-Fr 09:00-17:00; Sa 10:00-14:00; PH off") and
- * this deliberately does not implement it. It recognises `24/7` and the first
- * explicit time range, and returns undefined for anything it cannot read
- * confidently — an unknown window is handled honestly by the scheduler, which
- * drops the day's confidence, whereas a wrong window silently builds a plan
- * around a closed door.
- *
- * The day-of-week dimension is not modelled yet, so results are reported at low
- * confidence. Weekly closures are a known gap tracked in the roadmap.
- */
-export function parseOsmOpeningHours(value?: string): { opensAt: string; closesAt: string } | undefined {
-  if (!value) return undefined;
-  const text = value.trim();
-  if (!text || /^(closed|off)$/i.test(text)) return undefined;
-  if (/^24\/7$/.test(text)) return { opensAt: '00:00', closesAt: '23:59' };
+/** OSM day abbreviation → JavaScript `Date.getDay()`. */
+const DAY_INDEX: Record<string, number> = {
+  su: 0, mo: 1, tu: 2, we: 3, th: 4, fr: 5, sa: 6,
+};
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 
-  const match = text.match(TIME_RANGE);
-  if (!match) return undefined;
-  const opensAt = `${pad(match[1])}:${match[2]}`;
-  const closesAt = `${pad(match[3])}:${match[4]}`;
-  // A range that closes before it opens crosses midnight; the scheduler has no
-  // representation for that, so it is reported as unknown rather than inverted.
-  if (opensAt >= closesAt) return undefined;
-  return { opensAt, closesAt };
+/** One opening window and the weekdays it applies to. */
+export interface OpeningRule {
+  /** `Date.getDay()` values: 0 is Sunday. */
+  daysOfWeek: number[];
+  opensAt: string;
+  closesAt: string;
+}
+
+/**
+ * Expand an OSM day selector — `Mo`, `Mo-Fr`, `Mo,We,Fr`, `Sa-Su` — into day
+ * numbers. A range that wraps the week (`Fr-Mo`) is walked forwards from the
+ * start day, which is what the notation means.
+ */
+function expandDays(selector: string): number[] {
+  const days = new Set<number>();
+  for (const part of selector.split(',')) {
+    const token = part.trim().toLowerCase();
+    if (!token) continue;
+    const range = token.match(/^([a-z]{2})\s*-\s*([a-z]{2})$/);
+    if (range) {
+      const from = DAY_INDEX[range[1]];
+      const to = DAY_INDEX[range[2]];
+      if (from === undefined || to === undefined) continue;
+      for (let day = from; ; day = (day + 1) % 7) {
+        days.add(day);
+        if (day === to) break;
+      }
+      continue;
+    }
+    const single = DAY_INDEX[token];
+    if (single !== undefined) days.add(single);
+  }
+  return [...days];
+}
+
+/**
+ * Read weekly opening rules out of an OSM `opening_hours` string.
+ *
+ * This is the fix for the weekly-closure gap. Many museums close on Mondays and
+ * write it as `Tu-Su 10:00-18:00`; reading only the first time range and
+ * applying it to every day builds a plan around a closed door, which is the
+ * kind of error a traveller discovers on the pavement.
+ *
+ * The full grammar is large and this does not implement all of it — no month
+ * ranges, no public holidays, no `sunrise`/`sunset`, no week numbers. Anything
+ * it cannot read confidently yields no rule at all, which the scheduler handles
+ * honestly as "hours unknown" and reports as reduced confidence. Guessing would
+ * be worse than admitting ignorance.
+ *
+ * Later rules override earlier ones for the days they name, matching OSM
+ * semantics — which is what makes `Mo-Su 09:00-18:00; Mo off` work.
+ */
+export function parseOsmOpeningRules(value?: string): OpeningRule[] {
+  if (!value) return [];
+  const text = value.trim();
+  if (!text || /^(closed|off)$/i.test(text)) return [];
+  if (/^24\/7$/.test(text)) {
+    return [{ daysOfWeek: ALL_DAYS, opensAt: '00:00', closesAt: '23:59' }];
+  }
+
+  const byDay = new Map<number, { opensAt: string; closesAt: string }>();
+  let understoodAnything = false;
+
+  for (const segment of text.split(';')) {
+    const clause = segment.trim();
+    if (!clause) continue;
+    // Public holidays and school holidays are a separate calendar the planner
+    // has no access to, so they are skipped rather than applied to a weekday.
+    if (/^(ph|sh)\b/i.test(clause)) continue;
+
+    const daySelector = clause.match(/^((?:[A-Za-z]{2}(?:\s*-\s*[A-Za-z]{2})?)(?:\s*,\s*[A-Za-z]{2}(?:\s*-\s*[A-Za-z]{2})?)*)\b/);
+    const days = daySelector ? expandDays(daySelector[1]) : ALL_DAYS;
+    if (days.length === 0) continue;
+
+    const rest = daySelector ? clause.slice(daySelector[0].length) : clause;
+    if (/\b(off|closed)\b/i.test(rest)) {
+      for (const day of days) byDay.delete(day);
+      understoodAnything = true;
+      continue;
+    }
+
+    const match = rest.match(TIME_RANGE);
+    if (!match) continue;
+    const opensAt = `${pad(match[1])}:${match[2]}`;
+    const closesAt = `${pad(match[3])}:${match[4]}`;
+    // A window that closes before it opens crosses midnight; the scheduler has
+    // no representation for that, so it is left unknown rather than inverted.
+    if (opensAt >= closesAt) continue;
+    for (const day of days) byDay.set(day, { opensAt, closesAt });
+    understoodAnything = true;
+  }
+
+  if (!understoodAnything || byDay.size === 0) return [];
+
+  // Collapse identical windows so a normal week is a rule or two, not seven.
+  const grouped = new Map<string, OpeningRule>();
+  for (const [day, window] of byDay) {
+    const key = `${window.opensAt}-${window.closesAt}`;
+    const existing = grouped.get(key);
+    if (existing) existing.daysOfWeek.push(day);
+    else grouped.set(key, { daysOfWeek: [day], opensAt: window.opensAt, closesAt: window.closesAt });
+  }
+  return [...grouped.values()].map((rule) => ({ ...rule, daysOfWeek: rule.daysOfWeek.sort((a, b) => a - b) }));
 }
 
 /** Typical visit length by category — a default only, overridden by evidence. */

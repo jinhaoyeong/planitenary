@@ -235,6 +235,21 @@ const UNINFORMATIVE_CATEGORIES = new Set(['essential', 'experience', 'day-trip']
 const humanise = (category: string) =>
   category.replace(/-/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
 
+/**
+ * The calendar date of day N, or undefined for an undated trip.
+ *
+ * Undated is a real case — a traveller can plan before fixing dates — and it
+ * degrades honestly: without a weekday the scheduler falls back to a place's
+ * first published window rather than inventing one.
+ */
+export function dateForDay(startDate: string | undefined, dayIndex: number): string | undefined {
+  if (!startDate) return undefined;
+  // UTC throughout, so the weekday cannot shift with the viewer's timezone.
+  const start = Date.parse(`${startDate}T00:00:00Z`);
+  if (!Number.isFinite(start)) return undefined;
+  return new Date(start + dayIndex * 86_400_000).toISOString().slice(0, 10);
+}
+
 const clockMinutes = (value?: string) => {
   if (!value) return null;
   const match = value.match(/^(\d{1,2}):(\d{2})$/);
@@ -388,6 +403,9 @@ export function buildDestinationItinerary(
       routeResolver: options.routeResolver,
       queueEvidence: options.queueEvidence,
       preferIndoor: options.weatherRiskDays?.includes(index + 1),
+      // Supplies the weekday that opening hours are checked against, so a
+      // Monday is not planned from places that close on Mondays.
+      date: dateForDay(profile.startDate, index),
       // Arrival day starts in the afternoon; the traveller is in transit.
       startTimeOverride: index === 0 && itinerary.days.length === 0 ? '15:00' : undefined,
     });
