@@ -57,6 +57,13 @@ export const secrets = {
   // avoid requiring a second YouTube-specific secret.
   youtube: () => env('GOOGLE_MAPS_API_KEY'),
   tripadvisor: () => env('TRIPADVISOR_API_KEY'),
+  openRouteService: () => env('OPENROUTESERVICE_API_KEY'),
+  /**
+   * Overpass needs no key, but the endpoint is overridable: the public
+   * instances are a shared community resource, and any deployment doing real
+   * volume should point at its own.
+   */
+  overpassEndpoint: () => env('OVERPASS_ENDPOINT') || 'https://overpass-api.de/api/interpreter',
   amap: () => env('AMAP_API_KEY'),
   baidu: () => env('BAIDU_API_KEY'),
   weather: () => env('WEATHER_API_KEY'),
@@ -80,6 +87,10 @@ export function capabilitySnapshot() {
     // present is not proof that the Routes API is enabled or billable.
     googleRoutes: false,
     googleReviews: google,
+    // OpenStreetMap and Wikivoyage need no credentials and have no billing
+    // path at all, so this deployment can always offer them.
+    osm: true,
+    openRouteService: Boolean(secrets.openRouteService()),
     youtube: Boolean(secrets.youtube()),
     tripadvisor: Boolean(secrets.tripadvisor()),
     // Official-source fetching needs no third-party key.

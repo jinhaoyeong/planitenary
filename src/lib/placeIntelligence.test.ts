@@ -60,6 +60,24 @@ describe('dimensions are computed independently', () => {
     expect(matching.dimensions.travellerFit).toBeGreaterThan(unrelated.dimensions.travellerFit);
   });
 
+  it('recognises significance from documentation when there are no reviews at all', () => {
+    // OpenStreetMap and Wikivoyage carry no ratings. A well-documented place —
+    // an encyclopedia article, a guidebook entry — must still outrank an
+    // undocumented one, or a review-free provider would flatten the shortlist.
+    const documented = scorePlace(place({ id: 'a', categories: ['museum'], notability: 0.9 }), inputs());
+    const undocumented = scorePlace(place({ id: 'b', categories: ['museum'] }), inputs());
+    expect(documented.dimensions.destinationSignificance)
+      .toBeGreaterThan(undocumented.dimensions.destinationSignificance);
+  });
+
+  it('does not penalise a provider for carrying only one of the two signals', () => {
+    // Footfall and documentation are alternatives, not additive requirements.
+    const byFootfall = scorePlace(place({ id: 'a', categories: ['museum'], reviewCount: 30_000 }), inputs());
+    const byDocumentation = scorePlace(place({ id: 'b', categories: ['museum'], notability: 1 }), inputs());
+    expect(byDocumentation.dimensions.destinationSignificance)
+      .toBeCloseTo(byFootfall.dimensions.destinationSignificance, 1);
+  });
+
   it('treats a lifetime star rating as weaker than recent visitor evidence', () => {
     const ratingOnly = scorePlace(place({ id: 'a', rating: 5, reviewCount: 900 }), inputs());
     const recentlyPraised = scorePlace(place({ id: 'a' }), inputs({

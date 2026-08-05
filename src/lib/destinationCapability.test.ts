@@ -94,6 +94,58 @@ describe('destination capability resolution', () => {
     expect(describeCapability(capability)).not.toContain('Osaka');
   });
 
+  it('serves any city from OpenStreetMap when no paid provider is configured', () => {
+    // The case that matters after the Google project was removed: discovery
+    // must still be live, not a fixture, and not unavailable.
+    const capability = resolveDestinationCapability(
+      { city: 'Melbourne', countryCode: 'AU' },
+      { ...EMPTY_PROVIDER_RUNTIME, osm: true },
+      ['Osaka'],
+    );
+    expect(capability.places).toEqual({ provider: 'osm', status: 'live' });
+    expect(hasLiveDiscovery(capability)).toBe(true);
+    expect(describeCapability(capability)).not.toContain('may be out of date');
+  });
+
+  it('prefers a configured paid provider over the keyless one', () => {
+    const capability = resolveDestinationCapability(
+      { city: 'Melbourne', countryCode: 'AU' },
+      runtime({ osm: true }),
+    );
+    expect(capability.places.provider).toBe('google');
+  });
+
+  it('keeps mainland China on regional providers even with OpenStreetMap available', () => {
+    // OSM coverage exists in China but the regional providers are authoritative
+    // there, and the regional split must not be quietly bypassed.
+    const capability = resolveDestinationCapability(
+      { city: 'Beijing', countryCode: 'CN' },
+      { ...EMPTY_PROVIDER_RUNTIME, osm: true, amap: true },
+    );
+    expect(capability.places.provider).toBe('amap');
+  });
+
+  it('does not claim OpenStreetMap discovery before the server has reported in', () => {
+    const capability = resolveDestinationCapability({ city: 'Melbourne', countryCode: 'AU' }, EMPTY_PROVIDER_RUNTIME);
+    expect(capability.places.status).toBe('unavailable');
+  });
+
+  it('uses OpenRouteService for routing when Google Routes is absent', () => {
+    const capability = resolveDestinationCapability(
+      { city: 'Melbourne', countryCode: 'AU' },
+      { ...EMPTY_PROVIDER_RUNTIME, osm: true, openRouteService: true },
+    );
+    expect(capability.routes).toEqual({ provider: 'openrouteservice', status: 'live' });
+  });
+
+  it('prefers Google Routes over OpenRouteService when both are configured', () => {
+    const capability = resolveDestinationCapability(
+      { city: 'Melbourne', countryCode: 'AU' },
+      runtime({ openRouteService: true }),
+    );
+    expect(capability.routes.provider).toBe('google-routes');
+  });
+
   it('always offers straight-line routing so a plan is never route-blind', () => {
     const capability = resolveDestinationCapability(
       { city: 'Reykjavik', countryCode: 'IS' },

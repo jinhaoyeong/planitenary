@@ -121,12 +121,26 @@ function travellerFit(candidate: PlaceCandidate, profile: TripProfile): number {
 
 function destinationSignificance(candidate: PlaceCandidate): number {
   if (candidate.categories.includes('essential')) return 1;
-  // A place many people have rated is, empirically, a place people go to.
-  const ratingWeight = candidate.reviewCount
+
+  /**
+   * Two independent signals, whichever is available:
+   *
+   * - `notability` — documentation. An encyclopedia article or a guidebook
+   *   entry means the wider world considers this place worth explaining.
+   * - `reviewCount` — footfall. A place many people rated is a place people go.
+   *
+   * Providers without reviews supply the first; providers without notability
+   * data supply the second. Taking the stronger of the two means a source
+   * carrying only one of them is not silently penalised for the gap.
+   */
+  const footfall = candidate.reviewCount
     ? clamp01(Math.log10(candidate.reviewCount + 1) / 4.5)
     : 0;
-  if (candidate.categories.includes('local-character')) return clamp01(0.75 + ratingWeight * 0.25);
-  return clamp01(0.55 + ratingWeight * 0.4);
+  const documented = typeof candidate.notability === 'number' ? clamp01(candidate.notability) : 0;
+  const weight = Math.max(footfall, documented);
+
+  if (candidate.categories.includes('local-character')) return clamp01(0.75 + weight * 0.25);
+  return clamp01(0.55 + weight * 0.4);
 }
 
 /**

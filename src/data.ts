@@ -55,7 +55,7 @@ export interface Activity {
   lockedFields?: ActivityLockedField[];
   fieldProvenance?: ActivityFieldProvenance;
   generatedMetadata?: ActivityGeneratedMetadata;
-  provider?: 'google' | 'official-tourism' | 'wikidata';
+  provider?: 'google' | 'osm' | 'amap' | 'baidu' | 'official-tourism' | 'wikidata';
   providerPlaceId?: string;
   sourceReferences?: Array<{ label: string; url: string }>;
   lastVerifiedAt?: string;

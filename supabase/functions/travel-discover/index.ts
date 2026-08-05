@@ -22,14 +22,39 @@ import {
   writeDiscoveryCache,
 } from '../_shared/cache.ts';
 import { discoveryCityKey } from '../_shared/cacheKeys.ts';
+import {
+  isExcludedOsmPlace,
+  osmCategories,
+  osmElementCoordinates,
+  osmIndoorOutdoor,
+  osmNames,
+  osmNotability,
+  osmPlaceId,
+  osmPriceLevel,
+  osmVisitMinutes,
+  parseOsmOpeningHours,
+  type OsmElement,
+} from '../_shared/osmPlaces.ts';
+import {
+  matchListing,
+  WIKIVOYAGE_CATEGORIES,
+  parseWikivoyageListings,
+  type WikivoyageListing,
+} from '../_shared/wikivoyage.ts';
 
 interface DiscoverBody {
   city?: string;
   countryCode?: string;
-  provider?: 'google' | 'amap' | 'baidu' | 'fixture';
+  provider?: 'google' | 'osm' | 'amap' | 'baidu' | 'fixture';
   interests?: string[];
   limit?: number;
   travelStartsInDays?: number;
+  /**
+   * The destination's coordinates, when the client already has them. Saves a
+   * geocoding round trip; absent, the city is looked up instead.
+   */
+  lat?: number;
+  lng?: number;
 }
 
 /** Search phrases that between them cover how people actually plan a trip. */
@@ -363,6 +388,307 @@ async function searchBaidu(city: string, countryCode: string, limit: number, tra
   return results.filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
 }
 
+// ---------------------------------------------------------------------------
+// OpenStreetMap + Wikivoyage
+// ---------------------------------------------------------------------------
+
+/**
+ * Wikimedia and Nominatim both require a descriptive User-Agent and will block
+ * anonymous traffic. Identifying the app is a condition of using them.
+ */
+const USER_AGENT = 'Planitenary/1.0 (travel itinerary planner; +https://github.com/planitenary)';
+
+interface CityArea {
+  centre: [number, number];
+  radiusMetres: number;
+}
+
+/**
+ * A candidate from the keyless sources. Written out rather than inferred so the
+ * OSM and Wikivoyage builders are held to one shape.
+ */
+interface OpenCandidate {
+  id: string;
+  provider: 'osm' | 'wikivoyage';
+  providerPlaceId: string;
+  name: string;
+  localName?: string;
+  description?: string;
+  countryCode: string;
+  city: string;
+  neighbourhood?: string;
+  coordinates: [number, number];
+  categories: string[];
+  experienceTags: string[];
+  notability: number;
+  priceLevel?: number;
+  openingHours?: { periods: Array<{ opensAt: string; closesAt: string }>; sourceConfidence: 'low' };
+  estimatedVisitMinutes: number;
+  indoorOutdoor: 'indoor' | 'outdoor' | 'mixed';
+  reservationStatus: 'unknown';
+  address?: string;
+  website?: string;
+  phone?: string;
+  sourceConfidence: 'high' | 'medium';
+  sourceReferences: Array<{ label: string; url: string; retrievedAt: string }>;
+  lastVerifiedAt: string;
+  expiresAt: string;
+}
+
+/**
+ * Where to search, and how wide.
+ *
+ * The client already knows its destination's coordinates, so the common path
+ * costs nothing. Nominatim is the fallback, and its bounding box gives a far
+ * better radius than a fixed guess — a city state and a small town should not
+ * be searched at the same scale.
+ */
+async function resolveCityArea(city: string, countryCode: string, lat?: number, lng?: number): Promise<CityArea> {
+  if (typeof lat === 'number' && typeof lng === 'number') {
+    return { centre: [lat, lng], radiusMetres: 12_000 };
+  }
+
+  const params = new URLSearchParams({ q: city, format: 'json', limit: '1' });
+  if (countryCode) params.set('countrycodes', countryCode.toLowerCase());
+  const payload = await fetchJson(
+    `https://nominatim.openstreetmap.org/search?${params}`,
+    { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } },
+  ).catch(() => null);
+
+  const hit = Array.isArray(payload) ? payload[0] as Record<string, unknown> : null;
+  const centreLat = Number(hit?.lat);
+  const centreLng = Number(hit?.lon);
+  if (!Number.isFinite(centreLat) || !Number.isFinite(centreLng)) {
+    throw new ProviderError(`Could not locate ${city}.`, 404);
+  }
+
+  // boundingbox is [southLat, northLat, westLng, eastLng] as strings.
+  const box = (hit?.boundingbox as string[] | undefined)?.map(Number);
+  let radiusMetres = 12_000;
+  if (box?.length === 4 && box.every(Number.isFinite)) {
+    const latSpanMetres = Math.abs(box[1] - box[0]) * 111_320;
+    const lngSpanMetres = Math.abs(box[3] - box[2]) * 111_320 * Math.cos(centreLat * Math.PI / 180);
+    radiusMetres = Math.max(latSpanMetres, lngSpanMetres) / 2;
+  }
+  return {
+    centre: [centreLat, centreLng],
+    // Clamped: a country-sized relation must not trigger a continent-wide query.
+    radiusMetres: Math.round(Math.max(4_000, Math.min(25_000, radiusMetres))),
+  };
+}
+
+/**
+ * One Overpass query for the whole shortlist.
+ *
+ * The paid path needed seven text searches because it had to *describe* what it
+ * wanted. OSM objects carry their own classification, so a single query asks
+ * for every kind of place at once and the tags say which is which — seven
+ * billed requests become one free one.
+ *
+ * Restaurants and cafés are deliberately absent. A city holds thousands, and an
+ * unranked list of them is noise; curated food comes from Wikivoyage's `eat`
+ * listings instead, which is a better answer than the first 200 by proximity.
+ */
+async function fetchOverpassPlaces(area: CityArea): Promise<OsmElement[]> {
+  const [lat, lng] = area.centre;
+  const scope = `(around:${area.radiusMetres},${lat},${lng})`;
+  const query = `[out:json][timeout:40];
+(
+  nwr["tourism"~"^(attraction|museum|gallery|artwork|viewpoint|zoo|aquarium|theme_park)$"]["name"]${scope};
+  nwr["historic"]["name"]${scope};
+  nwr["amenity"~"^(place_of_worship|marketplace|arts_centre|theatre)$"]["name"]${scope};
+  nwr["leisure"~"^(park|garden|nature_reserve)$"]["name"]${scope};
+  nwr["natural"~"^(beach|peak|volcano)$"]["name"]${scope};
+  nwr["shop"~"^(mall|department_store)$"]["name"]${scope};
+);
+out center tags 400;`;
+
+  const payload = await fetchJson(
+    secrets.overpassEndpoint(),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+      body: `data=${encodeURIComponent(query)}`,
+    },
+    45_000,
+  );
+  const elements = (payload as { elements?: OsmElement[] } | null)?.elements;
+  return Array.isArray(elements) ? elements : [];
+}
+
+/**
+ * Wikivoyage's curated listings for one city. One request per city, never per
+ * place — per-place enrichment is exactly the fan-out that made the previous
+ * provider expensive.
+ *
+ * A missing page is normal (not every town has one) and returns an empty list
+ * rather than failing discovery.
+ */
+async function fetchWikivoyageListings(city: string): Promise<WikivoyageListing[]> {
+  const params = new URLSearchParams({
+    action: 'parse',
+    page: city,
+    prop: 'wikitext',
+    format: 'json',
+    formatversion: '2',
+    redirects: '1',
+  });
+  const payload = await fetchJson(
+    `https://en.wikivoyage.org/w/api.php?${params}`,
+    { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } },
+    12_000,
+  ).catch(() => null);
+
+  const wikitext = (payload as { parse?: { wikitext?: string } } | null)?.parse?.wikitext;
+  return typeof wikitext === 'string' ? parseWikivoyageListings(wikitext) : [];
+}
+
+const WIKIVOYAGE_URL = (city: string) => `https://en.wikivoyage.org/wiki/${encodeURIComponent(city)}`;
+
+/**
+ * Discovery from sources that cannot be billed.
+ *
+ * OSM supplies coverage and structure; Wikivoyage supplies editorial judgement
+ * and prose. Neither has a rating, so significance comes from `notability` —
+ * see `osmNotability` for why documentation is a defensible substitute.
+ */
+async function searchOsm(
+  city: string,
+  countryCode: string,
+  limit: number,
+  travelStartsInDays?: number,
+  coordinates?: { lat?: number; lng?: number },
+) {
+  const retrievedAt = new Date().toISOString();
+  const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
+  const area = await resolveCityArea(city, countryCode, coordinates?.lat, coordinates?.lng);
+
+  // Independent sources, so one being down must not sink the other.
+  const [elements, listings] = await Promise.all([
+    fetchOverpassPlaces(area),
+    fetchWikivoyageListings(city).catch(() => [] as WikivoyageListing[]),
+  ]);
+
+  const byKey = new Map<string, OpenCandidate>();
+  const usedListings = new Set<WikivoyageListing>();
+
+  for (const element of elements) {
+    const candidate = buildOsmCandidate(element, city, countryCode, retrievedAt, expiresAt, listings, usedListings);
+    if (!candidate) continue;
+    // OSM often holds the same place as both a node and an enclosing way.
+    const key = `${candidate.name.toLowerCase()}|${candidate.coordinates[0].toFixed(3)},${candidate.coordinates[1].toFixed(3)}`;
+    const existing = byKey.get(key);
+    if (!existing || candidate.notability > existing.notability) byKey.set(key, candidate);
+  }
+
+  // Curated places OSM did not return — most usefully the food listings, which
+  // the Overpass query deliberately skips.
+  for (const listing of listings) {
+    if (usedListings.has(listing) || !listing.coordinates) continue;
+    const categories = WIKIVOYAGE_CATEGORIES[listing.kind];
+    const hours = parseOsmOpeningHours(listing.hours);
+    byKey.set(`wv|${listing.name.toLowerCase()}`, {
+      id: `wikivoyage-${encodeURIComponent(listing.name)}`,
+      provider: 'wikivoyage' as const,
+      providerPlaceId: `wv:${listing.name}`,
+      name: listing.name,
+      description: listing.content,
+      countryCode,
+      city,
+      coordinates: listing.coordinates,
+      categories,
+      experienceTags: categories,
+      // A hand-written guidebook entry is a strong significance signal on its own.
+      notability: 0.6,
+      priceLevel: undefined,
+      openingHours: hours
+        ? { periods: [hours], sourceConfidence: 'low' as const }
+        : undefined,
+      estimatedVisitMinutes: osmVisitMinutes(categories),
+      indoorOutdoor: 'mixed' as const,
+      reservationStatus: 'unknown' as const,
+      address: listing.address,
+      website: listing.url,
+      phone: undefined,
+      sourceConfidence: 'medium' as const,
+      sourceReferences: [{ label: 'Wikivoyage', url: listing.url || WIKIVOYAGE_URL(city), retrievedAt }],
+      lastVerifiedAt: retrievedAt,
+      expiresAt,
+    });
+  }
+
+  // Best documented first, so a truncated list keeps the places that matter.
+  return [...byKey.values()]
+    .sort((a, b) => b.notability - a.notability)
+    .slice(0, limit);
+}
+
+function buildOsmCandidate(
+  element: OsmElement,
+  city: string,
+  countryCode: string,
+  retrievedAt: string,
+  expiresAt: string,
+  listings: WikivoyageListing[],
+  usedListings: Set<WikivoyageListing>,
+): OpenCandidate | null {
+  const tags = element.tags || {};
+  if (isExcludedOsmPlace(tags)) return null;
+
+  const placeId = osmPlaceId(element);
+  const coordinates = osmElementCoordinates(element);
+  const { name, localName } = osmNames(tags);
+  if (!placeId || !coordinates || !name) return null;
+
+  const categories = osmCategories(tags);
+  // Nothing in the tags says what kind of place this is, so nothing here can
+  // honestly describe it to a traveller.
+  if (categories.length === 0) return null;
+
+  const listing = matchListing({ name, coordinates }, listings);
+  if (listing) usedListings.add(listing);
+
+  const hours = parseOsmOpeningHours(tags.opening_hours);
+  // A guidebook entry is independent corroboration, so it lifts significance.
+  const notability = Math.min(1, osmNotability(tags) + (listing ? 0.35 : 0));
+
+  return {
+    id: `osm-${placeId}`,
+    provider: 'osm' as const,
+    providerPlaceId: placeId,
+    name,
+    localName,
+    // Wikivoyage prose beats a bare tag list for explaining why to go.
+    description: listing?.content,
+    countryCode,
+    city,
+    neighbourhood: tags['addr:suburb'] || tags['addr:district'] || tags['addr:city'] || undefined,
+    coordinates,
+    categories,
+    experienceTags: categories,
+    notability,
+    priceLevel: osmPriceLevel(tags),
+    openingHours: hours
+      // Low, deliberately: OSM hours are community-maintained and this parser
+      // does not yet model weekly closures.
+      ? { periods: [hours], sourceConfidence: 'low' as const }
+      : undefined,
+    estimatedVisitMinutes: osmVisitMinutes(categories),
+    indoorOutdoor: osmIndoorOutdoor(tags),
+    reservationStatus: 'unknown' as const,
+    address: [tags['addr:housenumber'], tags['addr:street']].filter(Boolean).join(' ') || undefined,
+    website: tags.website || tags['contact:website'],
+    phone: tags.phone || tags['contact:phone'],
+    sourceConfidence: (listing || tags.wikidata ? 'high' : 'medium') as 'high' | 'medium',
+    sourceReferences: [
+      { label: 'OpenStreetMap', url: `https://www.openstreetmap.org/${element.type}/${element.id}`, retrievedAt },
+      ...(listing ? [{ label: 'Wikivoyage', url: WIKIVOYAGE_URL(city), retrievedAt }] : []),
+    ],
+    lastVerifiedAt: retrievedAt,
+    expiresAt,
+  };
+}
+
 Deno.serve(async (request) => {
   const early = preflight(request);
   if (early) return early;
@@ -382,10 +708,17 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const selectedProvider = body.provider === 'amap' || body.provider === 'baidu'
-      ? body.provider
-      : countryCode === 'CN' && secrets.amap() ? 'amap'
-        : countryCode === 'CN' && secrets.baidu() ? 'baidu' : 'google';
+    // The client's capability model already chose a provider; honour it. Only
+    // when it asks for nothing specific does the server pick, preferring a
+    // configured commercial provider and falling back to the keyless one —
+    // which always works, so there is no unavailable case left outside China.
+    const requested = body.provider;
+    const selectedProvider = requested === 'amap' || requested === 'baidu' || requested === 'osm'
+      ? requested
+      : requested === 'google' && secrets.google() ? 'google'
+        : countryCode === 'CN' && secrets.amap() ? 'amap'
+          : countryCode === 'CN' && secrets.baidu() ? 'baidu'
+            : secrets.google() ? 'google' : 'osm';
 
     // Read-through: repeating a search for the same city must not re-buy the
     // provider's results. Place identity is the slowest-moving data the app
@@ -437,7 +770,9 @@ Deno.serve(async (request) => {
       ? await searchAmap(city, countryCode, limit, body.travelStartsInDays)
       : selectedProvider === 'baidu'
         ? await searchBaidu(city, countryCode, limit, body.travelStartsInDays)
-        : await searchGoogle(city, countryCode, limit, body.travelStartsInDays);
+        : selectedProvider === 'osm'
+          ? await searchOsm(city, countryCode, limit, body.travelStartsInDays, { lat: body.lat, lng: body.lng })
+          : await searchGoogle(city, countryCode, limit, body.travelStartsInDays);
     if (candidates.length === 0) {
       return json({ error: `No places were returned for ${city}.` }, 404);
     }

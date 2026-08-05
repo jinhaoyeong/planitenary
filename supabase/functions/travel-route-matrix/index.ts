@@ -20,8 +20,22 @@ interface MatrixBody {
   mode?: 'walking' | 'public-transport' | 'driving' | 'cycling';
   departureTime?: string;
   travelStartsInDays?: number;
-  provider?: 'google' | 'amap' | 'baidu';
+  provider?: 'google' | 'openrouteservice' | 'amap' | 'baidu';
 }
+
+/**
+ * Google travel modes → OpenRouteService profiles.
+ *
+ * Transit is absent on purpose: ORS does not offer a public-transport matrix on
+ * the free tier. Rather than routing a transit request as walking — which would
+ * silently invent a plausible-looking but wrong duration — those elements stay
+ * `unknown`, and the client falls back to its labelled straight-line estimate.
+ */
+const ORS_PROFILES: Record<string, string> = {
+  WALK: 'foot-walking',
+  DRIVE: 'driving-car',
+  BICYCLE: 'cycling-regular',
+};
 
 const TRAVEL_MODES: Record<string, string> = {
   walking: 'WALK',
@@ -111,7 +125,8 @@ Deno.serve(async (request) => {
   }
 
   const key = secrets.google();
-  if (!regionalProvider && !key) return json({ error: 'Routing is not configured.' }, 503);
+  const orsKey = secrets.openRouteService();
+  if (!regionalProvider && !key && !orsKey) return json({ error: 'Routing is not configured.' }, 503);
 
   // Cache identity for every endpoint. Points without a placeId or coordinates
   // cannot be cached, so they read as permanent misses rather than a bad key.
@@ -215,6 +230,63 @@ Deno.serve(async (request) => {
     if (complete) {
       return json({ matrix, cached: true, expiresAt: cacheExpiry });
     }
+
+    // OpenRouteService: the keyless-adjacent path. Free tier, hard-capped, and
+    // it returns 429 rather than an invoice when the cap is reached.
+    if (!key && orsKey) {
+      const profile = ORS_PROFILES[mode];
+      if (!profile) {
+        // Transit has no ORS equivalent; leave it honestly unknown.
+        return json({ matrix, cached: false, provider: 'openrouteservice', unsupportedMode: body.mode, expiresAt: cacheExpiry });
+      }
+
+      // ORS routes coordinates only — it has no notion of a provider place id.
+      const points = [...origins, ...destinations];
+      if (points.some((point) => !point.coordinates)) {
+        return json({ error: 'OpenRouteService routing requires coordinates for every point.' }, 400);
+      }
+      // One flat location list, indexed into by sources and destinations.
+      const locations = points.map((point) => [point.coordinates![1], point.coordinates![0]]);
+      const sourceIndices = origins.map((_, index) => index);
+      const destinationIndices = destinations.map((_, index) => origins.length + index);
+
+      const orsPayload = await fetchJson(`https://api.openrouteservice.org/v2/matrix/${profile}`, {
+        method: 'POST',
+        headers: { Authorization: orsKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          locations,
+          sources: sourceIndices,
+          destinations: destinationIndices,
+          metrics: ['duration', 'distance'],
+        }),
+      }, 15_000) as { durations?: Array<Array<number | null>>; distances?: Array<Array<number | null>> } | null;
+
+      const durations = orsPayload?.durations || [];
+      const distances = orsPayload?.distances || [];
+      const orsRows: RouteCacheRow[] = [];
+      origins.forEach((_, i) => destinations.forEach((__, j) => {
+        const seconds = durations[i]?.[j];
+        const metres = distances[i]?.[j];
+        // A null cell means no route exists — that is unknown, never zero.
+        if (typeof seconds !== 'number' || typeof metres !== 'number') return;
+        const durationMinutes = Math.round(seconds / 60);
+        const distanceMeters = Math.round(metres);
+        matrix[i][j] = { status: 'ok', source: 'provider', durationMinutes, distanceMeters } as never;
+        const oKey = originKeys[i];
+        const dKey = destinationKeys[j];
+        if (oKey && dKey && oKey !== dKey) {
+          orsRows.push({ origin_key: oKey, destination_key: dKey, mode: cacheMode, duration_minutes: durationMinutes, distance_meters: distanceMeters, expires_at: cacheExpiry });
+        }
+      }));
+      if (cache) await writeRouteCache(cache, orsRows);
+
+      return json({ matrix, cached: false, provider: 'openrouteservice', expiresAt: cacheExpiry });
+    }
+
+    // Reaching here means Google is the chosen provider: the regional and ORS
+    // paths have both returned, and the no-provider case was rejected up front.
+    // Stated explicitly so the invariant survives the next branch added above.
+    if (!key) return json({ error: 'Routing is not configured.' }, 503);
 
     const payload = await fetchJson('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
       method: 'POST',

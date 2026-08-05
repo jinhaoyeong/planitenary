@@ -1,6 +1,13 @@
 import type { Activity } from '../data';
 
-export type DiscoveryProvider = 'google' | 'official-tourism' | 'wikidata';
+export type DiscoveryProvider =
+  | 'google'
+  | 'osm'
+  /** Regional map providers, used for mainland China. */
+  | 'amap'
+  | 'baidu'
+  | 'official-tourism'
+  | 'wikidata';
 export type ReservationStatus = 'not-needed' | 'recommended' | 'required' | 'unknown';
 export type IndoorOutdoor = 'indoor' | 'outdoor' | 'mixed';
 
@@ -56,6 +63,16 @@ export interface PlaceCandidate {
   experienceTags: string[];
   rating?: number;
   reviewCount?: number;
+  /**
+   * 0–1. How central this place is to understanding the destination, derived
+   * from documentation rather than popularity: an encyclopedia article, a
+   * heritage listing, a curated guidebook entry.
+   *
+   * Distinct from `rating` on purpose. A star average measures satisfaction
+   * over a venue's whole lifetime; this measures significance, and is the
+   * signal available from sources that carry no reviews at all.
+   */
+  notability?: number;
   priceLevel?: number;
   openingHours?: DateAwareOpeningHours;
   estimatedVisitMinutes: number;

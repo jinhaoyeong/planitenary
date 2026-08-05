@@ -25,8 +25,8 @@ export type ProviderAvailability =
   | 'user-shared-only'
   | 'unavailable';
 
-export type PlaceProviderId = 'google' | 'amap' | 'baidu' | 'fixture';
-export type RouteProviderId = 'google-routes' | 'amap' | 'baidu' | 'offline';
+export type PlaceProviderId = 'google' | 'osm' | 'amap' | 'baidu' | 'fixture';
+export type RouteProviderId = 'google-routes' | 'openrouteservice' | 'amap' | 'baidu' | 'offline';
 
 export interface EvidenceCapability {
   official: ProviderAvailability;
@@ -61,6 +61,14 @@ export interface ProviderRuntime {
   googlePlaces: boolean;
   googleRoutes: boolean;
   googleReviews: boolean;
+  /**
+   * OpenStreetMap discovery via Overpass, plus Wikivoyage curation. Needs no
+   * key and cannot be attached to a billing account, so it is normally true —
+   * the flag exists so a deployment can turn it off, not so it can pay for it.
+   */
+  osm: boolean;
+  /** Routing via OpenRouteService. Free tier, hard-capped, never billed. */
+  openRouteService: boolean;
   youtube: boolean;
   tripadvisor: boolean;
   officialSources: boolean;
@@ -82,6 +90,10 @@ export const EMPTY_PROVIDER_RUNTIME: ProviderRuntime = {
   googlePlaces: false,
   googleRoutes: false,
   googleReviews: false,
+  // Keyless, but still served by an Edge Function — so it is unknown until the
+  // server says it is reachable, exactly like every other backed provider.
+  osm: false,
+  openRouteService: false,
   youtube: false,
   tripadvisor: false,
   officialSources: false,
@@ -145,6 +157,11 @@ export function resolveDestinationCapability(
     places = { provider: 'baidu', status: 'live' };
   } else if (!regional && runtime.googlePlaces) {
     places = { provider: 'google', status: 'live' };
+  } else if (!regional && runtime.osm) {
+    // OpenStreetMap covers the world and costs nothing, so it is a genuine live
+    // provider rather than a fallback — but it is tried after Google, which has
+    // richer commercial coverage where a deployment pays for it.
+    places = { provider: 'osm', status: 'live' };
   } else if (hasFixture) {
     places = { provider: 'fixture', status: 'fixture' };
   } else {
@@ -159,6 +176,8 @@ export function resolveDestinationCapability(
     routes = { provider: 'baidu', status: 'live' };
   } else if (!regional && runtime.googleRoutes) {
     routes = { provider: 'google-routes', status: 'live' };
+  } else if (!regional && runtime.openRouteService) {
+    routes = { provider: 'openrouteservice', status: 'live' };
   } else {
     // Straight-line estimation always works, and is always labelled as such.
     routes = { provider: 'offline', status: 'fixture' };

@@ -859,6 +859,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           city: capability.destination.city,
           region: destination?.region,
           countryCode: destination?.countryCode || capability.destination.countryCode,
+          lat: destination?.lat,
+          lng: destination?.lng,
         },
         runtime,
         isSupabaseConfigured() ? invokeTravelFunction : undefined,

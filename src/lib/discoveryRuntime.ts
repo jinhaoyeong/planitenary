@@ -40,6 +40,8 @@ function parseRuntime(payload: unknown): ProviderRuntime {
     googlePlaces: asBoolean(source.googlePlaces),
     googleRoutes: asBoolean(source.googleRoutes),
     googleReviews: asBoolean(source.googleReviews),
+    osm: asBoolean(source.osm),
+    openRouteService: asBoolean(source.openRouteService),
     youtube: asBoolean(source.youtube),
     tripadvisor: asBoolean(source.tripadvisor),
     officialSources: asBoolean(source.officialSources),
@@ -274,7 +276,7 @@ export async function fetchPlaceEvidence(
  * {@link fetchPlaceEvidence}.
  */
 export async function discoverPlaces(
-  destination: Pick<TripDestination, 'city' | 'region' | 'countryCode'>,
+  destination: Pick<TripDestination, 'city' | 'region' | 'countryCode' | 'lat' | 'lng'>,
   runtime: ProviderRuntime = EMPTY_PROVIDER_RUNTIME,
   invoke?: (name: string, body: unknown) => Promise<unknown>,
 ): Promise<DiscoveryOutcome> {
@@ -287,6 +289,10 @@ export async function discoverPlaces(
         city: destination.city,
         countryCode: destination.countryCode,
         provider: capability.places.provider,
+        // Saves the server a geocoding round trip whenever the destination was
+        // chosen from search rather than typed by hand.
+        lat: destination.lat,
+        lng: destination.lng,
       });
       const candidates = Array.isArray(payload) ? (payload as PlaceCandidate[]) : [];
       if (candidates.length > 0) {

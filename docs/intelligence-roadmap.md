@@ -347,12 +347,35 @@ paying a provider:
   could never be cached until the discovery cache expired 30 days later. Linking
   now also repairs itself on the cache-hit path.
 
-**Phase 2 — Free, unbillable place data**
-4. Add `'osm'` to `PlaceProviderId`; write `searchOsm()` beside `searchAmap`
-5. Wikivoyage + Wikipedia pageviews for curation and significance
-6. OpenRouteService for the route matrix; keep the haversine fallback
+**Phase 2 — Free, unbillable place data — DONE (2026-08-06)**
+4. ✅ `'osm'` added to `PlaceProviderId`; `searchOsm()` sits beside `searchAmap`
+5. ✅ Wikivoyage curation — one request per *city*, never per place
+6. ✅ OpenRouteService route matrix; the haversine fallback is untouched
+7. ✅ `notability` replaces `rating` as the significance signal
+8. ✅ `indoorOutdoor` is finally real, from OSM tags
 
-*After this, discovery works end to end with zero spend and no billing account.*
+*Discovery now works end to end with zero spend and no billing account.*
+
+Notes worth carrying forward:
+
+- **Seven billed searches became one free query.** A text API had to be *told*
+  what "top attractions" means, so the old path ran seven searches. OSM objects
+  carry their own classification, so one Overpass query asks for everything and
+  the tags say which is which.
+- **Restaurants are deliberately not in the Overpass query.** A city holds
+  thousands and an unranked list of them is noise. Food comes from Wikivoyage's
+  `eat` listings instead — curated, and a better answer.
+- **`notability` is not a rating.** A star average measures lifetime
+  satisfaction; notability measures documentation (encyclopedia article,
+  heritage listing, guidebook entry). `destinationSignificance` takes the
+  stronger of notability and review count, so a source carrying only one of the
+  two is not penalised for the gap.
+- **Transit has no ORS equivalent** on the free tier. Those elements stay
+  `unknown` rather than being routed as walking, which would have invented a
+  plausible-looking wrong duration.
+- **OSM opening hours are parsed conservatively** and reported at `low`
+  confidence. Weekly closures are still unmodelled — the Monday-closure gap in
+  §5.3 remains open and is now the most valuable single fix left.
 
 **Phase 3 — Evidence breadth**
 7. Reddit ingestion
