@@ -834,7 +834,7 @@ function App() {
     return () => window.removeEventListener('storage', onStorage);
   }, [activeItineraryId, activeItinerary, itineraryStorageKey]);
 
-  const handleTabChange = (newTab: typeof activeTab) => {
+  const handleTabChange = (newTab: typeof activeTab, targetId?: string) => {
     hapticMedium();
     setActiveTab(newTab);
     
@@ -844,8 +844,11 @@ function App() {
       const header = document.querySelector('header');
       const headerHeight = header ? header.getBoundingClientRect().height : 0;
       
-      const targetY = mainContent
-        ? Math.max(0, mainContent.getBoundingClientRect().top + window.scrollY - headerHeight - 8)
+      const targetElement = targetId ? document.getElementById(targetId) : null;
+      const targetY = targetElement
+        ? Math.max(0, targetElement.getBoundingClientRect().top + window.scrollY - headerHeight - 16)
+        : mainContent
+          ? Math.max(0, mainContent.getBoundingClientRect().top + window.scrollY - headerHeight - 8)
         : 0;
         
       const startY = window.scrollY;
@@ -1503,7 +1506,7 @@ function App() {
               className="mt-8 flex flex-wrap items-center gap-3"
             >
               <button
-                onClick={() => handleTabChange(displayItinerary.primaryButtonTab || 'itinerary')}
+                onClick={() => handleTabChange(displayItinerary.primaryButtonTab || 'itinerary', 'itinerary-first-day')}
                 className="pill-btn pill-primary accent-button"
                 style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
               >
@@ -1511,7 +1514,9 @@ function App() {
                   contentEditable={isHomeHeroEditing}
                   suppressContentEditableWarning
                   className="cursor-text rounded px-1 outline-none focus:bg-black/10"
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    if (isHomeHeroEditing) event.stopPropagation();
+                  }}
                   onBlur={(event) => commitHeroText('primaryButtonLabel', event.currentTarget.textContent || '')}
                   title="Click text to edit"
                 >{displayItinerary.primaryButtonLabel || 'Open the itinerary'}</span>
@@ -1521,7 +1526,9 @@ function App() {
                   contentEditable={isHomeHeroEditing}
                   suppressContentEditableWarning
                   className="cursor-text rounded px-1 outline-none focus:bg-white/10"
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    if (isHomeHeroEditing) event.stopPropagation();
+                  }}
                   onBlur={(event) => commitHeroText('secondaryButtonLabel', event.currentTarget.textContent || '')}
                   title="Click text to edit"
                 >{displayItinerary.secondaryButtonLabel || 'See the map'}</span>

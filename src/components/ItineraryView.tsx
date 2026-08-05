@@ -762,7 +762,9 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex gap-4 p-5 bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5 transition-all group relative"
+      // z-[41] keeps the roaming pet overlay (fixed, z-40 — see Pets.tsx)
+      // walking behind this card instead of across the description text.
+      className="flex gap-4 p-5 bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5 transition-all group relative z-[41]"
       onTouchStart={handleTouchStart}
       onTouchEnd={clearLongPressTimer}
       onTouchCancel={clearLongPressTimer}
@@ -1696,6 +1698,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                   >
                     {(provided, snapshot) => (
                       <motion.div
+                        id={index === 0 ? 'itinerary-first-day' : undefined}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.05, duration: 0.3, ease: 'easeOut' }}
@@ -1976,9 +1979,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
             <div className="font-extrabold text-base md:text-xl mb-0.5 md:mb-1">
               <span className={clsx(
                 selectedDay === day.day 
-                  ? "text-rose-400 dark:text-white" 
-                  : "text-rose-400"
-              )}>Day</span> {day.day}
+                  ? "text-white/70 dark:text-white/75"
+                  : "text-slate-500 dark:text-slate-400"
+              )}>Day</span>{' '}
+              <span className={clsx(
+                selectedDay === day.day
+                  ? "text-rose-300 dark:text-white"
+                  : "text-rose-500 dark:text-rose-400"
+              )}>{day.day}</span>
             </div>
             <div className="text-[10px] md:text-xs truncate font-medium opacity-80">
               {day.city}
@@ -1999,7 +2007,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
           {...swipeHandlers}
         >
           <div
-            className="p-5 md:p-8 rounded-3xl shadow-sm border relative overflow-hidden"
+            // z-[41] keeps the roaming pet overlay (fixed, z-40 — see Pets.tsx)
+            // walking behind this card instead of across its text.
+            className="p-5 md:p-8 rounded-3xl shadow-sm border relative z-[41] overflow-hidden"
             style={{
               background: 'linear-gradient(135deg, var(--bg-elevated) 0%, color-mix(in srgb, var(--bg) 70%, var(--bg-elevated)) 100%)',
               borderColor: 'var(--border)',
@@ -2057,7 +2067,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
 
           {routeRealityChecks.length > 0 && (
             <div
-              className="rounded-3xl border p-4 md:p-5 space-y-2"
+              className="rounded-3xl border p-4 md:p-5 space-y-2 relative z-[41]"
               style={{
                 backgroundColor: 'var(--bg-elevated)',
                 borderColor: 'var(--border)',

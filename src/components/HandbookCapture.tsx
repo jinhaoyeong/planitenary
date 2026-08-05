@@ -317,7 +317,11 @@ export function HandbookCapture() {
                 >
                   {itinerary.primaryButtonLabel || 'Open the itinerary'}
                 </button>
-                <button type="button" className="pill-btn pill-ghost">
+                <button
+                  type="button"
+                  className="pill-btn pill-ghost"
+                  onClick={() => syncUrlAndState({ view: 'itinerary' })}
+                >
                   <MapIcon className="w-4 h-4" />
                   {itinerary.secondaryButtonLabel || 'See the map'}
                 </button>

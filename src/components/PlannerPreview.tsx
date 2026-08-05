@@ -87,7 +87,6 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const [proposal, setProposal] = useState<ItineraryProposal | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
-  const [improveExpanded, setImproveExpanded] = useState(false);
   // On a phone this panel is a secondary tool, not the main event: it starts
   // folded down to its header so the discovery card and the itinerary below it
   // stay reachable without scrolling past a wall of buttons.
@@ -119,6 +118,19 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   const conflictCount = useMemo(() => conflictCountFor(itinerary), [itinerary]);
   const declaredDays = declaredTripDays(profile);
   const existingDaysNotice = plannerExistingDaysNotice(declaredDays, itinerary.days.length);
+  // What the folded header promises. Says what the panel does now, in this
+  // trip's state, rather than naming the section twice.
+  const organiseSummary = (() => {
+    const conflicts = conflictCount > 0
+      ? ` · ${conflictCount} ${conflictCount === 1 ? 'conflict' : 'conflicts'} to fix`
+      : '';
+    if (!hasPlaceActivities && !hasInboxActivities) {
+      return discoverySupported ? 'Add places first' : 'No places yet';
+    }
+    if (!hasPlaceActivities) return 'Place your saved activities into days';
+    if (discoveryBuilt) return `Balance travel, replan a day, undo${conflicts}`;
+    return `Order your places into days${conflicts}`;
+  })();
 
   useEffect(() => {
     document.body.classList.add('planner-intelligence-active');
@@ -197,7 +209,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
 
   if (proposal) {
     return (
-      <section className="rounded-3xl p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }} aria-live="polite">
+      <section className="p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-section, var(--card-radius, 1.5rem))' }} aria-live="polite">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="eyebrow m-0">Preview before applying</div>
@@ -312,7 +324,10 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
   return (
     <div className="space-y-4">
       <DestinationDiscoveryPanel itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
-      <section className={`planner-organise-panel rounded-3xl p-4 sm:p-5 space-y-3 ${organiseOpen ? 'is-open' : 'is-collapsed'}`} style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+      <section
+        className={`planner-organise-panel p-4 sm:p-5 space-y-3 ${organiseOpen ? 'is-open' : 'is-collapsed'}`}
+        style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-section, var(--card-radius, 1.5rem))' }}
+      >
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
@@ -320,9 +335,15 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
             aria-expanded={organiseOpen}
             onClick={() => setOrganiseOpen((open) => !open)}
           >
-            <h3 className="font-display text-2xl text-left">
-              {discoveryBuilt ? 'Improve plan' : 'Organise places'}
-            </h3>
+            {/* Folded, the title alone says nothing about what is inside. The
+                subtitle carries that job on a phone, so opening the panel is a
+                decision rather than a guess. */}
+            <span className="planner-organise-heading">
+              <h3 className="font-display planner-organise-title">
+                {discoveryBuilt ? 'Improve plan' : 'Organise places'}
+              </h3>
+              <span className="planner-organise-summary">{organiseSummary}</span>
+            </span>
             <ChevronDown
               className={`planner-organise-chevron w-5 h-5 shrink-0 transition-transform ${organiseOpen ? 'rotate-180' : ''}`}
               style={{ color: 'var(--ink-muted)' }}
@@ -341,43 +362,38 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
 
           <div className="planner-action-groups">
             {!discoveryBuilt && (
-              <div>
-                <span className="planner-action-label">Build</span>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {hasPlaceActivities && <button type="button" className="pill-btn pill-primary" onClick={optimiseWholeTrip}><Sparkles className="w-4 h-4" /> Organise places</button>}
-                  {hasInboxActivities && !hasPlaceActivities && <button type="button" className="pill-btn pill-primary" onClick={build}><Sparkles className="w-4 h-4" /> Place activities</button>}
-                  {!hasPlaceActivities && !hasInboxActivities && (
-                    <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>
-                      {discoverySupported ? `Add places or use ${discoveryCityLabel} discovery above.` : 'Add places to start.'}
-                    </span>
-                  )}
-                </div>
+              <div className="planner-action-group">
+                {hasPlaceActivities && <button type="button" className="pill-btn pill-primary planner-primary-action" onClick={optimiseWholeTrip}><Sparkles className="w-4 h-4" /> Organise places</button>}
+                {hasInboxActivities && !hasPlaceActivities && <button type="button" className="pill-btn pill-primary planner-primary-action" onClick={build}><Sparkles className="w-4 h-4" /> Place activities</button>}
+                {!hasPlaceActivities && !hasInboxActivities && (
+                  <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>
+                    {discoverySupported ? `Add places or use ${discoveryCityLabel} discovery above.` : 'Add places to start.'}
+                  </span>
+                )}
               </div>
             )}
             {hasPlaceActivities && (
-              <div>
-                <span className="planner-action-label">Improve</span>
-                <div className="planner-improve-actions flex flex-wrap gap-2 mt-2" data-expanded={improveExpanded ? 'true' : 'false'}>
+              <div className="planner-action-group">
+                <span className="planner-action-label">Adjust the plan</span>
+                {/* One scrollable row instead of a wrapping block plus a "More"
+                    expander: every action stays reachable, and the section costs
+                    one row of height rather than five. */}
+                <div
+                  className="planner-improve-actions"
+                  role="group"
+                  aria-label="Ways to adjust the plan"
+                >
                   <button type="button" className="pill-btn pill-soft" onClick={optimiseWholeTrip}>Balance travel</button>
                   <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'late-start', minutes: 60 })}>Late start · 60 min</button>
                   <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'rain' })}>Rainy-day plan</button>
-                  <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={() => replanSelectedDay({ kind: 'route-delay', minutes: 30 })}>Route delay · 30 min</button>
-                  <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={() => replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 })}>Less walking</button>
-                  <button type="button" className="pill-btn pill-soft planner-improve-action-extra" disabled title="Requires live place discovery and replacement candidates">More local · Soon</button>
-                  <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={relaxWholeTrip}>More relaxed</button>
-                  <button type="button" className="pill-btn pill-soft planner-improve-action-extra" onClick={lowerCostWholeTrip}>Lower cost</button>
-                  <button type="button" className="pill-btn pill-soft planner-improve-action-extra" disabled={conflictCount === 0} title={conflictCount > 0 ? 'Preview deterministic conflict repair' : 'No opening-hours or overlap conflicts detected'} onClick={repairWholeTrip}>Fix conflicts{conflictCount > 0 ? ` · ${conflictCount}` : ''}</button>
-                  {lastHistory && <button type="button" className="pill-btn pill-ghost planner-improve-action-extra" onClick={undo}><Undo2 className="w-4 h-4" /> Undo</button>}
+                  <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'route-delay', minutes: 30 })}>Route delay · 30 min</button>
+                  <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 })}>Less walking</button>
+                  <button type="button" className="pill-btn pill-soft" onClick={relaxWholeTrip}>More relaxed</button>
+                  <button type="button" className="pill-btn pill-soft" onClick={lowerCostWholeTrip}>Lower cost</button>
+                  <button type="button" className="pill-btn pill-soft" disabled={conflictCount === 0} title={conflictCount > 0 ? 'Preview deterministic conflict repair' : 'No opening-hours or overlap conflicts detected'} onClick={repairWholeTrip}>Fix conflicts{conflictCount > 0 ? ` · ${conflictCount}` : ''}</button>
+                  <button type="button" className="pill-btn pill-soft" disabled title="Requires live place discovery and replacement candidates">More local · Soon</button>
+                  {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo</button>}
                 </div>
-                <button
-                  type="button"
-                  className="planner-improve-toggle pill-btn pill-ghost mt-2 sm:hidden"
-                  aria-expanded={improveExpanded}
-                  onClick={() => setImproveExpanded((open) => !open)}
-                >
-                  {improveExpanded ? 'Less' : 'More'}
-                  <ChevronDown className={`w-4 h-4 transition-transform ${improveExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
-                </button>
               </div>
             )}
           </div>

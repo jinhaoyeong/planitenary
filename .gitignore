@@ -34,6 +34,9 @@ deps/
 *.sln
 *.sw?
 
+# Supabase CLI local state
+supabase/.temp/
+
 # Native iOS artifacts (not shipped in this repo)
 ios/
 TravelHandbook-iOS/

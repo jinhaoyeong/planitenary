@@ -17,7 +17,8 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 /* The entry point is a single row: what you get, and the button that starts it.
-   It sits above the planner, so it earns exactly one line of explanation. */
+   It sits above the planner, so it earns exactly one line of explanation.
+   Centering the copy stack against the action keeps the card visually balanced. */
 .destination-discovery-intro {
   display: flex;
   align-items: center;
@@ -27,12 +28,18 @@ body.planner-intelligence-active .pet-overlay {
   padding: 0.85rem 1rem;
 }
 
+.destination-discovery-intro .pill-btn {
+  margin-top: 0.1rem;
+}
+
 .destination-intro-copy {
   min-width: 0;
 }
 
 .destination-discovery-intro h3 {
-  font-family: var(--font-display);
+  /* Matches the `.font-display` helper the rest of the app uses. */
+  font-family: var(--font-serif);
+  font-weight: 400;
   font-size: clamp(1.15rem, 1.8vw, 1.5rem);
   line-height: 1.15;
   letter-spacing: -0.02em;
@@ -48,7 +55,9 @@ body.planner-intelligence-active .pet-overlay {
 .destination-preview-header h4 {
   margin-top: 0.65rem;
   max-width: 22ch;
-  font-family: var(--font-display);
+  /* Matches the `.font-display` helper the rest of the app uses. */
+  font-family: var(--font-serif);
+  font-weight: 400;
   font-size: clamp(1.35rem, 2.2vw, 1.85rem);
   line-height: 1.05;
   letter-spacing: -0.025em;
@@ -409,7 +418,9 @@ body.planner-intelligence-active .pet-overlay {
 
 .destination-deck-chrome h3 {
   margin-top: 0.7rem;
-  font-family: var(--font-display);
+  /* Matches the `.font-display` helper the rest of the app uses. */
+  font-family: var(--font-serif);
+  font-weight: 400;
   font-size: 1.55rem;
   line-height: 1.1;
 }
@@ -986,7 +997,9 @@ body.planner-intelligence-active .pet-overlay {
 
 .destination-built-summary h3 {
   margin-top: 0.8rem;
-  font-family: var(--font-display);
+  /* Matches the `.font-display` helper the rest of the app uses. */
+  font-family: var(--font-serif);
+  font-weight: 400;
   font-size: clamp(1.5rem, 2.5vw, 2.2rem);
   line-height: 1.05;
 }
@@ -1391,6 +1404,7 @@ body.planner-intelligence-active .pet-overlay {
 
 .planner-organise-header {
   display: flex;
+  /* Center the two-line label and chevron as one control. */
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
@@ -1401,6 +1415,28 @@ body.planner-intelligence-active .pet-overlay {
   background: transparent;
   color: inherit;
   cursor: pointer;
+  text-align: left;
+}
+
+.planner-organise-chevron {
+  margin-top: 0.15rem;
+}
+
+.planner-organise-heading {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.planner-organise-title {
+  font-size: 1.5rem;
+  line-height: 1.15;
+}
+
+/* Desktop keeps the panel permanently open, so the folded-state promise would
+   only repeat what is already on screen. */
+.planner-organise-summary {
+  display: none;
 }
 
 .planner-organise-body {
@@ -1408,9 +1444,15 @@ body.planner-intelligence-active .pet-overlay {
   gap: 0.75rem;
 }
 
-.planner-improve-toggle {
-  width: 100%;
-  justify-content: center;
+.planner-action-group {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.planner-improve-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 @media (max-width: 639px) {
@@ -1418,24 +1460,77 @@ body.planner-intelligence-active .pet-overlay {
      leftover padding, so a folded section costs one line, not a third of the
      screen. */
   .planner-organise-panel {
+    display: flex;
+    flex-direction: column;
     padding: 0.65rem 0.85rem;
+    transition: padding 0.38s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .planner-organise-panel.is-collapsed {
+    justify-content: center;
     padding-block: 0.5rem;
     gap: 0;
   }
 
-  .planner-organise-panel .font-display {
+  .planner-organise-panel.is-collapsed > .planner-organise-body {
+    margin-top: 0;
+  }
+
+  .planner-organise-panel.is-open > .planner-organise-body {
+    margin-top: 0.75rem;
+  }
+
+  .planner-organise-title {
     font-size: 1.05rem;
   }
 
-  .planner-organise-body[data-open="false"] {
-    display: none;
+  /* The folded header has to answer "what is in here?" on its own. */
+  .planner-organise-summary {
+    display: block;
+    overflow: hidden;
+    color: var(--ink-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .planner-improve-actions[data-expanded="false"] .planner-improve-action-extra {
-    display: none;
+  .planner-organise-body[data-open="false"] {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transform: translateY(-0.35rem);
+  }
+
+  .planner-organise-body {
+    max-height: 60rem;
+    opacity: 1;
+    overflow: hidden;
+    transform: translateY(0);
+    transition:
+      max-height 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.2s ease,
+      transform 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+      margin-top 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0.38s;
+    visibility: visible;
+    will-change: max-height, opacity, transform;
+  }
+
+  .planner-organise-body[data-open="false"] {
+    visibility: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .planner-organise-body {
+      transition: none;
+    }
+
+    .planner-organise-panel {
+      transition: none;
+    }
   }
 
   /* Action pills sized for a dense list of options rather than for one hero
@@ -1452,16 +1547,49 @@ body.planner-intelligence-active .pet-overlay {
     height: 0.85rem;
   }
 
+  .planner-primary-action {
+    width: 100%;
+    justify-content: center;
+    min-height: 2.5rem;
+  }
+
+  /* Adjustments scroll sideways in one row. A wrapping block of ten pills was
+     five rows tall and pushed the itinerary off the screen; this keeps every
+     option reachable at the cost of a single row, and the pills bleed to the
+     panel edge so the row visibly continues. */
   .planner-improve-actions {
-    gap: 0.35rem;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+    overflow-x: auto;
+    margin-inline: -0.85rem;
+    padding-inline: 0.85rem;
+    padding-block: 0.15rem;
+    scroll-padding-inline: 0.85rem;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .planner-improve-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .planner-improve-actions .pill-btn {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
   }
 
   .planner-action-label {
     font-size: 0.6rem;
   }
 
+  .planner-action-group {
+    gap: 0.4rem;
+  }
+
   .planner-action-groups {
-    gap: 0.75rem;
+    gap: 0.8rem;
   }
 }
 
