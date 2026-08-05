@@ -41,8 +41,11 @@ body.planner-intelligence-active .pet-overlay {
   list-style: none;
   cursor: pointer;
   color: var(--ink);
-  font-size: 0.82rem;
-  font-weight: 750;
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
 }
 
 .destination-build-fold > summary::-webkit-details-marker {
@@ -1204,14 +1207,17 @@ body.planner-intelligence-active .pet-overlay {
   border-top: 1px solid var(--border);
   background: transparent;
   color: var(--ink);
-  font-size: 0.82rem;
-  font-weight: 750;
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
   cursor: pointer;
   text-align: left;
 }
 
 .planner-improve-section-toggle span {
-  letter-spacing: 0.01em;
+  letter-spacing: -0.01em;
 }
 
 @media (max-width: 639px) {

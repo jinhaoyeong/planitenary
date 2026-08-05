@@ -1723,19 +1723,19 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                             data-motif={visualIdentity?.motifSet && visualIdentity.motifSet !== 'none' ? visualIdentity.motifSet : undefined}
                             aria-hidden="true"
                           />
-                          <div className="flex justify-between items-start mb-3 md:mb-4 gap-2 relative z-[1]">
-                            <div className="flex items-start md:items-center gap-2 md:gap-3 flex-wrap">
+                          <div className="flex justify-between items-start mb-3 md:mb-4 gap-3 relative z-[1]">
+                            <div className="flex items-start gap-2 md:gap-3 min-w-0 flex-1">
                               {isEditingMode && (
                                 <div 
                                   {...provided.dragHandleProps}
-                                  className="p-1 md:p-1.5 -ml-1 md:-ml-2 text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 self-start mt-0.5 md:mt-0"
+                                  className="p-1 md:p-1.5 -ml-1 md:-ml-2 text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 self-start mt-1"
                                 >
                                   <GripVertical className="w-4 h-4 md:w-5 md:h-5" />
                                 </div>
                               )}
                               <div
                                 className={clsx(
-                                  "font-display handbook-display text-5xl md:text-6xl leading-none whitespace-nowrap transition-transform origin-left",
+                                  "font-display handbook-display text-4xl md:text-5xl leading-none whitespace-nowrap shrink-0 transition-transform origin-left pt-0.5",
                                   !isEditingMode && "group-hover:scale-105 cursor-pointer"
                                 )}
                                 style={{ color: 'var(--accent)' }}
@@ -1743,10 +1743,20 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                               >
                                 {String(day.day).padStart(2, '0')}
                               </div>
+                              <h3
+                                className={clsx(
+                                  "font-display text-2xl md:text-3xl leading-[1.1] min-w-0 flex-1 transition-colors",
+                                  !isEditingMode && "cursor-pointer"
+                                )}
+                                style={{ color: 'var(--ink)' }}
+                                onClick={() => !isEditingMode && setSelectedDay(day.day)}
+                              >
+                                {day.title}
+                              </h3>
                             </div>
                             
                             {isEditingMode && editingDateIndex === index ? (
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 shrink-0">
                                 <input
                                   autoFocus
                                   type="text"
@@ -1766,7 +1776,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                             ) : (
                               <div 
                                 className={clsx(
-                                  "text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest text-right shrink-0 mt-1 md:mt-0",
+                                  "text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest text-right shrink-0 pt-1",
                                   isEditingMode && "cursor-pointer hover:text-rose-500 flex items-center gap-1"
                                 )}
                                 onClick={() => {
@@ -1781,17 +1791,6 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                               </div>
                             )}
                           </div>
-                          
-                          <h3
-                            className={clsx(
-                              "font-display text-2xl md:text-3xl leading-tight mb-2 line-clamp-2 transition-colors",
-                              !isEditingMode && "cursor-pointer"
-                            )}
-                            style={{ color: 'var(--ink)' }}
-                            onClick={() => !isEditingMode && setSelectedDay(day.day)}
-                          >
-                            {day.title}
-                          </h3>
 
                           {day.activities.length === 0 && (
                             <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>
