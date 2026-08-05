@@ -94,6 +94,30 @@ describe('destination capability resolution', () => {
     expect(describeCapability(capability)).not.toContain('Osaka');
   });
 
+  it('offers forum discussion once Reddit credentials exist', () => {
+    const capability = resolveDestinationCapability(
+      { city: 'Melbourne', countryCode: 'AU' },
+      runtime({ reddit: true }),
+    );
+    expect(capability.evidence.reddit).toBe('live');
+    expect(describeCapability(capability)).toContain('traveller discussion');
+  });
+
+  it('does not offer Reddit for mainland China, where it is blocked', () => {
+    // Coverage there is written by visitors, not locals. Presenting a thin
+    // outsider view as the local consensus would be the dishonest option.
+    const capability = resolveDestinationCapability(
+      { city: 'Beijing', countryCode: 'CN' },
+      runtime({ reddit: true, amap: true }),
+    );
+    expect(capability.evidence.reddit).toBe('unavailable');
+  });
+
+  it('reports Reddit unavailable rather than live when unconfigured', () => {
+    const capability = resolveDestinationCapability({ city: 'Melbourne', countryCode: 'AU' }, runtime());
+    expect(capability.evidence.reddit).toBe('unavailable');
+  });
+
   it('serves any city from OpenStreetMap when no paid provider is configured', () => {
     // The case that matters after the Google project was removed: discovery
     // must still be live, not a fixture, and not unavailable.

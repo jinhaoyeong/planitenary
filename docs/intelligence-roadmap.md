@@ -390,11 +390,28 @@ Notes worth carrying forward:
   confidence. Weekly closures are still unmodelled — the Monday-closure gap in
   §5.3 remains open and is now the most valuable single fix left.
 
-**Phase 3 — Evidence breadth**
-7. Reddit ingestion
-8. Split YouTube onto its own billing-free key
-9. Close the user-shared link loop: oEmbed → claims → `source_documents`
-10. TripAdvisor into the existing seam
+**Phase 3 — Evidence breadth — DONE (2026-08-06), except TripAdvisor**
+7. ✅ Reddit ingestion, via app-only OAuth
+8. ✅ YouTube split onto its own `YOUTUBE_API_KEY`
+9. ✅ User-shared link loop: oEmbed → claims → `source_documents`
+10. TripAdvisor into the existing seam — deferred; its coverage skews touristy,
+    which is the least useful signal for this product
+
+Also done here, since both were overdue:
+
+- **Claim extraction moved to `_shared/claims.ts`** and given its own tests. It
+  is the code that turns a stranger's sentence into something the planner acts
+  on, and it had none. Writing them found a real gap: "the line was about 50
+  min" — a far more natural phrasing than "line of 50 min" — was not matched,
+  because the pattern allowed one hedge word and people use two.
+- **The drifting unions collapsed.** `DiscoveryProvider` and
+  `SchedulerRejectionReason` are now declared once in `src/data.ts` and
+  re-exported. Both pairs had drifted; adding Reddit would have made it three.
+
+Reddit needs free credentials (`REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET`
+from a "script" app). The unauthenticated `.json` endpoints are not an option:
+Reddit throttles and increasingly blocks anonymous requests from cloud IPs,
+which is where Edge Functions run.
 
 **Phase 4 — Evidence depth**
 11. `GEMINI_API_KEY` set; LLM claim extraction with the substring validation gate

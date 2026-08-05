@@ -14,6 +14,7 @@
  * reported rather than silently dropped.
  */
 
+import type { SchedulerRejectionReason } from '../data';
 import type { PlaceCandidate } from './destinationIntelligence';
 import { distanceMeters } from './placeIdentity';
 import { PACE_DEFAULTS, type TravelBehaviourProfile } from './travelBehaviour';
@@ -74,19 +75,12 @@ export interface ScheduledSlot {
   reason: string;
 }
 
-export type RejectionReason =
-  | 'daily-capacity-reached'
-  | 'opening-hours-conflict'
-  /** Published hours name no window for this weekday. */
-  | 'closed-on-this-day'
-  | 'walking-limit-exceeded'
-  | 'return-time-exceeded'
-  | 'queue-exceeds-tolerance'
-  /** Would leave the day with less unscheduled time than the pace guarantees. */
-  | 'free-time-floor'
-  | 'incompatible-location'
-  | 'insufficient-route-data'
-  | 'duplicate';
+/**
+ * Declared in `../data` alongside `DiscoveryUnscheduledReason`, which extends
+ * it. Keeping one list means a new reason cannot be added here and silently
+ * omitted from the persisted union — which is exactly what happened twice.
+ */
+export type RejectionReason = SchedulerRejectionReason;
 
 export interface SchedulingRejection {
   candidate: PlaceCandidate;

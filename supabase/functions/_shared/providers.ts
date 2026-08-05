@@ -52,10 +52,28 @@ const env = (name: string): string | undefined => {
 /** Secrets, resolved once. Absent secret means that provider is simply off. */
 export const secrets = {
   google: () => env('GOOGLE_MAPS_API_KEY'),
-  // Google Cloud uses one API key for the enabled Places, Routes,
-  // Geocoding and YouTube Data APIs. Keep provider access server-side and
-  // avoid requiring a second YouTube-specific secret.
-  youtube: () => env('GOOGLE_MAPS_API_KEY'),
+  /**
+   * YouTube Data API v3, on its own key.
+   *
+   * Previously this aliased the Maps key, which tied video evidence to a
+   * project that could be billed. YouTube's 10,000 unit/day quota needs no
+   * payment method at all, so its key belongs to a Cloud project with **no
+   * billing account attached** — which makes it structurally incapable of
+   * charging, rather than merely unlikely to.
+   *
+   * The Maps key remains a fallback so an existing deployment keeps working.
+   */
+  youtube: () => env('YOUTUBE_API_KEY') || env('GOOGLE_MAPS_API_KEY'),
+  /**
+   * Reddit, via an app-only OAuth client (a free "script" app).
+   *
+   * The unauthenticated `.json` endpoints are not usable here: Reddit rate
+   * limits and increasingly blocks anonymous requests from cloud IPs, which is
+   * exactly where Edge Functions run. Credentials are free and the quota is
+   * generous; absent them, Reddit simply reports as unavailable.
+   */
+  redditClientId: () => env('REDDIT_CLIENT_ID'),
+  redditClientSecret: () => env('REDDIT_CLIENT_SECRET'),
   tripadvisor: () => env('TRIPADVISOR_API_KEY'),
   openRouteService: () => env('OPENROUTESERVICE_API_KEY'),
   /**
@@ -92,6 +110,7 @@ export function capabilitySnapshot() {
     osm: true,
     openRouteService: Boolean(secrets.openRouteService()),
     youtube: Boolean(secrets.youtube()),
+    reddit: Boolean(secrets.redditClientId() && secrets.redditClientSecret()),
     tripadvisor: Boolean(secrets.tripadvisor()),
     // Official-source fetching needs no third-party key.
     officialSources: true,
@@ -193,6 +212,57 @@ export async function probeGoogleRoutes(): Promise<boolean> {
     // disabled retries the failing (still billable) call on every request.
     routesProbe = { value: false, checkedAt: Date.now() };
     return false;
+  }
+}
+
+/**
+ * Reddit requires a descriptive User-Agent naming the app and will throttle or
+ * block traffic that does not identify itself.
+ */
+export const REDDIT_USER_AGENT = 'web:planitenary:1.0 (travel itinerary planner)';
+
+/**
+ * App-only OAuth token, memoised for its lifetime.
+ *
+ * Reddit issues these for ~24 hours. Fetching one per evidence request would
+ * spend a request on authentication for every request of substance, so the
+ * token is held in module scope — which an Edge Function instance reuses —
+ * and refreshed a little early to avoid racing its own expiry.
+ */
+let redditToken: { value: string; expiresAt: number } | null = null;
+
+/** Test seam: drop the memoised Reddit token. */
+export const resetRedditToken = () => { redditToken = null; };
+
+export async function redditAccessToken(): Promise<string | null> {
+  const id = secrets.redditClientId();
+  const secret = secrets.redditClientSecret();
+  if (!id || !secret) return null;
+  if (redditToken && redditToken.expiresAt > Date.now()) return redditToken.value;
+
+  try {
+    const response = await fetch('https://www.reddit.com/api/v1/access_token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${btoa(`${id}:${secret}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': REDDIT_USER_AGENT,
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as { access_token?: string; expires_in?: number };
+    if (!payload.access_token) return null;
+    const lifetimeSeconds = typeof payload.expires_in === 'number' ? payload.expires_in : 3600;
+    redditToken = {
+      value: payload.access_token,
+      // Refreshed five minutes early so a long request cannot outlive its token.
+      expiresAt: Date.now() + Math.max(60, lifetimeSeconds - 300) * 1000,
+    };
+    return redditToken.value;
+  } catch {
+    // Evidence is optional; a failed sign-in must not break discovery.
+    return null;
   }
 }
 

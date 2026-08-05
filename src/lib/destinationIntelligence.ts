@@ -1,13 +1,11 @@
-import type { Activity } from '../data';
+import type { Activity, DiscoveryProvider } from '../data';
 
-export type DiscoveryProvider =
-  | 'google'
-  | 'osm'
-  /** Regional map providers, used for mainland China. */
-  | 'amap'
-  | 'baidu'
-  | 'official-tourism'
-  | 'wikidata';
+/**
+ * Declared in `../data` so the persisted `Activity.provider` and the in-flight
+ * `PlaceCandidate.provider` cannot drift apart. Re-exported here because this
+ * is where discovery code naturally looks for it.
+ */
+export type { DiscoveryProvider };
 export type ReservationStatus = 'not-needed' | 'recommended' | 'required' | 'unknown';
 export type IndoorOutdoor = 'indoor' | 'outdoor' | 'mixed';
 

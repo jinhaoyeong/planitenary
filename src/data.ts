@@ -55,7 +55,7 @@ export interface Activity {
   lockedFields?: ActivityLockedField[];
   fieldProvenance?: ActivityFieldProvenance;
   generatedMetadata?: ActivityGeneratedMetadata;
-  provider?: 'google' | 'osm' | 'amap' | 'baidu' | 'official-tourism' | 'wikidata';
+  provider?: DiscoveryProvider;
   providerPlaceId?: string;
   sourceReferences?: Array<{ label: string; url: string }>;
   lastVerifiedAt?: string;
@@ -79,15 +79,41 @@ export type DiscoveryCandidateDecision = 'must-do' | 'interested' | 'skip' | 'vi
 
 export type DiscoveryStage = 'not-started' | 'reviewing' | 'shortlist-ready' | 'itinerary-built' | 'needs-review';
 
-export type DiscoveryUnscheduledReason =
+/**
+ * Where a place record came from.
+ *
+ * Defined here, in the base data module, and re-exported by
+ * `destinationIntelligence` as `DiscoveryProvider`. It was previously declared
+ * in both files and drifted twice — once missing the regional providers, once
+ * missing OpenStreetMap.
+ */
+export type DiscoveryProvider =
+  | 'google'
+  | 'osm'
+  | 'wikivoyage'
+  /** Regional map providers, used for mainland China. */
+  | 'amap'
+  | 'baidu'
+  | 'official-tourism'
+  | 'wikidata';
+
+/**
+ * Every reason the day simulator can decline to schedule a place.
+ *
+ * Lives here rather than in the scheduler so the persisted union and the
+ * runtime one cannot disagree — `humanScheduler` re-exports this as
+ * `RejectionReason`. The two used to be separate lists of the same concepts,
+ * and adding a reason to one silently broke the other.
+ */
+export type SchedulerRejectionReason =
   | 'opening-hours-conflict'
   | 'daily-capacity-reached'
   | 'incompatible-location'
   | 'insufficient-route-data'
   | 'duplicate'
-  // Raised by the human scheduler: the traveller's own comfort limits, not a
-  // data gap. Kept distinct so the UI can offer to relax the limit instead of
-  // implying the place is unavailable.
+  // The traveller's own comfort limits, not a data gap. Kept distinct so the
+  // UI can offer to relax the limit instead of implying the place is
+  // unavailable.
   | 'walking-limit-exceeded'
   | 'return-time-exceeded'
   | 'queue-exceeds-tolerance'
@@ -97,7 +123,15 @@ export type DiscoveryUnscheduledReason =
   | 'closed-on-this-day'
   // Adding it would have left the day with less unscheduled time than the
   // chosen pace guarantees.
-  | 'free-time-floor'
+  | 'free-time-floor';
+
+/**
+ * Why a shortlisted place did not make it into the finished plan. Everything
+ * the scheduler can say, plus the one reason only the planner can reach.
+ */
+export type DiscoveryUnscheduledReason =
+  | SchedulerRejectionReason
+  /** The trip ran out of days before this place could be placed anywhere. */
   | 'no-viable-day';
 
 export interface DiscoveryUnscheduledCandidate {

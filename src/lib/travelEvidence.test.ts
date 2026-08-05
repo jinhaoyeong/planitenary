@@ -78,6 +78,44 @@ describe('operational fact gating', () => {
     const social = evidence({ source: 'tiktok', claims: [claim({ type: 'overrated', summary: 'Overrated' })] });
     expect(claimIsPresentableAsFact(social, social.claims[0])).toBe(true);
   });
+
+  it('will not let a forum thread establish that a venue has closed', () => {
+    // Reddit is good evidence for judgement and poor evidence for operational
+    // fact. Someone saying "I think it shut down" must not close a place.
+    const thread = evidence({ source: 'reddit', claims: [claim({ type: 'closed', summary: 'Heard it shut' })] });
+    expect(claimIsPresentableAsFact(thread, thread.claims[0])).toBe(false);
+  });
+});
+
+describe('forum discussion as evidence', () => {
+  it('weighs a thread above a video and below a map provider', () => {
+    const at = (source: SourceEvidence['source']) => evidenceWeight(evidence({ source }), NOW);
+    expect(at('reddit')).toBeGreaterThan(at('youtube'));
+    expect(at('reddit')).toBeLessThan(at('google-places'));
+  });
+
+  it('does not attach the platform promotion penalty that social video carries', () => {
+    // The whole point of adding Reddit: no sponsorship incentive, so it is not
+    // pre-penalised the way TikTok and RedNote are.
+    const thread = evidence({ source: 'reddit' });
+    const video = evidence({ source: 'rednote' });
+    expect(promotionRisk(thread)).toBeLessThan(promotionRisk(video));
+  });
+
+  it('still flags a thread that reads as promotional', () => {
+    const advertised = evidence({ source: 'reddit', disclosure: 'sponsored' });
+    expect(promotionRisk(advertised)).toBe(1);
+  });
+
+  it('counts a thread as an independent source for corroboration', () => {
+    const summary = summarisePlaceEvidence('place-1', [
+      evidence({ source: 'google-places', claims: [claim({ type: 'overrated', summary: 'Described as overrated' })] }),
+      evidence({ source: 'reddit', claims: [claim({ type: 'overrated', summary: 'Described as overrated' })] }),
+    ], NOW);
+    expect(summary.distinctSources).toContain('reddit');
+    expect(summary.sourceCount).toBe(2);
+    expect(summary.negativeThemes).toContain('Described as overrated');
+  });
 });
 
 describe('promotion risk', () => {

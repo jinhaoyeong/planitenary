@@ -31,6 +31,8 @@ export type RouteProviderId = 'google-routes' | 'openrouteservice' | 'amap' | 'b
 export interface EvidenceCapability {
   official: ProviderAvailability;
   googleReviews: ProviderAvailability;
+  /** Forum discussion — the least commercially motivated stream available. */
+  reddit: ProviderAvailability;
   youtube: ProviderAvailability;
   tripadvisor: ProviderAvailability;
   tiktok: ProviderAvailability;
@@ -69,6 +71,7 @@ export interface ProviderRuntime {
   osm: boolean;
   /** Routing via OpenRouteService. Free tier, hard-capped, never billed. */
   openRouteService: boolean;
+  reddit: boolean;
   youtube: boolean;
   tripadvisor: boolean;
   officialSources: boolean;
@@ -94,6 +97,7 @@ export const EMPTY_PROVIDER_RUNTIME: ProviderRuntime = {
   // server says it is reachable, exactly like every other backed provider.
   osm: false,
   openRouteService: false,
+  reddit: false,
   youtube: false,
   tripadvisor: false,
   officialSources: false,
@@ -189,6 +193,10 @@ export function resolveDestinationCapability(
     official: liveOr(runtime.officialSources, hasFixture ? 'fixture' : 'unavailable'),
     // Google review coverage follows the same regional split as Google places.
     googleReviews: liveOr(runtime.googleReviews && !regional),
+    // Reddit is blocked in mainland China, so its coverage of destinations
+    // there is written by visitors rather than locals. Reported unavailable
+    // rather than presenting a thin outsider view as the local consensus.
+    reddit: liveOr(runtime.reddit && !regional),
     youtube: liveOr(runtime.youtube),
     tripadvisor: liveOr(runtime.tripadvisor && !regional),
     tiktok: socialAvailability(runtime.tiktokPartner),
@@ -238,6 +246,7 @@ export function describeCapability(capability: DestinationCapability): string {
   if (capability.places.status === 'live') {
     const streams = [
       capability.evidence.googleReviews === 'live' && 'traveller reviews',
+      capability.evidence.reddit === 'live' && 'traveller discussion',
       capability.evidence.youtube === 'live' && 'recent videos',
       capability.evidence.official === 'live' && 'official sources',
     ].filter((entry): entry is string => Boolean(entry));

@@ -42,6 +42,7 @@ function parseRuntime(payload: unknown): ProviderRuntime {
     googleReviews: asBoolean(source.googleReviews),
     osm: asBoolean(source.osm),
     openRouteService: asBoolean(source.openRouteService),
+    reddit: asBoolean(source.reddit),
     youtube: asBoolean(source.youtube),
     tripadvisor: asBoolean(source.tripadvisor),
     officialSources: asBoolean(source.officialSources),

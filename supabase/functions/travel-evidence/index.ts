@@ -1,20 +1,32 @@
 /**
  * Gathers what people are actually saying about a place, right now.
  *
- * Two streams today:
- *   - Google Places reviews. Capped at five per place and ordered by relevance,
- *     so this is a sample, not a census — it is weighted accordingly.
- *   - YouTube, searched with a recency filter, which is the best openly
- *     available signal for what is currently worth visiting.
+ * Three streams today, chosen so their biases do not all point the same way:
+ *   - Reddit threads. Written after the visit, with no sponsorship incentive
+ *     and public disagreement, which makes this the best available answer to
+ *     "is it overrated" — the question a star average structurally cannot ask.
+ *   - YouTube, searched with a recency filter: the strongest openly available
+ *     signal for what is worth visiting *now*, and the most promotional.
+ *   - Google Places reviews, when a deployment pays for them. Capped at five
+ *     per place and ordered by relevance, so a sample, not a census.
  *
  * TikTok, Douyin and RedNote are deliberately absent: none offers public travel
- * search to commercial apps. Those arrive as traveller-pasted links instead.
+ * search to commercial apps. Those arrive as traveller-pasted links instead,
+ * through `travel-import-link`.
  *
- * Claim extraction here is keyword-based and conservative. It reports what a
- * source said and links back to it; it never asserts an operational fact that
- * no source stated.
+ * Claim extraction lives in `_shared/claims.ts` and is keyword-based and
+ * conservative. It reports what a source said and links back to it; it never
+ * asserts an operational fact that no source stated.
  */
-import { expiryFor, fetchJson, json, preflight, secrets } from '../_shared/providers.ts';
+import {
+  expiryFor,
+  fetchJson,
+  json,
+  preflight,
+  redditAccessToken,
+  REDDIT_USER_AGENT,
+  secrets,
+} from '../_shared/providers.ts';
 import {
   type CachedEvidence,
   readCanonicalPlaceIds,
@@ -25,6 +37,7 @@ import {
   writeEvidenceProbes,
 } from '../_shared/cache.ts';
 import { evidenceSourceUrl, reviewItemKey, shouldFetchEvidence } from '../_shared/cacheKeys.ts';
+import { assessDisclosure, extractClaims } from '../_shared/claims.ts';
 
 interface EvidenceBody {
   city?: string;
@@ -33,89 +46,6 @@ interface EvidenceBody {
   travelStartsInDays?: number;
   /** Which map provider the ids belong to. Defaults to Google. */
   provider?: string;
-}
-
-type ClaimType =
-  | 'worth-visiting' | 'overrated' | 'local-favourite' | 'tourist-trap'
-  | 'queue-time' | 'crowded' | 'closed' | 'reservation-needed' | 'food-quality';
-
-interface Claim {
-  type: ClaimType;
-  summary: string;
-  value?: number;
-  unit?: 'minutes';
-  strength: number;
-  excerpt?: string;
-}
-
-/**
- * Conservative phrase matching. Each rule needs an unambiguous phrase — we
- * would rather miss a claim than invent one.
- */
-const CLAIM_RULES: Array<{ type: ClaimType; patterns: RegExp[]; summary: string; strength: number }> = [
-  { type: 'overrated', patterns: [/\boverrated\b/i, /\bnot worth (the|it)\b/i, /\bwaste of (time|money)\b/i], summary: 'Described as overrated', strength: 0.8 },
-  { type: 'tourist-trap', patterns: [/\btourist trap\b/i, /\btoo touristy\b/i], summary: 'Described as a tourist trap', strength: 0.8 },
-  { type: 'local-favourite', patterns: [/\blocals? (love|go|eat|favou?rite)\b/i, /\bhidden gem\b/i], summary: 'Described as a local favourite', strength: 0.7 },
-  { type: 'worth-visiting', patterns: [/\bworth (the|a) (visit|trip|queue|wait)\b/i, /\bmust[- ]see\b/i, /\bhighly recommend\b/i], summary: 'Described as worth visiting', strength: 0.7 },
-  { type: 'crowded', patterns: [/\b(very |extremely |so )?crowded\b/i, /\bpacked\b/i, /\bshoulder to shoulder\b/i], summary: 'Reported as crowded', strength: 0.6 },
-  { type: 'closed', patterns: [/\bpermanently closed\b/i, /\bclosed (down|for good)\b/i], summary: 'Reported as closed', strength: 0.9 },
-  { type: 'reservation-needed', patterns: [/\b(book|reserve|reservation)s? (ahead|in advance|required|essential)\b/i], summary: 'Booking ahead is recommended', strength: 0.7 },
-  { type: 'food-quality', patterns: [/\b(delicious|amazing food|best (meal|food))\b/i], summary: 'Food is well regarded', strength: 0.6 },
-];
-
-/** "waited about 40 minutes", "2 hour queue", "45 min wait". */
-const QUEUE_PATTERNS = [
-  /(\d{1,3})\s*(?:-|to)?\s*\d{0,3}\s*min(?:ute)?s?\s*(?:queue|wait|line)/i,
-  /(?:queue|wait(?:ed)?|line)\s*(?:of|was|for|about)?\s*(?:around\s*)?(\d{1,3})\s*min/i,
-  /(\d)\s*hours?\s*(?:queue|wait|line)/i,
-];
-
-function extractClaims(text: string): Claim[] {
-  if (!text) return [];
-  const claims: Claim[] = [];
-
-  for (const rule of CLAIM_RULES) {
-    const hit = rule.patterns.find((pattern) => pattern.test(text));
-    if (!hit) continue;
-    const match = text.match(hit);
-    claims.push({
-      type: rule.type,
-      summary: rule.summary,
-      strength: rule.strength,
-      excerpt: match ? text.slice(Math.max(0, (match.index ?? 0) - 40), (match.index ?? 0) + 80).trim() : undefined,
-    });
-  }
-
-  for (const pattern of QUEUE_PATTERNS) {
-    const match = text.match(pattern);
-    if (!match) continue;
-    const raw = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(raw)) continue;
-    const minutes = /hour/i.test(match[0]) ? raw * 60 : raw;
-    // Anything beyond four hours is far more likely a misparse than a queue.
-    if (minutes > 0 && minutes <= 240) {
-      claims.push({
-        type: 'queue-time',
-        summary: `Reported wait of about ${minutes} minutes`,
-        value: minutes,
-        unit: 'minutes',
-        strength: 0.7,
-        excerpt: match[0],
-      });
-    }
-    break;
-  }
-
-  return claims;
-}
-
-/** Undisclosed promotion is common; look for the honest disclosures at least. */
-function assessDisclosure(text: string): 'organic' | 'sponsored' | 'possible-promotion' {
-  if (/\b(sponsored|paid partnership|#ad\b|gifted|complimentary (meal|stay|visit))/i.test(text)) {
-    return 'sponsored';
-  }
-  if (/\b(discount code|use my code|affiliate|partnership)\b/i.test(text)) return 'possible-promotion';
-  return 'organic';
 }
 
 interface GoogleReview {
@@ -213,6 +143,87 @@ async function youtubeEvidence(placeName: string, city: string, placeId: string)
     });
 }
 
+interface RedditPost {
+  data?: {
+    id?: string;
+    title?: string;
+    selftext?: string;
+    permalink?: string;
+    subreddit?: string;
+    created_utc?: number;
+    score?: number;
+    num_comments?: number;
+    over_18?: boolean;
+    is_self?: boolean;
+    author?: string;
+  };
+}
+
+/**
+ * What people who actually went are saying, from discussion rather than reviews.
+ *
+ * This is the counterweight to the promotional pull of every other channel.
+ * A review sits next to a business listing and a video earns its creator money;
+ * a forum thread does neither, and its replies contradict each other in public.
+ * That makes it the best free signal for "is this overrated" — the question a
+ * star average structurally cannot answer.
+ *
+ * Only post titles and bodies are read. Comments hold the richest detail (queue
+ * times, "go at 7am"), but fetching them costs one request per post, which is
+ * the per-place fan-out this app already learned not to do.
+ */
+async function redditEvidence(placeName: string, city: string, placeId: string) {
+  const token = await redditAccessToken();
+  if (!token || !placeName) return [];
+
+  const params = new URLSearchParams({
+    q: `"${placeName}" ${city}`,
+    sort: 'relevance',
+    // A year is long enough to find the thread and short enough to stay current;
+    // freshnessWeight decays whatever comes back by its actual age.
+    t: 'year',
+    limit: '15',
+    type: 'link',
+  });
+
+  const payload = await fetchJson(
+    `https://oauth.reddit.com/search?${params}`,
+    { headers: { Authorization: `Bearer ${token}`, 'User-Agent': REDDIT_USER_AGENT } },
+    10_000,
+  ).catch(() => null);
+
+  const posts = (payload as { data?: { children?: RedditPost[] } } | null)?.data?.children || [];
+
+  return posts.flatMap((post) => {
+    const data = post.data;
+    if (!data?.id || !data.permalink || data.over_18) return [];
+    const text = `${data.title || ''}. ${data.selftext || ''}`.trim();
+    const claims = extractClaims(text);
+    // A thread that says nothing about the place is noise, not evidence.
+    if (claims.length === 0) return [];
+
+    return [{
+      id: `reddit-${data.id}`,
+      canonicalPlaceId: placeId,
+      source: 'reddit' as const,
+      sourceUrl: `https://www.reddit.com${data.permalink}`,
+      sourceItemId: data.id,
+      publishedAt: data.created_utc ? new Date(data.created_utc * 1000).toISOString() : undefined,
+      retrievedAt: new Date().toISOString(),
+      authorType: 'traveller' as const,
+      disclosure: assessDisclosure(text),
+      claims,
+      /**
+       * Search relevance is not a guarantee the thread is about *this* place —
+       * names repeat across cities. Confidence rises with community agreement,
+       * which is the closest thing a forum has to corroboration, and stays
+       * below a map provider's because the match itself is looser.
+       */
+      confidence: Math.min(0.75, 0.45 + Math.min(0.3, Math.log10(Math.max(1, data.score || 1)) / 10)),
+    }];
+  });
+}
+
 Deno.serve(async (request) => {
   const early = preflight(request);
   if (early) return early;
@@ -279,6 +290,7 @@ Deno.serve(async (request) => {
   // would be ignored until the probe expires, days afterwards.
   const canFetchReviews = Boolean(secrets.google());
   const canFetchVideos = Boolean(secrets.youtube());
+  const canFetchThreads = Boolean(secrets.redditClientId() && secrets.redditClientSecret());
 
   // Sequential on purpose: these are quota-limited APIs, and a burst of
   // parallel requests is the fastest way to get rate limited.
@@ -300,9 +312,16 @@ Deno.serve(async (request) => {
       source: 'youtube',
       freshProbes,
     });
+    const wantThreads = Boolean(name) && shouldFetchEvidence({
+      configured: canFetchThreads,
+      canonicalPlaceId: canonicalId,
+      source: 'reddit',
+      freshProbes,
+    });
     // Cached rows stay usable whenever we are not replacing them this run.
     const reviewsAreFresh = !wantReviews;
     const videosAreFresh = !wantVideos;
+    const threadsAreFresh = !wantThreads;
 
     // Cached documents are used only for the sources we are *not* re-fetching.
     // A probe write can fail while the document write succeeded, and returning
@@ -311,23 +330,27 @@ Deno.serve(async (request) => {
     const cachedEntries = (canonicalId ? cachedByCanonical.get(canonicalId) || [] : []).filter((entry) => (
       entry.source === 'google-places' ? reviewsAreFresh
         : entry.source === 'youtube' ? videosAreFresh
-          : true
+          : entry.source === 'reddit' ? threadsAreFresh
+            : true
     ));
     const cachedDocuments = cachedEntries.map((entry, position) => toWireDocument(placeId, entry, position));
 
-    const [reviews, videos] = await Promise.all([
+    const [reviews, videos, threads] = await Promise.all([
       wantReviews ? googleReviews(placeId) : Promise.resolve([]),
       wantVideos ? youtubeEvidence(name, city, placeId) : Promise.resolve([]),
+      wantThreads ? redditEvidence(name, city, placeId) : Promise.resolve([]),
     ]);
     if (wantReviews) providerCalls += 1;
     if (wantVideos) providerCalls += 1;
+    if (wantThreads) providerCalls += 1;
 
-    documents.push(...cachedDocuments, ...reviews, ...videos);
+    documents.push(...cachedDocuments, ...reviews, ...videos, ...threads);
 
     if (canonicalId) {
       if (wantReviews) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'google-places' });
       if (wantVideos) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'youtube' });
-      for (const document of [...reviews, ...videos]) {
+      if (wantThreads) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'reddit' });
+      for (const document of [...reviews, ...videos, ...threads]) {
         freshDocuments.push({
           canonicalPlaceId: canonicalId,
           source: document.source,

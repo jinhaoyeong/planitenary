@@ -17,6 +17,7 @@ export type EvidenceSource =
   | 'official-tourism'
   | 'google-places'
   | 'tripadvisor'
+  | 'reddit'
   | 'youtube'
   | 'tiktok'
   | 'douyin'
@@ -136,6 +137,17 @@ const SOURCE_AUTHORITY: Record<EvidenceSource, number> = {
   'official-tourism': 0.95,
   'google-places': 0.85,
   tripadvisor: 0.75,
+  /**
+   * Ranked above video platforms and below map providers.
+   *
+   * Reddit is a discussion forum, so it is weak evidence for an operational
+   * fact — it can never establish that a venue has closed, and
+   * `OPERATIONAL_CLAIMS` keeps it from trying. But for the judgement a
+   * traveller actually wants ("is this worth it, how long was the queue, when
+   * should I go") it is unusually good: threads are written after the visit,
+   * carry no sponsorship incentive, and disagree with each other in public.
+   */
+  reddit: 0.65,
   youtube: 0.6,
   tiktok: 0.5,
   douyin: 0.5,
