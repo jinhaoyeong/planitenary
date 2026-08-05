@@ -2649,10 +2649,6 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
     min-height: 17rem;
   }
 
-  .trip-card-title {
-    margin-top: 1.5rem !important;
-  }
-
   .trip-card-metrics {
     margin-top: 1.25rem !important;
   }
