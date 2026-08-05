@@ -383,14 +383,12 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                 className="trip-card text-left editorial-card p-5 sm:p-6 cursor-pointer"
                 style={{ backgroundColor: 'var(--bg-elevated)' }}
               >
-              <div className="flex items-start justify-between gap-4">
-                <span className="font-display text-5xl" style={{ color: 'var(--accent)' }} data-accent-swatch="trip-number">{String(index + 1).padStart(2, '0')}</span>
-                <div className="flex items-center gap-1">
-                  <span className="p-2 rounded-full" style={{ color: 'var(--ink-muted)' }}><ArrowRight className="w-5 h-5" /></span>
-                </div>
+              <div className="trip-card-heading">
+                <span className="trip-card-number font-display" style={{ color: 'var(--accent)' }} data-accent-swatch="trip-number">{String(index + 1).padStart(2, '0')}</span>
+                <h2 className="trip-card-title font-display">{trip.title}</h2>
+                <span className="trip-card-arrow p-2 rounded-full" style={{ color: 'var(--ink-muted)' }}><ArrowRight className="w-5 h-5" /></span>
               </div>
-              <h2 className="trip-card-title font-display text-3xl mt-8">{trip.title}</h2>
-              <p className="mt-2 line-clamp-2" style={{ color: 'var(--ink-muted)' }}>{trip.description}</p>
+              <p className="mt-3 line-clamp-2" style={{ color: 'var(--ink-muted)' }}>{trip.description}</p>
               <div className="trip-card-metrics flex flex-wrap gap-3 mt-6 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
                 <span className="inline-flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> {trip.dayCount} days</span>
                 <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {trip.cityCount} cities</span>
