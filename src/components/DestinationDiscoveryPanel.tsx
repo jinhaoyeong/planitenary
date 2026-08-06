@@ -27,6 +27,7 @@ import type { RouteLeg, RouteResolver } from '../lib/humanScheduler';
 import {
   buildDestinationItinerary,
   defaultDiscoveryDecisions,
+  pruneDecisionsToCandidates,
   rankWithIntelligence,
   shortlistTarget,
   type DestinationBuildResult,
@@ -806,6 +807,13 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const [decisions, setDecisions] = useState<Record<string, CandidateDecision>>(() => (
     savedStateMatchesCity ? itinerary.discoveryState!.decisions : {}
   ));
+  /**
+   * Set when a re-discovery discarded choices about places no longer offered.
+   * Candidates are not persisted, so restored decisions cannot be checked
+   * against anything until discovery returns — this is where the traveller
+   * finds out.
+   */
+  const [decisionNotice, setDecisionNotice] = useState<string | null>(null);
   const decisionsRef = useRef(decisions);
   const [buildResult, setBuildResult] = useState<DestinationBuildResult | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
@@ -983,12 +991,22 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           ? `Live discovery unavailable: ${outcome.providerError}`
           : 'No places were returned for this destination.');
       }
-      const nextDecisions = Object.keys(decisions).length > 0 ? decisions : {};
+      /**
+       * Decisions survive a re-discovery, but only for places still on offer.
+       * A provider can return a different set for the same city, and keeping
+       * the rest leaves the deck counting choices about cards it does not have.
+       */
+      const pruned = pruneDecisionsToCandidates(decisionsRef.current, discovered);
       setCandidates(discovered);
-      decisionsRef.current = nextDecisions;
-      setDecisions(nextDecisions);
+      decisionsRef.current = pruned.decisions;
+      setDecisions(pruned.decisions);
+      // Nothing is dropped silently: a selection that vanishes between runs is
+      // the traveller's work disappearing, and they get told.
+      setDecisionNotice(pruned.dropped > 0
+        ? `${pruned.dropped} earlier ${pruned.dropped === 1 ? 'choice' : 'choices'} no longer match places on offer here, so ${pruned.dropped === 1 ? 'it was' : 'they were'} cleared.`
+        : null);
       setPhase('review');
-      persistDecisions(nextDecisions, new Date().toISOString());
+      persistDecisions(pruned.decisions, new Date().toISOString());
     } catch (discoveryError) {
       setError(discoveryError instanceof Error ? discoveryError.message : 'Discovery could not be loaded.');
     } finally {
@@ -1505,6 +1523,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
             </div>
             <span>{reviewedCount} of {ranked.length} reviewed · {selectedCount} selected</span>
           </div>
+          {decisionNotice && (
+            <p className="text-xs" role="status" style={{ color: 'var(--accent)' }}>{decisionNotice}</p>
+          )}
         </div>
         <div className="destination-review-summary">
           <div className="destination-review-mode-toggle" role="group" aria-label="Review layout">

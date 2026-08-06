@@ -154,6 +154,36 @@ export function rankDestinationCandidates(candidates: PlaceCandidate[], profile:
 }
 
 /**
+ * Drop decisions about places that are no longer on offer.
+ *
+ * Decisions are restored by city and survive a re-discovery, but the candidate
+ * list does not: a provider can return a different set for the same city, and a
+ * cached run can expire into a shorter one. Keeping every prior decision then
+ * leaves the deck describing places that are not in it — the reported "45 of 20
+ * reviewed" — and, when none of the retained ids appear in the new list, a
+ * build that accepts nothing at all while the traveller is looking at a
+ * shortlist of 33.
+ *
+ * Keyed on the candidate id rather than the name, because two places in one
+ * city genuinely share names.
+ */
+export function pruneDecisionsToCandidates(
+  decisions: Record<string, CandidateDecision>,
+  candidates: readonly Pick<PlaceCandidate, 'id'>[],
+): { decisions: Record<string, CandidateDecision>; dropped: number } {
+  const offered = new Set(candidates.map((candidate) => candidate.id));
+  const kept: Record<string, CandidateDecision> = {};
+  let dropped = 0;
+
+  for (const [candidateId, decision] of Object.entries(decisions)) {
+    if (offered.has(candidateId)) kept[candidateId] = decision;
+    else dropped += 1;
+  }
+
+  return { decisions: kept, dropped };
+}
+
+/**
  * Places to shortlist beyond what the days can actually hold.
  *
  * Some accepted places never reach a day: they close on the wrong weekday, sit

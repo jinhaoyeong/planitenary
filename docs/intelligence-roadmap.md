@@ -582,9 +582,10 @@ first two days of a long-haul trip.
   daylight-saving boundary does not put it an hour out. Unknown zones return
   undefined rather than zero — "no difference" and "no idea" must not share a
   value.
-- Flight times have no home on the profile yet, so `tripEdges` currently
-  carries only the time-zone shift. The arrival and departure logic is built,
-  tested and waiting for a UI that asks.
+- ~~Flight times have no home on the profile yet~~ — closed in `0fa4a02`.
+  `TripProfile.arrivalTime` / `departureTime` are collected in the create
+  wizard and in Trip identity, and reach `tripEdges` alongside the time-zone
+  shift.
 
 **Nightly refresh + weather-aware assignment — DONE (2026-08-06)**
 
@@ -625,10 +626,12 @@ one.
 
 **Still open**
 
-- Flight times have no home on `TripProfile`; arrival and departure shaping is
-  built and tested but only the time-zone shift is wired.
 - Departure-date targeting for the refresh job, per the deviation above.
 - Phase 4: LLM claim extraction, which needs `GEMINI_API_KEY`.
+
+Closed since this list was written: flight times on `TripProfile` (`0fa4a02`),
+the `sanitizeActivity` field losses (`4c3d6c6`), the component-test harness
+(`c5dfce5`) and trip-length shortlist sizing (`141e6f4`).
 
 **Phase 6 — Prove what exists actually works — NOT STARTED**
 
