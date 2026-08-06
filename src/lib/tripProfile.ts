@@ -70,6 +70,18 @@ export interface TripDestination {
   providerPlaceId?: string;
 }
 
+/**
+ * One stay, in the traveller's own travel order.
+ *
+ * `days` rather than nights, because the itinerary is built in days and a stay
+ * of one day is a real thing — a day trip that ends somewhere else. The array's
+ * order *is* the route: Osaka then Nara then Kyoto means exactly that.
+ */
+export interface TripCityStay {
+  city: string;
+  days: number;
+}
+
 export interface TripProfile {
   version: 1;
   destinations: TripDestination[];
@@ -87,6 +99,17 @@ export interface TripProfile {
   departureTime?: string;
   /** Nights are derived, days = nights + 1 when both dates exist. */
   dayCount: number;
+  /**
+   * How the traveller is dividing the trip between their cities, in travel
+   * order. Their decision, not the planner's: where you sleep on night four is
+   * a booking, and an app that quietly reassigns it is wrong in a way no
+   * scheduling cleverness makes up for.
+   *
+   * Absent on a single-city trip, and on multi-city trips saved before this
+   * existed — `planCityLegs` still divides those by shortlist so an old trip
+   * keeps working, but the wizard asks for a stay plan before discovery.
+   */
+  cityStays?: TripCityStay[];
   tripTypes: TripType[];
   styles: TravelStyle[];
   moods: TripMood[];
@@ -453,6 +476,35 @@ const asStringArray = (value: unknown): string[] =>
 const pickAll = <T extends string>(value: unknown, allowed: readonly T[]): T[] =>
   asStringArray(value).filter((item): item is T => (allowed as readonly string[]).includes(item));
 
+/**
+ * A stored stay plan, filtered to cities the trip still has.
+ *
+ * Deliberately dumb: it validates shape and membership and nothing else. The
+ * plan may be incomplete, over-spent, or all zeroes — those are states the
+ * traveller is in the middle of, not corruption to repair behind their back.
+ */
+function sanitizeCityStays(value: unknown, cities: string[]): TripCityStay[] | undefined {
+  if (!Array.isArray(value) || cities.length === 0) return undefined;
+  const byKey = new Map(cities.map((city) => [city.toLowerCase(), city]));
+  const seen = new Set<string>();
+  const stays: TripCityStay[] = [];
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const item = entry as Partial<TripCityStay>;
+    const key = typeof item.city === 'string' ? item.city.trim().toLowerCase() : '';
+    const city = byKey.get(key);
+    if (!city || seen.has(key)) continue;
+    seen.add(key);
+    const days = typeof item.days === 'number' && Number.isFinite(item.days)
+      ? Math.max(0, Math.floor(item.days))
+      : 0;
+    stays.push({ city, days });
+  }
+
+  return stays.length > 0 ? stays : undefined;
+}
+
 export function sanitizeTripProfile(value: unknown): TripProfile | null {
   if (!value || typeof value !== 'object') return null;
   const source = value as Partial<TripProfile> & Record<string, unknown>;
@@ -517,6 +569,13 @@ export function sanitizeTripProfile(value: unknown): TripProfile | null {
     arrivalTime: sanitizeClockTime(source.arrivalTime),
     departureTime: sanitizeClockTime(source.departureTime),
     dayCount: duration.dayCount,
+    /**
+     * Kept only for cities still on the trip, in the order it was saved in —
+     * that order is the route. Nothing is rebalanced here: a plan that no
+     * longer adds up is the traveller's to resolve, and the wizard shows them
+     * what is left. Undefined when there is nothing to divide.
+     */
+    cityStays: sanitizeCityStays(source.cityStays, destinations.map((entry) => entry.city)),
     tripTypes: pickAll(source.tripTypes, TRIP_TYPE_OPTIONS.map((option) => option.id)),
     styles: pickAll(source.styles, TRAVEL_STYLE_OPTIONS.map((option) => option.id)),
     moods: pickAll(source.moods, MOOD_OPTIONS.map((option) => option.id)),
