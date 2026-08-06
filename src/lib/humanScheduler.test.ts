@@ -332,6 +332,47 @@ describe('honesty about confidence', () => {
   });
 });
 
+describe('late arrival meals', () => {
+  it('allows dinner after a 19:30 arrival without adding a main stop', () => {
+    const restaurant = place({
+      id: 'late-restaurant',
+      name: 'Late restaurant',
+      categories: ['food'],
+      openingHours: hours('17:00', '23:30'),
+    });
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [],
+      mealCandidates: [restaurant],
+      behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }),
+      origin: hotel,
+      startTimeOverride: '21:30',
+      returnTimeOverride: '23:59',
+      maxMainOverride: 0,
+    });
+
+    expect(day.slots.filter((slot) => slot.kind === 'place')).toHaveLength(0);
+    expect(day.slots.some((slot) => slot.kind === 'meal' && slot.candidate?.id === restaurant.id)).toBe(true);
+  });
+
+  it('does not invent a meal after the late-dinner cutoff', () => {
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: [],
+      behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }),
+      origin: hotel,
+      startTimeOverride: '22:31',
+      returnTimeOverride: '23:59',
+      maxMainOverride: 0,
+    });
+
+    expect(day.slots.filter((slot) => slot.kind === 'meal')).toHaveLength(0);
+    expect(day.warnings.join(' ')).toContain('intentionally empty');
+  });
+});
+
 describe('clustering replaces hardcoded themes', () => {
   it('groups nearby places and separates distant ones, in any city', () => {
     const clusters = clusterCandidates(melbourneCandidates(), 2500);

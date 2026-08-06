@@ -553,6 +553,10 @@ export function assignClustersToDays(
 
 /** Getting out of an airport and to somewhere you can start the day. */
 const ARRIVAL_SETTLING_MINUTES = 120;
+/** Keep a late-arrival day open long enough to find and eat one dinner. */
+const ARRIVAL_MEAL_ALLOWANCE_MINUTES = 180;
+/** Do not let an arrival-day override run past the end of the local day. */
+const END_OF_DAY_MINUTES = 24 * 60 - 1;
 /** Leaving for the airport: check-in, security, and not running for it. */
 const DEPARTURE_LEAD_MINUTES = 210;
 /** Beyond this shift, the body is genuinely on another clock. */
@@ -597,6 +601,15 @@ export function shapeTripEdge(
     shape.startTimeOverride = toTime(usableFrom);
     // Landing in the evening leaves a day that is really just dinner.
     shape.maxMainOverride = usableFrom >= toMinutes('17:00') ? 0 : 1;
+    if (shape.maxMainOverride === 0) {
+      /**
+       * "Just dinner" has to mean the day stays open long enough to eat one.
+       * Without this the usual return time has already passed by the moment
+       * the bags are down, the window is zero minutes wide, and the day comes
+       * back empty — which is what it did until this was noticed.
+       */
+      shape.returnTimeOverride = toTime(Math.min(usableFrom + ARRIVAL_MEAL_ALLOWANCE_MINUTES, END_OF_DAY_MINUTES));
+    }
     shape.note = `Day one starts after your ${edges.arrivalTime} arrival, with time to drop bags.`;
   }
 

@@ -213,6 +213,15 @@ export const isFoodOnly = (candidate: PlaceCandidate): boolean =>
 /** How far a traveller will reasonably walk for a meal that is not the point of the day. */
 const MEAL_DETOUR_WALK_MINUTES = 12;
 
+/**
+ * The latest a meal is still dinner rather than the middle of the night.
+ *
+ * Only reached on an arrival day, where the settling time can push the day's
+ * start past the configured dinner window. Beyond this the plan says nothing
+ * instead of inventing a 2am meal.
+ */
+const LATEST_DINNER_START = 22 * 60 + 30;
+
 /** Budget tier → the price levels that tier is comfortable with. */
 const BUDGET_PRICE_LEVELS: Record<string, number[]> = {
   budget: [0, 1, 2],
@@ -488,7 +497,28 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
   const seen = new Set<string>();
 
   const lunch = behaviour.meals.lunchWindow;
-  const dinner = behaviour.meals.dinnerWindow;
+  /**
+   * Dinner, moved to when the traveller can actually eat it.
+   *
+   * The configured window is a preference for an ordinary day. A day that
+   * cannot begin until after it has closed is an arrival day — the plane
+   * landed, the bags are dropped, and it is now later than anyone planned.
+   * Holding the traveller to a window that expired while they were in a taxi
+   * would mean landing at 19:30 and being offered no dinner at all, which is
+   * not what "no main activities" was ever meant to say.
+   *
+   * Past {@link LATEST_DINNER_START} it stays unset: at some point the honest
+   * answer is that the day is over, and the empty-day warning explains it.
+   */
+  const dinner = (() => {
+    const configured = behaviour.meals.dinnerWindow;
+    if (!configured) return configured;
+    const configuredEnd = toMinutes(configured.end);
+    if (startMinutes <= configuredEnd) return configured;
+    if (startMinutes > LATEST_DINNER_START) return undefined;
+    // Wide enough to reach a restaurant, not so wide it drifts into the night.
+    return { start: toTime(startMinutes), end: toTime(LATEST_DINNER_START) };
+  })();
   /**
    * `breakfastRequired` has been on the profile since the behaviour model was
    * written and was never scheduled. A traveller who says they need breakfast
@@ -805,6 +835,22 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
     }
   }
 
+  /**
+   * A day that scheduled no sights never entered the loop above, so it never
+   * reached `maybeInsertMeal` either — meals were only ever inserted as a side
+   * effect of placing an attraction. An evening arrival is exactly that day:
+   * `maxMainOverride: 0` by design, but the traveller has still landed and
+   * still needs feeding.
+   *
+   * Guarded on an empty day so ordinary days keep the behaviour they have.
+   * `selectMealPlace` still applies opening hours, the walking detour limit
+   * and the queue tolerance, so this can only find somewhere genuinely open
+   * and genuinely close by.
+   */
+  if (mainCount === 0 && optionalCount === 0) {
+    maybeInsertMeal(dayCity || '', clock);
+  }
+
   // A dinner window still owed at the end of the day.
   if (dinner && !dinnerPlaced && clock < toMinutes(dinner.end)) {
     const start = Math.max(clock, toMinutes(dinner.start));
@@ -831,6 +877,10 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
     walkingMetres += walkingMetresOf(homeLeg);
   }
   const expectedReturn = clock + returnMinutes;
+
+  if (maxMain === 0 && startMinutes > LATEST_DINNER_START && slots.length === 0) {
+    warnings.push(`No meal fits after ${toTime(startMinutes)}; this day is intentionally empty.`);
+  }
 
   const busyMinutes = visitMinutes + transportMinutes + queueTotal + mealMinutes;
   // Free time is measured against the day the traveller *has* — start through

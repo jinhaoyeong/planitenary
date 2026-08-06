@@ -22,12 +22,12 @@ Measured against the goal quoted above, not against this document's own phases.
 | "as human as possible" — queue, rest, fatigue across days, meal venues | **Done** |
 | "adapt to the mood the traveller chose" | **Done** — `PACE_DEFAULTS` fully enforced |
 | Arrival and departure shaping | **Done** — flight times wired in `0fa4a02` |
-| "don't give them 100 for 10+ days" | **Not started** — see §6 Phase 7 |
+| "don't give them 100 for 10+ days" | **Done, tuning still provisional** — see §6 Phase 7 |
 | "pull the latest reviews from around the internet" | **Partial** — YouTube and official sites live; Google off by choice; Reddit dropped |
 | TikTok / Douyin / RedNote discovery | **Blocked, permanently** — see §1 |
 | "be trendy and always up to date" | **Built, never verified** — `travel-refresh` has not run against real due records |
 
-Rough shape: **engine ~85%, sourcing ~40%, confirmed working end to end ~50%.**
+Rough shape: **engine ~85%, sourcing ~40%, confirmed working end to end ~55%.**
 
 The third number is the weak one, and it is the one that matters. Two examples
 of why "built" and "working" are not the same thing here, both found on
@@ -40,10 +40,10 @@ of why "built" and "working" are not the same thing here, both found on
   `DiscoveryProvider` values, so every place from OpenStreetMap, Wikivoyage,
   Amap or Baidu lost its attribution on save — which is all of them.
 
-Both are fixed in `4c3d6c6`, and both were invisible from the outside. Nothing
-in the test suite covers the save path, because all 32 test files are
-`src/lib/*` and there is no component-test setup. Adding features on top of an
-unverified pipeline is how those two survived; §9 exists to stop the next pair.
+Both are fixed in `4c3d6c6`, and both are now covered by the component-test
+setup from `c5dfce5`. The save path, trip identity fields, and discovery
+decision pruning have automated coverage; §9 remains for the parts that need
+real builds or deployed services.
 
 ---
 
@@ -633,7 +633,7 @@ Closed since this list was written: flight times on `TripProfile` (`0fa4a02`),
 the `sanitizeActivity` field losses (`4c3d6c6`), the component-test harness
 (`c5dfce5`) and trip-length shortlist sizing (`141e6f4`).
 
-**Phase 6 — Prove what exists actually works — NOT STARTED**
+**Phase 6 — Prove what exists actually works — PARTLY VERIFIED**
 
 Nothing new is built here. This phase closes the gap between "shipped" and
 "observed working", and it comes first because everything after it is built on
@@ -645,37 +645,72 @@ paths that have never been confirmed. Detail in §9.
 29. Confirm the 03:00 cron fires and the quota split holds
 30. Confirm the itinerary-sync flicker is closed, then strip the tracing
 
-**Phase 7 — Shortlist sized to the trip — NOT STARTED**
+**Phase 7 — Shortlist sized to the trip — DONE; tuning remains provisional**
 
 The traveller's own complaint: *"don't give them like 100 for 10+ days, they
 don't have time to go to so many places."*
 
-`defaultDiscoveryDecisions` in `src/lib/destinationPlanner.ts` is:
+`defaultDiscoveryDecisions` in `src/lib/destinationPlanner.ts` now derives the
+target from trip length and pace, rather than using the old:
 
 ```ts
 ranked.slice(0, 2)   → 'must-do'
 ranked.slice(2, 29)  → 'interested'
 ```
 
-A hardcoded 29 for every trip. A 3-day city break and a 21-day trip get an
-identical shortlist.
+A hardcoded 29 for every trip. A 3-day city break and a 21-day trip used to get
+an identical shortlist.
 
-31. Derive the target from capacity, not a constant: `dayCount` ×
+31. **Done.** Derive the target from capacity, not a constant: `dayCount` ×
     `PACE_DEFAULTS[pace].maxMainActivities`, which already differs per pace —
     so Calm asks for fewer places than Fast paced without a second rule
-32. Add headroom for rejection, not a flat multiplier. Places are lost to
+32. **Done, with the multiplier still provisional.** Add headroom for rejection, not a flat multiplier. Places are lost to
     opening hours, walking limits and clustering; `unscheduledReasons` already
     records why, so the overshoot can be measured from real plans rather than
     guessed. Measure before choosing the factor — `FATIGUE_SPREAD_TOLERANCE`
     was guessed at `0.25` and fired on nothing
-33. Keep meals out of the count. `isFoodOnly` places are drawn from a separate
+33. **Done.** Keep meals out of the count. `isFoodOnly` places are drawn from a separate
     pool and must not consume sightseeing capacity
-34. Show the traveller the target: "about 30 places for 11 days" beats an
+34. **Done.** Show the traveller the target: "about 30 places for 11 days" beats an
     unexplained deck length
+
+### Phase 7 measurement result — 2026-08-06
+
+`measureShortlistFit` is called after each development build and stores up to
+50 samples in `window.__plannerDiagnostics`, grouped by city, trip length, and
+the pace actually used. A sweep of 36 fixture builds (four cities, three
+paces, three trip lengths) produced only 10 usable samples: the other 26 were
+pool-bound, and nine of the usable rows came from Osaka, the only pool with
+enough places for the chosen shortlist.
+
+The usable median implied headroom was 1.75, but that number must not tune the
+constant. The metric is partly self-referential: the shortlist is deliberately
+capacity × 1.4, so `accepted / scheduled` above 1.4 mostly measures places lost
+to other constraints. Fixture opening hours are also uniformly 09:00–18:00,
+so they cannot tell us how live weekday closures affect the margin.
+
+The fill-rate pattern points elsewhere:
+
+| Pace | 3 days | 5 days | 8 days |
+| --- | ---: | ---: | ---: |
+| Calm | 67% | 100% | 100% |
+| Balanced | 78% | 80% | 88% |
+| Fast paced | 75% | 70% | 63% |
+
+Active-pace underfill is therefore not evidence that headroom is too small.
+In the clearest case, Osaka at eight days and fast pace, the shortlist was
+already the full 35-place fixture pool and only 20 of 32 nominal slots filled;
+most rejections were `no-viable-day`, with no opening-hours or walking-limit
+signal because the fixture data could not exercise those paths. This suggests
+that `maxMainActivities` is aspirational for active pace when geography and
+travel time are real, not that `SHORTLIST_HEADROOM` should increase.
+
+Decision: keep `SHORTLIST_HEADROOM = 1.4` and its provisional label. Revisit
+after collecting non-pool-bound samples from live places with real hours.
 
 **Phase 8 — Sourcing breadth — PARTLY BLOCKED**
 
-35. Fix carried-over decisions on re-discovery (below; blocks any honest
+35. **Done** — fix carried-over decisions on re-discovery (below; it blocked any honest
     measurement of shortlist size)
 36. TripAdvisor, the one unimplemented free-tier review seam — §2.5
 37. Phase 4 LLM extraction, which is what turns a pasted RedNote or TikTok link
@@ -739,21 +774,21 @@ it needs nothing but the app.
 **Passes when** a place from OSM still says `provider: 'osm'` and keeps its
 `indoorOutdoor` after a reload. Before `4c3d6c6` both were `undefined`.
 
-**Better than a manual check:** stand up a component-test setup (jsdom + RTL)
-and lock this as a test. It is the only way this class of bug gets caught
-automatically, and it currently cannot be — see §9.6.
+**Automated coverage:** the jsdom + RTL setup from `c5dfce5` now covers the
+sanitisation and Trip Identity save path. A deployed OSM round trip remains a
+live-environment check.
 
 ### 9.2 Mood actually changes the plan — no credentials needed
 
-§7's first criterion has never been demonstrated on a real trip.
+The criterion is now covered by reproducible real-build tests in `6b369a6`.
 
 1. Same city, same dates, same shortlist
 2. Build once with **Calm**, once with **Fast paced**
 3. Compare stops per day, start time, meal length, free-time floor
 
-**Passes when** the two are visibly different plans. **Fails silently** if
-`deriveTravelBehaviour` is not reaching `simulateDay` — which is exactly the
-shape of the `indoorOutdoor` bug, so do not assume it from the code.
+**Passes when** the two are visibly different plans. The recorded build
+comparison showed relaxed / balanced / active paces producing different
+stops-per-day, start times, meal lengths, and walking totals.
 
 ### 9.3 Itinerary sync flicker — no credentials needed
 
@@ -770,18 +805,19 @@ so this is a small change.
 
 ### 9.4 Flight-time shaping — no credentials needed
 
-Wired in `0fa4a02` but only ever exercised by unit tests on `shapeTripEdge`.
+Wired in `0fa4a02` and verified through finished builds in `6b369a6`.
 
 1. Set arrival `19:30`, departure `20:00` in Settings → Trip identity
 2. **Rebuild through the discovery panel** — editing the profile does not
    re-run the planner, which is why this looked broken on 2026-08-06
 3. Day one should hold no main sights, only a late meal; the last day should
-   end by 16:30; both should carry the traveller-facing note
+   end by 16:30; both should carry the traveller-facing note. A 19:30 arrival
+   now allows a dinner-only day without raising the sightseeing allowance.
 
 **Also test the inverted window:** a departure early enough that the airport
-lead lands before the day starts — `12:33` gives a 09:03 limit against a 09:30
-start. `simulateDay` should schedule nothing and say why. Untested, and not
-covered by the 529 tests.
+   lead lands before the day starts — `12:33` gives a 09:03 limit against a 09:30
+   start. `simulateDay` should schedule nothing and say why. This case is now
+   covered by the real-build verification.
 
 ### 9.5 Needs credentials not in the working tree
 
@@ -804,10 +840,9 @@ where source = 'official-website'
 
 No undo needed — the sweep rewrites `expires_at` itself.
 
-### 9.6 The structural gap
+### 9.6 The structural gap — largely closed
 
-All 32 test files are `src/lib/*`. There is **no component-test setup** — no
-jsdom, no React Testing Library. So nothing covers:
+The jsdom + React Testing Library setup from `c5dfce5` now covers:
 
 - the save path (`sanitizeItinerary` / `sanitizeActivity`), where both silent
   losses lived
@@ -815,19 +850,35 @@ jsdom, no React Testing Library. So nothing covers:
 - the discovery deck's interactions
 - the panel wiring that connects the profile to `BuildOptions`
 
-Every check in §9.1–9.4 is manual **because it has to be**. Standing up jsdom +
-RTL is the single change that converts most of this backlog into automation,
-and it is worth doing before Phase 8 rather than after.
+The remaining manual checks are the deployed discovery → save → reload round
+trip and the itinerary-sync browser observation. The scheduler's pace and
+flight-edge behavior is now covered by reproducible finished-build tests.
 
 ---
 
 ## 10. Known gaps not yet scheduled
 
-- **Carried-over decisions are not filtered to the current candidate set.**
-  `DestinationDiscoveryPanel` keeps prior decisions wholesale on re-discovery,
-  producing the real "45 of 20 reviewed" counter seen on 2026-08-06. When none
-  of the retained ids appear in the new `ranked` list, a build accepts nothing.
-  Blocks any honest measurement of Phase 7.
+### Current verification amendment — 2026-08-06
+
+Reproducible finished-build tests now verify that Calm, balanced, and
+fast-paced profiles reach the scheduler and produce different stop counts,
+start times, meal lengths, and walking totals. They also verify a shortened
+departure day, the inverted departure window, and a dinner-only first day for
+a 19:30 arrival: no main sightseeing stops, but a real meal when one fits or
+a flexible dinner fallback otherwise.
+
+The jsdom and React Testing Library setup covers the save path, Trip Identity
+fields, and stale-decision pruning. The shortlist sweep remains deliberately
+untuned: 26 of 36 fixture builds were pool-bound, and active-pace underfill was
+dominated by `no-viable-day` in the only sufficiently large pool. Keep
+`SHORTLIST_HEADROOM = 1.4` until non-pool-bound live samples with real hours
+exist. The carried-decision issue is closed by `d89bbe8`.
+
+- **Carried-over decisions are now filtered to the current candidate set.**
+  `pruneDecisionsToCandidates` intersects by canonical candidate id and reports
+  how many stale selections were discarded, so a rebuild cannot silently
+  accept nothing because the city returned a different deck. Closed by
+  `d89bbe8`.
 - **Nothing tells the traveller the day plan is stale after a profile edit.**
   `profileRevision` guards generated *copy* against its frozen proposal; there
   is no equivalent for the days. A traveller can set flight times, see the plan

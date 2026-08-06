@@ -544,16 +544,15 @@ describe('§9.4 — flight times reshape the edges of a real plan', () => {
     );
   };
 
-  it('leaves no room at all on the day a 19:30 flight lands', () => {
+  it('leaves no room for sightseeing on the day a 19:30 flight lands', () => {
     /**
-     * Verified behaviour, and *not* what `shapeTripEdge`'s own comment claims.
-     * It says an evening arrival "leaves a day that is really just dinner", but
-     * 19:30 plus two hours to clear the airport and drop bags starts the day at
-     * 21:30 — past the hour a balanced pace heads back — so nothing fits,
-     * dinner included.
+     * The arrival edge keeps the day at dinner-only capacity. The dinner may
+     * be a real venue or the flexible fallback, but no main sight is invented
+     * after 21:30.
      */
     const result = buildWithEdges({ arrivalTime: '19:30' });
-    expect(result.days[0].activities).toHaveLength(0);
+    expect(result.days[0].activities.filter((activity) => activity.kind === 'place')).toHaveLength(0);
+    expect(result.days[0].activities.filter((activity) => activity.kind === 'meal-window')).toHaveLength(1);
   });
 
   it('tells the traveller why day one is empty rather than looking broken', () => {
