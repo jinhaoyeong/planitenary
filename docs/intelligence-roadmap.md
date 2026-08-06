@@ -12,6 +12,41 @@ This document is the plan to get there from the code as it stands today.
 
 ---
 
+## Status — 2026-08-06
+
+Measured against the goal quoted above, not against this document's own phases.
+
+| Goal, in the traveller's words | State |
+| --- | --- |
+| "travel distance, walking distance, enjoying time, eating time — every factor" | **Done** |
+| "as human as possible" — queue, rest, fatigue across days, meal venues | **Done** |
+| "adapt to the mood the traveller chose" | **Done** — `PACE_DEFAULTS` fully enforced |
+| Arrival and departure shaping | **Done** — flight times wired in `0fa4a02` |
+| "don't give them 100 for 10+ days" | **Not started** — see §6 Phase 7 |
+| "pull the latest reviews from around the internet" | **Partial** — YouTube and official sites live; Google off by choice; Reddit dropped |
+| TikTok / Douyin / RedNote discovery | **Blocked, permanently** — see §1 |
+| "be trendy and always up to date" | **Built, never verified** — `travel-refresh` has not run against real due records |
+
+Rough shape: **engine ~85%, sourcing ~40%, confirmed working end to end ~50%.**
+
+The third number is the weak one, and it is the one that matters. Two examples
+of why "built" and "working" are not the same thing here, both found on
+2026-08-06 by reading rather than by testing:
+
+- `sanitizeActivity` never copied `indoorOutdoor`. It is the only input to
+  `isOutdoor`, so weather-aware ordering and the rain replan lost their data on
+  the **first save of any trip** and had been running blind ever since.
+- The same function matched `provider` against three of seven
+  `DiscoveryProvider` values, so every place from OpenStreetMap, Wikivoyage,
+  Amap or Baidu lost its attribution on save — which is all of them.
+
+Both are fixed in `4c3d6c6`, and both were invisible from the outside. Nothing
+in the test suite covers the save path, because all 32 test files are
+`src/lib/*` and there is no component-test setup. Adding features on top of an
+unverified pipeline is how those two survived; §9 exists to stop the next pair.
+
+---
+
 ## 0. What already exists
 
 This is not a rewrite. The architecture is largely right; most of the work is
@@ -595,6 +630,55 @@ one.
 - Departure-date targeting for the refresh job, per the deviation above.
 - Phase 4: LLM claim extraction, which needs `GEMINI_API_KEY`.
 
+**Phase 6 — Prove what exists actually works — NOT STARTED**
+
+Nothing new is built here. This phase closes the gap between "shipped" and
+"observed working", and it comes first because everything after it is built on
+paths that have never been confirmed. Detail in §9.
+
+26. Verify the discovery → build → save → reload round trip keeps its data
+27. Verify `travel-refresh` against real expired probes
+28. Verify the deployed Vercel build
+29. Confirm the 03:00 cron fires and the quota split holds
+30. Confirm the itinerary-sync flicker is closed, then strip the tracing
+
+**Phase 7 — Shortlist sized to the trip — NOT STARTED**
+
+The traveller's own complaint: *"don't give them like 100 for 10+ days, they
+don't have time to go to so many places."*
+
+`defaultDiscoveryDecisions` in `src/lib/destinationPlanner.ts` is:
+
+```ts
+ranked.slice(0, 2)   → 'must-do'
+ranked.slice(2, 29)  → 'interested'
+```
+
+A hardcoded 29 for every trip. A 3-day city break and a 21-day trip get an
+identical shortlist.
+
+31. Derive the target from capacity, not a constant: `dayCount` ×
+    `PACE_DEFAULTS[pace].maxMainActivities`, which already differs per pace —
+    so Calm asks for fewer places than Fast paced without a second rule
+32. Add headroom for rejection, not a flat multiplier. Places are lost to
+    opening hours, walking limits and clustering; `unscheduledReasons` already
+    records why, so the overshoot can be measured from real plans rather than
+    guessed. Measure before choosing the factor — `FATIGUE_SPREAD_TOLERANCE`
+    was guessed at `0.25` and fired on nothing
+33. Keep meals out of the count. `isFoodOnly` places are drawn from a separate
+    pool and must not consume sightseeing capacity
+34. Show the traveller the target: "about 30 places for 11 days" beats an
+    unexplained deck length
+
+**Phase 8 — Sourcing breadth — PARTLY BLOCKED**
+
+35. Fix carried-over decisions on re-discovery (below; blocks any honest
+    measurement of shortlist size)
+36. TripAdvisor, the one unimplemented free-tier review seam — §2.5
+37. Phase 4 LLM extraction, which is what turns a pasted RedNote or TikTok link
+    into structured claims — the only lawful route to those platforms
+38. Decide the Google reviews question in §8 deliberately, with a hard cap
+
 ---
 
 ## 7. How we know it worked
@@ -624,3 +708,133 @@ The traveller's own test, made concrete:
   and rate-limit terms before building on it.
 - **Free-tier limits** for OpenRouteService and TripAdvisor shift over time —
   verify current quotas rather than trusting figures quoted from memory.
+- **Is `AMAP_API_KEY` set?** `resolveDestinationCapability` excludes
+  OpenStreetMap when `regional` is true, so mainland China routes to Amap or
+  Baidu and nothing else. A Guangzhou deck rendering live data therefore means
+  a **paid** provider is configured. Confirm this deliberately rather than
+  discovering it on an invoice.
+
+---
+
+## 9. Verification backlog
+
+What "verified" means for each unproven claim, and exactly what it takes. These
+are ordered by how much later work depends on them.
+
+### 9.1 The save round trip — no credentials needed
+
+The highest-value check, because it is where both silent data losses lived, and
+it needs nothing but the app.
+
+1. Build a plan through the discovery panel and apply it
+2. Reload the page
+3. In the console: `JSON.parse(localStorage.getItem('itinerary-<user>-<id>'))`
+4. Assert on a scheduled place activity that these survived:
+   `indoorOutdoor`, `provider`, `durationMinutes`, `transportMinutes`,
+   `transportMode`, `travelEstimateSource`, `sourceReferences`, `coordinates`
+
+**Passes when** a place from OSM still says `provider: 'osm'` and keeps its
+`indoorOutdoor` after a reload. Before `4c3d6c6` both were `undefined`.
+
+**Better than a manual check:** stand up a component-test setup (jsdom + RTL)
+and lock this as a test. It is the only way this class of bug gets caught
+automatically, and it currently cannot be — see §9.6.
+
+### 9.2 Mood actually changes the plan — no credentials needed
+
+§7's first criterion has never been demonstrated on a real trip.
+
+1. Same city, same dates, same shortlist
+2. Build once with **Calm**, once with **Fast paced**
+3. Compare stops per day, start time, meal length, free-time floor
+
+**Passes when** the two are visibly different plans. **Fails silently** if
+`deriveTravelBehaviour` is not reaching `simulateDay` — which is exactly the
+shape of the `indoorOutdoor` bug, so do not assume it from the code.
+
+### 9.3 Itinerary sync flicker — no credentials needed
+
+1. Open a long trip, rebuild, watch the console for `[itinerary-sync]`
+2. Read the `applied`, `incomingRevision`, `currentRevision`, `incomingDays`,
+   `currentDays` fields on each line
+
+**Passes when** no `realtime-echo` or `remote-fetch` line reports
+`applied: true` alongside an `incomingDays` lower than `currentDays`.
+
+**Then** set `ITINERARY_SYNC_DEBUG = false` in `src/App.tsx` and delete
+`logItinerarySync` and its call sites — deliberately one flag and one function
+so this is a small change.
+
+### 9.4 Flight-time shaping — no credentials needed
+
+Wired in `0fa4a02` but only ever exercised by unit tests on `shapeTripEdge`.
+
+1. Set arrival `19:30`, departure `20:00` in Settings → Trip identity
+2. **Rebuild through the discovery panel** — editing the profile does not
+   re-run the planner, which is why this looked broken on 2026-08-06
+3. Day one should hold no main sights, only a late meal; the last day should
+   end by 16:30; both should carry the traveller-facing note
+
+**Also test the inverted window:** a departure early enough that the airport
+lead lands before the day starts — `12:33` gives a 09:03 limit against a 09:30
+start. `simulateDay` should schedule nothing and say why. Untested, and not
+covered by the 529 tests.
+
+### 9.5 Needs credentials not in the working tree
+
+`.env.local` holds only `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
+`VITE_SUPABASE_AUTH_REDIRECT_URL` and `YOUTUBE_API_KEY`. No service-role key,
+no `TRAVEL_REFRESH_SECRET`, and the Supabase CLI is not installed.
+
+| Check | Needs | Method |
+| --- | --- | --- |
+| `travel-refresh` does real work | service role + `TRAVEL_REFRESH_SECRET` | Expire one probe (SQL below), re-run the protected curl, expect `officialRefreshed: 1` |
+| Cron fires at 03:00 | Supabase dashboard | Read the function logs the morning after |
+| Quota split holds | Supabase dashboard | `youtubeBlocked` stays 0 until the refresh budget is genuinely spent; refresh must never exceed 30 of the shared counter |
+| Deployed frontend | a Vercel build | Weather assignment, best-time merge and trip-edge shaping all shipped in `a6704cd` and have only ever run locally |
+
+```sql
+update evidence_probes set expires_at = now() - interval '1 day'
+where source = 'official-website'
+  and canonical_place_id in (select id from canonical_places limit 1);
+```
+
+No undo needed — the sweep rewrites `expires_at` itself.
+
+### 9.6 The structural gap
+
+All 32 test files are `src/lib/*`. There is **no component-test setup** — no
+jsdom, no React Testing Library. So nothing covers:
+
+- the save path (`sanitizeItinerary` / `sanitizeActivity`), where both silent
+  losses lived
+- the sync layer and its revision guard
+- the discovery deck's interactions
+- the panel wiring that connects the profile to `BuildOptions`
+
+Every check in §9.1–9.4 is manual **because it has to be**. Standing up jsdom +
+RTL is the single change that converts most of this backlog into automation,
+and it is worth doing before Phase 8 rather than after.
+
+---
+
+## 10. Known gaps not yet scheduled
+
+- **Carried-over decisions are not filtered to the current candidate set.**
+  `DestinationDiscoveryPanel` keeps prior decisions wholesale on re-discovery,
+  producing the real "45 of 20 reviewed" counter seen on 2026-08-06. When none
+  of the retained ids appear in the new `ranked` list, a build accepts nothing.
+  Blocks any honest measurement of Phase 7.
+- **Nothing tells the traveller the day plan is stale after a profile edit.**
+  `profileRevision` guards generated *copy* against its frozen proposal; there
+  is no equivalent for the days. A traveller can set flight times, see the plan
+  unchanged, and reasonably conclude the feature does nothing.
+- **Amap POI noise reaches the shortlist.** A Guangzhou deck ranked "AAG
+  Markets" — a financial-services office — at 58 with "central to understanding
+  this city". Regional-provider keyword search has no category gate equivalent
+  to `osmPlaces.ts`.
+- **No photos.** `photoUrl` and `photoAttribution` exist on `PlaceCandidate`
+  and `PlaceMedia` renders them, but nothing populates them since Google was
+  removed. Wikidata `P18`, the OSM `wikimedia_commons` tag and MediaWiki
+  `pageimages` are all free and keyless. Coverage would be partial — notable
+  sights yes, a market stall no — and Commons requires visible attribution.
