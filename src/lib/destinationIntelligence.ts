@@ -81,6 +81,18 @@ export interface PlaceCandidate {
   notability?: number;
   priceLevel?: number;
   openingHours?: DateAwareOpeningHours;
+  /**
+   * The operator's own site. Providers already return it; it is declared here
+   * because it is the address of the highest-authority evidence source there
+   * is — the only one allowed to establish that a place has closed.
+   */
+  website?: string;
+  /**
+   * Diets this place can actually cater for, e.g. `vegetarian`, `halal`.
+   * Only firm answers are recorded — see `osmDietaryOptions` for why a
+   * "limited" option is treated as no answer at all.
+   */
+  dietaryOptions?: string[];
   estimatedVisitMinutes: number;
   indoorOutdoor: IndoorOutdoor;
   reservationStatus: ReservationStatus;

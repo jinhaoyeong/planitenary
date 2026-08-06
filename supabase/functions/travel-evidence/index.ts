@@ -21,12 +21,17 @@
 import {
   expiryFor,
   fetchJson,
+  fetchText,
   json,
   preflight,
   redditAccessToken,
   REDDIT_USER_AGENT,
   secrets,
+  YOUTUBE_QUOTA_TIMEZONE,
+  YOUTUBE_SEARCH_UNITS,
+  youtubeSearchLimit,
 } from '../_shared/providers.ts';
+import { reserveQuota, usageToday } from '../_shared/quota.ts';
 import {
   type CachedEvidence,
   readCanonicalPlaceIds,
@@ -38,11 +43,21 @@ import {
 } from '../_shared/cache.ts';
 import { evidenceSourceUrl, reviewItemKey, shouldFetchEvidence } from '../_shared/cacheKeys.ts';
 import { assessDisclosure, extractClaims } from '../_shared/claims.ts';
+import { parseOsmOpeningRules } from '../_shared/osmPlaces.ts';
+import {
+  closureNotices,
+  extractJsonLd,
+  isSafePublicUrl,
+  openingRulesFromJsonLd,
+  visibleText,
+} from '../_shared/officialSource.ts';
 
 interface EvidenceBody {
   city?: string;
   placeIds?: string[];
   placeNames?: string[];
+  /** Each place's own website, for the official-source check. */
+  placeWebsites?: Array<string | undefined>;
   travelStartsInDays?: number;
   /** Which map provider the ids belong to. Defaults to Google. */
   provider?: string;
@@ -141,6 +156,58 @@ async function youtubeEvidence(placeName: string, city: string, placeId: string)
         confidence: 0.45,
       };
     });
+}
+
+/**
+ * What the operator says about their own place.
+ *
+ * The highest-authority source in the model, and the only one permitted to
+ * establish that a venue has closed. It is also the cheapest: the address is
+ * already on the candidate, and reading it costs no credential and no quota.
+ *
+ * Returns claims *and* opening hours, because an operator's own hours should
+ * override community-maintained ones — which is what makes a weekday closure
+ * trustworthy rather than merely likely.
+ */
+async function officialEvidence(website: string | undefined, placeId: string) {
+  // The address came from a community-edited tag, so it is untrusted input.
+  if (!isSafePublicUrl(website)) return { documents: [], openingRules: [] };
+
+  const html = await fetchText(website!);
+  if (!html) return { documents: [], openingRules: [] };
+
+  const openingRules = openingRulesFromJsonLd(extractJsonLd(html), parseOsmOpeningRules);
+  const text = visibleText(html);
+  const notices = closureNotices(text);
+
+  // A page with neither a notice nor structured hours told us nothing worth
+  // storing. Recording it anyway would dilute every summary with empty records.
+  if (notices.length === 0) return { documents: [], openingRules };
+
+  return {
+    openingRules,
+    documents: [{
+      id: `official-${placeId}`,
+      canonicalPlaceId: placeId,
+      source: 'official-website' as const,
+      sourceUrl: website!,
+      sourceItemId: undefined as string | undefined,
+      publishedAt: undefined as string | undefined,
+      retrievedAt: new Date().toISOString(),
+      authorType: 'official' as const,
+      // An operator describing their own place is not promotion in the sense
+      // `promotionRisk` guards against, and `authorType: 'official'` already
+      // adds its own small penalty there.
+      disclosure: 'organic' as const,
+      claims: notices.map((notice) => ({
+        type: notice.type,
+        summary: notice.summary,
+        strength: 0.95,
+        excerpt: notice.excerpt,
+      })),
+      confidence: 0.9,
+    }],
+  };
 }
 
 interface RedditPost {
@@ -281,9 +348,13 @@ Deno.serve(async (request) => {
 
   const documents: unknown[] = [];
   const trends: Record<string, number> = {};
+  /** Operator-published hours by provider place id, for the client to merge. */
+  const openingHours: Record<string, Array<{ daysOfWeek: number[]; opensAt: string; closesAt: string }>> = {};
   const freshDocuments: CachedEvidence[] = [];
   const attemptedProbes: Array<{ canonicalPlaceId: string; source: string }> = [];
   let providerCalls = 0;
+  /** Video lookups the daily cap stopped. Reported so a quiet gap is visible. */
+  let quotaBlocked = 0;
 
   // A probe records that a provider was *asked*. An unconfigured provider was
   // never asked, so it must not be probed — otherwise adding the key later
@@ -291,6 +362,8 @@ Deno.serve(async (request) => {
   const canFetchReviews = Boolean(secrets.google());
   const canFetchVideos = Boolean(secrets.youtube());
   const canFetchThreads = Boolean(secrets.redditClientId() && secrets.redditClientSecret());
+  // An operator's own site needs no credential at all — it is always available.
+  const placeWebsites = body.placeWebsites || [];
 
   // Sequential on purpose: these are quota-limited APIs, and a burst of
   // parallel requests is the fastest way to get rate limited.
@@ -318,10 +391,36 @@ Deno.serve(async (request) => {
       source: 'reddit',
       freshProbes,
     });
-    // Cached rows stay usable whenever we are not replacing them this run.
+    const website = placeWebsites[index];
+    const wantOfficial = Boolean(website) && shouldFetchEvidence({
+      configured: true,
+      canonicalPlaceId: canonicalId,
+      source: 'official-website',
+      freshProbes,
+    });
+    /**
+     * The daily cap, checked immediately before the call rather than up front.
+     *
+     * Reserved atomically, so two requests running at once cannot both take the
+     * last search. A refusal here is deliberately *not* recorded as a probe:
+     * we never asked, so tomorrow must ask again rather than treating today's
+     * silence as an answer.
+     */
+    const videosAllowed = wantVideos && await reserveQuota(cache, {
+      provider: 'youtube-search',
+      calls: 1,
+      units: YOUTUBE_SEARCH_UNITS,
+      callLimit: youtubeSearchLimit(),
+      resetTimezone: YOUTUBE_QUOTA_TIMEZONE,
+    });
+    if (wantVideos && !videosAllowed) quotaBlocked += 1;
+
+    // Cached rows stay usable whenever we are not replacing them this run —
+    // including when the cap stopped us, where the cached copy is all we have.
     const reviewsAreFresh = !wantReviews;
-    const videosAreFresh = !wantVideos;
+    const videosAreFresh = !videosAllowed;
     const threadsAreFresh = !wantThreads;
+    const officialIsFresh = !wantOfficial;
 
     // Cached documents are used only for the sources we are *not* re-fetching.
     // A probe write can fail while the document write succeeded, and returning
@@ -331,26 +430,35 @@ Deno.serve(async (request) => {
       entry.source === 'google-places' ? reviewsAreFresh
         : entry.source === 'youtube' ? videosAreFresh
           : entry.source === 'reddit' ? threadsAreFresh
+          : entry.source === 'official-website' ? officialIsFresh
             : true
     ));
     const cachedDocuments = cachedEntries.map((entry, position) => toWireDocument(placeId, entry, position));
 
-    const [reviews, videos, threads] = await Promise.all([
+    const [reviews, videos, threads, official] = await Promise.all([
       wantReviews ? googleReviews(placeId) : Promise.resolve([]),
-      wantVideos ? youtubeEvidence(name, city, placeId) : Promise.resolve([]),
+      videosAllowed ? youtubeEvidence(name, city, placeId) : Promise.resolve([]),
       wantThreads ? redditEvidence(name, city, placeId) : Promise.resolve([]),
+      wantOfficial ? officialEvidence(website, placeId) : Promise.resolve({ documents: [], openingRules: [] }),
     ]);
     if (wantReviews) providerCalls += 1;
-    if (wantVideos) providerCalls += 1;
+    if (videosAllowed) providerCalls += 1;
     if (wantThreads) providerCalls += 1;
+    if (wantOfficial) providerCalls += 1;
 
-    documents.push(...cachedDocuments, ...reviews, ...videos, ...threads);
+    // Hours from the operator override community-maintained ones, which is
+    // what makes a weekday closure trustworthy rather than merely likely.
+    if (official.openingRules.length > 0) openingHours[placeId] = official.openingRules;
+
+    documents.push(...cachedDocuments, ...reviews, ...videos, ...threads, ...official.documents);
 
     if (canonicalId) {
       if (wantReviews) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'google-places' });
-      if (wantVideos) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'youtube' });
+      // Only a call that actually happened counts as having asked.
+      if (videosAllowed) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'youtube' });
       if (wantThreads) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'reddit' });
-      for (const document of [...reviews, ...videos, ...threads]) {
+      if (wantOfficial) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'official-website' });
+      for (const document of [...reviews, ...videos, ...threads, ...official.documents]) {
         freshDocuments.push({
           canonicalPlaceId: canonicalId,
           source: document.source,
@@ -389,11 +497,22 @@ Deno.serve(async (request) => {
   return json({
     documents,
     trends,
+    openingHours,
     // Summarisation runs client-side via summarisePlaceEvidence, so the
     // weighting rules live in one place rather than being duplicated here.
     expiresAt,
     /** Diagnostics: how many provider calls this request actually cost. */
     providerCalls,
     cached: providerCalls === 0,
+    /**
+     * Where the day's YouTube allowance stands. Without this a cap looks
+     * exactly like a provider outage — evidence quietly thins and nothing says
+     * why.
+     */
+    youtubeQuota: {
+      limit: youtubeSearchLimit(),
+      used: (await usageToday(cache, 'youtube-search', YOUTUBE_QUOTA_TIMEZONE))?.calls ?? null,
+      blockedThisRequest: quotaBlocked,
+    },
   });
 });

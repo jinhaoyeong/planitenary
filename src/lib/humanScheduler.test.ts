@@ -4,6 +4,7 @@ import {
   clusterCandidates,
   estimateLeg,
   queueMinutesFor,
+  selectMealPlace,
   simulateDay,
   toMinutes,
   toTime,
@@ -105,26 +106,45 @@ describe('pace changes the actual plan', () => {
   const candidates = melbourneCandidates();
 
   it('produces materially different days from identical candidates', () => {
+    const relaxedBehaviour = deriveTravelBehaviour({ moods: ['calm'], tripTypes: [] });
+    const activeBehaviour = deriveTravelBehaviour({ moods: ['fast-paced'], tripTypes: [] });
     const relaxed = simulateDay({
-      dayNumber: 1,
-      city: 'Melbourne',
-      candidates,
-      behaviour: deriveTravelBehaviour({ moods: ['calm'], tripTypes: [] }),
-      origin: hotel,
+      dayNumber: 1, city: 'Melbourne', candidates, behaviour: relaxedBehaviour, origin: hotel,
     });
     const active = simulateDay({
-      dayNumber: 1,
-      city: 'Melbourne',
-      candidates,
-      behaviour: deriveTravelBehaviour({ moods: ['fast-paced'], tripTypes: [] }),
-      origin: hotel,
+      dayNumber: 1, city: 'Melbourne', candidates, behaviour: activeBehaviour, origin: hotel,
     });
 
     // The requirement: same candidates, provably different plans.
     expect(active.load.mainActivities).toBeGreaterThan(relaxed.load.mainActivities);
     expect(relaxed.load.departureTime > active.load.departureTime).toBe(true);
-    expect(relaxed.load.freeTimeMinutes).toBeGreaterThan(active.load.freeTimeMinutes);
-    expect(active.load.fatigueScore).toBeGreaterThan(relaxed.load.fatigueScore);
+
+    /**
+     * Absolute exertion, not `fatigueScore`.
+     *
+     * `fatigueScore` is normalised to each traveller's own limits, and its own
+     * documentation says it is therefore not comparable across pace profiles —
+     * a gentle day can read high for someone with gentle limits, which is the
+     * whole point of it. Comparing it here happened to pass and was never
+     * measuring what this test claims.
+     */
+    const exertion = (day: typeof relaxed) => day.load.walkingMinutes + day.load.transportMinutes;
+    expect(exertion(active)).toBeGreaterThan(exertion(relaxed));
+
+    /**
+     * Free time as a *share* of the day, not raw minutes.
+     *
+     * An active profile runs 08:30–22:00 and a relaxed one 10:00–20:30, so the
+     * active day has nearly three more hours to leave unfilled. Comparing raw
+     * minutes measures the length of the window, not how roomy it feels — the
+     * same reasoning already written into the planner's pace test.
+     */
+    const roominess = (day: typeof relaxed, returnTime: string) => {
+      const available = toMinutes(returnTime) - toMinutes(day.load.departureTime);
+      return day.load.freeTimeMinutes / Math.max(1, available);
+    };
+    expect(roominess(relaxed, relaxedBehaviour.preferredReturnTime!))
+      .toBeGreaterThan(roominess(active, activeBehaviour.preferredReturnTime!));
   });
 
   it('reports every place it could not fit, with a reason', () => {
@@ -214,7 +234,7 @@ describe('the day is physically possible', () => {
 });
 
 describe('meals and rest are real time, not labels', () => {
-  it('inserts a lunch window and counts its minutes', () => {
+  it('names somewhere to actually eat when the shortlist holds one', () => {
     const day = simulateDay({
       dayNumber: 1,
       city: 'Melbourne',
@@ -222,11 +242,51 @@ describe('meals and rest are real time, not labels', () => {
       behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }),
       origin: hotel,
     });
-    const lunch = day.slots.find((slot) => slot.kind === 'meal' && slot.label === 'Lunch');
+    const lunch = day.slots.find((slot) => slot.kind === 'meal' && slot.label.startsWith('Lunch'));
     expect(lunch).toBeDefined();
     expect(day.load.mealMinutes).toBeGreaterThan(0);
-    // A meal window is a constraint, never presented as a discovered attraction.
+    // The market is somewhere to eat, so lunch is a place rather than a gap.
+    expect(lunch!.label).toContain('—');
+    expect(lunch!.candidate).toBeDefined();
+    expect(day.load.mealPlaces).toBeGreaterThan(0);
+  });
+
+  it('still reserves a flexible window when nothing suitable is open', () => {
+    // A day must never simply lose its lunch. With no food on the shortlist the
+    // block survives, and is labelled as the constraint it is.
+    const day = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      // A long visit that would otherwise run straight past the lunch window,
+      // and nowhere on the shortlist to eat.
+      candidates: [place({ id: 'gallery', categories: ['museum'], estimatedVisitMinutes: 300, openingHours: hours('08:00', '20:00') })],
+      behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }),
+      origin: hotel,
+    });
+    const lunch = day.slots.find((slot) => slot.kind === 'meal' && slot.label === 'Lunch');
+    expect(lunch).toBeDefined();
+    expect(lunch!.candidate).toBeUndefined();
     expect(lunch!.reason).toContain('not a recommended attraction');
+    expect(day.load.mealPlaces).toBe(0);
+  });
+
+  it('schedules breakfast only when the traveller says they need it', () => {
+    const withBreakfast = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: melbourneCandidates(),
+      behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }, { meals: { breakfastRequired: true } }),
+      origin: hotel,
+    });
+    const without = simulateDay({
+      dayNumber: 1,
+      city: 'Melbourne',
+      candidates: melbourneCandidates(),
+      behaviour: deriveTravelBehaviour({ moods: [], tripTypes: [] }),
+      origin: hotel,
+    });
+    expect(withBreakfast.slots.some((slot) => slot.label.startsWith('Breakfast'))).toBe(true);
+    expect(without.slots.some((slot) => slot.label.startsWith('Breakfast'))).toBe(false);
   });
 
   it('counts queueing separately from visiting', () => {
@@ -321,6 +381,102 @@ describe('time helpers', () => {
     expect(weekdayOf('2026-08-09')).toBe(0);
     expect(weekdayOf(undefined)).toBeUndefined();
     expect(weekdayOf('not-a-date')).toBeUndefined();
+  });
+});
+
+describe('choosing somewhere to eat', () => {
+  const eatery = (id: string, overrides: Partial<PlaceCandidate> = {}) => place({
+    id,
+    categories: ['food'],
+    estimatedVisitMinutes: 60,
+    openingHours: hours('11:00', '22:00'),
+    ...overrides,
+  });
+
+  const pick = (options: PlaceCandidate[], preferences: Parameters<typeof selectMealPlace>[1]['preferences'] = {}) =>
+    selectMealPlace(options, {
+      atMinutes: toMinutes('12:30'),
+      resolveRoute: estimateLeg,
+      queueTolerance: 40,
+      queueEvidence: {},
+      preferences,
+      used: new Set<string>(),
+    });
+
+  it('will not seat a traveller somewhere that is shut', () => {
+    const closed = eatery('closed-now', { openingHours: hours('18:00', '23:00') });
+    expect(pick([closed])).toBeUndefined();
+  });
+
+  it('will not offer a place that is not somewhere to eat', () => {
+    expect(pick([place({ id: 'museum', categories: ['museum'] })])).toBeUndefined();
+  });
+
+  it('honours a dietary need as a requirement, not a preference', () => {
+    const unsuitable = eatery('steakhouse', { dietaryOptions: ['halal'] });
+    const suitable = eatery('veg-place', { dietaryOptions: ['vegetarian', 'vegan'] });
+    expect(pick([unsuitable, suitable], { dietaryNeeds: ['vegetarian'] })?.candidate.id).toBe('veg-place');
+  });
+
+  it('does not starve a traveller where nobody has tagged the restaurants', () => {
+    // Unknown must not mean unsuitable, or a vegetarian gets no lunch at all
+    // in cities with thin dietary tagging.
+    const untagged = eatery('untagged');
+    expect(pick([untagged], { dietaryNeeds: ['vegetarian'] })?.candidate.id).toBe('untagged');
+  });
+
+  it('avoids a place priced outside the traveller\'s budget', () => {
+    const expensive = eatery('fine-dining', { priceLevel: 4 });
+    const affordable = eatery('noodle-bar', { priceLevel: 1 });
+    expect(pick([expensive, affordable], { budgetTier: 'budget' })?.candidate.id).toBe('noodle-bar');
+  });
+
+  it('prefers the food the traveller said they came for', () => {
+    const generic = eatery('generic');
+    const wanted = eatery('night-market', { experienceTags: ['street-food'] });
+    expect(pick([generic, wanted], { preferredTags: ['street-food'] })?.candidate.id).toBe('night-market');
+  });
+
+  it('refuses a queue longer than the traveller will tolerate', () => {
+    const queued = eatery('famous-ramen', { reservationStatus: 'unknown', categories: ['essential', 'food'] });
+    const choice = selectMealPlace([queued], {
+      atMinutes: toMinutes('12:30'),
+      resolveRoute: estimateLeg,
+      queueTolerance: 10,
+      queueEvidence: { 'famous-ramen': 90 },
+      preferences: {},
+      used: new Set<string>(),
+    });
+    expect(choice).toBeUndefined();
+  });
+
+  it('will not send a traveller across the city for lunch', () => {
+    const far = eatery('far-away', { coordinates: [-37.8677, 144.9740] });
+    const near = eatery('round-the-corner', { coordinates: [-37.8140, 144.9635] });
+    const from = place({ id: 'here', coordinates: [-37.8136, 144.9631] });
+    const choice = selectMealPlace([far, near], {
+      atMinutes: toMinutes('12:30'),
+      from,
+      resolveRoute: estimateLeg,
+      queueTolerance: 40,
+      queueEvidence: {},
+      preferences: {},
+      used: new Set<string>(),
+    });
+    expect(choice?.candidate.id).toBe('round-the-corner');
+  });
+
+  it('does not offer the same place twice', () => {
+    const only = eatery('only-option');
+    const choice = selectMealPlace([only], {
+      atMinutes: toMinutes('12:30'),
+      resolveRoute: estimateLeg,
+      queueTolerance: 40,
+      queueEvidence: {},
+      preferences: {},
+      used: new Set(['only-option']),
+    });
+    expect(choice).toBeUndefined();
   });
 });
 

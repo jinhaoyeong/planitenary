@@ -14,6 +14,8 @@ import {
 } from './travelBehaviour';
 import {
   clusterCandidates,
+  isFoodOnly,
+  isFoodPlace,
   simulateDay,
   toTime,
   type DayLoad,
@@ -364,16 +366,30 @@ export function buildDestinationItinerary(
     ? 'public transport'
     : 'walking / public transport';
 
+  /**
+   * Food is offered to every day rather than clustered into one.
+   *
+   * A restaurant is not a destination competing for the day's stops — it is
+   * where the traveller happens to be at one o'clock. Drawing from the whole
+   * ranked list, not just the accepted shortlist, means a day can suggest
+   * somewhere to eat even when the traveller never swiped on a restaurant.
+   */
+  const foodCandidates = ranked
+    .map(({ candidate }) => candidate)
+    .filter((candidate) => isFoodPlace(candidate) && decisions[candidate.id] !== 'skip');
+
   // Must-do places lead their cluster so capacity limits never drop them first.
   const mustDo = new Set(
     accepted.filter((candidate) => decisions[candidate.id] === 'must-do').map((candidate) => candidate.id),
   );
-  const clusters = clusterCandidates(accepted).map((cluster) =>
+  const clusters = clusterCandidates(accepted.filter((candidate) => !isFoodOnly(candidate))).map((cluster) =>
     [...cluster].sort((a, b) => Number(mustDo.has(b.id)) - Number(mustDo.has(a.id))));
 
   const days: DayPlan[] = [];
   const dayLoads: DayLoad[] = [];
   const scheduled = new Set<string>();
+  /** Venues already used for a meal, so the trip does not eat in one place daily. */
+  const usedMealVenues = new Set<string>();
   const rejections = new Map<string, { candidate: PlaceCandidate; reason: DiscoveryUnscheduledReason; detail: string }>();
   const warnings = new Set<string>();
   (options.currentEventNotes || []).filter(Boolean).forEach((note) => {
@@ -406,6 +422,14 @@ export function buildDestinationItinerary(
       // Supplies the weekday that opening hours are checked against, so a
       // Monday is not planned from places that close on Mondays.
       date: dateForDay(profile.startDate, index),
+      // Somewhere to actually eat. Offered from the whole shortlist rather than
+      // this day's cluster, because a traveller does not shortlist lunch.
+      mealCandidates: foodCandidates.filter((candidate) => !usedMealVenues.has(candidate.id)),
+      mealPreferences: {
+        budgetTier: profile.budgetTier,
+        dietaryNeeds: behaviour.meals.dietaryNeeds,
+        preferredTags: profile.styles,
+      },
       // Arrival day starts in the afternoon; the traveller is in transit.
       startTimeOverride: index === 0 && itinerary.days.length === 0 ? '15:00' : undefined,
     });
@@ -415,7 +439,19 @@ export function buildDestinationItinerary(
       .filter((activity): activity is Activity => activity !== null);
 
     for (const slot of simulated.slots) {
-      if (slot.candidate) scheduled.add(slot.candidate.id);
+      /**
+       * Meal venues are tracked apart from shortlisted places.
+       *
+       * `scheduled` answers "did the traveller's choice make it in", and every
+       * accepted place must appear there or in `rejections`. A restaurant the
+       * planner suggested was never their choice, so counting it would break
+       * that accounting — while still needing to be remembered, so the same
+       * place is not offered for lunch on every day of the trip.
+       */
+      if (slot.candidate) {
+        if (slot.kind === 'meal') usedMealVenues.add(slot.candidate.id);
+        else scheduled.add(slot.candidate.id);
+      }
       if (slot.arrivalLeg?.source === 'provider') usedProviderRoutes = true;
     }
 

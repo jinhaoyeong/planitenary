@@ -216,6 +216,58 @@ export async function probeGoogleRoutes(): Promise<boolean> {
 }
 
 /**
+ * Fetch a page as text, with a hard timeout and a hard size cap.
+ *
+ * Used for official venue websites, whose addresses come from community-edited
+ * map data. A page there can be any size at all, so the read is capped rather
+ * than trusted: without it, one enormous or endless response would exhaust the
+ * function. Only HTML is accepted, so a link to a large binary is dropped
+ * before any of it is read.
+ */
+export async function fetchText(
+  url: string,
+  timeoutMs = 10_000,
+  maxBytes = 512_000,
+): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'Planitenary/1.0 (travel itinerary planner)' },
+    });
+    if (!response.ok) return null;
+    if (!/text\/html|application\/xhtml/i.test(response.headers.get('content-type') || '')) return null;
+
+    const reader = response.body?.getReader();
+    if (!reader) return null;
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) { chunks.push(value); total += value.length; }
+    }
+    // Stop the transfer rather than draining a page that overruns the cap.
+    await reader.cancel().catch(() => {});
+
+    const merged = new Uint8Array(Math.min(total, maxBytes));
+    let offset = 0;
+    for (const chunk of chunks) {
+      if (offset >= merged.length) break;
+      merged.set(chunk.subarray(0, merged.length - offset), offset);
+      offset += chunk.length;
+    }
+    return new TextDecoder('utf-8', { fatal: false }).decode(merged);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Reddit requires a descriptive User-Agent naming the app and will throttle or
  * block traffic that does not identify itself.
  */
@@ -265,6 +317,28 @@ export async function redditAccessToken(): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * YouTube's `search.list` allowance.
+ *
+ * The Data API grants 10,000 quota units a day *and* 100 search queries a day.
+ * A search costs 100 units, so the two run out together — but the search count
+ * is the one worth reasoning about, because it maps directly to places: 100
+ * searches is 100 places.
+ *
+ * The default sits below 100 on purpose. The margin covers the calls already in
+ * flight when the cap is reached, and leaves room to test without locking the
+ * app out for the rest of the day. Override with `YOUTUBE_DAILY_SEARCH_LIMIT`.
+ */
+export const youtubeSearchLimit = (): number => {
+  const configured = Number(env('YOUTUBE_DAILY_SEARCH_LIMIT'));
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 90;
+};
+
+/** Google resets Data API quotas at midnight Pacific, not UTC. */
+export const YOUTUBE_QUOTA_TIMEZONE = 'America/Los_Angeles';
+/** One `search.list` call. Published cost, used for reporting only. */
+export const YOUTUBE_SEARCH_UNITS = 100;
 
 /**
  * Cache lifetimes, in seconds. Travel data rots at very different rates, and

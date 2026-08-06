@@ -814,6 +814,16 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       setQueueEvidence((previous) => ({ ...previous, ...digest.queueEvidence }));
       setEvidenceSummaries((previous) => ({ ...previous, ...digest.evidenceSummaries }));
       setTrends((previous) => ({ ...previous, ...digest.trends }));
+
+      // Hours from an operator's own site replace whatever the map provider
+      // held. Community-maintained hours go stale; this is what corrects them,
+      // and it is what stops a day being built around a closed door.
+      const official = digest.officialHours;
+      if (Object.keys(official).length > 0) {
+        setCandidates((previous) => previous.map((candidate) => (
+          official[candidate.id] ? { ...candidate, openingHours: official[candidate.id] } : candidate
+        )));
+      }
     });
     return () => { active = false; };
   }, [phase, usingFixture, currentDeckCard, pendingDeck, capability.destination.city, capability.destination.countryCode, capability.places.provider]);

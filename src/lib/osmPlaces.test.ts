@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isExcludedOsmPlace,
   osmCategories,
+  osmDietaryOptions,
   osmElementCoordinates,
   osmIndoorOutdoor,
   osmNames,
@@ -170,6 +171,24 @@ describe('opening hours', () => {
 
   it('refuses a range that crosses midnight instead of inverting it', () => {
     expect(parseOsmOpeningRules('22:00-02:00')).toEqual([]);
+  });
+});
+
+describe('dietary options', () => {
+  it('records only a firm answer', () => {
+    expect(osmDietaryOptions({ 'diet:vegetarian': 'yes', 'diet:vegan': 'only' }).sort())
+      .toEqual(['vegan', 'vegetarian']);
+  });
+
+  it('ignores "limited", which a traveller cannot plan around', () => {
+    // One dish on a twenty-dish menu is not catering for a dietary need, and
+    // reporting it as such is worse than saying nothing.
+    expect(osmDietaryOptions({ 'diet:vegan': 'limited' })).toEqual([]);
+    expect(osmDietaryOptions({ 'diet:halal': 'no' })).toEqual([]);
+  });
+
+  it('says nothing when nobody has tagged it', () => {
+    expect(osmDietaryOptions({ amenity: 'restaurant' })).toEqual([]);
   });
 });
 

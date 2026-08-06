@@ -149,6 +149,23 @@ export function osmNames(tags: OsmTags, language = 'en'): { name?: string; local
 }
 
 /**
+ * What a place can actually feed someone, from OSM's `diet:*` tags.
+ *
+ * Only `yes` and `only` count. `diet:vegan=limited` means one dish on a
+ * twenty-dish menu, which is not an answer a traveller with a dietary need can
+ * plan around — reporting it as catered for would be worse than saying nothing.
+ */
+export function osmDietaryOptions(tags: OsmTags): string[] {
+  const options: string[] = [];
+  for (const [key, value] of Object.entries(tags)) {
+    if (!key.startsWith('diet:') || (value !== 'yes' && value !== 'only')) continue;
+    const diet = key.slice('diet:'.length).trim().toLowerCase();
+    if (diet) options.push(diet);
+  }
+  return [...new Set(options)];
+}
+
+/**
  * `fee=no` is a real, useful fact: free entry. `fee=yes` without a `charge` tag
  * says only that it costs something, which is not a price level — so it returns
  * undefined rather than guessing a number.

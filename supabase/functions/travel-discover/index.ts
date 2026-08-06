@@ -25,6 +25,7 @@ import { discoveryCityKey } from '../_shared/cacheKeys.ts';
 import {
   isExcludedOsmPlace,
   osmCategories,
+  osmDietaryOptions,
   osmElementCoordinates,
   osmIndoorOutdoor,
   osmNames,
@@ -433,6 +434,7 @@ interface OpenCandidate {
   categories: string[];
   experienceTags: string[];
   notability: number;
+  dietaryOptions?: string[];
   priceLevel?: number;
   openingHours?: {
     periods: Array<{ daysOfWeek: number[]; opensAt: string; closesAt: string }>;
@@ -532,6 +534,47 @@ out center tags 400;`;
 }
 
 /**
+ * Somewhere to eat, as a separate and much smaller query.
+ *
+ * The sights query excludes food on purpose: a city holds thousands of
+ * restaurants and an unranked list of them is noise. But a plan that reserves
+ * eighty-five minutes for lunch and names no restaurant is not a plan, so food
+ * is fetched deliberately, with two filters that cut the volume to something
+ * useful:
+ *
+ *   - a `cuisine` tag, which is what lets a day match a traveller's taste and
+ *     is absent from the long tail of unmaintained entries;
+ *   - a name, so it can be put in front of a person.
+ *
+ * Wikivoyage's `eat` listings are merged on top of this and rank higher, being
+ * hand-picked rather than merely present.
+ */
+async function fetchOverpassFood(area: CityArea): Promise<OsmElement[]> {
+  const [lat, lng] = area.centre;
+  // Tighter than the sights radius: nobody crosses a city for an average lunch.
+  const radius = Math.min(area.radiusMetres, 8_000);
+  const query = `[out:json][timeout:30];
+(
+  nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["name"]["cuisine"](around:${radius},${lat},${lng});
+  nwr["amenity"="marketplace"]["name"](around:${radius},${lat},${lng});
+);
+out center tags 150;`;
+
+  const payload = await fetchJson(
+    secrets.overpassEndpoint(),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+      body: `data=${encodeURIComponent(query)}`,
+    },
+    35_000,
+  ).catch(() => null);
+
+  const elements = (payload as { elements?: OsmElement[] } | null)?.elements;
+  return Array.isArray(elements) ? elements : [];
+}
+
+/**
  * Wikivoyage's curated listings for one city. One request per city, never per
  * place — per-place enrichment is exactly the fan-out that made the previous
  * provider expensive.
@@ -579,15 +622,16 @@ async function searchOsm(
   const area = await resolveCityArea(city, countryCode, coordinates?.lat, coordinates?.lng);
 
   // Independent sources, so one being down must not sink the other.
-  const [elements, listings] = await Promise.all([
+  const [elements, food, listings] = await Promise.all([
     fetchOverpassPlaces(area),
+    fetchOverpassFood(area).catch(() => [] as OsmElement[]),
     fetchWikivoyageListings(city).catch(() => [] as WikivoyageListing[]),
   ]);
 
   const byKey = new Map<string, OpenCandidate>();
   const usedListings = new Set<WikivoyageListing>();
 
-  for (const element of elements) {
+  for (const element of [...elements, ...food]) {
     const candidate = buildOsmCandidate(element, city, countryCode, retrievedAt, expiresAt, listings, usedListings);
     if (!candidate) continue;
     // OSM often holds the same place as both a node and an enclosing way.
@@ -635,11 +679,25 @@ async function searchOsm(
     });
   }
 
-  // Best documented first, so a truncated list keeps the places that matter.
-  return [...byKey.values()]
-    .sort((a, b) => b.notability - a.notability)
-    .slice(0, limit);
+  /**
+   * Best documented first, so a truncated list keeps the places that matter —
+   * but sights and food are ranked separately and given their own share.
+   *
+   * Ranked together, food would vanish: a restaurant almost never has a
+   * Wikipedia article, so every one of them sorts below every monument. The
+   * day would then reserve time for lunch with nowhere to eat it.
+   */
+  const isFood = (candidate: OpenCandidate) =>
+    candidate.categories.some((category) => FOOD_CATEGORIES.includes(category));
+  const all = [...byKey.values()].sort((a, b) => b.notability - a.notability);
+  const foodShare = Math.max(6, Math.round(limit * 0.25));
+  const meals = all.filter(isFood).slice(0, foodShare);
+  const sights = all.filter((candidate) => !isFood(candidate)).slice(0, limit - meals.length);
+  return [...sights, ...meals];
 }
+
+/** Categories that make a place somewhere to eat rather than somewhere to see. */
+const FOOD_CATEGORIES = ['food', 'cafes', 'street-food', 'market'];
 
 function buildOsmCandidate(
   element: OsmElement,
@@ -666,6 +724,11 @@ function buildOsmCandidate(
   const listing = matchListing({ name, coordinates }, listings);
   if (listing) usedListings.add(listing);
 
+  // "japanese;sushi" → two tags the ranker can match a traveller's styles to.
+  const cuisines = (tags.cuisine || '')
+    .split(';')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
   const hours = parseOsmOpeningRules(tags.opening_hours);
   // A guidebook entry is independent corroboration, so it lifts significance.
   const notability = Math.min(1, osmNotability(tags) + (listing ? 0.35 : 0));
@@ -683,8 +746,9 @@ function buildOsmCandidate(
     neighbourhood: tags['addr:suburb'] || tags['addr:district'] || tags['addr:city'] || undefined,
     coordinates,
     categories,
-    experienceTags: categories,
+    experienceTags: [...new Set([...categories, ...cuisines])],
     notability,
+    dietaryOptions: osmDietaryOptions(tags),
     priceLevel: osmPriceLevel(tags),
     openingHours: hours.length > 0
       // Low, deliberately: OSM hours are community-maintained, and this parser

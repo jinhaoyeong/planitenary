@@ -42,6 +42,11 @@ export interface DayLoad {
   walkingDistanceMeters: number;
   queueMinutes: number;
   mealMinutes: number;
+  /**
+   * Meals given a real venue. The difference between this and the number of
+   * meal slots is how often the plan could only offer a flexible window.
+   */
+  mealPlaces: number;
   freeTimeMinutes: number;
   departureTime: string;
   expectedReturnTime: string;
@@ -186,6 +191,120 @@ const OPTIONAL_WALK_MINUTES = 12;
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+/** Categories that make a place somewhere you could eat. */
+const FOOD_CATEGORIES = ['food', 'cafes', 'street-food'];
+
+/** True when a meal could be had here. A market qualifies; so does a museum café. */
+export const isFoodPlace = (candidate: PlaceCandidate): boolean =>
+  candidate.categories.some((category) => FOOD_CATEGORIES.includes(category));
+
+/**
+ * True when eating is *all* this place is for.
+ *
+ * The distinction matters: a night market or a food hall is somewhere to eat
+ * **and** a genuine sight, and treating anything food-adjacent as a restaurant
+ * would quietly delete it from the day's attractions. Only a place with no
+ * non-food character is excluded from sightseeing.
+ */
+export const isFoodOnly = (candidate: PlaceCandidate): boolean =>
+  candidate.categories.length > 0
+  && candidate.categories.every((category) => FOOD_CATEGORIES.includes(category));
+
+/** How far a traveller will reasonably walk for a meal that is not the point of the day. */
+const MEAL_DETOUR_WALK_MINUTES = 12;
+
+/** Budget tier → the price levels that tier is comfortable with. */
+const BUDGET_PRICE_LEVELS: Record<string, number[]> = {
+  budget: [0, 1, 2],
+  'mid-range': [0, 1, 2, 3],
+  luxury: [1, 2, 3, 4],
+};
+
+export interface MealPreferenceInputs {
+  budgetTier?: string;
+  dietaryNeeds?: string[];
+  /** Cuisine and style tags the traveller asked for, e.g. `street-food`. */
+  preferredTags?: string[];
+}
+
+/**
+ * Choose somewhere to actually eat.
+ *
+ * A meal slot used to be an empty ninety minutes labelled "Lunch — venue not
+ * selected". That is a placeholder, not a plan, and for a traveller whose whole
+ * interest is food it was the emptiest part of the itinerary.
+ *
+ * Scored rather than filtered, so a day always gets the best available answer
+ * instead of nothing when no candidate is perfect. Hard requirements — open at
+ * the time, tolerable queue, reachable — are still absolute; everything else
+ * ranks.
+ */
+export function selectMealPlace(
+  options: PlaceCandidate[],
+  context: {
+    atMinutes: number;
+    weekday?: number;
+    from?: PlaceCandidate;
+    resolveRoute: RouteResolver;
+    queueTolerance: number;
+    queueEvidence: Record<string, number>;
+    preferences: MealPreferenceInputs;
+    used: Set<string>;
+  },
+): { candidate: PlaceCandidate; leg?: RouteLeg; queueMinutes: number } | undefined {
+  const { preferences } = context;
+  const wantedTags = new Set((preferences.preferredTags || []).map((tag) => tag.toLowerCase()));
+  const allowedPrices = BUDGET_PRICE_LEVELS[preferences.budgetTier || 'mid-range'];
+  const dietary = (preferences.dietaryNeeds || []).map((need) => need.toLowerCase());
+
+  let best: { candidate: PlaceCandidate; leg?: RouteLeg; queueMinutes: number; score: number } | undefined;
+
+  for (const candidate of options) {
+    if (context.used.has(candidate.id) || !isFoodPlace(candidate)) continue;
+
+    // --- Hard requirements ------------------------------------------------
+    const hours = openingWindow(candidate, context.weekday);
+    if (hours.closedToday) continue;
+    if (hours.known && (context.atMinutes < hours.opensAt || context.atMinutes >= hours.closesAt)) continue;
+
+    const queueMinutes = queueMinutesFor(candidate, context.queueEvidence[candidate.id]);
+    if (queueMinutes > context.queueTolerance) continue;
+
+    const leg = context.from ? context.resolveRoute(context.from, candidate) : undefined;
+    if (context.from && !leg) continue;
+    const detour = leg ? walkingMinutesOf(leg) : 0;
+    if (detour > MEAL_DETOUR_WALK_MINUTES) continue;
+
+    /**
+     * A dietary need is a requirement, not a preference — but only where the
+     * data exists to honour it. Treating "unknown" as "unsuitable" would leave
+     * a vegetarian traveller with no lunch at all in cities where nobody has
+     * tagged the restaurants.
+     */
+    if (dietary.length > 0 && candidate.dietaryOptions && candidate.dietaryOptions.length > 0) {
+      const catered = dietary.every((need) => candidate.dietaryOptions!.some((option) => option.includes(need)));
+      if (!catered) continue;
+    }
+
+    // --- Preferences ------------------------------------------------------
+    let score = 0;
+    const tags = new Set([...candidate.categories, ...candidate.experienceTags].map((tag) => tag.toLowerCase()));
+    for (const tag of wantedTags) if (tags.has(tag)) score += 2;
+    if (candidate.priceLevel !== undefined && allowedPrices.includes(candidate.priceLevel)) score += 1;
+    if (candidate.priceLevel !== undefined && !allowedPrices.includes(candidate.priceLevel)) score -= 2;
+    if (dietary.length > 0 && candidate.dietaryOptions?.length) score += 2;
+    // Closer is better once everything else is equal: a meal should not become
+    // the walk of the day.
+    score += Math.max(0, (MEAL_DETOUR_WALK_MINUTES - detour) / MEAL_DETOUR_WALK_MINUTES);
+    if (hours.known) score += 0.5;
+    score += (candidate.notability ?? 0);
+
+    if (!best || score > best.score) best = { candidate, leg, queueMinutes, score };
+  }
+
+  return best ? { candidate: best.candidate, leg: best.leg, queueMinutes: best.queueMinutes } : undefined;
+}
+
 interface OpeningWindow {
   opensAt: number;
   closesAt: number;
@@ -258,6 +377,14 @@ export interface DayPlanRequest {
   /** Prefer indoor candidates when live weather indicates a wet day. */
   preferIndoor?: boolean;
   /**
+   * Places to eat, offered for meal slots only. Kept separate from
+   * `candidates` because a traveller does not shortlist lunch the way they
+   * shortlist a museum — and food must not consume the day's main allowance.
+   */
+  mealCandidates?: PlaceCandidate[];
+  /** Budget, diet and taste, for choosing between them. */
+  mealPreferences?: MealPreferenceInputs;
+  /**
    * The calendar date this day falls on, `YYYY-MM-DD`. Supplies the weekday
    * that opening hours are resolved against; without it, weekly closures cannot
    * be honoured and the planner falls back to the first published window.
@@ -308,6 +435,17 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
   const weekday = weekdayOf(request.date);
   const dayCity = request.origin?.city || candidates[0]?.city;
 
+  /**
+   * Restaurants are scheduled as meals, not as sights.
+   *
+   * Without this split a shortlist containing food would spend the day's main
+   * allowance on lunch venues and then still reserve an empty window to eat in.
+   * `mealCandidates` lets the caller offer food the traveller never explicitly
+   * shortlisted, which is usually how eating works.
+   */
+  const foodOptions = [...(request.mealCandidates || []), ...candidates.filter(isFoodPlace)];
+  const sightCandidates = candidates.filter((candidate) => !isFoodOnly(candidate));
+
   const slots: ScheduledSlot[] = [...(request.fixedSlots || [])].sort((a, b) => a.startMinutes - b.startMinutes);
   const rejections: SchedulingRejection[] = [];
   const warnings: string[] = [];
@@ -326,12 +464,23 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
   let totalLegs = 0;
   let lunchPlaced = false;
   let dinnerPlaced = false;
+  /** Meals given a real venue, as opposed to a flexible window. */
+  let mealPlaces = 0;
 
   let previous: PlaceCandidate | undefined = request.origin;
   const seen = new Set<string>();
 
   const lunch = behaviour.meals.lunchWindow;
   const dinner = behaviour.meals.dinnerWindow;
+  /**
+   * `breakfastRequired` has been on the profile since the behaviour model was
+   * written and was never scheduled. A traveller who says they need breakfast
+   * gets one, in the hour before the day's first stop.
+   */
+  const breakfast = behaviour.meals.breakfastRequired
+    ? { start: toTime(Math.max(0, startMinutes - 60)), end: toTime(startMinutes) }
+    : undefined;
+  let breakfastPlaced = false;
 
   /**
    * Insert a meal when the clock has entered its window — or when the activity
@@ -355,6 +504,51 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
       const start = Math.max(clock, windowStart);
       if (start > windowEnd) return false;
 
+      // Somewhere real to eat, if the shortlist holds one that is open now and
+      // close by. The abstract window survives as the fallback so a day never
+      // simply loses its lunch.
+      const choice = selectMealPlace(foodOptions, {
+        atMinutes: start,
+        weekday,
+        from: previous,
+        resolveRoute,
+        queueTolerance,
+        queueEvidence,
+        preferences: request.mealPreferences || {},
+        used: seen,
+      });
+
+      if (choice) {
+        const legMinutes = choice.leg?.durationMinutes ?? 0;
+        const seatedAt = start + legMinutes + choice.queueMinutes;
+        // Travelling to and queueing for a meal is real time; if it no longer
+        // fits the window, the flexible block is the honest answer.
+        if (seatedAt + diningMinutes <= windowEnd + diningMinutes) {
+          slots.push({
+            kind: 'meal',
+            startMinutes: seatedAt,
+            endMinutes: seatedAt + diningMinutes,
+            candidate: choice.candidate,
+            label: `${label} — ${choice.candidate.name}`,
+            arrivalLeg: choice.leg,
+            queueMinutes: choice.queueMinutes,
+            reason: `${choice.candidate.neighbourhood || choice.candidate.city} · ${choice.candidate.categories.slice(0, 2).join(' and ')}`,
+          });
+          seen.add(choice.candidate.id);
+          mealPlaces += 1;
+          clock = seatedAt + diningMinutes;
+          mealMinutes += diningMinutes;
+          transportMinutes += legMinutes;
+          queueTotal += choice.queueMinutes;
+          if (choice.leg) {
+            walkingMinutes += walkingMinutesOf(choice.leg);
+            walkingMetres += walkingMetresOf(choice.leg);
+          }
+          previous = choice.candidate;
+          return true;
+        }
+      }
+
       slots.push({
         kind: 'meal',
         startMinutes: start,
@@ -367,11 +561,12 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
       return true;
     };
 
+    breakfastPlaced = tryMeal(breakfast, breakfastPlaced, 'Breakfast');
     lunchPlaced = tryMeal(lunch, lunchPlaced, 'Lunch');
     dinnerPlaced = tryMeal(dinner, dinnerPlaced, 'Dinner');
   };
 
-  for (const candidate of candidates) {
+  for (const candidate of sightCandidates) {
     if (seen.has(candidate.id)) {
       rejections.push({ candidate, reason: 'duplicate', detail: 'Already scheduled on this day.' });
       continue;
@@ -683,6 +878,7 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
       walkingDistanceMeters: Math.round(walkingMetres),
       queueMinutes: queueTotal,
       mealMinutes,
+      mealPlaces,
       freeTimeMinutes,
       departureTime: toTime(startMinutes),
       expectedReturnTime: toTime(expectedReturn),

@@ -18,7 +18,7 @@ import {
   getDestinationCapability as getFixtureLibrary,
   SUPPORTED_DISCOVERY_CITIES,
 } from './destinationFixtures';
-import type { PlaceCandidate } from './destinationIntelligence';
+import type { DateAwareOpeningHours, PlaceCandidate } from './destinationIntelligence';
 import {
   summarisePlaceEvidence,
   trendStrength,
@@ -105,6 +105,12 @@ export interface DiscoveryOutcome {
   evidenceSummaries: Record<string, PlaceEvidenceSummary>;
   /** Trend strength 0–1 by candidate id. */
   trends: Record<string, number>;
+  /**
+   * Opening hours read from the operator's own site, by candidate id. These
+   * supersede whatever the map provider held: community-maintained hours go
+   * stale, and an official page is the thing that can correct them.
+   */
+  officialHours: Record<string, DateAwareOpeningHours>;
   /** Provider failure retained for UI diagnostics when no fallback exists. */
   providerError?: string;
 }
@@ -179,12 +185,13 @@ export function parseCurrentEvents(payload: unknown): CurrentEventSummary[] {
 function digestEvidence(
   payload: unknown,
   candidates: PlaceCandidate[],
-): Pick<DiscoveryOutcome, 'queueEvidence' | 'evidenceSummaries' | 'trends'> {
-  const empty = { queueEvidence: {}, evidenceSummaries: {}, trends: {} };
+): EvidenceDigest {
+  const empty = { queueEvidence: {}, evidenceSummaries: {}, trends: {}, officialHours: {} };
   if (!payload || typeof payload !== 'object') return empty;
 
   const documents = (payload as { documents?: unknown }).documents;
   const rawTrends = (payload as { trends?: unknown }).trends;
+  const rawHours = (payload as { openingHours?: unknown }).openingHours;
   if (!Array.isArray(documents)) return empty;
 
   const byProviderId = new Map(
@@ -203,8 +210,20 @@ function digestEvidence(
   const queueEvidence: Record<string, number> = {};
   const evidenceSummaries: Record<string, PlaceEvidenceSummary> = {};
   const trends: Record<string, number> = {};
+  const officialHours: Record<string, DateAwareOpeningHours> = {};
 
   for (const [providerId, candidateId] of byProviderId) {
+    // Hours are read even when a place produced no documents: an operator's
+    // page routinely publishes hours without saying anything claim-worthy.
+    const periods = (rawHours as Record<string, unknown> | undefined)?.[providerId];
+    if (Array.isArray(periods) && periods.length > 0) {
+      officialHours[candidateId] = {
+        periods: periods as DateAwareOpeningHours['periods'],
+        // The operator is the authority on their own hours.
+        sourceConfidence: 'high',
+      };
+    }
+
     const summary = summarisePlaceEvidence(providerId, evidence);
     if (summary.sourceCount === 0) continue;
     evidenceSummaries[candidateId] = { ...summary, canonicalPlaceId: candidateId };
@@ -222,7 +241,7 @@ function digestEvidence(
     }
   }
 
-  return { queueEvidence, evidenceSummaries, trends };
+  return { queueEvidence, evidenceSummaries, trends, officialHours };
 }
 
 /** The empty digest, used whenever evidence is unavailable or not yet fetched. */
@@ -230,9 +249,10 @@ export const EMPTY_EVIDENCE_DIGEST: EvidenceDigest = {
   queueEvidence: {},
   evidenceSummaries: {},
   trends: {},
+  officialHours: {},
 };
 
-export type EvidenceDigest = Pick<DiscoveryOutcome, 'queueEvidence' | 'evidenceSummaries' | 'trends'>;
+export type EvidenceDigest = Pick<DiscoveryOutcome, 'queueEvidence' | 'evidenceSummaries' | 'trends' | 'officialHours'>;
 
 /**
  * Gather evidence for a specific handful of candidates.
@@ -260,6 +280,7 @@ export async function fetchPlaceEvidence(
       city: destination.city,
       placeIds: withProviderId.map((candidate) => candidate.providerPlaceId),
       placeNames: withProviderId.map((candidate) => candidate.name),
+      placeWebsites: withProviderId.map((candidate) => candidate.website),
       provider: options?.provider,
       travelStartsInDays: options?.travelStartsInDays,
     });
@@ -326,9 +347,7 @@ export async function discoverPlaces(
       // Report the fixture honestly even if the provider was nominally "live".
       capability: { ...capability, places: { provider: 'fixture', status: 'fixture' } },
       usingFixture: true,
-      queueEvidence: {},
-      evidenceSummaries: {},
-      trends: {},
+      ...EMPTY_EVIDENCE_DIGEST,
       providerError,
     };
   }
@@ -337,9 +356,7 @@ export async function discoverPlaces(
     candidates: [],
     capability: { ...capability, places: { ...capability.places, status: 'unavailable' } },
     usingFixture: false,
-    queueEvidence: {},
-    evidenceSummaries: {},
-    trends: {},
+    ...EMPTY_EVIDENCE_DIGEST,
     providerError,
   };
 }

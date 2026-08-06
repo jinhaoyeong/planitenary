@@ -422,8 +422,40 @@ which is where Edge Functions run.
 14. ✅ Day-of-week opening hours, end to end (fixes the Monday-closure bug)
 15. ✅ All four dead `PACE_DEFAULTS` fields enforced
 
-**Phase 5b — Remaining scheduling intelligence**
-16. Real restaurants in meal slots; add breakfast
+**Official sources + meals — DONE (2026-08-06)**
+
+- ✅ **The official-source fetcher now exists.** `capabilitySnapshot()` had
+  hardcoded `officialSources: true` since the capability model was written, and
+  nothing implemented it — so `describeCapability` told travellers the plan was
+  "checked against official sources" when nothing checked any. It is the
+  highest-authority source in the model (weight 1.0, the only one permitted to
+  establish a closure) and it needs no credential at all.
+- ✅ Operator-published hours override community-maintained ones, read from
+  schema.org JSON-LD.
+- ✅ **SSRF guard** on those fetches. Venue URLs come from OpenStreetMap tags,
+  which anyone on earth can edit, so this is attacker-influenceable input:
+  `isSafePublicUrl` rejects non-HTTPS, credentials, odd ports, loopback,
+  link-local (including the cloud metadata endpoint) and private ranges.
+- ✅ Meals name a real restaurant, chosen on opening hours, queue tolerance,
+  walking detour, budget tier, dietary needs and the traveller's own styles.
+- ✅ `breakfastRequired` is finally scheduled.
+- ✅ A separate, capped Overpass food query, because the sights query excludes
+  restaurants on purpose and Wikivoyage alone is too thin to eat from.
+
+Three things worth carrying forward:
+
+- **`fatigueScore` is not comparable across pace profiles** — its own
+  documentation says so, and a test was comparing it anyway. It passed by luck
+  until meal travel shifted the numbers. Absolute exertion is the honest signal.
+- **Food-adjacent is not food-only.** A night market is somewhere to eat *and*
+  a genuine sight; the first cut of the split quietly deleted markets from
+  sightseeing. `isFoodOnly` draws the line, `isFoodPlace` decides meal
+  eligibility.
+- **Suggested meal venues are not shortlisted places.** They are tracked apart
+  from `scheduled`, or the "every accepted place is scheduled or explained"
+  invariant breaks the moment the planner suggests a restaurant.
+
+**Phase 5c — Remaining scheduling intelligence**
 17. Weather-aware and best-time-aware day assignment
 18. Cross-day fatigue rebalancing
 19. Arrival/departure/jet-lag day shaping
