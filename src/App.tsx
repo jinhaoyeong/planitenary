@@ -15,8 +15,10 @@ import type {
   PlannerChangeRecord,
   ScheduleItemKind,
   DiscoveryCandidateDecision,
+  DiscoveryProvider,
   DiscoveryStage,
   DiscoveryUnscheduledReason,
+  IndoorOutdoor,
   ItineraryDiscoveryState,
 } from './data';
 import { ItineraryView } from './components/ItineraryView';
@@ -137,6 +139,35 @@ const VALID_ACTIVITY_SOURCES: ActivitySource[] = ['manual', 'generated', 'import
 const VALID_BOOKING_STATUSES: BookingStatus[] = ['none', 'requested', 'confirmed', 'cancelled'];
 const VALID_LOCKED_FIELDS: ActivityLockedField[] = ['schedule', 'location', 'duration', 'cost', 'booking', 'all'];
 const VALID_SCHEDULE_KINDS: ScheduleItemKind[] = ['place', 'reservation', 'transport', 'meal-window', 'rest-window', 'free-time'];
+/**
+ * Written as a keyed record rather than an array so the compiler enforces
+ * completeness: adding a provider to {@link DiscoveryProvider} without listing
+ * it here fails the build.
+ *
+ * This was previously an inline three-way comparison that had drifted from the
+ * type, so every place found by OpenStreetMap, Wikivoyage, Amap or Baidu —
+ * which is all of them, Google being unconfigured — silently lost its
+ * attribution on the first save. The same list has drifted twice before; a
+ * runtime array would let it happen a fourth time.
+ */
+const DISCOVERY_PROVIDERS: Record<DiscoveryProvider, true> = {
+  google: true,
+  osm: true,
+  wikivoyage: true,
+  amap: true,
+  baidu: true,
+  'official-tourism': true,
+  wikidata: true,
+};
+const INDOOR_OUTDOOR_VALUES: Record<IndoorOutdoor, true> = {
+  indoor: true,
+  outdoor: true,
+  mixed: true,
+};
+const isDiscoveryProvider = (value: unknown): value is DiscoveryProvider =>
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(DISCOVERY_PROVIDERS, value);
+const isIndoorOutdoor = (value: unknown): value is IndoorOutdoor =>
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(INDOOR_OUTDOOR_VALUES, value);
 const VALID_DISCOVERY_DECISIONS: DiscoveryCandidateDecision[] = ['must-do', 'interested', 'skip', 'visited'];
 const VALID_DISCOVERY_STAGES: DiscoveryStage[] = ['not-started', 'reviewing', 'shortlist-ready', 'itinerary-built', 'needs-review'];
 const VALID_DISCOVERY_UNSCHEDULED_REASONS: DiscoveryUnscheduledReason[] = ['opening-hours-conflict', 'daily-capacity-reached', 'incompatible-location', 'insufficient-route-data', 'duplicate', 'no-viable-day'];
@@ -299,7 +330,11 @@ const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, scope =
     travelEstimateSource: source.travelEstimateSource === 'provider-route' || source.travelEstimateSource === 'offline-straight-line' || source.travelEstimateSource === 'unknown' ? source.travelEstimateSource : undefined,
     travelEstimateConfidence: source.travelEstimateConfidence === 'high' || source.travelEstimateConfidence === 'medium' || source.travelEstimateConfidence === 'low' ? source.travelEstimateConfidence : undefined,
     generatedMetadata,
-    provider: source.provider === 'google' || source.provider === 'official-tourism' || source.provider === 'wikidata' ? source.provider : undefined,
+    provider: isDiscoveryProvider(source.provider) ? source.provider : undefined,
+    // Weather-aware ordering and the rain replan both read this. It was never
+    // copied here at all, so the planner's indoor/outdoor knowledge survived
+    // exactly one render before the first save erased it.
+    indoorOutdoor: isIndoorOutdoor(source.indoorOutdoor) ? source.indoorOutdoor : undefined,
     providerPlaceId: typeof source.providerPlaceId === 'string' && source.providerPlaceId.trim() ? source.providerPlaceId.trim() : undefined,
     sourceReferences: Array.isArray(source.sourceReferences)
       ? source.sourceReferences.flatMap((reference) => reference && typeof reference === 'object'
@@ -418,6 +453,36 @@ const sanitizePlannerHistory = (value: unknown): PlannerChangeRecord[] | undefin
     affectedDayNumbers: Array.isArray(entry.affectedDayNumbers) ? entry.affectedDayNumbers : [],
   }));
 };
+
+/**
+ * TEMPORARY. Traces which of the three writers last touched `customItinerary`.
+ * Remove once the flicker report is confirmed closed; it is deliberately one
+ * flag and one function so stripping it is a two-line change.
+ */
+const ITINERARY_SYNC_DEBUG = true;
+const logItinerarySync = (writer: string, detail: Record<string, unknown>) => {
+  if (!ITINERARY_SYNC_DEBUG) return;
+  console.info(`[itinerary-sync] ${writer}`, detail);
+};
+
+/**
+ * Version ordering across the three writers into `customItinerary`.
+ *
+ * Local edits increment `revision`; a remote payload is only worth applying if
+ * it carries a higher one. Without this the debounced upsert and the realtime
+ * echo of that same upsert race each other, and a payload describing the state
+ * *before* a rebuild can land after it — which is how a freshly built 21-day
+ * plan flickered and then emptied.
+ *
+ * Equal revisions are treated as "already have it", which is what an echo of
+ * our own write is. The trade-off: a second device editing concurrently can
+ * produce two different itineraries at the same revision, and the lower-numbered
+ * write is dropped rather than merged. Ordering by a number cannot fix that —
+ * only a real merge could — but silently losing the newer plan is the worse
+ * failure, and it is the one being reported.
+ */
+const isNewerItineraryRevision = (incoming: Itinerary, current: Itinerary | null): boolean =>
+  !current || (incoming.revision || 0) > (current.revision || 0);
 
 const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
   const source = value && typeof value === 'object' ? value as Partial<Itinerary> : {};
@@ -592,6 +657,12 @@ function App() {
   const itinerarySyncReadyRef = useRef(false);
   const hasLocalItineraryRef = useRef(false);
   const remoteItineraryLoadedRef = useRef(false);
+  /**
+   * Mirrors `customItinerary` for the async sync callbacks. They are created by
+   * an effect that does not depend on it, so their closure would otherwise hold
+   * whichever itinerary existed when the subscription was opened.
+   */
+  const latestItineraryRef = useRef<Itinerary | null>(null);
 
   const demoItinerary = itineraries.find((i) => i.id === activeItineraryId) ?? itineraries[0];
   const activeItinerary = useMemo(
@@ -609,10 +680,21 @@ function App() {
     ? `itinerary-demo-${activeItineraryId}`
     : `itinerary-${user?.id ?? 'account'}-${activeItineraryId}`;
   const handleItineraryChange = (nextItinerary: Itinerary) => {
-    setCustomItinerary((current) => sanitizeItinerary({
-      ...nextItinerary,
-      revision: Math.max(nextItinerary.revision || 0, (current?.revision || 0) + 1),
-    }, activeItinerary));
+    setCustomItinerary((current) => {
+      const next = sanitizeItinerary({
+        ...nextItinerary,
+        revision: Math.max(nextItinerary.revision || 0, (current?.revision || 0) + 1),
+      }, activeItinerary);
+      latestItineraryRef.current = next;
+      logItinerarySync('local-edit', {
+        applied: true,
+        incomingRevision: next.revision,
+        currentRevision: current?.revision,
+        incomingDays: next.days.length,
+        currentDays: current?.days.length,
+      });
+      return next;
+    });
   };
 
   const commitHeroText = (field: keyof Itinerary, value: string) => {
@@ -753,9 +835,22 @@ function App() {
 
       if (data?.data) {
         const sanitized = sanitizeItinerary(data.data, activeItinerary);
-        setCustomItinerary(sanitized);
+        const current = latestItineraryRef.current;
+        // A fetch that resolves after a local rebuild describes an older trip,
+        // and must not be allowed to undo it.
+        const applied = isNewerItineraryRevision(sanitized, current);
+        logItinerarySync('remote-fetch', {
+          applied,
+          incomingRevision: sanitized.revision,
+          currentRevision: current?.revision,
+          incomingDays: sanitized.days.length,
+          currentDays: current?.days.length,
+        });
         hasLocalItineraryRef.current = true;
-        saveToStorage(itineraryStorageKey, sanitized);
+        if (applied) {
+          setCustomItinerary(sanitized);
+          saveToStorage(itineraryStorageKey, sanitized);
+        }
       } else if (error && error.code !== 'PGRST116') {
         console.error('Error fetching itinerary:', error);
       }
@@ -774,12 +869,25 @@ function App() {
           const nextData = payload.new && 'data' in payload.new ? (payload.new.data as Itinerary | undefined) : undefined;
           if (!nextData) return;
           const sanitized = sanitizeItinerary(nextData, activeItinerary);
+          const current = latestItineraryRef.current;
           hasLocalItineraryRef.current = true;
-          setCustomItinerary((prev) => {
-            if (prev && JSON.stringify(prev) === JSON.stringify(sanitized)) return prev;
-            saveToStorage(itineraryStorageKey, sanitized);
-            return sanitized;
+          /**
+           * Most of these events are the echo of this client's own debounced
+           * upsert. Applying one is at best a no-op and at worst a rollback,
+           * because the echo describes whatever was written 800ms ago.
+           */
+          const applied = isNewerItineraryRevision(sanitized, current)
+            && JSON.stringify(current) !== JSON.stringify(sanitized);
+          logItinerarySync('realtime-echo', {
+            applied,
+            incomingRevision: sanitized.revision,
+            currentRevision: current?.revision,
+            incomingDays: sanitized.days.length,
+            currentDays: current?.days.length,
           });
+          if (!applied) return;
+          saveToStorage(itineraryStorageKey, sanitized);
+          setCustomItinerary(sanitized);
         }
       )
       .subscribe();
@@ -789,6 +897,11 @@ function App() {
       channel.unsubscribe();
     };
   }, [activeItineraryId, activeItinerary, isDemoUser, itineraryStorageKey, user, selectedTripId]);
+
+  // Keeps the mirror authoritative for writers other than handleItineraryChange.
+  useEffect(() => {
+    latestItineraryRef.current = customItinerary;
+  }, [customItinerary]);
 
   useEffect(() => {
     const itineraryToSync = customItinerary;

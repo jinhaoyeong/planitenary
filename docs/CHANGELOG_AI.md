@@ -8,7 +8,7 @@ Running log. Newest first. Rationale lives in `CLAUDE_CONTEXT.md`.
 
 ### Completed
 
-Flight times on `TripProfile` (uncommitted)
+`0fa4a02` Add flight times to trip planning
 - `arrivalTime` / `departureTime` added to `TripProfile`, with
   `sanitizeClockTime` normalising `H:MM` and `HH:MM:SS` to `HH:MM` and dropping
   anything else
@@ -19,12 +19,60 @@ Flight times on `TripProfile` (uncommitted)
   time-zone shift reached it
 - Tests: 523 → 529. New `src/lib/tripProfile.test.ts`
 
+Deck card: desktop swipe and flip-back
+- Mouse drag now decides a card, as touch always could. `DRAG_INTENT_PX = 8`
+  marks a gesture as a drag so the click that trails it is consumed instead of
+  flipping the card it just decided on
+- The flag resets on candidate change too: a committed swipe replaces the card
+  without ever firing the click that would have cleared it
+- Clicking the back of a card flips it shut, which Space always did. Ignores
+  interactive children and a live text selection
+- `draggable={false}` on the photo, so native image drag cannot hijack a swipe
+
+Itinerary sync: stop a stale write undoing a rebuild
+- `revision` existed to order versions and neither read path consulted it. The
+  remote fetch overwrote unconditionally; the realtime handler compared only
+  deep equality. A fetch or echo resolving after a rebuild could roll it back
+- `isNewerItineraryRevision` now gates both, and `latestItineraryRef` mirrors
+  state for the async callbacks, whose closures are formed in an effect that
+  does not depend on `customItinerary`
+- Ref writes deliberately kept out of state updaters: StrictMode double-invokes
+  those, which would double `saveToStorage`
+- Temporary `[itinerary-sync]` tracing behind `ITINERARY_SYNC_DEBUG`
+
+Itinerary sync: stop the sanitiser stripping the planner's work
+- **`indoorOutdoor` was never copied by `sanitizeActivity`.** It is the only
+  input to `isOutdoor`, so weather-aware ordering and the rain replan lost
+  their data on the first save and had been running blind since
+- **`provider` was matched against a stale three-value list** while
+  `DiscoveryProvider` has seven, so every place from OpenStreetMap, Wikivoyage,
+  Amap or Baidu lost attribution on save — all of them, Google being unconfigured
+- Both are now `Record<Union, true>` keyed records, so omitting a value is a
+  **compile error**, not silent loss. `data.ts` records this list drifting twice
+  before; verified by deleting a key and confirming `TS2741`
+
 ### Not verified
 
 The three verification items carried in `CURRENT_TASK.md` were left undone:
 each needs production credentials that are not in the working tree
 (`.env.local` holds only `VITE_SUPABASE_*` and `YOUTUBE_API_KEY` — no service
 role key, no `TRAVEL_REFRESH_SECRET`), and the Supabase CLI is not installed.
+
+The deck-card interactions and the sync guard have **no test coverage**. All 32
+test files are `src/lib/*`; there is no component-test setup (no jsdom, no
+RTL), so covering them means standing that up first. Both were verified only by
+`tsc -b`, eslint and reading.
+
+Whether the revision guard actually closes the reported flicker is unconfirmed —
+it fixes a real defect either way, and the tracing exists to settle it on the
+next reproduction. The two sanitiser losses are confirmed and were happening on
+every save independently of the race.
+
+### Known consequence
+
+Trips saved before this session have already lost `indoorOutdoor` and
+`provider` on their activities. Those fields return only on a rebuild through
+discovery; nothing backfills them.
 
 ---
 

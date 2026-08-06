@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   ArrowLeft,
   Check,
@@ -41,6 +41,13 @@ interface DestinationDiscoveryPanelProps {
 type DiscoveryPhase = 'idle' | 'review' | 'preview' | 'built';
 
 const SWIPE_COMMIT_PX = 110;
+/**
+ * Past this much movement a pointer gesture is a drag, not a tap. A mouse drag
+ * still ends with a click on whatever was underneath it, so without a threshold
+ * every desktop swipe would also flip the card it just decided on. Well under
+ * `SWIPE_COMMIT_PX`, because an abandoned swipe is still not a tap.
+ */
+const DRAG_INTENT_PX = 8;
 
 const GROUPS = [
   { id: 'essentials', label: 'Essentials', matches: ['essential'] },
@@ -154,6 +161,8 @@ function PlaceMedia({ candidate, className }: { candidate: PlaceCandidate; class
           alt={`${candidate.name}, ${candidate.neighbourhood || candidate.city}`}
           loading="lazy"
           decoding="async"
+          // Native image dragging would otherwise hijack a swipe on a mouse.
+          draggable={false}
           onError={() => setFailedUrl(candidate.photoUrl ?? null)}
         />
       ) : (
@@ -352,8 +361,9 @@ function CandidateCard({
 /**
  * One place, one decision. The front is the photograph and the two facts that
  * frame a snap judgement; the back is the full evidence for the times a snap
- * judgement is not enough. Used on both mobile (swipe) and desktop (a wider
- * card driven by the keyboard and the rail beside it).
+ * judgement is not enough. Used on both mobile and desktop; the same swipe,
+ * keyboard and button routes to a decision exist on each, because a pointer is
+ * a pointer whether it is a finger or a mouse.
  */
 function DeckCard({
   ranked,
@@ -377,13 +387,39 @@ function DeckCard({
   const mustOpacity = useTransform(x, [20, SWIPE_COMMIT_PX], [0, 1]);
   const skipOpacity = useTransform(x, [-SWIPE_COMMIT_PX, -20], [1, 0]);
   const isDesktop = variant === 'desktop';
+  /** Whether the current pointer gesture has travelled far enough to be a drag. */
+  const dragMovedRef = useRef(false);
 
   useEffect(() => {
     x.set(0);
+    // A committed swipe replaces the card without ever firing the click that
+    // would have cleared this, so the next card must not start suppressed.
+    dragMovedRef.current = false;
   }, [candidate.id, x]);
 
   const commit = (decision: DiscoveryCandidateDecision) => onDecision(decision);
   const flip = (next: boolean) => { onFlippedChange(next); hapticTap(); };
+
+  const openDetails = () => {
+    // Consume the click that trails a drag rather than reading it as a tap.
+    if (dragMovedRef.current) {
+      dragMovedRef.current = false;
+      return;
+    }
+    flip(true);
+  };
+
+  /**
+   * Clicking the back flips it shut, which is what Space has always done. Only
+   * the card's own surface closes it: interactive children and a live text
+   * selection are left alone, so opening a source or copying an excerpt does
+   * not throw away the details the traveller was reading.
+   */
+  const closeDetailsFromSurface = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('a, button, input, textarea, select')) return;
+    if (window.getSelection()?.toString()) return;
+    flip(false);
+  };
 
   return (
     <motion.div
@@ -397,9 +433,13 @@ function DeckCard({
       <motion.article
         className="destination-deck-card"
         style={{ x, rotate }}
-        drag={flipped || reduceMotion || isDesktop ? false : 'x'}
+        drag={flipped || reduceMotion ? false : 'x'}
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.92}
+        onDragStart={() => { dragMovedRef.current = false; }}
+        onDrag={(_, info) => {
+          if (Math.abs(info.offset.x) > DRAG_INTENT_PX) dragMovedRef.current = true;
+        }}
         onDragEnd={(_, info) => {
           if (info.offset.x >= SWIPE_COMMIT_PX || info.velocity.x > 700) {
             commit('must-do');
@@ -418,7 +458,7 @@ function DeckCard({
             <button
               type="button"
               className="destination-flip-face is-front"
-              onClick={() => flip(true)}
+              onClick={openDetails}
               aria-label={`Show details for ${candidate.name}`}
             >
               <PlaceMedia candidate={candidate} className="destination-deck-photo" />
@@ -437,7 +477,7 @@ function DeckCard({
               </div>
             </button>
 
-            <div className="destination-flip-face is-back" aria-hidden={!flipped}>
+            <div className="destination-flip-face is-back" aria-hidden={!flipped} onClick={closeDetailsFromSurface}>
               <button type="button" className="destination-flip-back-close" onClick={() => flip(false)} aria-label="Flip card back">
                 <X className="w-4 h-4" />
               </button>
@@ -454,14 +494,20 @@ function DeckCard({
                   </a>
                 )}
               </div>
-              <div className="destination-deck-back-actions">
-                <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
-                <button type="button" className="destination-quick-action is-detail" onClick={() => commit('interested')}>Interested</button>
-                <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
-              </div>
             </div>
           </div>
         </div>
+
+        {flipped && (
+          <>
+            <div className="destination-deck-actions">
+              <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
+              <button type="button" className="destination-quick-action is-detail" onClick={() => commit('interested')}>Interested</button>
+              <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
+            </div>
+            <p className="destination-deck-hint">Choose a preference, or close the card to keep browsing</p>
+          </>
+        )}
 
         {!flipped && (
           <>
@@ -471,7 +517,9 @@ function DeckCard({
               <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
             </div>
             <p className="destination-deck-hint">
-              {isDesktop ? '← skip · → must do · ↑ interested · Space details' : 'Swipe right to keep · left to skip'}
+              {isDesktop
+                ? 'Drag or ← skip · → must do · ↑ interested · Space details'
+                : 'Swipe right to keep · left to skip'}
             </p>
           </>
         )}
