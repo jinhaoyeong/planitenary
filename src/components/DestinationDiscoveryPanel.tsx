@@ -1168,11 +1168,13 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       routeResolver,
       weatherRiskDays: nextWeatherRiskDays,
       /**
-       * Flight times are not captured anywhere yet, so only the time-zone
-       * shift is known — and it is worth having on its own: it is what decides
-       * whether the first days of a long-haul trip are eased off.
+       * Flight times come from the traveller and are optional; the time-zone
+       * shift is derived, and is worth having on its own because it is what
+       * decides whether the first days of a long-haul trip are eased off.
        */
       tripEdges: {
+        arrivalTime: profile.arrivalTime,
+        departureTime: profile.departureTime,
         timezoneShiftHours: timezoneShiftHours(
           destination?.timezone,
           profile.startDate ? new Date(`${profile.startDate}T12:00:00Z`) : undefined,

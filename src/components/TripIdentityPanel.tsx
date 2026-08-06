@@ -26,6 +26,7 @@ import {
   manualDestination,
   primaryCountry,
   resolveDuration,
+  sanitizeClockTime,
   sanitizeTripProfile,
   type BudgetTier,
   type TripProfile,
@@ -122,6 +123,36 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
             min={profile.startDate || undefined}
             value={profile.endDate || ''}
             onChange={(event) => update({ endDate: event.target.value || undefined })}
+          />
+        </div>
+      </div>
+
+      {/*
+        * Flight times, editable after the fact because they are usually booked
+        * later than the trip is planned. They bypass the duration validation
+        * above: a time cannot make a date range reversed or over-long.
+        */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+            Arrival time (optional)
+          </label>
+          <input
+            type="time"
+            className="editorial-input w-full"
+            value={profile.arrivalTime || ''}
+            onChange={(event) => update({ arrivalTime: sanitizeClockTime(event.target.value) })}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+            Departure time (optional)
+          </label>
+          <input
+            type="time"
+            className="editorial-input w-full"
+            value={profile.departureTime || ''}
+            onChange={(event) => update({ departureTime: sanitizeClockTime(event.target.value) })}
           />
         </div>
       </div>

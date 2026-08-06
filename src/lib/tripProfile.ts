@@ -75,6 +75,16 @@ export interface TripProfile {
   destinations: TripDestination[];
   startDate?: string;
   endDate?: string;
+  /**
+   * Local landing time on the first day, `HH:MM`. A trip does not begin at
+   * nine in the morning; it begins when the plane is on the ground.
+   */
+  arrivalTime?: string;
+  /**
+   * Local take-off time on the final day, `HH:MM`. The last day ends when the
+   * traveller has to leave for the airport, not at the usual hour.
+   */
+  departureTime?: string;
   /** Nights are derived, days = nights + 1 when both dates exist. */
   dayCount: number;
   tripTypes: TripType[];
@@ -245,6 +255,23 @@ export const createEmptyProfile = (homeCurrency = 'MYR'): TripProfile => ({
   visualDesign: defaultVisualDesignForNewTrip(),
   createdAt: new Date().toISOString(),
 });
+
+/**
+ * A wall-clock time as `HH:MM`, or `undefined`.
+ *
+ * Anything unparseable is dropped rather than coerced, because a half-read
+ * flight time is worse than none: `shapeTripEdge` would silently shorten or
+ * lengthen the wrong day. Seconds are accepted because some browsers append
+ * them to `<input type="time">`, and discarded because nothing uses them.
+ */
+export function sanitizeClockTime(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const match = /^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?$/.exec(value.trim());
+  if (!match) return undefined;
+  const hours = Number(match[1]);
+  if (hours > 23) return undefined;
+  return `${String(hours).padStart(2, '0')}:${match[2]}`;
+}
 
 const parseDate = (value?: string): Date | null => {
   if (!value) return null;
@@ -487,6 +514,8 @@ export function sanitizeTripProfile(value: unknown): TripProfile | null {
     destinations,
     startDate: duration.startDate,
     endDate: duration.endDate,
+    arrivalTime: sanitizeClockTime(source.arrivalTime),
+    departureTime: sanitizeClockTime(source.departureTime),
     dayCount: duration.dayCount,
     tripTypes: pickAll(source.tripTypes, TRIP_TYPE_OPTIONS.map((option) => option.id)),
     styles: pickAll(source.styles, TRAVEL_STYLE_OPTIONS.map((option) => option.id)),

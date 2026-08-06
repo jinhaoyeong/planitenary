@@ -41,6 +41,7 @@ import {
   destinationFromPlace,
   manualDestination,
   nightsBetween,
+  sanitizeClockTime,
   sanitizeTripProfile,
   resolveDuration,
   suggestedCurrency,
@@ -458,6 +459,42 @@ export function TripCreateWizard({
                     value={profile.endDate || ''}
                     onChange={(event) => update({ endDate: event.target.value || undefined })}
                   />
+                </div>
+              </div>
+
+              {/*
+                * Optional, and deliberately placed under the dates rather than
+                * in its own step: a traveller who has not booked flights yet
+                * should be able to skip straight past it.
+                */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                    Arrival time (optional)
+                  </label>
+                  <input
+                    type="time"
+                    className="editorial-input w-full"
+                    value={profile.arrivalTime || ''}
+                    onChange={(event) => update({ arrivalTime: sanitizeClockTime(event.target.value) })}
+                  />
+                  <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+                    Day one starts after you land, with time to drop bags.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                    Departure time (optional)
+                  </label>
+                  <input
+                    type="time"
+                    className="editorial-input w-full"
+                    value={profile.departureTime || ''}
+                    onChange={(event) => update({ departureTime: sanitizeClockTime(event.target.value) })}
+                  />
+                  <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+                    The last day ends in time to leave for the airport.
+                  </p>
                 </div>
               </div>
 
