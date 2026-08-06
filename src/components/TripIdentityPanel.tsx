@@ -101,6 +101,30 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
     [profile, itinerary.days.length],
   );
 
+  /**
+   * Read from the handbook as it stands, not from the edit that produced it,
+   * so it survives a reload and stays true while the traveller is still
+   * deciding.
+   */
+  const durationChange = useMemo(() => {
+    if (!durationValidation.ok || durationValidation.days <= 0 || itinerary.days.length === 0) return null;
+
+    const emptyTail = [...itinerary.days]
+      .reverse()
+      .findIndex((day) => day.activities.length > 0);
+    const trailingEmpty = emptyTail === -1 ? itinerary.days.length : emptyTail;
+    const planned = itinerary.days.some((day) => day.activities.length > 0);
+
+    if (itinerary.days.length > durationValidation.days) {
+      const stranded = itinerary.days.length - durationValidation.days;
+      return `${stranded} ${stranded === 1 ? 'day is' : 'days are'} past the end of these dates and still hold plans. They have been kept — remove them from the itinerary if you no longer want them.`;
+    }
+    if (planned && trailingEmpty > 0) {
+      return `${trailingEmpty === 1 ? 'The last day is' : `The last ${trailingEmpty} days are`} empty. Rebuild through the discovery panel to schedule ${trailingEmpty === 1 ? 'it' : 'them'}.`;
+    }
+    return null;
+  }, [durationValidation, itinerary.days]);
+
   return (
     <div className="space-y-6">
       {/*
@@ -140,7 +164,7 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
             dayCount={duration.days}
             startDate={profile.startDate}
             value={profile.cityStays}
-            onChange={(cityStays) => update({ cityStays })}
+            onChange={(cityStays) => update({ cityStays, cityStayDayCount: duration.days })}
           />
         </div>
       )}
@@ -180,6 +204,21 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
       {durationError && (
         <p className="text-sm" style={{ color: 'var(--accent)' }} role="alert">
           {durationError}
+        </p>
+      )}
+
+      {/*
+        * What changing the dates just did to the handbook.
+        *
+        * The day cards follow the dates now, but a new day arrives empty and
+        * the planner does not re-run on its own — so a traveller who adds a day
+        * would otherwise see a ninth card appear, blank, with no indication of
+        * how to fill it. Days past the end of a shortened trip are never
+        * deleted, and this is where they are accounted for.
+        */}
+      {durationChange && (
+        <p className="text-xs" role="status" style={{ color: 'var(--accent)' }}>
+          {durationChange}
         </p>
       )}
 

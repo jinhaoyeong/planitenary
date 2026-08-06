@@ -102,6 +102,77 @@ export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
   });
 }
 
+export interface DaySyncResult {
+  days: DayPlan[];
+  /** Day cards appended because the trip got longer. */
+  added: number;
+  /** Empty trailing cards removed because the trip got shorter. */
+  removed: number;
+  /**
+   * Days past the end of the shortened trip that still hold activities. Kept,
+   * never deleted, and reported so the traveller can decide.
+   */
+  strandedDays: number[];
+}
+
+/**
+ * Keep the day cards in step with the trip's length and dates.
+ *
+ * Day cards were only ever built at creation, so a traveller who added a day
+ * afterwards got a hero badge reading 9 above eight day cards — the ninth day
+ * simply did not exist anywhere in the app, and the planner sized everything to
+ * eight.
+ *
+ * Growing appends neutral cards. Shrinking removes trailing cards **only while
+ * they are empty**: a day with something planned on it is work, and deleting it
+ * to satisfy a date change would be the app throwing away what the traveller
+ * did. Those days are reported instead.
+ *
+ * Dates are refreshed on every card, because moving the trip forward a week
+ * moves every day with it. Titles and activities are never touched.
+ */
+export function syncDaysWithDuration(itinerary: Itinerary, profile: TripProfile): DaySyncResult {
+  const validation = validateTripDuration(profile);
+  const target = generatedDayCardCount(validation.ok ? validation.days : 0);
+  const current = itinerary.days;
+
+  // No usable duration: leave the handbook exactly as it is. Clearing the dates
+  // is not an instruction to delete the plan.
+  if (target <= 0) return { days: current, added: 0, removed: 0, strandedDays: [] };
+
+  const cities = destinationCities(profile);
+  const dateFor = (index: number) => (profile.startDate
+    ? SHORT_DATE.format(addDays(profile.startDate, index))
+    : `Day ${index + 1}`);
+
+  let days = current.map((day, index) => ({ ...day, day: index + 1, date: dateFor(index) }));
+  let added = 0;
+  let removed = 0;
+
+  if (days.length < target) {
+    const generated = buildDaysFromProfile(profile);
+    added = target - days.length;
+    days = [...days, ...generated.slice(days.length)];
+  } else if (days.length > target) {
+    while (days.length > target && days[days.length - 1].activities.length === 0) {
+      days = days.slice(0, -1);
+      removed += 1;
+    }
+  }
+
+  const strandedDays = days.slice(target).map((day) => day.day);
+
+  // A single-city trip names its city on every card, including newly added
+  // ones; a multi-city trip leaves that to the planner, as at creation.
+  const city = cityForDay(cities);
+  return {
+    days: city ? days.map((day) => ({ ...day, city: day.city || city })) : days,
+    added,
+    removed,
+    strandedDays,
+  };
+}
+
 /**
  * Writes a whole generated identity onto a brand new itinerary and records
  * every field as generated. Only safe for trips that have no copy yet — an
@@ -137,10 +208,17 @@ export function syncDurationDependentFields(
   generatedAt = new Date().toISOString(),
 ): Itinerary {
   const days = badgeDurationDays(profile);
-  const identity = buildTripIdentity(profile, { plannedDays: itinerary.days.length });
+  /**
+   * The cards follow the dates. This is the single place every profile write
+   * passes through, which is why it belongs here rather than in each panel —
+   * before this, changing the dates moved the badge and left the day cards
+   * behind, so a nine-day trip had eight days in it.
+   */
+  const synced = syncDaysWithDuration(itinerary, profile);
+  const identity = buildTripIdentity(profile, { plannedDays: synced.days.length });
   const sources: FieldSourceMap = { ...(itinerary.fieldSources ?? {}) };
 
-  let next: Itinerary = { ...itinerary, tripProfile: profile };
+  let next: Itinerary = { ...itinerary, tripProfile: profile, days: synced.days };
 
   if (days <= 0) {
     // A badge that still shows an old count contradicts the profile.

@@ -110,6 +110,16 @@ export interface TripProfile {
    * keeps working, but the wizard asks for a stay plan before discovery.
    */
   cityStays?: TripCityStay[];
+  /**
+   * The trip length `cityStays` was set against.
+   *
+   * Without it, a plan that no longer adds up is ambiguous: three days placed
+   * on an eight-day trip could be a finished plan for a trip that has since
+   * grown, or a plan the traveller abandoned halfway. The first must be kept
+   * and stretched; the second is better replaced by inference. This is what
+   * tells them apart.
+   */
+  cityStayDayCount?: number;
   tripTypes: TripType[];
   styles: TravelStyle[];
   moods: TripMood[];
@@ -576,6 +586,9 @@ export function sanitizeTripProfile(value: unknown): TripProfile | null {
      * what is left. Undefined when there is nothing to divide.
      */
     cityStays: sanitizeCityStays(source.cityStays, destinations.map((entry) => entry.city)),
+    cityStayDayCount: typeof source.cityStayDayCount === 'number' && Number.isFinite(source.cityStayDayCount)
+      ? Math.max(0, Math.floor(source.cityStayDayCount))
+      : undefined,
     tripTypes: pickAll(source.tripTypes, TRIP_TYPE_OPTIONS.map((option) => option.id)),
     styles: pickAll(source.styles, TRAVEL_STYLE_OPTIONS.map((option) => option.id)),
     moods: pickAll(source.moods, MOOD_OPTIONS.map((option) => option.id)),

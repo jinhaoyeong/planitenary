@@ -27,7 +27,7 @@ import {
 } from './humanScheduler';
 import { scorePlaces, type ScoringInputs } from './placeIntelligence';
 import { cityForDay as cityForLegDay, describeCityLegs, orderedCities, planCityLegs, type CityLeg } from './cityLegs';
-import { legsFromCityStays, reconcileCityStays } from './cityStays';
+import { cityStayTotal, fitCityStays, legsFromCityStays, reconcileCityStays } from './cityStays';
 import { distanceMeters } from './placeIdentity';
 
 const STYLE_TAGS: Record<string, string[]> = {
@@ -870,12 +870,29 @@ export function buildDestinationItinerary(
    * *was* asked. Where you sleep on night four is a hotel booking, and the
    * planner does not get a vote.
    */
-  const statedLegs = legsFromCityStays(reconcileCityStays(profile.cityStays, chosenCities), dayCount);
-  const inferred = statedLegs.length > 0
+  const reconciledStays = reconcileCityStays(profile.cityStays, chosenCities);
+  const statedDays = cityStayTotal(reconciledStays);
+  /**
+   * A plan that no longer adds up is still their plan, *if it ever added up*.
+   *
+   * Adding a day to a trip must not discard the eight nights already placed:
+   * `fitCityStays` stretches the last stay to cover the difference and the
+   * warning says so, which is a change the traveller can see and correct. A
+   * plan abandoned half-finished is a different thing, and inference serves it
+   * better than dumping five unplaced days on whichever city came last —
+   * `cityStayDayCount` is what tells the two apart.
+   */
+  const planWasFinished = statedDays > 0
+    && (statedDays === dayCount || statedDays === profile.cityStayDayCount);
+  const statedLegs = planWasFinished
+    ? legsFromCityStays(fitCityStays(reconciledStays, dayCount), dayCount)
+    : [];
+  const { legs, dropped: droppedCities } = statedLegs.length > 0
     ? { legs: statedLegs, dropped: [] as string[] }
     : planCityLegs(legCities, dayCount, shortlistWeights);
-  const { legs, dropped: droppedCities } = inferred;
   const legsAreStated = statedLegs.length > 0;
+  /** How far the stay plan was from the trip it was applied to. */
+  const stayPlanDrift = legsAreStated ? dayCount - statedDays : 0;
   const legCityKeys = new Set(legs.map((leg) => cityKey(leg.city)));
 
   /**
@@ -1225,6 +1242,17 @@ export function buildDestinationItinerary(
       // only thing worth saying is that it was followed.
       ? `Built to your stay plan: ${describeCityLegs(legs)}.`
       : `Your days are split ${describeCityLegs(legs)}, following how many places you kept in each city. Set a stay plan in Settings to decide this yourself.`);
+  }
+  /**
+   * The trip changed length after the plan was made. Never silent: the extra
+   * days went somewhere specific, and the traveller is the one who should
+   * decide whether that is where they want them.
+   */
+  if (stayPlanDrift !== 0 && legs.length > 0) {
+    const lastCity = legs[legs.length - 1].city;
+    warnings.add(stayPlanDrift > 0
+      ? `Your trip is ${stayPlanDrift} ${stayPlanDrift === 1 ? 'day' : 'days'} longer than your stay plan, so ${stayPlanDrift === 1 ? 'it was' : 'they were'} added to ${lastCity}. Change this in Settings if ${stayPlanDrift === 1 ? 'that day belongs' : 'those days belong'} elsewhere.`
+      : `Your trip is ${Math.abs(stayPlanDrift)} ${Math.abs(stayPlanDrift) === 1 ? 'day' : 'days'} shorter than your stay plan, so the last ${Math.abs(stayPlanDrift) === 1 ? 'day was' : 'days were'} taken off the end. Change this in Settings if you would rather lose ${Math.abs(stayPlanDrift) === 1 ? 'a day' : 'days'} somewhere else.`);
   }
   if (droppedCities.length > 0) {
     warnings.add(droppedCities.length === 1

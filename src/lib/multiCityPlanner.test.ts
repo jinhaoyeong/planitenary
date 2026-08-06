@@ -229,13 +229,78 @@ describe('the traveller\'s stay plan overrules the planner', () => {
     expect(warnings.some((warning) => warning.includes('how many places you kept'))).toBe(false);
   });
 
-  it('falls back to inference when the plan does not cover the trip', () => {
-    // Half-answered is not answered. An eight-day trip with three days placed
-    // must not silently become a three-day plan.
+  it('falls back to inference for a plan that was never finished', () => {
+    // Three days placed on an eight-day trip, and no record of it ever having
+    // added up. Half-answered is not answered, and dumping the five unplaced
+    // days on Osaka would be a decision nobody made.
     const { cityLegs, warnings } = build(withStays([{ city: 'Osaka', days: 3 }]));
 
     expect(cityLegs.reduce((total, leg) => total + leg.days, 0)).toBe(8);
     expect(warnings.some((warning) => warning.includes('how many places you kept'))).toBe(true);
+  });
+
+  describe('when the trip changes length afterwards', () => {
+    /**
+     * The traveller's question: *"What if user add one more day in the app
+     * after building and setting up the trip?"* A finished plan must survive
+     * it. Discarding eight deliberate nights because a ninth day appeared
+     * would be the app forgetting a decision it had just been given.
+     */
+    const finished = (stays: Array<{ city: string; days: number }>, plannedFor: number) =>
+      kansaiProfile({ cityStays: stays, cityStayDayCount: plannedFor });
+
+    it('keeps the plan and puts the extra day on the last stay', () => {
+      const profile = finished([
+        { city: 'Osaka', days: 4 },
+        { city: 'Kyoto', days: 4 },
+      ], 8);
+      const { cityLegs } = buildDestinationItinerary(
+        kansaiTrip(9),
+        { ...profile, dayCount: 9, endDate: '2026-10-10' },
+        rankDestinationCandidates(OSAKA_PLACE_FIXTURE, profile),
+        acceptAll(OSAKA_PLACE_FIXTURE),
+      );
+
+      expect(cityLegs).toEqual([
+        { city: 'Osaka', startDay: 1, endDay: 4, days: 4 },
+        { city: 'Kyoto', startDay: 5, endDay: 9, days: 5 },
+      ]);
+    });
+
+    it('says where the extra day went, so it can be moved', () => {
+      const profile = finished([{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 4 }], 8);
+      const { warnings } = buildDestinationItinerary(
+        kansaiTrip(9),
+        { ...profile, dayCount: 9, endDate: '2026-10-10' },
+        rankDestinationCandidates(OSAKA_PLACE_FIXTURE, profile),
+        acceptAll(OSAKA_PLACE_FIXTURE),
+      );
+
+      expect(warnings.some((warning) => warning.includes('1 day longer than your stay plan')
+        && warning.includes('added to Kyoto'))).toBe(true);
+    });
+
+    it('takes days off the end when the trip is shortened, and says so', () => {
+      const profile = finished([{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 4 }], 8);
+      const { cityLegs, warnings } = buildDestinationItinerary(
+        kansaiTrip(6),
+        { ...profile, dayCount: 6, endDate: '2026-10-07' },
+        rankDestinationCandidates(OSAKA_PLACE_FIXTURE, profile),
+        acceptAll(OSAKA_PLACE_FIXTURE),
+      );
+
+      expect(cityLegs).toEqual([
+        { city: 'Osaka', startDay: 1, endDay: 4, days: 4 },
+        { city: 'Kyoto', startDay: 5, endDay: 6, days: 2 },
+      ]);
+      expect(warnings.some((warning) => warning.includes('2 days shorter than your stay plan'))).toBe(true);
+    });
+
+    it('says nothing about drift when the plan still fits exactly', () => {
+      const { warnings } = build(finished([{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 4 }], 8));
+      expect(warnings.some((warning) => warning.includes('longer than your stay plan')
+        || warning.includes('shorter than your stay plan'))).toBe(false);
+    });
   });
 
   it('ignores a plan naming a city the trip no longer has', () => {

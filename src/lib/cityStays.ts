@@ -131,6 +131,46 @@ export function moveCityStay(stays: TripCityStay[], index: number, direction: -1
 }
 
 /**
+ * Stretch or trim a plan to a trip whose length has changed.
+ *
+ * Adding a day to a trip that already has a stay plan must not throw the plan
+ * away — the traveller placed those nights deliberately, and one extra day is
+ * not a reason to re-decide the other eight. The extra days go to the **last**
+ * stay, which is where a trip extension usually lands, and the caller says so.
+ * Shortening takes days off the end for the same reason, and never below zero.
+ *
+ * This is a fallback for a plan the traveller has not revisited yet, not a
+ * substitute for asking: the planner still says what it did, and the stay
+ * planner still shows the change as theirs to adjust.
+ */
+export function fitCityStays(stays: TripCityStay[], dayCount: number): TripCityStay[] {
+  const placed = stays.filter((stay) => stay.days > 0);
+  if (placed.length === 0 || dayCount <= 0) return [];
+
+  const total = cityStayTotal(placed);
+  if (total === dayCount) return placed;
+
+  if (total < dayCount) {
+    const grown = [...placed];
+    grown[grown.length - 1] = {
+      ...grown[grown.length - 1],
+      days: grown[grown.length - 1].days + (dayCount - total),
+    };
+    return grown;
+  }
+
+  // Too long: take from the end, dropping any stay that reaches zero.
+  let excess = total - dayCount;
+  const trimmed = [...placed];
+  for (let index = trimmed.length - 1; index >= 0 && excess > 0; index -= 1) {
+    const take = Math.min(excess, trimmed[index].days);
+    trimmed[index] = { ...trimmed[index], days: trimmed[index].days - take };
+    excess -= take;
+  }
+  return trimmed.filter((stay) => stay.days > 0);
+}
+
+/**
  * Turn a stay plan into legs with real day numbers, dropping cities given no
  * days. Returns `[]` for a plan that does not cover the trip, so a caller can
  * fall back rather than build days from a half-answered question.

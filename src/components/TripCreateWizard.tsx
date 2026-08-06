@@ -470,7 +470,7 @@ export function TripCreateWizard({
                     dayCount={nights + 1}
                     startDate={profile.startDate}
                     value={profile.cityStays}
-                    onChange={(cityStays) => update({ cityStays })}
+                    onChange={(cityStays) => update({ cityStays, cityStayDayCount: nights + 1 })}
                   />
                 </div>
               )}
