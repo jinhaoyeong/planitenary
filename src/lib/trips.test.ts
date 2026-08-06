@@ -41,7 +41,17 @@ describe('generated days', () => {
     }
   });
 
-  it('spreads days across the cities of a multi-city trip', () => {
+  it('claims no city per day on a multi-city trip, because it does not know yet', () => {
+    /**
+     * This asserted the opposite until 2026-08-06, and the opposite was the
+     * traveller's complaint: an even split wrote "Day 6 in Nara" and "Day 8 in
+     * Kyoto" into the cards at creation, before a single place had been
+     * shortlisted, and nothing downstream honoured those assignments.
+     *
+     * The division belongs to `planCityLegs`, which weighs each city by what
+     * the traveller actually kept there. Until that runs, a blank is the honest
+     * answer — and the titles fall back to "Day 3" rather than naming a city.
+     */
     const days = buildDaysFromProfile(
       kyoto({
         startDate: '2027-10-04',
@@ -49,7 +59,18 @@ describe('generated days', () => {
         destinations: [manualDestination('Kyoto', 'Japan'), manualDestination('Osaka', 'Japan')],
       }),
     );
-    expect(new Set(days.map((day) => day.city))).toEqual(new Set(['Kyoto', 'Osaka']));
+
+    expect(new Set(days.map((day) => day.city))).toEqual(new Set(['']));
+    expect(days.map((day) => day.title)).toEqual([
+      'Arrival day', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Departure day',
+    ]);
+  });
+
+  it('still names the city on a single-city trip, where it is simply true', () => {
+    const days = buildDaysFromProfile(kyoto({ startDate: '2027-10-04', endDate: '2027-10-07' }));
+    expect(days.map((day) => day.title)).toEqual([
+      'Arrive in Kyoto', 'Day 2 in Kyoto', 'Day 3 in Kyoto', 'Last morning in Kyoto',
+    ]);
   });
 
   it('refuses to invent day cards for an over-limit date range', () => {

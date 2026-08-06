@@ -26,6 +26,9 @@ import {
   type SimulatedDay,
 } from './humanScheduler';
 import { scorePlaces, type ScoringInputs } from './placeIntelligence';
+import { cityForDay as cityForLegDay, describeCityLegs, orderedCities, planCityLegs, type CityLeg } from './cityLegs';
+import { legsFromCityStays, reconcileCityStays } from './cityStays';
+import { distanceMeters } from './placeIdentity';
 
 const STYLE_TAGS: Record<string, string[]> = {
   cafes: ['cafes', 'food'],
@@ -378,6 +381,12 @@ export interface DestinationBuildResult {
   routeMode: 'offline-straight-line' | 'provider';
   /** The pace actually used, so the UI can explain the shape of the plan. */
   behaviour: TravelBehaviourProfile;
+  /**
+   * How the trip divided between cities. One leg for a single-city trip, and
+   * empty only when there is no destination at all. Surfaced so the traveller
+   * can see — and disagree with — the split the planner chose for them.
+   */
+  cityLegs: CityLeg[];
 }
 
 /**
@@ -441,6 +450,12 @@ function rebalanceDays(
   initialSimulations: SimulatedDay[],
   simulateAll: (assignments: PlaceCandidate[][]) => SimulatedDay[],
   placesOf: (day: SimulatedDay) => PlaceCandidate[],
+  /**
+   * Which leg each day belongs to. Stops may only move between days of the same
+   * stay: evening out a trip is worth a rearranged afternoon, never a train to
+   * another city. Defaults to one group, which is what a single-city trip is.
+   */
+  groupOfDay: (index: number) => string = () => '',
 ): { assignments: PlaceCandidate[][]; simulations: SimulatedDay[]; moves: number } {
   let assignments = initialAssignments;
   let simulations = initialSimulations;
@@ -462,6 +477,12 @@ function rebalanceDays(
     const heaviest = active.reduce((worst, entry) =>
       entry.day.load.fatigueScore > worst.day.load.fatigueScore ? entry : worst);
     /**
+     * Candidate destinations for the move: only days in the same city. On a
+     * single-city trip this is every other day, exactly as before.
+     */
+    const sameLeg = active.filter((entry) => groupOfDay(entry.index) === groupOfDay(heaviest.index));
+    if (sameLeg.length < 2) break;
+    /**
      * Only days that already have stops are targets.
      *
      * Moving into an empty day is a different decision — filling a rest day —
@@ -470,7 +491,7 @@ function rebalanceDays(
      * *widens* the range. Rebalancing evens out the days the traveller is
      * already spending; it does not quietly consume their free one.
      */
-    const lightest = active.reduce((best, entry) =>
+    const lightest = sameLeg.reduce((best, entry) =>
       (entry.day.load.fatigueScore < best.day.load.fatigueScore ? entry : best));
 
     if (heaviest.index === lightest.index) break;
@@ -794,6 +815,120 @@ export function buildDestinationItinerary(
   );
   const dayCount = Math.max(1, itinerary.days.length || profile.dayCount || 1);
   const primaryCity = profile.destinations[0]?.city || itinerary.cities[0] || accepted[0]?.city || '';
+
+  /**
+   * --- Which city each day belongs to -------------------------------------
+   *
+   * A trip through Osaka, Nara, Kyoto and Kobe is a sequence of stays, and
+   * every downstream decision depends on knowing which stay a day is part of:
+   * what it may draw from, where it eats, whether a stop may move to a lighter
+   * day. Days were previously all stamped with `primaryCity`, which is why a
+   * four-city trip came back as eight days in Osaka.
+   *
+   * Length follows what the traveller shortlisted, because that is their own
+   * statement of how much each city is worth to them. A city they chose but
+   * shortlisted nothing in gets no days rather than an empty one — the deck for
+   * it is still there to review, and the plan will change when they do.
+   */
+  const sights = accepted.filter((candidate) => !isFoodOnly(candidate));
+  const cityKey = (city: string) => city.trim().toLowerCase();
+
+  /**
+   * Only cities the traveller actually chose become legs.
+   *
+   * A deck for Osaka also offers Nara, Kyoto and Kobe as *day trips* — the
+   * fixture has six such places. Those are not stays, and turning one into a
+   * leg would silently move the traveller's hotel. Whether a day trip is
+   * schedulable at all is `simulateDay`'s decision, made from the pace:
+   * `allowCrossCityDays` is exactly this question.
+   */
+  const chosenCities = orderedCities([
+    ...profile.destinations.map((destination) => destination.city),
+    ...itinerary.cities,
+    primaryCity,
+  ]);
+  const placesInCity = (city: string) =>
+    sights.filter((candidate) => cityKey(candidate.city || '') === cityKey(city)).length;
+  const shortlistWeights: Record<string, number> = {};
+  for (const city of chosenCities) shortlistWeights[city] = placesInCity(city);
+
+  const citiesWithPlaces = chosenCities.filter((city) => shortlistWeights[city] > 0);
+  /**
+   * A chosen city with nothing shortlisted gets no days rather than an empty
+   * one — the deck for it is still there to review, and the plan changes when
+   * they do. Before anything is shortlisted at all, every chosen city still
+   * counts, so a fresh trip divides sensibly instead of collapsing to one city.
+   */
+  const legCities = citiesWithPlaces.length > 0 ? citiesWithPlaces : chosenCities;
+
+  /**
+   * The traveller's own stay plan wins outright.
+   *
+   * `planCityLegs` infers a division from the shortlist, which is the right
+   * answer for a trip that was never asked — an old saved trip, or a build run
+   * before the wizard existed. It is never the right answer for a trip that
+   * *was* asked. Where you sleep on night four is a hotel booking, and the
+   * planner does not get a vote.
+   */
+  const statedLegs = legsFromCityStays(reconcileCityStays(profile.cityStays, chosenCities), dayCount);
+  const inferred = statedLegs.length > 0
+    ? { legs: statedLegs, dropped: [] as string[] }
+    : planCityLegs(legCities, dayCount, shortlistWeights);
+  const { legs, dropped: droppedCities } = inferred;
+  const legsAreStated = statedLegs.length > 0;
+  const legCityKeys = new Set(legs.map((leg) => cityKey(leg.city)));
+
+  /**
+   * Where a day trip is taken *from*.
+   *
+   * Kiyomizu-dera is in Kyoto, but on a trip whose only stay is Osaka it is an
+   * Osaka day out. The base is the nearest stay by the centre of what is
+   * shortlisted there — computed from the places themselves, so it needs no
+   * gazetteer and works for any city the app has never heard of.
+   */
+  const legCentres = new Map<string, [number, number]>();
+  for (const leg of legs) {
+    const points = sights
+      .filter((candidate) => cityKey(candidate.city || '') === cityKey(leg.city))
+      .map((candidate) => candidate.coordinates)
+      .filter((point): point is [number, number] => Array.isArray(point));
+    if (points.length === 0) continue;
+    legCentres.set(cityKey(leg.city), [
+      points.reduce((total, [lat]) => total + lat, 0) / points.length,
+      points.reduce((total, [, lng]) => total + lng, 0) / points.length,
+    ]);
+  }
+  const dayTripBaseCache = new Map<string, string>();
+  const dayTripBase = (candidate: PlaceCandidate): string => {
+    const cached = dayTripBaseCache.get(candidate.id);
+    if (cached !== undefined) return cached;
+    const fallback = legs[0]?.city ?? '';
+    let base = fallback;
+    if (candidate.coordinates && legCentres.size > 0) {
+      let best = Infinity;
+      for (const leg of legs) {
+        const centre = legCentres.get(cityKey(leg.city));
+        if (!centre) continue;
+        const distance = distanceMeters(candidate.coordinates, centre);
+        if (distance < best) { best = distance; base = leg.city; }
+      }
+    }
+    dayTripBaseCache.set(candidate.id, base);
+    return base;
+  };
+  /** Whether a place is available to the days of one stay. */
+  const belongsToLeg = (candidate: PlaceCandidate, legCity: string): boolean => {
+    const city = candidate.city?.trim();
+    if (!city || !legCity) return true;
+    if (cityKey(city) === cityKey(legCity)) return true;
+    return !legCityKeys.has(cityKey(city)) && cityKey(dayTripBase(candidate)) === cityKey(legCity);
+  };
+  const cityOfDayIndex = (index: number) => cityForLegDay(legs, index + 1) || primaryCity;
+  const legOfDayIndex = (index: number) => {
+    const city = cityOfDayIndex(index);
+    const leg = legs.find((entry) => index + 1 >= entry.startDay && index + 1 <= entry.endDay);
+    return leg ? `${leg.startDay}-${leg.city}` : city;
+  };
   const transportMode = profile.transport.includes('public-transport')
     ? 'public transport'
     : 'walking / public transport';
@@ -814,13 +949,39 @@ export function buildDestinationItinerary(
   const mustDo = new Set(
     accepted.filter((candidate) => decisions[candidate.id] === 'must-do').map((candidate) => candidate.id),
   );
-  const clusters = assignClustersToDays(
-    clusterCandidates(accepted.filter((candidate) => !isFoodOnly(candidate))).map((cluster) =>
-      [...cluster].sort((a, b) => Number(mustDo.has(b.id)) - Number(mustDo.has(a.id)))),
-    dayCount,
-    // Send the sheltered part of the city to the day the forecast says is wet.
-    options.weatherRiskDays,
-  );
+  /**
+   * Clusters are formed *within* a stay, never across it.
+   *
+   * Distance clustering alone would eventually separate Kyoto from Kobe, but it
+   * would just as happily hand one day a Kyoto morning and a Kobe afternoon —
+   * a train ride nobody agreed to. Each leg is clustered against its own days,
+   * so a day only ever draws from the city it is in.
+   */
+  const orderMustDoFirst = (cluster: PlaceCandidate[]) =>
+    [...cluster].sort((a, b) => Number(mustDo.has(b.id)) - Number(mustDo.has(a.id)));
+  const clusters: PlaceCandidate[][] = Array.from({ length: dayCount }, () => []);
+
+  if (legs.length === 0) {
+    assignClustersToDays(
+      clusterCandidates(sights).map(orderMustDoFirst),
+      dayCount,
+      options.weatherRiskDays,
+    ).forEach((cluster, index) => { clusters[index] = cluster; });
+  } else {
+    for (const leg of legs) {
+      const legSights = sights.filter((candidate) => belongsToLeg(candidate, leg.city));
+      const legWetDays = (options.weatherRiskDays || [])
+        .filter((day) => day >= leg.startDay && day <= leg.endDay)
+        // `assignClustersToDays` counts from one *within the days it is given*.
+        .map((day) => day - leg.startDay + 1);
+
+      assignClustersToDays(
+        clusterCandidates(legSights).map(orderMustDoFirst),
+        leg.days,
+        legWetDays,
+      ).forEach((cluster, offset) => { clusters[leg.startDay - 1 + offset] = cluster; });
+    }
+  }
 
   const days: DayPlan[] = [];
   const dayLoads: DayLoad[] = [];
@@ -841,9 +1002,10 @@ export function buildDestinationItinerary(
     // The first and last days are shaped by the flights, not by the pace. The
     // note is for the traveller and is collected separately.
     const edge = shapeTripEdge(index, dayCount, options.tripEdges || {});
+    const dayCity = cityOfDayIndex(index);
     return simulateDay({
     dayNumber: index + 1,
-    city: primaryCity,
+    city: dayCity,
     candidates: dayCandidates,
     behaviour,
     routeResolver: options.routeResolver,
@@ -853,8 +1015,11 @@ export function buildDestinationItinerary(
     // Monday is not planned from places that close on Mondays.
     date: dateForDay(profile.startDate, index),
     // Somewhere to actually eat. Offered from the whole shortlist rather than
-    // this day's cluster, because a traveller does not shortlist lunch.
-    mealCandidates: foodCandidates.filter((candidate) => !excludedMealVenues.has(candidate.id)),
+    // this day's cluster, because a traveller does not shortlist lunch — but
+    // only from the city the day is actually in. Lunch is where you happen to
+    // be at one o'clock, and on a Nara day that is not Osaka.
+    mealCandidates: foodCandidates.filter((candidate) =>
+      !excludedMealVenues.has(candidate.id) && belongsToLeg(candidate, dayCity)),
     mealPreferences: {
       budgetTier: profile.budgetTier,
       dietaryNeeds: behaviour.meals.dietaryNeeds,
@@ -903,6 +1068,29 @@ export function buildDestinationItinerary(
   let assignments: PlaceCandidate[][] = [];
 
   for (let index = 0; index < dayCount; index += 1) {
+    /**
+     * A stay ends and whatever it could not fit stays behind.
+     *
+     * Rolling an Osaka place forward into a Kyoto day would only be rejected
+     * again for being in the wrong city, and would keep rolling until the trip
+     * ran out — arriving at the same answer by a longer route and burying the
+     * real reason. Say it plainly at the boundary instead.
+     */
+    if (index > 0 && legOfDayIndex(index) !== legOfDayIndex(index - 1)) {
+      const leavingCity = cityOfDayIndex(index - 1);
+      for (const candidate of carryOver) {
+        if (scheduled.has(candidate.id) || rejections.has(candidate.id)) continue;
+        rejections.set(candidate.id, {
+          candidate,
+          reason: 'no-viable-day',
+          detail: leavingCity
+            ? `Your ${leavingCity} days were full before this fitted, and the trip moves on after them.`
+            : 'The days in this city were full before this fitted.',
+        });
+      }
+      carryOver = [];
+    }
+
     const cluster = clusters[index] || [];
     const dayCandidates = [...carryOver, ...cluster].filter((candidate) => !scheduled.has(candidate.id));
     carryOver = [];
@@ -941,7 +1129,7 @@ export function buildDestinationItinerary(
   }
 
   // --- Pass two: even out the days ----------------------------------------
-  const rebalanced = rebalanceDays(assignments, simulations, simulateAll, placesOf);
+  const rebalanced = rebalanceDays(assignments, simulations, simulateAll, placesOf, legOfDayIndex);
   assignments = rebalanced.assignments;
   simulations = rebalanced.simulations;
   if (rebalanced.moves > 0) {
@@ -995,7 +1183,7 @@ export function buildDestinationItinerary(
     days.push({
       day: existing?.day || index + 1,
       date: existing?.date || '',
-      city: simulated.city || existing?.city || primaryCity,
+      city: cityOfDayIndex(index) || simulated.city || existing?.city || primaryCity,
       title,
       activities: [...protectedActivities, ...discoveredActivities].sort((a, b) => a.time.localeCompare(b.time)),
       photos: existing?.photos,
@@ -1024,6 +1212,26 @@ export function buildDestinationItinerary(
   }
 
   const unscheduledReasons = [...rejections.values()];
+
+  /**
+   * The split between cities is a judgement made on the traveller's behalf, and
+   * a judgement made silently cannot be argued with. Say it, and say what
+   * decided it, so someone who wants two more days in Kyoto knows the lever is
+   * their own shortlist.
+   */
+  if (legs.length > 1) {
+    warnings.add(legsAreStated
+      // Their own plan, read back rather than explained: they set it, and the
+      // only thing worth saying is that it was followed.
+      ? `Built to your stay plan: ${describeCityLegs(legs)}.`
+      : `Your days are split ${describeCityLegs(legs)}, following how many places you kept in each city. Set a stay plan in Settings to decide this yourself.`);
+  }
+  if (droppedCities.length > 0) {
+    warnings.add(droppedCities.length === 1
+      ? `${droppedCities[0]} has no day of its own — ${dayCount} ${dayCount === 1 ? 'day' : 'days'} cannot cover every city you chose. Add a day, or keep more places there than elsewhere.`
+      : `${droppedCities.join(' and ')} have no days of their own — ${dayCount} days cannot cover every city you chose.`);
+  }
+
   warnings.add('Opening hours with low or medium source confidence should be rechecked before travel.');
 
   return {
@@ -1035,5 +1243,6 @@ export function buildDestinationItinerary(
     warnings: [...warnings],
     routeMode: usedProviderRoutes ? 'provider' : 'offline-straight-line',
     behaviour,
+    cityLegs: legs,
   };
 }

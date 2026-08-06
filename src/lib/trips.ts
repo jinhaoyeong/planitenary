@@ -62,13 +62,18 @@ const addDays = (iso: string, offset: number) => {
   return date;
 };
 
-/** Spread the planned days across destinations so each city gets a fair block. */
-const cityForDay = (cities: string[], dayIndex: number, totalDays: number) => {
-  if (cities.length === 0) return '';
-  if (cities.length === 1 || totalDays <= 1) return cities[0];
-  const perCity = totalDays / cities.length;
-  return cities[Math.min(cities.length - 1, Math.floor(dayIndex / perCity))];
-};
+/**
+ * Which city a freshly created day belongs to.
+ *
+ * One city means every day is in it, and saying so is simply true. Several
+ * cities mean the app does not know yet: the division depends on what the
+ * traveller shortlists in each, which has not happened at creation time. It
+ * used to guess with an even split — eight days across Osaka, Nara, Kyoto and
+ * Kobe came back as "Day 6 in Nara" and "Day 8 in Kyoto", numbers nothing
+ * downstream honoured and the traveller never chose. A blank is honest, and
+ * `buildDestinationItinerary` fills it from the plan it actually produced.
+ */
+const cityForDay = (cities: string[]) => (cities.length === 1 ? cities[0] : '');
 
 /** Guards against a mistyped year turning into thousands of day cards. */
 // MAX_GENERATED_DAYS is re-exported from tripDuration above.
@@ -83,7 +88,7 @@ export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
 
   const cities = destinationCities(profile);
   return Array.from({ length: days }, (_, index) => {
-    const city = cityForDay(cities, index, days);
+    const city = cityForDay(cities);
     const date = profile.startDate ? SHORT_DATE.format(addDays(profile.startDate, index)) : `Day ${index + 1}`;
     const isFirst = index === 0;
     const isLast = index === days - 1 && days > 1;
