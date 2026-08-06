@@ -1,0 +1,12 @@
+-- Opening hours read from a place's own website are now stored rather than
+-- returned and discarded.
+--
+-- The nightly refresh marks the official-source probe fresh, which makes the
+-- next live request skip the fetch. Without somewhere to keep the hours, they
+-- would be read overnight and thrown away, and the traveller would keep seeing
+-- the community-maintained ones — the refresh would actively suppress the
+-- better answer it had just found.
+--
+-- Same reasoning as 20260805000100: the grant is explicit, because a silent
+-- write failure here looks exactly like "this place publishes no hours".
+grant select, insert, update on public.opening_hours_snapshots to service_role;

@@ -483,11 +483,117 @@ Details that matter:
 - `travel-evidence` reports `youtubeQuota: { limit, used, blockedThisRequest }`,
   because otherwise a cap looks exactly like a provider outage.
 
-**Phase 5c — Remaining scheduling intelligence**
-17. Weather-aware and best-time-aware day assignment
-18. Cross-day fatigue rebalancing
-19. Arrival/departure/jet-lag day shaping
-20. Surface rejection reasons in the UI
+**Cross-day rebalancing + rejection detail — DONE (2026-08-06)**
+
+18. ✅ Cross-day fatigue rebalancing
+20. ✅ The scheduler's own explanation reaches the traveller
+
+`buildDestinationItinerary` now runs in three passes — fill the days in order,
+even them out, then turn the result into the plan. The middle pass moves the
+last stop off the hardest day onto the lightest and re-simulates, keeping the
+move only when the spread genuinely narrows **and** no place is lost.
+
+Measured, not guessed. On the Melbourne set, walking went from **34 / 12 / 10 /
+9** minutes across four days to **10 / 12 / 16 / 15**.
+
+Decisions worth keeping:
+
+- **Tolerance is 0.18**, chosen from measured plans. A two-day trip at 0.47
+  against 0.22 — one day twice as demanding — scores 0.247 and clearly wants
+  evening out; a balanced three-day trip scores 0.140 and does not. The
+  original 0.25 caught neither.
+- **Comparing `fatigueScore` across days of one trip is valid**, unlike
+  comparing it across pace profiles: every day here shares one behaviour
+  profile, which is exactly what the score is normalised to.
+- **Empty days are never targets.** Filling a free day is a different decision,
+  and it interacts badly with the measure — an empty day is excluded from the
+  spread, so putting one stop on it creates a very light active day and *widens*
+  the range.
+- **A geographically silly move rejects itself.** Nothing in the rebalancer
+  knows about clusters, but moving a CBD stop onto a beach day adds a long
+  transit leg, which fails the "must narrow the spread" test.
+
+`SchedulingRejection.detail` now reaches the UI and is persisted, so *"Closed on
+Mondays"* and *"Would push walking past your 75 minute limit, including the
+journey back"* survive a reload instead of degrading to a category label.
+
+**Phase 5d — DONE (2026-08-06)**
+
+17. ✅ `bestTimeWindows` populated, from corroborated evidence
+19. ✅ Arrival, departure and jet-lag day shaping
+
+**`bestTimeWindows` now has a source.** `best-time` claims are extracted from
+what people wrote — "go early", "at sunset", "lit up at night" — and turned into
+a window only when sources agree. The bar is deliberately high, because the
+scheduler *declines to place* a venue outside its window: one stranger's remark
+could otherwise drop a place from the trip. It needs two independent sources,
+and a rival window at half the weight or less.
+
+The extraction rules are narrow in a specific way: each phrase must be about
+timing, not enthusiasm. "Amazing at sunset" is a time; "amazing" is not.
+
+**The trip's edges are no longer ordinary days.** `shapeTripEdge` gives day one
+a start two hours after landing (and no main stops at all after an evening
+arrival), ends the last day in time to leave for the airport, and eases the
+first two days of a long-haul trip.
+
+- **The old arrival override was dead code.** `index === 0 && itinerary.days.length === 0`
+  is false whenever the itinerary already has day placeholders — which it always
+  does — so the 15:00 start never once applied.
+- **`maxMainOverride` may only ask for less.** A caller can request a gentler
+  day; it cannot raise the traveller's own ceiling.
+- **Jet lag is computed, not asked for.** `timezoneShiftHours` reads the
+  browser's zone against the destination's, on the trip's own start date so a
+  daylight-saving boundary does not put it an hour out. Unknown zones return
+  undefined rather than zero — "no difference" and "no idea" must not share a
+  value.
+- Flight times have no home on the profile yet, so `tripEdges` currently
+  carries only the time-zone shift. The arrival and departure logic is built,
+  tested and waiting for a UI that asks.
+
+**Nightly refresh + weather-aware assignment — DONE (2026-08-06)**
+
+`travel-refresh` runs nightly and re-gathers what has expired. Until now the
+only thing that refreshed anything was a traveller happening to reopen
+discovery after the window lapsed — so the plan was most out of date precisely
+when nobody was looking.
+
+**The budget invariant.** Refresh and live traffic share one counter and differ
+only in the ceiling they ask against: refresh passes `callLimit: 30`, live
+passes `90`. Because the count is shared, refresh can never push the total past
+30, which leaves at least 60 searches for people actually using the app. If
+travellers get there first, refresh gets less, or none. No coordination, no
+second table, no race — and no change to `consume_provider_quota`.
+
+Official websites cost nothing and refresh freely, capped at 200 a night.
+
+**Deviation from the approved plan, stated plainly.** "Trips departing within
+seven days" is not queryable: `trip_registry` holds no travel dates and nothing
+links a canonical place to a trip. The stand-in is **recency of interest** —
+`evidence_probes.retrieved_at` records when the app last asked about a place, so
+the most recently probed places refresh first and anything untouched for 30 days
+refreshes not at all. Same cost discipline, different route. True departure-date
+targeting needs a start date on the registry and a place→trip link.
+
+**A flaw caught mid-build.** Marking the official probe fresh makes the next
+live request *skip* the fetch — so hours read overnight would have been thrown
+away, and the traveller left on community-maintained ones. The refresh would
+have actively suppressed the better answer it had just found. Hours now persist
+in `opening_hours_snapshots`, and `travel-evidence` reads them when it skips.
+
+**Weather-aware day assignment.** `assignClustersToDays` sends the sheltered
+part of the city to the day the forecast says is wet. Ordering *within* a day
+could only shuffle what the day was given; if the wet day got the gardens and
+the beach there was nothing to bring forward. A swap needs a 25-point
+improvement in indoor share, so a coherent day is never traded for a marginal
+one.
+
+**Still open**
+
+- Flight times have no home on `TripProfile`; arrival and departure shaping is
+  built and tested but only the time-zone shift is wired.
+- Departure-date targeting for the refresh job, per the deviation above.
+- Phase 4: LLM claim extraction, which needs `GEMINI_API_KEY`.
 
 ---
 

@@ -74,6 +74,40 @@ describe('reading a queue time a traveller can be scheduled around', () => {
   });
 });
 
+describe('reading when a place is best visited', () => {
+  const windowFor = (text: string) => extractClaims(text).find((claim) => claim.type === 'best-time')?.appliesTo;
+
+  it('hears advice to go early', () => {
+    expect(windowFor('Go early, it gets busy')).toEqual({ start: '07:00', end: '10:30' });
+    expect(windowFor('Get there before the crowds')).toEqual({ start: '07:00', end: '10:30' });
+  });
+
+  it('hears sunset and after-dark advice as different times', () => {
+    expect(windowFor('Stunning at sunset')?.start).toBe('16:30');
+    expect(windowFor('The bridge is lit up at night')?.start).toBe('18:30');
+  });
+
+  it('ignores enthusiasm that says nothing about timing', () => {
+    // "Amazing" is not a time. A loose rule here removes a place from the trip
+    // rather than merely mis-ranking it, because the scheduler will decline to
+    // place it outside the window.
+    expect(windowFor('Absolutely amazing, loved it')).toBeUndefined();
+    expect(windowFor('An early 20th century building')).toBeUndefined();
+  });
+
+  it('reports one window per source rather than two contradictory ones', () => {
+    const windows = extractClaims('Go early, though it is also lovely at sunset')
+      .filter((claim) => claim.type === 'best-time');
+    expect(windows).toHaveLength(1);
+  });
+
+  it('quotes the phrase it read the timing from', () => {
+    const text = 'We went twice. Go early, the queue triples by noon.';
+    const claim = extractClaims(text).find((entry) => entry.type === 'best-time');
+    expect(text).toContain(claim!.excerpt!);
+  });
+});
+
 describe('every claim can be traced back to what was written', () => {
   it('quotes the source verbatim', () => {
     const text = 'We went early. Honestly overrated for the price, but the view is fine.';

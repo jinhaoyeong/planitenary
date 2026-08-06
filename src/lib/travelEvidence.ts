@@ -249,6 +249,14 @@ export interface PlaceEvidenceSummary {
   typicalQueueMinutes?: number;
   /** Median reported visit length in minutes. */
   typicalVisitMinutes?: number;
+  /**
+   * The part of the day sources say this place is best, when they agree.
+   *
+   * Feeds `bestTimeWindows` on the candidate, which the scheduler treats as a
+   * preference strong enough to decline a placement — so it is only set when
+   * the evidence genuinely converges on one window.
+   */
+  bestTimeWindow?: { start: string; end: string };
   /** 0–1, weighted by authority, confidence and freshness. */
   evidenceConfidence: number;
   /** 0-1 visitor crowding signal, separate from general quality. */
@@ -286,6 +294,8 @@ export function summarisePlaceEvidence(
   const visitValues: number[] = [];
   const positive = new Map<string, number>();
   const negative = new Map<string, number>();
+  /** Candidate best-time windows, keyed by window, weighted by their source. */
+  const timeWindows = new Map<string, { window: { start: string; end: string }; weight: number; sources: number }>();
 
   let weightTotal = 0;
   let riskTotal = 0;
@@ -300,6 +310,18 @@ export function summarisePlaceEvidence(
     for (const claim of item.claims) {
       if (claim.type === 'queue-time' && typeof claim.value === 'number') queueValues.push(claim.value);
       if (claim.type === 'visit-duration' && typeof claim.value === 'number') visitValues.push(claim.value);
+
+      if (claim.type === 'best-time' && claim.appliesTo?.start && claim.appliesTo.end) {
+        const window = { start: claim.appliesTo.start, end: claim.appliesTo.end };
+        const key = `${window.start}-${window.end}`;
+        const existing = timeWindows.get(key);
+        if (existing) {
+          existing.weight += weight * claim.strength;
+          existing.sources += 1;
+        } else {
+          timeWindows.set(key, { window, weight: weight * claim.strength, sources: 1 });
+        }
+      }
 
       const bucket = POSITIVE_CLAIMS.has(claim.type) ? positive : NEGATIVE_CLAIMS.has(claim.type) ? negative : null;
       if (bucket) bucket.set(claim.summary, (bucket.get(claim.summary) || 0) + weight * claim.strength);
@@ -326,6 +348,23 @@ export function summarisePlaceEvidence(
   const averageWeight = relevant.length > 0 ? weightTotal / relevant.length : 0;
   const corroboration = Math.min(1, distinctSources.length / 3);
   const evidenceConfidence = Math.max(0, Math.min(1, averageWeight * (0.6 + 0.4 * corroboration)));
+  /**
+   * A best-time window only survives when sources agree.
+   *
+   * Two people saying "go early" is a pattern; one person saying it against
+   * another saying "go at sunset" is a disagreement, and the honest answer to a
+   * disagreement is no window at all — the scheduler would otherwise decline to
+   * place the venue outside a window only one stranger asked for.
+   */
+  const rankedWindows = [...timeWindows.values()].sort((a, b) => b.weight - a.weight);
+  const leadingWindow = rankedWindows[0];
+  const bestTimeWindow = leadingWindow
+    && leadingWindow.sources >= 2
+    // The leader must clearly outweigh any rival, not merely edge it.
+    && (rankedWindows.length === 1 || leadingWindow.weight >= rankedWindows[1].weight * 2)
+    ? leadingWindow.window
+    : undefined;
+
   const crowdedClaims = [...negative.keys()].filter((summary) => /crowd|packed|busy|queue|wait/i.test(summary)).length;
   const queueRisk = queueValues.length > 0 ? Math.min(1, (median(queueValues) || 0) / 90) : 0;
   const crowdRisk = Math.max(0, Math.min(1, crowdedClaims > 0 ? Math.max(0.55, queueRisk) : queueRisk));
@@ -339,6 +378,7 @@ export function summarisePlaceEvidence(
     negativeThemes: rank(negative),
     typicalQueueMinutes: median(queueValues),
     typicalVisitMinutes: median(visitValues),
+    bestTimeWindow,
     evidenceConfidence,
     crowdRisk,
     promotionRisk: weightTotal > 0 ? riskTotal / weightTotal : 0.5,

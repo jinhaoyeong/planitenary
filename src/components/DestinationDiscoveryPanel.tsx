@@ -20,6 +20,7 @@ import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderR
 import { capabilityFor, discoverPlaces, fetchPlaceEvidence, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
 import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { hapticMedium, hapticSuccess, hapticTap } from '../lib/haptics';
+import { timezoneShiftHours } from '../lib/timezones';
 import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
 import type { RouteLeg, RouteResolver } from '../lib/humanScheduler';
@@ -551,7 +552,9 @@ function BuiltDiscoverySummary({
             {unscheduled.slice(0, 3).map((item) => (
               <li key={item.candidateId}>
                 <span>{nameFor(item.candidateId)}</span>
-                <small>{unscheduledReasonLabel(item.reason)}</small>
+                {/* The scheduler's own sentence when it has one — it says what
+                    actually blocked this place, which the category cannot. */}
+                <small>{item.detail || unscheduledReasonLabel(item.reason)}</small>
               </li>
             ))}
           </ul>
@@ -644,10 +647,13 @@ function DiscoveryPreview({
               : 'Keep this plan, or choose fewer places and rebuild.'}
           </span>
           <ul>
-            {visibleUnscheduled.map(({ candidate, reason }) => (
+            {visibleUnscheduled.map(({ candidate, reason, detail }) => (
               <li key={candidate.id}>
                 <span>{candidate.name}</span>
-                {!sharedReason && <small>{unscheduledReasonLabel(reason)}</small>}
+                {/* Always shown, even when every place shares a category: two
+                    places can both be "Opening hours don't fit" for entirely
+                    different reasons, and the specific one is the useful part. */}
+                <small>{detail || unscheduledReasonLabel(reason)}</small>
               </li>
             ))}
           </ul>
@@ -819,10 +825,21 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       // held. Community-maintained hours go stale; this is what corrects them,
       // and it is what stops a day being built around a closed door.
       const official = digest.officialHours;
-      if (Object.keys(official).length > 0) {
-        setCandidates((previous) => previous.map((candidate) => (
-          official[candidate.id] ? { ...candidate, openingHours: official[candidate.id] } : candidate
-        )));
+      const windows = digest.bestTimeWindows;
+      if (Object.keys(official).length > 0 || Object.keys(windows).length > 0) {
+        setCandidates((previous) => previous.map((candidate) => {
+          const hours = official[candidate.id];
+          const best = windows[candidate.id];
+          if (!hours && !best) return candidate;
+          return {
+            ...candidate,
+            ...(hours ? { openingHours: hours } : {}),
+            // When travellers agree a place is best at a particular time, the
+            // scheduler aims for it rather than dropping the place in wherever
+            // it happens to fit.
+            ...(best ? { bestTimeWindows: best } : {}),
+          };
+        }));
       }
     });
     return () => { active = false; };
@@ -1150,6 +1167,17 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       queueEvidence,
       routeResolver,
       weatherRiskDays: nextWeatherRiskDays,
+      /**
+       * Flight times are not captured anywhere yet, so only the time-zone
+       * shift is known — and it is worth having on its own: it is what decides
+       * whether the first days of a long-haul trip are eased off.
+       */
+      tripEdges: {
+        timezoneShiftHours: timezoneShiftHours(
+          destination?.timezone,
+          profile.startDate ? new Date(`${profile.startDate}T12:00:00Z`) : undefined,
+        ),
+      },
       currentEventNotes,
       currentEvents,
     });
@@ -1179,7 +1207,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         updatedAt: timestamp,
         stage: 'itinerary-built',
         scheduledCandidateIds: buildResult.scheduledCandidates.map((candidate) => candidate.id),
-        unscheduledCandidates: buildResult.unscheduledReasons.map(({ candidate, reason }) => ({ candidateId: candidate.id, reason })),
+        unscheduledCandidates: buildResult.unscheduledReasons.map(({ candidate, reason, detail }) => ({
+          candidateId: candidate.id,
+          reason,
+          detail,
+        })),
       },
       plannerHistory: [
         ...(itinerary.plannerHistory || []),

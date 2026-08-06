@@ -338,11 +338,19 @@ const sanitizeDiscoveryState = (value: unknown): ItineraryDiscoveryState | undef
     unscheduledCandidates: Array.isArray(source.unscheduledCandidates)
       ? source.unscheduledCandidates.flatMap((item) => {
           if (!item || typeof item !== 'object') return [];
-          const candidate = item as { candidateId?: unknown; reason?: unknown };
+          const candidate = item as { candidateId?: unknown; reason?: unknown; detail?: unknown };
           return typeof candidate.candidateId === 'string'
             && typeof candidate.reason === 'string'
             && VALID_DISCOVERY_UNSCHEDULED_REASONS.includes(candidate.reason as DiscoveryUnscheduledReason)
-            ? [{ candidateId: candidate.candidateId, reason: candidate.reason as DiscoveryUnscheduledReason }]
+            ? [{
+              candidateId: candidate.candidateId,
+              reason: candidate.reason as DiscoveryUnscheduledReason,
+              // Older records predate the detail, so it stays optional and the
+              // UI falls back to the category label.
+              detail: typeof candidate.detail === 'string' && candidate.detail.trim()
+                ? candidate.detail.trim()
+                : undefined,
+            }]
             : [];
         })
       : undefined,

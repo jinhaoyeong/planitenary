@@ -176,6 +176,45 @@ describe('place evidence summary', () => {
   });
 });
 
+describe('agreeing on when a place is best', () => {
+  const timed = (start: string, end: string, source: SourceEvidence['source'] = 'reddit') => evidence({
+    source,
+    claims: [claim({ type: 'best-time', summary: 'Best early', appliesTo: { start, end }, strength: 0.6 })],
+  });
+
+  it('names a window once independent sources agree', () => {
+    const summary = summarisePlaceEvidence('place-1', [
+      timed('07:00', '10:30'), timed('07:00', '10:30', 'youtube'),
+    ], NOW);
+    expect(summary.bestTimeWindow).toEqual({ start: '07:00', end: '10:30' });
+  });
+
+  it('will not act on one stranger’s opinion', () => {
+    // The scheduler declines to place a venue outside its window, so a single
+    // unverified remark could quietly drop a place from the trip.
+    expect(summarisePlaceEvidence('place-1', [timed('07:00', '10:30')], NOW).bestTimeWindow).toBeUndefined();
+  });
+
+  it('reports no window when sources disagree', () => {
+    const summary = summarisePlaceEvidence('place-1', [
+      timed('07:00', '10:30'), timed('16:30', '19:30', 'youtube'),
+    ], NOW);
+    expect(summary.bestTimeWindow).toBeUndefined();
+  });
+
+  it('lets a clear majority win over a lone dissenter', () => {
+    const summary = summarisePlaceEvidence('place-1', [
+      timed('07:00', '10:30'), timed('07:00', '10:30', 'youtube'), timed('07:00', '10:30', 'google-places'),
+      timed('16:30', '19:30', 'tiktok'),
+    ], NOW);
+    expect(summary.bestTimeWindow).toEqual({ start: '07:00', end: '10:30' });
+  });
+
+  it('says nothing when nobody mentioned timing', () => {
+    expect(summarisePlaceEvidence('place-1', [evidence()], NOW).bestTimeWindow).toBeUndefined();
+  });
+});
+
 describe('trend strength', () => {
   it('rates a recent cross-platform surge above a single old mention', () => {
     const trending = trendStrength([

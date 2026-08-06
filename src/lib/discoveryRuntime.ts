@@ -111,6 +111,12 @@ export interface DiscoveryOutcome {
    * stale, and an official page is the thing that can correct them.
    */
   officialHours: Record<string, DateAwareOpeningHours>;
+  /**
+   * When sources agree a place is best visited, by candidate id. The scheduler
+   * treats this as a preference strong enough to decline a placement, so it is
+   * only ever set from corroborated evidence.
+   */
+  bestTimeWindows: Record<string, Array<{ start: string; end: string }>>;
   /** Provider failure retained for UI diagnostics when no fallback exists. */
   providerError?: string;
 }
@@ -186,7 +192,7 @@ function digestEvidence(
   payload: unknown,
   candidates: PlaceCandidate[],
 ): EvidenceDigest {
-  const empty = { queueEvidence: {}, evidenceSummaries: {}, trends: {}, officialHours: {} };
+  const empty = { queueEvidence: {}, evidenceSummaries: {}, trends: {}, officialHours: {}, bestTimeWindows: {} };
   if (!payload || typeof payload !== 'object') return empty;
 
   const documents = (payload as { documents?: unknown }).documents;
@@ -211,6 +217,7 @@ function digestEvidence(
   const evidenceSummaries: Record<string, PlaceEvidenceSummary> = {};
   const trends: Record<string, number> = {};
   const officialHours: Record<string, DateAwareOpeningHours> = {};
+  const bestTimeWindows: Record<string, Array<{ start: string; end: string }>> = {};
 
   for (const [providerId, candidateId] of byProviderId) {
     // Hours are read even when a place produced no documents: an operator's
@@ -233,6 +240,10 @@ function digestEvidence(
       queueEvidence[candidateId] = Math.max(0, Math.round(summary.typicalQueueMinutes));
     }
 
+    // `summarisePlaceEvidence` already demands agreement before it will name a
+    // window, so anything that reaches here is corroborated.
+    if (summary.bestTimeWindow) bestTimeWindows[candidateId] = [summary.bestTimeWindow];
+
     const trend = (rawTrends as Record<string, unknown> | undefined)?.[providerId];
     if (typeof trend === 'number' && Number.isFinite(trend)) {
       trends[candidateId] = Math.max(0, Math.min(1, trend));
@@ -241,7 +252,7 @@ function digestEvidence(
     }
   }
 
-  return { queueEvidence, evidenceSummaries, trends, officialHours };
+  return { queueEvidence, evidenceSummaries, trends, officialHours, bestTimeWindows };
 }
 
 /** The empty digest, used whenever evidence is unavailable or not yet fetched. */
@@ -250,9 +261,13 @@ export const EMPTY_EVIDENCE_DIGEST: EvidenceDigest = {
   evidenceSummaries: {},
   trends: {},
   officialHours: {},
+  bestTimeWindows: {},
 };
 
-export type EvidenceDigest = Pick<DiscoveryOutcome, 'queueEvidence' | 'evidenceSummaries' | 'trends' | 'officialHours'>;
+export type EvidenceDigest = Pick<
+  DiscoveryOutcome,
+  'queueEvidence' | 'evidenceSummaries' | 'trends' | 'officialHours' | 'bestTimeWindows'
+>;
 
 /**
  * Gather evidence for a specific handful of candidates.

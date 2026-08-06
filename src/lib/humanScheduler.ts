@@ -374,6 +374,16 @@ export interface DayPlanRequest {
   fixedSlots?: ScheduledSlot[];
   /** Arrival days start late; the caller can override the first departure. */
   startTimeOverride?: string;
+  /**
+   * Latest the traveller can still be out. A departure day ends when they have
+   * to leave for the airport, not when they would normally head back.
+   */
+  returnTimeOverride?: string;
+  /**
+   * Fewer main stops than the pace would normally allow — for an arrival day,
+   * a departure day, or the first days of a long-haul trip.
+   */
+  maxMainOverride?: number;
   /** Prefer indoor candidates when live weather indicates a wet day. */
   preferIndoor?: boolean;
   /**
@@ -418,8 +428,15 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
     : estimateLeg;
 
   const startMinutes = toMinutes(request.startTimeOverride || behaviour.preferredStartTime || paceDefaults.startTime);
-  const returnLimit = toMinutes(behaviour.preferredReturnTime || paceDefaults.latestReturnTime);
-  const maxMain = behaviour.maxMainActivitiesPerDay ?? paceDefaults.maxMainActivities;
+  const returnLimit = toMinutes(
+    request.returnTimeOverride || behaviour.preferredReturnTime || paceDefaults.latestReturnTime,
+  );
+  const paceMaxMain = behaviour.maxMainActivitiesPerDay ?? paceDefaults.maxMainActivities;
+  // An override may only ever ask for *less*: a gentler day is a caller's to
+  // request, but overriding the traveller's own ceiling upward is not.
+  const maxMain = request.maxMainOverride !== undefined
+    ? Math.max(0, Math.min(paceMaxMain, request.maxMainOverride))
+    : paceMaxMain;
   const buffer = behaviour.comfort.minimumTransitionBufferMinutes;
   const walkingCeiling = behaviour.walking.maximumDailyMinutes ?? paceDefaults.maximumWalkingMinutes;
   const diningMinutes = behaviour.meals.preferredDiningMinutes ?? paceDefaults.diningMinutes;

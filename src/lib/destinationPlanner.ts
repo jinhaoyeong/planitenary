@@ -17,10 +17,12 @@ import {
   isFoodOnly,
   isFoodPlace,
   simulateDay,
+  toMinutes,
   toTime,
   type DayLoad,
   type RouteResolver,
   type ScheduledSlot,
+  type SimulatedDay,
 } from './humanScheduler';
 import { scorePlaces, type ScoringInputs } from './placeIntelligence';
 
@@ -209,6 +211,240 @@ const TRIP_WIDE_REJECTIONS = new Set<DiscoveryUnscheduledReason>([
   'queue-exceeds-tolerance',
 ]);
 
+/**
+ * How uneven the trip may be before it is worth moving something.
+ *
+ * Chosen from measured plans rather than taste. A real five-place two-day trip
+ * came out at 0.47 against 0.22 — one day twice as demanding as the other, and
+ * obviously worth evening out — which scores 0.247. A well-balanced three-day
+ * Melbourne trip scores 0.140 and should be left alone. The line sits between
+ * them, close enough to the lower figure to catch the mild cases too.
+ *
+ * A wrong threshold is not dangerous here: a move must still *narrow* the
+ * spread to be kept, so setting this too low costs a few wasted simulations
+ * rather than a worse plan.
+ */
+const FATIGUE_SPREAD_TOLERANCE = 0.18;
+
+/** Moves are cheap to simulate, but an unbounded loop is not worth the risk. */
+const MAX_REBALANCE_MOVES = 4;
+
+/**
+ * Spread between the hardest and easiest day that actually has stops.
+ *
+ * `fatigueScore` is normalised to the traveller's own limits, which makes it
+ * meaningless to compare *between* travellers — but every day here shares one
+ * behaviour profile, so comparing days within a trip is exactly what it is for.
+ * Empty days are excluded: a day with nothing on it is not restful, it is
+ * unplanned, and counting it would make every trip look lopsided.
+ */
+function fatigueSpread(simulations: SimulatedDay[]): number {
+  const scores = simulations.filter((day) => day.load.mainActivities > 0).map((day) => day.load.fatigueScore);
+  return scores.length < 2 ? 0 : Math.max(...scores) - Math.min(...scores);
+}
+
+/**
+ * Even out the trip by moving stops from the hardest day to the easiest.
+ *
+ * A person planning by hand does this instinctively: they look at a day with
+ * four museums and a day with one, and move something. The scheduler produces
+ * each day well but has no view across the trip, so a greedy first pass can
+ * leave day two exhausting and day three nearly empty.
+ *
+ * Every move must earn its place. A move is kept only when the spread genuinely
+ * narrows **and** no place is lost — moving a stop onto a day that cannot
+ * absorb it would silently drop it, which is far worse than an uneven trip.
+ */
+function rebalanceDays(
+  initialAssignments: PlaceCandidate[][],
+  initialSimulations: SimulatedDay[],
+  simulateAll: (assignments: PlaceCandidate[][]) => SimulatedDay[],
+  placesOf: (day: SimulatedDay) => PlaceCandidate[],
+): { assignments: PlaceCandidate[][]; simulations: SimulatedDay[]; moves: number } {
+  let assignments = initialAssignments;
+  let simulations = initialSimulations;
+  let moves = 0;
+
+  const scheduledCount = (days: SimulatedDay[]) =>
+    days.reduce((total, day) => total + placesOf(day).length, 0);
+  const startingCount = scheduledCount(simulations);
+
+  for (let attempt = 0; attempt < MAX_REBALANCE_MOVES; attempt += 1) {
+    const spread = fatigueSpread(simulations);
+    if (spread <= FATIGUE_SPREAD_TOLERANCE) break;
+
+    const active = simulations
+      .map((day, index) => ({ index, day }))
+      .filter(({ day }) => day.load.mainActivities > 0);
+    if (active.length < 2) break;
+
+    const heaviest = active.reduce((worst, entry) =>
+      entry.day.load.fatigueScore > worst.day.load.fatigueScore ? entry : worst);
+    /**
+     * Only days that already have stops are targets.
+     *
+     * Moving into an empty day is a different decision — filling a rest day —
+     * and it interacts badly with the measure: an empty day is excluded from
+     * the spread, so putting one stop on it creates a very light active day and
+     * *widens* the range. Rebalancing evens out the days the traveller is
+     * already spending; it does not quietly consume their free one.
+     */
+    const lightest = active.reduce((best, entry) =>
+      (entry.day.load.fatigueScore < best.day.load.fatigueScore ? entry : best));
+
+    if (heaviest.index === lightest.index) break;
+    // Never empty a day to fill another.
+    if (assignments[heaviest.index].length < 2) break;
+
+    // The last stop of the heavy day is the one a person would drop first: it
+    // is the furthest into an already long day.
+    const next = assignments.map((day) => [...day]);
+    const moved = next[heaviest.index].pop();
+    if (!moved) break;
+    next[lightest.index] = [...next[lightest.index], moved];
+
+    const nextSimulations = simulateAll(next);
+    const landed = placesOf(nextSimulations[lightest.index]).some((place) => place.id === moved.id);
+    const keptEverything = scheduledCount(nextSimulations) === startingCount;
+    const improved = fatigueSpread(nextSimulations) < spread;
+
+    if (!landed || !keptEverything || !improved) break;
+
+    assignments = next;
+    simulations = nextSimulations;
+    moves += 1;
+  }
+
+  return { assignments, simulations, moves };
+}
+
+/** How much of a cluster can be enjoyed with a roof over your head. */
+const indoorShare = (cluster: PlaceCandidate[]): number => {
+  if (cluster.length === 0) return 0;
+  return cluster.filter((candidate) => candidate.indoorOutdoor === 'indoor').length / cluster.length;
+};
+
+/**
+ * Decide which part of the city each day goes to, with the forecast in mind.
+ *
+ * Ordering places *within* a day already prefers indoor ones when rain is
+ * likely, but that can only shuffle whatever the day was given. If the wet day
+ * was handed the botanic gardens and the beach, there is nothing indoors to
+ * bring forward. This chooses which cluster the day gets in the first place.
+ *
+ * Clusters otherwise keep their existing largest-first order, which is what
+ * makes coherent days. A wet day only takes a different cluster when that
+ * cluster is genuinely more sheltered than what it would have had — swapping
+ * for a marginal difference would trade a good day shape for nothing.
+ */
+export function assignClustersToDays(
+  clusters: PlaceCandidate[][],
+  dayCount: number,
+  wetDayNumbers: number[] = [],
+): PlaceCandidate[][] {
+  const wet = new Set(wetDayNumbers);
+  if (wet.size === 0 || clusters.length === 0) return clusters.slice(0, dayCount);
+
+  const remaining = [...clusters];
+  const assigned: PlaceCandidate[][] = [];
+
+  for (let day = 1; day <= dayCount; day += 1) {
+    if (remaining.length === 0) { assigned.push([]); continue; }
+
+    if (!wet.has(day)) {
+      assigned.push(remaining.shift()!);
+      continue;
+    }
+
+    const wouldHave = remaining[0];
+    let bestIndex = 0;
+    for (let index = 1; index < remaining.length; index += 1) {
+      if (indoorShare(remaining[index]) > indoorShare(remaining[bestIndex])) bestIndex = index;
+    }
+    // A quarter of the day's stops is the difference between "there is
+    // somewhere to shelter" and "this is technically more indoor".
+    const worthSwapping = indoorShare(remaining[bestIndex]) >= indoorShare(wouldHave) + 0.25;
+    assigned.push(remaining.splice(worthSwapping ? bestIndex : 0, 1)[0]);
+  }
+
+  return assigned;
+}
+
+/** Getting out of an airport and to somewhere you can start the day. */
+const ARRIVAL_SETTLING_MINUTES = 120;
+/** Leaving for the airport: check-in, security, and not running for it. */
+const DEPARTURE_LEAD_MINUTES = 210;
+/** Beyond this shift, the body is genuinely on another clock. */
+const JET_LAG_THRESHOLD_HOURS = 5;
+/** How many days a long-haul arrival keeps affecting the plan. */
+const JET_LAG_DAYS = 2;
+
+export interface TripEdges {
+  /** Local arrival time on day one, `HH:MM`. */
+  arrivalTime?: string;
+  /** Local departure time on the final day, `HH:MM`. */
+  departureTime?: string;
+  /**
+   * Hours between home and the destination, signed. Supplied by the caller
+   * because only the client knows where the traveller is starting from.
+   */
+  timezoneShiftHours?: number;
+}
+
+/**
+ * How a day at the edge of a trip differs from one in the middle.
+ *
+ * A trip does not begin at nine in the morning on day one. It begins whenever
+ * the plane lands, after which there is a bag to drop and a city to find. And
+ * it does not end at the usual hour either — the last day ends when the
+ * traveller has to leave for the airport, which is earlier than it feels.
+ *
+ * Returns only what differs from the normal pace, so a middle day passes
+ * through untouched.
+ */
+export function shapeTripEdge(
+  dayIndex: number,
+  dayCount: number,
+  edges: TripEdges,
+): { startTimeOverride?: string; returnTimeOverride?: string; maxMainOverride?: number; note?: string } {
+  const isFirst = dayIndex === 0;
+  const isLast = dayIndex === dayCount - 1 && dayCount > 1;
+  const shape: { startTimeOverride?: string; returnTimeOverride?: string; maxMainOverride?: number; note?: string } = {};
+
+  if (isFirst && edges.arrivalTime) {
+    const usableFrom = toMinutes(edges.arrivalTime) + ARRIVAL_SETTLING_MINUTES;
+    shape.startTimeOverride = toTime(usableFrom);
+    // Landing in the evening leaves a day that is really just dinner.
+    shape.maxMainOverride = usableFrom >= toMinutes('17:00') ? 0 : 1;
+    shape.note = `Day one starts after your ${edges.arrivalTime} arrival, with time to drop bags.`;
+  }
+
+  if (isLast && edges.departureTime) {
+    const mustLeaveBy = toMinutes(edges.departureTime) - DEPARTURE_LEAD_MINUTES;
+    shape.returnTimeOverride = toTime(Math.max(0, mustLeaveBy));
+    shape.maxMainOverride = Math.min(shape.maxMainOverride ?? 1, 1);
+    shape.note = `The last day ends in time to leave for a ${edges.departureTime} departure.`;
+  }
+
+  /**
+   * Jet lag, applied only where it is real. A three-hour shift is a late night;
+   * eight hours is waking at four in the morning for a week. The rule is
+   * deliberately blunt — one fewer stop, a later start — because anything more
+   * precise would be inventing physiology we cannot observe.
+   */
+  const shift = Math.abs(edges.timezoneShiftHours ?? 0);
+  if (shift >= JET_LAG_THRESHOLD_HOURS && dayIndex < JET_LAG_DAYS && !isLast) {
+    const laterStart = toMinutes(shape.startTimeOverride || '09:30') + 60;
+    shape.startTimeOverride = toTime(laterStart);
+    shape.maxMainOverride = Math.max(0, (shape.maxMainOverride ?? 99) === 99 ? 2 : shape.maxMainOverride!);
+    shape.note = shape.note
+      ? `${shape.note} Eased off for the ${shift}-hour time difference.`
+      : `Eased off for the ${shift}-hour time difference.`;
+  }
+
+  return shape;
+}
+
 export interface BuildOptions {
   /** Live routing when a provider is connected; estimates otherwise. */
   routeResolver?: RouteResolver;
@@ -218,6 +454,8 @@ export interface BuildOptions {
   behaviour?: TravelBehaviourProfile;
   /** Day numbers for which live weather recommends an indoor-first order. */
   weatherRiskDays?: number[];
+  /** Flight times and time-zone shift, so the first and last days fit reality. */
+  tripEdges?: TripEdges;
   /** Current event facts surfaced by the provider; never treated as booked time. */
   currentEventNotes?: string[];
   /** Timed event facts used only to detect conflicts with the proposed plan. */
@@ -382,8 +620,13 @@ export function buildDestinationItinerary(
   const mustDo = new Set(
     accepted.filter((candidate) => decisions[candidate.id] === 'must-do').map((candidate) => candidate.id),
   );
-  const clusters = clusterCandidates(accepted.filter((candidate) => !isFoodOnly(candidate))).map((cluster) =>
-    [...cluster].sort((a, b) => Number(mustDo.has(b.id)) - Number(mustDo.has(a.id))));
+  const clusters = assignClustersToDays(
+    clusterCandidates(accepted.filter((candidate) => !isFoodOnly(candidate))).map((cluster) =>
+      [...cluster].sort((a, b) => Number(mustDo.has(b.id)) - Number(mustDo.has(a.id)))),
+    dayCount,
+    // Send the sheltered part of the city to the day the forecast says is wet.
+    options.weatherRiskDays,
+  );
 
   const days: DayPlan[] = [];
   const dayLoads: DayLoad[] = [];
@@ -399,44 +642,78 @@ export function buildDestinationItinerary(
   const usedTitles = new Set<string>();
   let usedProviderRoutes = false;
 
+  /** Simulate one day from an explicit candidate list. */
+  const runDay = (index: number, dayCandidates: PlaceCandidate[], excludedMealVenues: Set<string>) => {
+    // The first and last days are shaped by the flights, not by the pace. The
+    // note is for the traveller and is collected separately.
+    const edge = shapeTripEdge(index, dayCount, options.tripEdges || {});
+    return simulateDay({
+    dayNumber: index + 1,
+    city: primaryCity,
+    candidates: dayCandidates,
+    behaviour,
+    routeResolver: options.routeResolver,
+    queueEvidence: options.queueEvidence,
+    preferIndoor: options.weatherRiskDays?.includes(index + 1),
+    // Supplies the weekday that opening hours are checked against, so a
+    // Monday is not planned from places that close on Mondays.
+    date: dateForDay(profile.startDate, index),
+    // Somewhere to actually eat. Offered from the whole shortlist rather than
+    // this day's cluster, because a traveller does not shortlist lunch.
+    mealCandidates: foodCandidates.filter((candidate) => !excludedMealVenues.has(candidate.id)),
+    mealPreferences: {
+      budgetTier: profile.budgetTier,
+      dietaryNeeds: behaviour.meals.dietaryNeeds,
+      preferredTags: profile.styles,
+    },
+      startTimeOverride: edge.startTimeOverride,
+      returnTimeOverride: edge.returnTimeOverride,
+      maxMainOverride: edge.maxMainOverride,
+    });
+  };
+
+  const placesOf = (day: SimulatedDay): PlaceCandidate[] => day.slots
+    .filter((slot) => slot.kind === 'place')
+    .map((slot) => slot.candidate)
+    .filter((candidate): candidate is PlaceCandidate => Boolean(candidate));
+
+  /**
+   * Re-simulate the whole trip from a fixed per-day assignment.
+   *
+   * Meal venues are recomputed from scratch each time so a re-run is
+   * deterministic — otherwise the exclusions left over from an abandoned
+   * arrangement would leak into the next one.
+   */
+  const simulateAll = (assignments: PlaceCandidate[][]): SimulatedDay[] => {
+    const meals = new Set<string>();
+    return assignments.map((dayCandidates, index) => {
+      const day = runDay(index, dayCandidates, meals);
+      for (const slot of day.slots) {
+        if (slot.kind === 'meal' && slot.candidate) meals.add(slot.candidate.id);
+      }
+      return day;
+    });
+  };
+
+  // Tell the traveller why the edges of their trip look different, rather than
+  // letting a near-empty arrival day read as a planning failure.
+  for (let index = 0; index < dayCount; index += 1) {
+    const { note } = shapeTripEdge(index, dayCount, options.tripEdges || {});
+    if (note) warnings.add(note);
+  }
+
+  // --- Pass one: fill the days in order ------------------------------------
   // Anything a cluster could not absorb rolls forward to later days.
   let carryOver: PlaceCandidate[] = [];
+  let simulations: SimulatedDay[] = [];
+  let assignments: PlaceCandidate[][] = [];
 
   for (let index = 0; index < dayCount; index += 1) {
-    const existing = itinerary.days[index];
-    const protectedActivities = (existing?.activities || []).filter((activity) =>
-      activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
-
     const cluster = clusters[index] || [];
     const dayCandidates = [...carryOver, ...cluster].filter((candidate) => !scheduled.has(candidate.id));
     carryOver = [];
 
-    const simulated = simulateDay({
-      dayNumber: index + 1,
-      city: primaryCity,
-      candidates: dayCandidates,
-      behaviour,
-      routeResolver: options.routeResolver,
-      queueEvidence: options.queueEvidence,
-      preferIndoor: options.weatherRiskDays?.includes(index + 1),
-      // Supplies the weekday that opening hours are checked against, so a
-      // Monday is not planned from places that close on Mondays.
-      date: dateForDay(profile.startDate, index),
-      // Somewhere to actually eat. Offered from the whole shortlist rather than
-      // this day's cluster, because a traveller does not shortlist lunch.
-      mealCandidates: foodCandidates.filter((candidate) => !usedMealVenues.has(candidate.id)),
-      mealPreferences: {
-        budgetTier: profile.budgetTier,
-        dietaryNeeds: behaviour.meals.dietaryNeeds,
-        preferredTags: profile.styles,
-      },
-      // Arrival day starts in the afternoon; the traveller is in transit.
-      startTimeOverride: index === 0 && itinerary.days.length === 0 ? '15:00' : undefined,
-    });
-
-    const discoveredActivities = simulated.slots
-      .map((slot) => slotToActivity(slot, index + 1, transportMode))
-      .filter((activity): activity is Activity => activity !== null);
+    const simulated = runDay(index, dayCandidates, usedMealVenues);
 
     for (const slot of simulated.slots) {
       /**
@@ -452,7 +729,6 @@ export function buildDestinationItinerary(
         if (slot.kind === 'meal') usedMealVenues.add(slot.candidate.id);
         else scheduled.add(slot.candidate.id);
       }
-      if (slot.arrivalLeg?.source === 'provider') usedProviderRoutes = true;
     }
 
     // Most rejections are about *this* day, not the place: a museum that shuts
@@ -464,6 +740,35 @@ export function buildDestinationItinerary(
       } else {
         carryOver.push(rejection.candidate);
       }
+    }
+
+    simulations.push(simulated);
+    assignments.push(placesOf(simulated));
+  }
+
+  // --- Pass two: even out the days ----------------------------------------
+  const rebalanced = rebalanceDays(assignments, simulations, simulateAll, placesOf);
+  assignments = rebalanced.assignments;
+  simulations = rebalanced.simulations;
+  if (rebalanced.moves > 0) {
+    warnings.add(rebalanced.moves === 1
+      ? 'One stop was moved to a lighter day so no single day is much harder than the rest.'
+      : `${rebalanced.moves} stops were moved to lighter days so no single day is much harder than the rest.`);
+  }
+
+  // --- Pass three: turn the final simulation into the plan ------------------
+  for (let index = 0; index < simulations.length; index += 1) {
+    const simulated = simulations[index];
+    const existing = itinerary.days[index];
+    const protectedActivities = (existing?.activities || []).filter((activity) =>
+      activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
+
+    const discoveredActivities = simulated.slots
+      .map((slot) => slotToActivity(slot, index + 1, transportMode))
+      .filter((activity): activity is Activity => activity !== null);
+
+    for (const slot of simulated.slots) {
+      if (slot.arrivalLeg?.source === 'provider') usedProviderRoutes = true;
     }
     simulated.warnings.forEach((warning) => warnings.add(warning));
 

@@ -312,6 +312,79 @@ export async function linkCanonicalPlaces(
 }
 
 // ---------------------------------------------------------------------------
+// Opening hours published by the operator
+// ---------------------------------------------------------------------------
+
+export interface OpeningRuleRow {
+  daysOfWeek: number[];
+  opensAt: string;
+  closesAt: string;
+}
+
+/**
+ * Hours read from a place's own website, by canonical place id.
+ *
+ * These have to persist, not merely be returned. The nightly refresh marks the
+ * official probe fresh, which makes the next live request *skip* the fetch —
+ * so without a stored copy the hours would be read overnight and then thrown
+ * away, and the traveller would keep seeing the community-maintained ones.
+ */
+export async function readOpeningHours(
+  client: SupabaseClient,
+  canonicalPlaceIds: string[],
+): Promise<Map<string, OpeningRuleRow[]>> {
+  const result = new Map<string, OpeningRuleRow[]>();
+  const ids = [...new Set(canonicalPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return result;
+  try {
+    const { data, error } = await client
+      .from('opening_hours_snapshots')
+      .select('canonical_place_id, payload, captured_for')
+      .in('canonical_place_id', ids)
+      .gt('expires_at', new Date().toISOString())
+      .order('captured_for', { ascending: false });
+    if (error || !data) return result;
+    for (const row of data) {
+      const placeId = String(row.canonical_place_id);
+      // Ordered newest first, so the first row for a place is the current one.
+      if (result.has(placeId)) continue;
+      const payload = row.payload as { rules?: OpeningRuleRow[] } | null;
+      if (Array.isArray(payload?.rules) && payload.rules.length > 0) result.set(placeId, payload.rules);
+    }
+  } catch {
+    // Best-effort: without them the caller falls back to provider hours.
+  }
+  return result;
+}
+
+export async function writeOpeningHours(
+  client: SupabaseClient,
+  rows: Array<{ canonicalPlaceId: string; rules: OpeningRuleRow[] }>,
+  expiresAt: string,
+): Promise<void> {
+  if (rows.length === 0) return;
+  try {
+    const capturedFor = new Date().toISOString().slice(0, 10);
+    await client
+      .from('opening_hours_snapshots')
+      .upsert(
+        rows.map((row) => ({
+          canonical_place_id: row.canonicalPlaceId,
+          captured_for: capturedFor,
+          payload: { rules: row.rules },
+          // The operator is the authority on their own hours.
+          source_confidence: 'high',
+          retrieved_at: new Date().toISOString(),
+          expires_at: expiresAt,
+        })),
+        { onConflict: 'canonical_place_id,captured_for' },
+      );
+  } catch {
+    // Best-effort.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Evidence cache
 // ---------------------------------------------------------------------------
 

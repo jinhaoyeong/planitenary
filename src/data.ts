@@ -137,6 +137,15 @@ export type DiscoveryUnscheduledReason =
 export interface DiscoveryUnscheduledCandidate {
   candidateId: string;
   reason: DiscoveryUnscheduledReason;
+  /**
+   * The specific sentence the scheduler produced — "Closed on Mondays",
+   * "Would push walking past your 75 minute limit, including the journey back".
+   *
+   * The `reason` alone only names a category. This is the part a traveller can
+   * act on, and it is worth persisting so it survives a reload rather than
+   * degrading to the generic label.
+   */
+  detail?: string;
 }
 
 export interface ItineraryDiscoveryState {

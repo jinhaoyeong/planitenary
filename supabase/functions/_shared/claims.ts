@@ -16,13 +16,15 @@
 
 export type ClaimType =
   | 'worth-visiting' | 'overrated' | 'local-favourite' | 'tourist-trap'
-  | 'queue-time' | 'crowded' | 'closed' | 'reservation-needed' | 'food-quality';
+  | 'queue-time' | 'best-time' | 'crowded' | 'closed' | 'reservation-needed' | 'food-quality';
 
 export interface Claim {
   type: ClaimType;
   summary: string;
   value?: number;
   unit?: 'minutes';
+  /** The part of the day a claim is about, for `best-time`. */
+  appliesTo?: { start: string; end: string };
   strength: number;
   excerpt?: string;
 }
@@ -60,6 +62,42 @@ const QUEUE_PATTERNS = [
   /(\d)\s*hours?\s*(?:queue|wait|line)/i,
 ];
 
+/**
+ * When people say a place is best visited.
+ *
+ * Deliberately narrow, and narrow in a specific way: each phrase has to be
+ * about *timing*, not about enthusiasm. "Amazing at sunset" is a time; "amazing"
+ * is not. A loose rule here does real damage — the scheduler turns these into a
+ * preferred window and will decline to schedule a place outside it, so a
+ * misread phrase removes a place from the trip rather than merely mis-ranking
+ * it.
+ *
+ * The windows are broad on purpose. The claim is "mornings are better here",
+ * not "arrive at 07:14".
+ */
+const BEST_TIME_RULES: Array<{ patterns: RegExp[]; window: { start: string; end: string }; summary: string }> = [
+  {
+    patterns: [
+      /\b(go|get there|arrive|visit|come)\b[^.]{0,20}\bearly\b/i,
+      /\bearly (in the )?morning\b/i,
+      /\bbefore the crowds\b/i,
+      /\bfirst thing in the morning\b/i,
+    ],
+    window: { start: '07:00', end: '10:30' },
+    summary: 'Reported as best early in the day',
+  },
+  {
+    patterns: [/\b(at|for|around|during) sunset\b/i, /\bgolden hour\b/i, /\bsunset views?\b/i],
+    window: { start: '16:30', end: '19:30' },
+    summary: 'Reported as best around sunset',
+  },
+  {
+    patterns: [/\bat night\b/i, /\bafter dark\b/i, /\blit up at night\b/i, /\bnight views?\b/i],
+    window: { start: '18:30', end: '23:00' },
+    summary: 'Reported as best after dark',
+  },
+];
+
 export function extractClaims(text: string): Claim[] {
   if (!text) return [];
   const claims: Claim[] = [];
@@ -74,6 +112,25 @@ export function extractClaims(text: string): Claim[] {
       strength: rule.strength,
       excerpt: match ? text.slice(Math.max(0, (match.index ?? 0) - 40), (match.index ?? 0) + 80).trim() : undefined,
     });
+  }
+
+  for (const rule of BEST_TIME_RULES) {
+    const hit = rule.patterns.find((pattern) => pattern.test(text));
+    if (!hit) continue;
+    const match = text.match(hit);
+    claims.push({
+      type: 'best-time',
+      summary: rule.summary,
+      appliesTo: rule.window,
+      // Lower than an opinion claim: a remark about timing is usually made in
+      // passing, and it carries more weight in the plan than it did in the
+      // sentence it came from.
+      strength: 0.6,
+      excerpt: match ? text.slice(Math.max(0, (match.index ?? 0) - 40), (match.index ?? 0) + 80).trim() : undefined,
+    });
+    // One timing claim per source. Two different windows from one sentence is
+    // a misread, not a place that is best twice.
+    break;
   }
 
   for (const pattern of QUEUE_PATTERNS) {

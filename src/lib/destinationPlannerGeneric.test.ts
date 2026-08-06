@@ -6,7 +6,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Itinerary } from '../data';
 import type { PlaceCandidate } from './destinationIntelligence';
-import { buildDestinationItinerary, defaultDiscoveryDecisions, rankDestinationCandidates } from './destinationPlanner';
+import {
+  assignClustersToDays,
+  buildDestinationItinerary,
+  defaultDiscoveryDecisions,
+  rankDestinationCandidates,
+  shapeTripEdge,
+} from './destinationPlanner';
 import { createEmptyProfile, manualDestination, type TripMood, type TripProfile } from './tripProfile';
 import { deriveTravelBehaviour } from './travelBehaviour';
 
@@ -105,6 +111,25 @@ describe('the planner is city-agnostic', () => {
     expect(titles.join(' ')).toMatch(/CBD|Southbank|Fitzroy|South Yarra|North Melbourne|St Kilda/);
   });
 
+  it('explains a rejection specifically, not just by category', () => {
+    /**
+     * The category ("Opening hours don't fit") is the same for two places that
+     * were blocked for entirely different reasons. The scheduler's own sentence
+     * names the constraint — a closing time, a walking limit, a weekday — and
+     * that is what reaches the traveller.
+     */
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(MELBOURNE, profile);
+    // Two days for twelve places guarantees some cannot fit.
+    const result = buildDestinationItinerary(emptyItinerary(2), profile, ranked, defaultDiscoveryDecisions(ranked));
+    expect(result.unscheduledReasons.length).toBeGreaterThan(0);
+    for (const rejection of result.unscheduledReasons) {
+      expect(rejection.detail.length).toBeGreaterThan(0);
+    }
+    // At least one names a concrete limit rather than restating the category.
+    expect(result.unscheduledReasons.some((rejection) => /\d/.test(rejection.detail))).toBe(true);
+  });
+
   it('accounts for every accepted place — scheduled or explained', () => {
     const profile = melbourneProfile();
     const ranked = rankDestinationCandidates(MELBOURNE, profile);
@@ -115,6 +140,192 @@ describe('the planner is city-agnostic', () => {
     for (const rejection of result.unscheduledReasons) {
       expect(rejection.detail.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('sending the sheltered part of the city to the wet day', () => {
+  const indoor = (id: string) => place(id, id, [-37.81, 144.96], 'Roofed', ['museum'], { indoorOutdoor: 'indoor' });
+  const outdoor = (id: string) => place(id, id, [-37.83, 144.98], 'Open Air', ['park'], { indoorOutdoor: 'outdoor' });
+  const sheltered = [indoor('m1'), indoor('m2')];
+  const exposed = [outdoor('p1'), outdoor('p2')];
+
+  it('gives the rainy day the indoor cluster', () => {
+    // Ordering within a day can only shuffle what the day was given. If the wet
+    // day got the gardens and the beach, there is nothing to bring forward.
+    const assigned = assignClustersToDays([exposed, sheltered], 2, [1]);
+    expect(assigned[0]).toBe(sheltered);
+    expect(assigned[1]).toBe(exposed);
+  });
+
+  it('keeps the usual order when no rain is forecast', () => {
+    const assigned = assignClustersToDays([exposed, sheltered], 2, []);
+    expect(assigned[0]).toBe(exposed);
+  });
+
+  it('does not trade a coherent day for a marginal difference', () => {
+    // Both clusters are equally exposed; swapping would gain nothing and lose
+    // the largest-first ordering that makes days hang together.
+    const assigned = assignClustersToDays([exposed, [outdoor('p3'), outdoor('p4')]], 2, [1]);
+    expect(assigned[0]).toBe(exposed);
+  });
+
+  it('handles more days than clusters without inventing one', () => {
+    const assigned = assignClustersToDays([sheltered], 3, [2]);
+    expect(assigned).toHaveLength(3);
+    expect(assigned[1]).toEqual([]);
+    expect(assigned[2]).toEqual([]);
+  });
+
+  it('reaches the finished plan, not just the assignment', () => {
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(MELBOURNE, profile);
+    const result = buildDestinationItinerary(emptyItinerary(4), profile, ranked, defaultDiscoveryDecisions(ranked), {
+      weatherRiskDays: [1],
+    });
+    expect(result.days).toHaveLength(4);
+    // Every accepted place still finds a home; weather changes the order, not
+    // whether the trip works.
+    expect(result.scheduledCandidates.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the edges of a trip are not ordinary days', () => {
+  it('starts day one after the plane lands, with time to drop bags', () => {
+    const shape = shapeTripEdge(0, 4, { arrivalTime: '11:00' });
+    expect(shape.startTimeOverride).toBe('13:00');
+    expect(shape.maxMainOverride).toBe(1);
+  });
+
+  it('gives up on an evening arrival rather than pretending it is a day', () => {
+    const shape = shapeTripEdge(0, 4, { arrivalTime: '19:30' });
+    expect(shape.maxMainOverride).toBe(0);
+  });
+
+  it('ends the last day in time to leave for the airport', () => {
+    // A 20:00 flight means leaving by 16:30, not heading back at 21:30.
+    const shape = shapeTripEdge(3, 4, { departureTime: '20:00' });
+    expect(shape.returnTimeOverride).toBe('16:30');
+  });
+
+  it('leaves the days in the middle alone', () => {
+    expect(shapeTripEdge(1, 4, { arrivalTime: '11:00', departureTime: '20:00' })).toEqual({});
+  });
+
+  it('eases the first days of a long-haul trip', () => {
+    const jetLagged = shapeTripEdge(1, 6, { timezoneShiftHours: -8 });
+    expect(jetLagged.maxMainOverride).toBe(2);
+    expect(jetLagged.note).toContain('8-hour time difference');
+  });
+
+  it('ignores a time difference the body would not notice', () => {
+    expect(shapeTripEdge(1, 6, { timezoneShiftHours: 2 })).toEqual({});
+  });
+
+  it('stops easing off once the traveller has adjusted', () => {
+    expect(shapeTripEdge(3, 6, { timezoneShiftHours: -8 })).toEqual({});
+  });
+
+  it('does nothing at all when no flight times are known', () => {
+    // The common case: a trip planned before the flights are booked.
+    expect(shapeTripEdge(0, 4, {})).toEqual({});
+  });
+
+  it('treats a single-day trip as an arrival, never a departure', () => {
+    const shape = shapeTripEdge(0, 1, { arrivalTime: '09:00', departureTime: '22:00' });
+    expect(shape.startTimeOverride).toBe('11:00');
+    expect(shape.returnTimeOverride).toBeUndefined();
+  });
+
+  it('shapes the real plan, and says why', () => {
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(MELBOURNE, profile);
+    const result = buildDestinationItinerary(emptyItinerary(4), profile, ranked, defaultDiscoveryDecisions(ranked), {
+      tripEdges: { arrivalTime: '14:00', departureTime: '19:00' },
+    });
+    // Day one cannot start before 16:00, so it holds at most one stop.
+    expect(result.dayLoads[0].mainActivities).toBeLessThanOrEqual(1);
+    expect(result.warnings.some((warning) => warning.includes('14:00 arrival'))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes('19:00 departure'))).toBe(true);
+  });
+});
+
+describe('evening out the trip', () => {
+  /**
+   * A trip the greedy pass genuinely gets wrong: one area strung out over
+   * walkable distances, another packed into a single corner. Filling days in
+   * order gives one day all the walking.
+   */
+  const LOPSIDED: PlaceCandidate[] = [
+    place('walk-1', 'Walk One', [-37.8100, 144.9600], 'Strung Out', ['museum']),
+    place('walk-2', 'Walk Two', [-37.8195, 144.9600], 'Strung Out', ['museum']),
+    place('walk-3', 'Walk Three', [-37.8290, 144.9600], 'Strung Out', ['museum']),
+    place('tight-1', 'Tight One', [-37.7500, 145.0500], 'One Corner', ['museum']),
+    place('tight-2', 'Tight Two', [-37.7501, 145.0501], 'One Corner', ['museum']),
+  ];
+
+  const buildLopsided = (days: number) => {
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(LOPSIDED, profile);
+    return buildDestinationItinerary(emptyItinerary(days), profile, ranked, defaultDiscoveryDecisions(ranked));
+  };
+
+  const spreadOf = (result: ReturnType<typeof buildLopsided>) => {
+    const scores = result.dayLoads.filter((load) => load.mainActivities > 0).map((load) => load.fatigueScore);
+    return scores.length < 2 ? 0 : Math.max(...scores) - Math.min(...scores);
+  };
+
+  it('moves a stop off the hardest day, and says that it did', () => {
+    // Proves the mechanism actually engages — not merely that it stayed quiet.
+    const result = buildLopsided(2);
+    expect(result.warnings.some((warning) => warning.includes('lighter day'))).toBe(true);
+  });
+
+  it('leaves the trip more even than it found it', () => {
+    // Filling days in order gives this set a spread of 0.247 — one day twice as
+    // demanding as the other. Rebalancing must improve on that. It is not
+    // required to reach the tolerance: it makes the best moves it can find
+    // within its budget and stops when none of them help.
+    expect(spreadOf(buildLopsided(2))).toBeLessThan(0.247);
+  });
+
+  it('spreads the walking rather than loading it all onto one day', () => {
+    // The measure the traveller actually feels. On the full Melbourne set the
+    // greedy pass produces 34 walking minutes on day one against 9 on day four.
+    const walking = build(melbourneProfile(), 4).dayLoads
+      .filter((load) => load.mainActivities > 0)
+      .map((load) => load.walkingMinutes);
+    expect(Math.max(...walking) - Math.min(...walking)).toBeLessThan(25);
+  });
+
+  it('never loses a place while evening days out', () => {
+    // A move onto a day that cannot absorb the stop would silently drop it,
+    // which is far worse than an uneven trip.
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(LOPSIDED, profile);
+    const decisions = defaultDiscoveryDecisions(ranked);
+    const accepted = Object.values(decisions).filter((d) => d === 'must-do' || d === 'interested').length;
+    const result = buildDestinationItinerary(emptyItinerary(2), profile, ranked, decisions);
+    expect(result.scheduledCandidates.length + result.unscheduledCandidates.length).toBe(accepted);
+  });
+
+  it('leaves an already-even trip alone rather than churning it', () => {
+    // Three days over this set already sit within tolerance at 0.140.
+    const result = build(melbourneProfile(), 3);
+    expect(result.warnings.some((warning) => warning.includes('lighter day'))).toBe(false);
+  });
+
+  it('does not quietly consume a free day', () => {
+    // Five days, four days' worth of places. The empty day stays empty:
+    // rebalancing evens out the days already being spent.
+    const result = build(melbourneProfile(), 5);
+    expect(result.dayLoads.filter((load) => load.mainActivities === 0).length).toBeGreaterThan(0);
+  });
+
+  it('still produces a plan when there is only one day to fill', () => {
+    // Nothing to balance against; the rebalancer must simply do nothing.
+    const result = build(melbourneProfile(), 1);
+    expect(result.days).toHaveLength(1);
+    expect(result.days[0].activities.some((activity) => activity.kind === 'place')).toBe(true);
   });
 });
 

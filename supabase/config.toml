@@ -19,6 +19,13 @@ verify_jwt = true
 [functions.travel-evidence]
 verify_jwt = true
 
+# The nightly refresh is called by a scheduler, not a signed-in traveller, so
+# it authenticates itself with TRAVEL_REFRESH_SECRET instead of a JWT. It
+# refuses every request when that secret is unset — an endpoint that spends
+# quota must fail closed.
+[functions.travel-refresh]
+verify_jwt = false
+
 [functions.travel-weather]
 verify_jwt = true
 
