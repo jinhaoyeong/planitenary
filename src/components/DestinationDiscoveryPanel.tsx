@@ -1469,6 +1469,17 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
               <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>
                 Use recommended shortlist ({shortlistSize.shortlist})
               </button>
+              {/*
+                * The number is explained rather than just shown: it comes from
+                * this trip's length and pace, so a traveller who wanted more
+                * knows the lever is the pace, not this button.
+                */}
+              <p className="text-xs w-full" style={{ color: 'var(--ink-muted)' }}>
+                {shortlistSize.capped && shortlistSize.shortlist < shortlistSize.capacity
+                  // Only a trip long enough to out-run the ceiling loses places.
+                  ? `About ${shortlistSize.shortlist} places — as many as is practical to review at once. ${tripDayCount} days at this pace could hold around ${shortlistSize.capacity}, so add more once you have worked through these.`
+                  : `About ${shortlistSize.shortlist} places for ${tripDayCount} ${tripDayCount === 1 ? 'day' : 'days'} — roughly what a ${tripBehaviour.pace.replace('-', ' ')} pace fits, with room for the ones that will not slot in.`}
+              </p>
               <button type="button" className="pill-btn pill-ghost" onClick={() => { hapticTap(); setPhase('idle'); }}>Close</button>
             </div>
           </div>

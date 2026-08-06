@@ -8,7 +8,7 @@
  * the trip was three days or twenty-one.
  */
 import { describe, expect, it } from 'vitest';
-import { defaultDiscoveryDecisions, shortlistTarget } from './destinationPlanner';
+import { defaultDiscoveryDecisions, measureShortlistFit, shortlistTarget } from './destinationPlanner';
 import { PACE_DEFAULTS, deriveTravelBehaviour } from './travelBehaviour';
 import { createEmptyProfile, manualDestination, type TripMood, type TripProfile } from './tripProfile';
 import type { PlaceCandidate, RankedCandidate } from './destinationIntelligence';
@@ -90,6 +90,91 @@ describe('capacity comes from the trip, not a constant', () => {
     const target = shortlistTarget(10, behaviourFor([]), 200);
     expect(target.mustDo).toBeGreaterThanOrEqual(2);
     expect(target.mustDo).toBeLessThan(target.shortlist);
+  });
+});
+
+describe('the ceiling is a promise, not a capacity claim', () => {
+  it('never pre-selects more than 100 places', () => {
+    // 21 days at an active pace works out at 118 without this.
+    const target = shortlistTarget(21, behaviourFor(['fast-paced']), 500);
+    expect(target.shortlist).toBeLessThanOrEqual(100);
+  });
+
+  it('still reports the trip’s real capacity when the ceiling binds', () => {
+    // Kept separate deliberately: the cap limits what is offered, it does not
+    // pretend the trip is shorter than it is. 21 active days really do hold 84
+    // stops, and the target says so even while offering 100.
+    const target = shortlistTarget(21, behaviourFor(['fast-paced']), 500);
+    expect(target.capped).toBe(true);
+    expect(target.capacity).toBe(84);
+    expect(target.shortlist).toBe(100);
+  });
+
+  it('trims headroom before it ever trims the plan', () => {
+    // At 21 active days the cap takes 118 down to 100, which is still above
+    // the 84 the days hold — so nothing is lost, only the margin narrows.
+    const target = shortlistTarget(21, behaviourFor(['fast-paced']), 500);
+    expect(target.shortlist).toBeGreaterThan(target.capacity);
+  });
+
+  it('leaves a genuine shortfall visible on a trip too big for the ceiling', () => {
+    // Beyond about 20 intensive days the ceiling really does offer fewer
+    // places than the trip could hold, and that has to be legible.
+    const huge = shortlistTarget(40, behaviourFor(['fast-paced']), 500);
+    expect(huge.capped).toBe(true);
+    expect(huge.capacity).toBeGreaterThan(huge.shortlist);
+  });
+
+  it('says so, so the shortfall is visible rather than discovered later', () => {
+    expect(shortlistTarget(21, behaviourFor(['fast-paced']), 500).capped).toBe(true);
+    expect(shortlistTarget(11, behaviourFor([]), 500).capped).toBe(false);
+  });
+
+  it('leaves every ordinary trip untouched', () => {
+    // The cap must not quietly become the sizing rule for normal trips.
+    for (const days of [3, 7, 11, 14]) {
+      const target = shortlistTarget(days, behaviourFor([]), 500);
+      expect(target.capped, `${days} days should size from capacity`).toBe(false);
+    }
+  });
+});
+
+describe('measuring what a build actually rejected', () => {
+  const buildResult = (scheduled: number, reasons: string[]) => ({
+    scheduledCandidates: Array.from({ length: scheduled }, (_, i) => ({ id: `s-${i}` })),
+    unscheduledReasons: reasons.map((reason, i) => ({ candidate: { id: `u-${i}` }, reason, detail: '' })),
+  } as unknown as Parameters<typeof measureShortlistFit>[0]);
+
+  it('reports the headroom a real build implies', () => {
+    // 10 accepted, 8 placed → 1.25×. This is the number that replaces the
+    // guessed SHORTLIST_HEADROOM once real trips have been run.
+    const measured = measureShortlistFit(buildResult(8, ['opening-hours-conflict', 'duplicate']));
+    expect(measured.accepted).toBe(10);
+    expect(measured.impliedHeadroom).toBeCloseTo(1.25);
+    expect(measured.rejectionRate).toBeCloseTo(0.2);
+  });
+
+  it('breaks rejections down by cause, which decides the direction to tune', () => {
+    // daily-capacity-reached means the shortlist was too long and headroom
+    // should fall; the others mean places were lost to reality.
+    const measured = measureShortlistFit(buildResult(5, [
+      'daily-capacity-reached', 'daily-capacity-reached', 'walking-limit-exceeded',
+    ]));
+    expect(measured.byReason['daily-capacity-reached']).toBe(2);
+    expect(measured.byReason['walking-limit-exceeded']).toBe(1);
+  });
+
+  it('claims no headroom from a build that placed nothing', () => {
+    // A failed build says nothing about how much margin a real one needs, and
+    // must not be averaged in as though it did.
+    const measured = measureShortlistFit(buildResult(0, ['duplicate']));
+    expect(measured.impliedHeadroom).toBe(0);
+  });
+
+  it('reports a clean build as needing no headroom at all', () => {
+    const measured = measureShortlistFit(buildResult(6, []));
+    expect(measured.rejectionRate).toBe(0);
+    expect(measured.impliedHeadroom).toBe(1);
   });
 });
 

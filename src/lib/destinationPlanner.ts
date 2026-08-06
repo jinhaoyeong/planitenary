@@ -183,6 +183,52 @@ export function pruneDecisionsToCandidates(
   return { decisions: kept, dropped };
 }
 
+export interface ShortlistMeasurement {
+  accepted: number;
+  scheduled: number;
+  unscheduled: number;
+  /** Share of accepted places that never reached a day, 0–1. */
+  rejectionRate: number;
+  /** The headroom multiplier this build implies: accepted ÷ scheduled. */
+  impliedHeadroom: number;
+  byReason: Record<string, number>;
+}
+
+/**
+ * What one build actually rejected, and the headroom it implies.
+ *
+ * `SHORTLIST_HEADROOM` is a guess. This is how it stops being one: run real
+ * trips, read `impliedHeadroom` off each, and set the constant from the spread
+ * rather than from intuition. `FATIGUE_SPREAD_TOLERANCE` was guessed at `0.25`
+ * and fired on nothing at all, which is the cost of skipping this step.
+ *
+ * `byReason` matters as much as the rate. Rejections for
+ * `daily-capacity-reached` mean the shortlist was simply too long and headroom
+ * should come *down*; `opening-hours-conflict` or `walking-limit-exceeded` mean
+ * places were lost to reality and headroom is doing its job.
+ */
+export function measureShortlistFit(result: DestinationBuildResult): ShortlistMeasurement {
+  const scheduled = result.scheduledCandidates.length;
+  const unscheduled = result.unscheduledReasons.length;
+  const accepted = scheduled + unscheduled;
+
+  const byReason: Record<string, number> = {};
+  for (const { reason } of result.unscheduledReasons) {
+    byReason[reason] = (byReason[reason] ?? 0) + 1;
+  }
+
+  return {
+    accepted,
+    scheduled,
+    unscheduled,
+    rejectionRate: accepted === 0 ? 0 : unscheduled / accepted,
+    // Undefined rather than 1 when nothing was scheduled: a build that placed
+    // no places says nothing about how much headroom a real one needs.
+    impliedHeadroom: scheduled === 0 ? 0 : accepted / scheduled,
+    byReason,
+  };
+}
+
 /**
  * Places to shortlist beyond what the days can actually hold.
  *
@@ -209,6 +255,21 @@ const MUST_DO_SHARE = 0.2;
 /** Never offer so few that the traveller has no real choice, even for one day. */
 const MINIMUM_SHORTLIST = 6;
 
+/**
+ * The most places to pre-select, whatever the arithmetic says.
+ *
+ * A product promise rather than a capacity claim, and deliberately applied
+ * *after* capacity so the two never blur. Twenty-one days at an active pace
+ * genuinely holds 84 stops, and the honest shortlist for it is 118 — but
+ * "don't give them like 100 for 10+ days" is the requirement, and a deck of
+ * 118 pre-selected places is not something a person reviews.
+ *
+ * When this binds, the trip is asking for more than the traveller can
+ * reasonably curate in one pass, and `capped` says so rather than leaving the
+ * shortfall to be discovered later.
+ */
+const SHORTLIST_CEILING = 100;
+
 export interface ShortlistTarget {
   /** Main sightseeing stops the trip can physically hold. */
   capacity: number;
@@ -216,6 +277,8 @@ export interface ShortlistTarget {
   shortlist: number;
   /** How many of those are offered as must-do. */
   mustDo: number;
+  /** True when {@link SHORTLIST_CEILING}, not the trip, decided the number. */
+  capped: boolean;
 }
 
 /**
@@ -241,11 +304,14 @@ export function shortlistTarget(
   const perDay = behaviour.maxMainActivitiesPerDay ?? PACE_DEFAULTS[behaviour.pace].maxMainActivities;
   const capacity = days * Math.max(1, perDay);
 
+  // Capacity first, then the product ceiling, then what actually exists. Kept
+  // in that order so a capped trip still reports its true capacity.
   const wanted = Math.max(MINIMUM_SHORTLIST, Math.ceil(capacity * SHORTLIST_HEADROOM));
-  const shortlist = Math.max(0, Math.min(availableCount, wanted));
+  const bounded = Math.min(wanted, SHORTLIST_CEILING);
+  const shortlist = Math.max(0, Math.min(availableCount, bounded));
   const mustDo = Math.min(shortlist, Math.max(2, Math.round(capacity * MUST_DO_SHARE)));
 
-  return { capacity, shortlist, mustDo };
+  return { capacity, shortlist, mustDo, capped: wanted > SHORTLIST_CEILING };
 }
 
 /**
@@ -266,7 +332,7 @@ export function defaultDiscoveryDecisions(
   // fixed shape is kept rather than inventing a capacity.
   const target = behaviour
     ? shortlistTarget(options.dayCount ?? 1, behaviour, sightseeing.length)
-    : { shortlist: Math.min(sightseeing.length, 29), mustDo: 2, capacity: 0 };
+    : { shortlist: Math.min(sightseeing.length, 29), mustDo: 2, capacity: 0, capped: false };
 
   sightseeing.slice(0, target.shortlist).forEach(({ candidate }, index) => {
     decisions[candidate.id] = index < target.mustDo ? 'must-do' : 'interested';
