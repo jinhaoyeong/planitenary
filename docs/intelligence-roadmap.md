@@ -455,6 +455,34 @@ Three things worth carrying forward:
   from `scheduled`, or the "every accepted place is scheduled or explained"
   invariant breaks the moment the planner suggests a restaurant.
 
+**YouTube daily cap — DONE (2026-08-06)**
+
+`provider_usage` plus `consume_provider_quota()` count our own YouTube searches
+and stop below Google's limit.
+
+The cap is on **search calls, not quota units**. The Data API grants 10,000
+units *and* 100 `search.list` calls a day; a search costs 100 units, so both run
+out together — but the search count is the one that maps to something
+meaningful: 100 searches is 100 places. Default ceiling 90, override with
+`YOUTUBE_DAILY_SEARCH_LIMIT`.
+
+Details that matter:
+
+- **Reset is midnight Pacific, not UTC.** Counting in UTC would misalign the
+  reset by up to eight hours.
+- **The reservation is atomic**, so two concurrent requests cannot both take the
+  last search. A counter in function memory would not work at all: Edge
+  Functions run as many short-lived instances.
+- **A refusal is not recorded as a probe.** We never asked, so tomorrow must ask
+  again rather than treating today's silence as an answer.
+- **A blocked place still serves its cached video evidence** — the cap stops new
+  lookups, it does not discard what is already known.
+- **Fails open.** Exceeding a YouTube quota costs nothing but an error response;
+  there is no bill behind it. Failing closed would turn a brief database problem
+  into a total loss of evidence.
+- `travel-evidence` reports `youtubeQuota: { limit, used, blockedThisRequest }`,
+  because otherwise a cap looks exactly like a provider outage.
+
 **Phase 5c — Remaining scheduling intelligence**
 17. Weather-aware and best-time-aware day assignment
 18. Cross-day fatigue rebalancing

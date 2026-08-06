@@ -77,7 +77,14 @@ export async function usageToday(
       .eq('provider', provider)
       .eq('usage_date', today)
       .maybeSingle();
-    if (error || !data) return { calls: 0, units: 0 };
+    /**
+     * "Nothing used yet" and "the counter is unreachable" are different
+     * answers and must not share a value. A missing row genuinely means zero;
+     * an error means we do not know, and reporting zero there would state
+     * confidently that the day's allowance is untouched when it might be spent.
+     */
+    if (error) return null;
+    if (!data) return { calls: 0, units: 0 };
     return { calls: Number(data.calls) || 0, units: Number(data.units) || 0 };
   } catch {
     return null;

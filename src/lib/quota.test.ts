@@ -78,4 +78,12 @@ describe('reporting the day’s usage', () => {
   it('reports unknown when there is no counter', async () => {
     expect(await usageToday(null, 'youtube-search', 'UTC')).toBeNull();
   });
+
+  it('reports unknown rather than zero when the counter cannot be read', async () => {
+    // The state right after deploying the function but before the migration:
+    // the table does not exist. Reporting zero would claim the day's allowance
+    // is untouched, which is a guess dressed as a measurement.
+    expect(await usageToday(tableClient({ error: { message: 'relation does not exist' } }), 'youtube-search', 'UTC'))
+      .toBeNull();
+  });
 });
