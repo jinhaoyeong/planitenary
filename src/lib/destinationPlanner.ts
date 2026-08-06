@@ -8,6 +8,7 @@ import {
   type RankedCandidate,
 } from './destinationIntelligence';
 import {
+  PACE_DEFAULTS,
   applyTravellerConstraints,
   deriveTravelBehaviour,
   type TravelBehaviourProfile,
@@ -152,10 +153,94 @@ export function rankDestinationCandidates(candidates: PlaceCandidate[], profile:
   }).sort((a, b) => b.score - a.score || a.candidate.name.localeCompare(b.candidate.name));
 }
 
-export function defaultDiscoveryDecisions(ranked: RankedCandidate[]): Record<string, CandidateDecision> {
+/**
+ * Places to shortlist beyond what the days can actually hold.
+ *
+ * Some accepted places never reach a day: they close on the wrong weekday, sit
+ * too far from that day's cluster, or would push the walk past the traveller's
+ * ceiling. Shortlisting exactly the capacity would leave days short whenever
+ * that happens, so the deck carries a margin.
+ *
+ * **Provisional.** It has not been measured. `unscheduledReasons` already
+ * records every rejection with its cause, so the real rate can be counted from
+ * live plans and this replaced with a number that came from somewhere.
+ * `FATIGUE_SPREAD_TOLERANCE` was guessed at `0.25` and fired on nothing at all;
+ * treating this as measured would be the same mistake.
+ */
+const SHORTLIST_HEADROOM = 1.4;
+
+/**
+ * The fraction of the shortlist offered as "must do" rather than "interested".
+ * The distinction is the traveller's to make; this only decides how many the
+ * recommendation is confident enough to pre-commit.
+ */
+const MUST_DO_SHARE = 0.2;
+
+/** Never offer so few that the traveller has no real choice, even for one day. */
+const MINIMUM_SHORTLIST = 6;
+
+export interface ShortlistTarget {
+  /** Main sightseeing stops the trip can physically hold. */
+  capacity: number;
+  /** Places to pre-select, capacity plus headroom, bounded by what exists. */
+  shortlist: number;
+  /** How many of those are offered as must-do. */
+  mustDo: number;
+}
+
+/**
+ * How many places a trip can actually absorb.
+ *
+ * The traveller's complaint was concrete: a shortlist of the same size whether
+ * the trip is three days or twenty-one. Capacity is not a matter of taste — it
+ * is the number of days multiplied by the stops a day of that pace can hold,
+ * and `PACE_DEFAULTS` already differs per pace. So Calm asks for fewer places
+ * than Fast paced without a second rule existing anywhere: choosing a relaxed
+ * mood shortens the deck, which is what choosing it should mean.
+ *
+ * Meals are excluded deliberately. A restaurant is not competing for a stop —
+ * `buildDestinationItinerary` draws food from the whole ranked list, so food
+ * places must not consume sightseeing capacity here either.
+ */
+export function shortlistTarget(
+  dayCount: number,
+  behaviour: TravelBehaviourProfile,
+  availableCount: number,
+): ShortlistTarget {
+  const days = Math.max(1, Math.round(dayCount) || 1);
+  const perDay = behaviour.maxMainActivitiesPerDay ?? PACE_DEFAULTS[behaviour.pace].maxMainActivities;
+  const capacity = days * Math.max(1, perDay);
+
+  const wanted = Math.max(MINIMUM_SHORTLIST, Math.ceil(capacity * SHORTLIST_HEADROOM));
+  const shortlist = Math.max(0, Math.min(availableCount, wanted));
+  const mustDo = Math.min(shortlist, Math.max(2, Math.round(capacity * MUST_DO_SHARE)));
+
+  return { capacity, shortlist, mustDo };
+}
+
+/**
+ * The "Recommended shortlist" pre-selection, sized to the trip rather than to a
+ * constant. Food-only places are passed over: they are drawn separately when
+ * meals are scheduled, and pre-selecting them would spend sightseeing capacity
+ * on lunch.
+ */
+export function defaultDiscoveryDecisions(
+  ranked: RankedCandidate[],
+  options: { dayCount?: number; behaviour?: TravelBehaviourProfile } = {},
+): Record<string, CandidateDecision> {
   const decisions: Record<string, CandidateDecision> = {};
-  ranked.slice(0, 2).forEach(({ candidate }) => { decisions[candidate.id] = 'must-do'; });
-  ranked.slice(2, 29).forEach(({ candidate }) => { decisions[candidate.id] = 'interested'; });
+  const sightseeing = ranked.filter(({ candidate }) => !isFoodOnly(candidate));
+
+  const behaviour = options.behaviour;
+  // Without trip context there is nothing to size against, so the previous
+  // fixed shape is kept rather than inventing a capacity.
+  const target = behaviour
+    ? shortlistTarget(options.dayCount ?? 1, behaviour, sightseeing.length)
+    : { shortlist: Math.min(sightseeing.length, 29), mustDo: 2, capacity: 0 };
+
+  sightseeing.slice(0, target.shortlist).forEach(({ candidate }, index) => {
+    decisions[candidate.id] = index < target.mustDo ? 'must-do' : 'interested';
+  });
   return decisions;
 }
 

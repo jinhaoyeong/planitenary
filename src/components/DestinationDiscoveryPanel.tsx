@@ -28,8 +28,11 @@ import {
   buildDestinationItinerary,
   defaultDiscoveryDecisions,
   rankWithIntelligence,
+  shortlistTarget,
   type DestinationBuildResult,
 } from '../lib/destinationPlanner';
+import { applyTravellerConstraints, deriveTravelBehaviour } from '../lib/travelBehaviour';
+import { isFoodOnly } from '../lib/humanScheduler';
 import type { TripProfile } from '../lib/tripProfile';
 
 interface DestinationDiscoveryPanelProps {
@@ -776,6 +779,19 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     () => rankWithIntelligence(candidates, profile, { evidence: evidenceSummaries, trends }),
     [candidates, profile, evidenceSummaries, trends],
   );
+  /**
+   * Trip capacity, derived the same way `buildDestinationItinerary` derives it,
+   * so the deck recommends the number of places the build can actually use.
+   */
+  const tripDayCount = Math.max(1, itinerary.days.length || profile.dayCount || 1);
+  const tripBehaviour = useMemo(
+    () => applyTravellerConstraints(deriveTravelBehaviour(profile)),
+    [profile],
+  );
+  const shortlistSize = useMemo(
+    () => shortlistTarget(tripDayCount, tripBehaviour, ranked.filter(({ candidate }) => !isFoodOnly(candidate)).length),
+    [tripDayCount, tripBehaviour, ranked],
+  );
   const groupedRanked = useMemo(() => {
     const assigned = new Set<string>();
     return GROUPS.map((group) => {
@@ -1071,7 +1087,12 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   }, [isMobileReview, phase, desktopMode, currentDeckCard, stepBack, decisions]);
 
   const selectRecommended = () => {
-    const next = defaultDiscoveryDecisions(ranked);
+    // Sized to this trip: the days it has, and the stops a day of the chosen
+    // pace can hold. A relaxed mood therefore shortlists fewer places.
+    const next = defaultDiscoveryDecisions(ranked, {
+      dayCount: tripDayCount,
+      behaviour: tripBehaviour,
+    });
     decisionsRef.current = next;
     setDecisions(next);
     persistDecisions(next);
@@ -1427,7 +1448,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
                   <ArrowLeft className="w-4 h-4" /> Reconsider {decisionHistory[decisionHistory.length - 1].name}
                 </button>
               )}
-              <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Use recommended shortlist</button>
+              <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>
+                Use recommended shortlist ({shortlistSize.shortlist})
+              </button>
               <button type="button" className="pill-btn pill-ghost" onClick={() => { hapticTap(); setPhase('idle'); }}>Close</button>
             </div>
           </div>
