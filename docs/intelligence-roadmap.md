@@ -23,6 +23,7 @@ Measured against the goal quoted above, not against this document's own phases.
 | "adapt to the mood the traveller chose" | **Done** — `PACE_DEFAULTS` fully enforced |
 | Arrival and departure shaping | **Done** — flight times wired in `0fa4a02` |
 | "don't give them 100 for 10+ days" | **Done, tuning still provisional** — see §6 Phase 7 |
+| Multi-city trips — a stay per city, days that belong to one | **Done** — `cityStays` asked in the wizard, `planCityLegs` as fallback, city switcher in discovery |
 | "pull the latest reviews from around the internet" | **Partial** — YouTube and official sites live; Google off by choice; Reddit dropped |
 | TikTok / Douyin / RedNote discovery | **Blocked, permanently** — see §1 |
 | "be trendy and always up to date" | **Built, never verified** — `travel-refresh` has not run against real due records |
@@ -40,10 +41,14 @@ of why "built" and "working" are not the same thing here, both found on
   `DiscoveryProvider` values, so every place from OpenStreetMap, Wikivoyage,
   Amap or Baidu lost its attribution on save — which is all of them.
 
-Both are fixed in `4c3d6c6`, and both are now covered by the component-test
-setup from `c5dfce5`. The save path, trip identity fields, and discovery
-decision pruning have automated coverage; §9 remains for the parts that need
-real builds or deployed services.
+Both are fixed in `4c3d6c6`, and both are now covered by tests: `c5dfce5`
+extracted the sanitisers out of `App.tsx` to `src/lib/itinerarySanitize.ts`
+precisely so they could be reached. The save path
+(`itinerarySanitize.test.ts`), decision pruning (`decisionPruning.test.ts`),
+the Trip Identity fields (`TripIdentityPanel.test.tsx`) and the discovery card's
+flip and gesture rules (`DeckCard.test.tsx`, `deckGestures.test.ts`) now have
+automated coverage; §9 remains for the parts that need real builds or deployed
+services.
 
 ---
 
@@ -774,9 +779,12 @@ it needs nothing but the app.
 **Passes when** a place from OSM still says `provider: 'osm'` and keeps its
 `indoorOutdoor` after a reload. Before `4c3d6c6` both were `undefined`.
 
-**Automated coverage:** the jsdom + RTL setup from `c5dfce5` now covers the
-sanitisation and Trip Identity save path. A deployed OSM round trip remains a
-live-environment check.
+**Automated coverage:** `itinerarySanitize.test.ts` covers the sanitisation
+itself — including both field losses, verified by reverting `4c3d6c6` and
+watching three tests go red — and `TripIdentityPanel.test.tsx` covers the Trip
+Identity save path. Neither exercises Supabase, `localStorage` or a real
+provider payload, so the deployed OSM round trip remains a live-environment
+check.
 
 ### 9.2 Mood actually changes the plan — no credentials needed
 
@@ -840,19 +848,46 @@ where source = 'official-website'
 
 No undo needed — the sweep rewrites `expires_at` itself.
 
-### 9.6 The structural gap — largely closed
+### 9.6 The structural gap — narrowed, not closed
 
-The jsdom + React Testing Library setup from `c5dfce5` now covers:
+The gap was that all 32 test files were `src/lib`, so anything living inside
+`App.tsx` or a component was unreachable. `c5dfce5` addressed it in two ways,
+and it is worth keeping them distinct:
+
+**By extraction, into pure-lib tests** — the larger share of the win:
 
 - the save path (`sanitizeItinerary` / `sanitizeActivity`), where both silent
-  losses lived
-- the sync layer and its revision guard
-- the discovery deck's interactions
-- the panel wiring that connects the profile to `BuildOptions`
+  losses lived — `itinerarySanitize.test.ts`
+- the revision guard `isNewerItineraryRevision`, which orders versions so a
+  late-resolving fetch cannot roll back a rebuild — same file
+- stale-decision pruning — `decisionPruning.test.ts` (`d89bbe8`)
+- shortlist sizing and the 100-place cap — `shortlistSizing.test.ts`
+- pace and flight-edge shaping through finished builds —
+  `destinationPlannerGeneric.test.ts` (`6b369a6`, `d742caf`)
+
+**By the jsdom + RTL harness itself:**
+
+- `TripIdentityPanel.test.tsx`, covering the flight-time and date fields and the
+  panel wiring that connects the profile to `BuildOptions`
+- `DeckCard.test.tsx`, covering the card's flip: which clicks open it, which
+  close it, and which — a source link, a live text selection — must be left
+  alone. The gesture *rules* moved to `src/lib/deckGestures.ts` and are covered
+  by `deckGestures.test.ts`, because Framer Motion's pointer drag cannot be
+  driven honestly in jsdom. Both were checked by mutation: removing the
+  interactive-target and selection guards turns four tests red
+
+**Still uncovered:**
+
+- the drag gesture *itself*. `isDragIntent` and `swipeDecision` are tested, and
+  the component calls them, but that a real mouse drag suppresses the click
+  trailing it remains a browser observation
+- the *call sites* of the revision guard in `App.tsx`. The comparison is tested;
+  that the remote fetch and the realtime handler both consult it is not
+- `DestinationDiscoveryPanel`'s use of `pruneDecisionsToCandidates` — the pruning
+  is tested, the wiring is not
 
 The remaining manual checks are the deployed discovery → save → reload round
-trip and the itinerary-sync browser observation. The scheduler's pace and
-flight-edge behavior is now covered by reproducible finished-build tests.
+trip (§9.1) and the itinerary-sync browser observation (§9.3).
 
 ---
 
@@ -867,8 +902,10 @@ departure day, the inverted departure window, and a dinner-only first day for
 a 19:30 arrival: no main sightseeing stops, but a real meal when one fits or
 a flexible dinner fallback otherwise.
 
-The jsdom and React Testing Library setup covers the save path, Trip Identity
-fields, and stale-decision pruning. The shortlist sweep remains deliberately
+The save path and stale-decision pruning are covered by pure-lib tests; the
+Trip Identity fields and the discovery card's flip by component tests, with the
+deck's gesture rules extracted to `deckGestures.ts` so they could be reached at
+all. §9.6 lists what remains uncovered. The shortlist sweep remains deliberately
 untuned: 26 of 36 fixture builds were pool-bound, and active-pace underfill was
 dominated by `no-viable-day` in the only sufficiently large pool. Keep
 `SHORTLIST_HEADROOM = 1.4` until non-pool-bound live samples with real hours
@@ -883,6 +920,10 @@ exist. The carried-decision issue is closed by `d89bbe8`.
   `profileRevision` guards generated *copy* against its frozen proposal; there
   is no equivalent for the days. A traveller can set flight times, see the plan
   unchanged, and reasonably conclude the feature does nothing.
+- **Route reordering is arrow buttons, not drag.** `CityStayPlanner` lets the
+  traveller set both the length and the order of every stay, which is the part
+  that matters; moving a city up a four-row list is still fiddlier than dragging
+  it would be.
 - **Amap POI noise reaches the shortlist.** A Guangzhou deck ranked "AAG
   Markets" — a financial-services office — at 58 with "central to understanding
   this city". Regional-provider keyword search has no category gate equivalent
