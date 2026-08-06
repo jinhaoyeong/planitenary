@@ -1,9 +1,20 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  test: {
+    /**
+     * `node` stays the default so the pure `src/lib` suites keep running in
+     * milliseconds. A component test asks for a DOM per file with a
+     * `// @vitest-environment jsdom` docblock, so only the files that need
+     * jsdom pay for it.
+     */
+    environment: 'node',
+    setupFiles: ['./src/test/setup.ts'],
+  },
   plugins: [
     react(),
     VitePWA({

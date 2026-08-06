@@ -101,12 +101,18 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
 
   return (
     <div className="space-y-6">
+      {/*
+        * Every label here is tied to its input by id. They were previously bare
+        * <label> siblings, which reads as an unlabelled field to a screen
+        * reader — and is why nothing could find them by name.
+        */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+          <label htmlFor="trip-start-date" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
             Start date
           </label>
           <input
+            id="trip-start-date"
             type="date"
             className="editorial-input w-full"
             value={profile.startDate || ''}
@@ -114,10 +120,11 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+          <label htmlFor="trip-end-date" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
             End date
           </label>
           <input
+            id="trip-end-date"
             type="date"
             className="editorial-input w-full"
             min={profile.startDate || undefined}
@@ -134,10 +141,11 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+          <label htmlFor="trip-arrival-time" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
             Arrival time (optional)
           </label>
           <input
+            id="trip-arrival-time"
             type="time"
             className="editorial-input w-full"
             value={profile.arrivalTime || ''}
@@ -145,10 +153,11 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+          <label htmlFor="trip-departure-time" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
             Departure time (optional)
           </label>
           <input
+            id="trip-departure-time"
             type="time"
             className="editorial-input w-full"
             value={profile.departureTime || ''}
