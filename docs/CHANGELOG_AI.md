@@ -4,6 +4,50 @@ Running log. Newest first. Rationale lives in `CLAUDE_CONTEXT.md`.
 
 ---
 
+## 2026-08-06 (trip length changes)
+
+> "What if user add one more day in the app after building and setting up the
+> trip — does the UI update? Make sure it does."
+
+It did not, in three separate ways.
+
+**The day cards never followed the dates.** They were generated once, at
+creation. Adding a day afterwards moved the hero badge to 9 and left eight
+cards behind, so the ninth day existed nowhere the traveller could open it.
+`syncDaysWithDuration` now runs inside `syncDurationDependentFields`, the single
+path every profile write already takes.
+
+- Growing appends. Shrinking removes trailing cards **only while they are
+  empty** — a day with something on it is work, and deleting it to satisfy a
+  date change would throw away what the traveller did; those days are kept and
+  reported as stranded
+- Clearing the dates changes nothing at all. Removing a date range is not an
+  instruction to delete eight days of planning
+- Dates refresh on every card, because moving a trip forward a week moves every
+  day with it
+
+**The stay plan was being discarded.** Eight placed nights no longer summed to
+nine days, and a plan that does not add up was falling through to inference — so
+adding one day silently threw away the whole thing. `fitCityStays` stretches the
+last stay, or trims from the end when the trip shrinks, and the build says which:
+"Your trip is 1 day longer than your stay plan, so it was added to Kyoto."
+
+That needed a distinction the profile could not previously make. Three days
+placed on an eight-day trip is either a finished plan for a trip that has since
+grown, or one abandoned half-way; the first must be kept and stretched, the
+second is better served by inference. `cityStayDayCount` records the length a
+plan was set against, which is what tells them apart.
+
+**Nothing said what had happened.** Trip Identity now reports it: an empty day
+at the end says to rebuild through discovery, and days past the end of a
+shortened trip say they were kept.
+
+Verified end to end through the ordinary save path: build 8 days as Osaka 5 /
+Kyoto 3, add a day, and the handbook returns nine dated cards and rebuilds as
+Osaka 5 / Kyoto 4. 744 tests across 46 files.
+
+---
+
 ## 2026-08-06 (multi-city session)
 
 Two reports from the traveller, one interface and one engine.

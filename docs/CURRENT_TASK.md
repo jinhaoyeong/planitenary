@@ -5,8 +5,21 @@ Multi-city planning, and a range calendar for the dates
 
 Branch: `main`, at `d742caf` plus this session's work.
 
-731 tests across 45 files, `tsc -b` clean, production build clean, eslint clean
+744 tests across 46 files, `tsc -b` clean, production build clean, eslint clean
 on changed files (the 53 remaining problems are pre-existing and unchanged).
+
+## Completed — the trip changing length after it is built
+
+- `syncDaysWithDuration` inside `syncDurationDependentFields`: day cards follow
+  the dates on every profile write. Growing appends; shrinking removes trailing
+  cards **only while empty** and reports the rest as stranded; clearing the
+  dates changes nothing; dates refresh when the trip moves
+- `fitCityStays` keeps a finished stay plan through a length change, stretching
+  the last stay or trimming from the end, and the build names what it did.
+  `cityStayDayCount` distinguishes a finished plan from an abandoned one, so
+  only the latter falls back to inference
+- Trip Identity reports the consequence: an empty last day says to rebuild
+  through discovery; stranded days say they were kept
 
 ## Completed — multi-city
 
