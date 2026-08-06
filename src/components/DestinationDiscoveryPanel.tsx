@@ -34,6 +34,7 @@ import {
 } from '../lib/destinationPlanner';
 import { applyTravellerConstraints, deriveTravelBehaviour } from '../lib/travelBehaviour';
 import { isFoodOnly } from '../lib/humanScheduler';
+import { recordShortlistDiagnostic } from '../lib/plannerDiagnostics';
 import type { TripProfile } from '../lib/tripProfile';
 
 interface DestinationDiscoveryPanelProps {
@@ -1274,6 +1275,12 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     if (weatherWarning) result.warnings = [...result.warnings, weatherWarning];
     if (eventsWarning) result.warnings = [...result.warnings, eventsWarning];
     if (nextWeatherRiskDays.length > 0) result.warnings = [...result.warnings, `Rain-sensitive days use an indoor-first order: ${nextWeatherRiskDays.join(', ')}.`];
+    /**
+     * Developer-only. Records what this build actually rejected, so
+     * `SHORTLIST_HEADROOM` can eventually be set from real trips instead of
+     * intuition. Reads the finished result and changes nothing about it.
+     */
+    recordShortlistDiagnostic(result, { city: cityLabel, days: tripDayCount });
     setBuildResult(result);
     setPhase('preview');
     setRouteLoading(false);
