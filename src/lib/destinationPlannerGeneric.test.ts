@@ -483,3 +483,109 @@ describe('safety guarantees survive the rewrite', () => {
     expect(rejection?.reason).toBe('queue-exceeds-tolerance');
   });
 });
+
+/**
+ * The roadmap's §9.2 and §9.4 verification pass, run through real builds
+ * rather than by hand.
+ *
+ * §7's first success criterion — "selecting Calm produces a visibly different
+ * itinerary from Fast paced" — had never been demonstrated on a real plan, only
+ * inferred from the pace table. The `indoorOutdoor` loss is the reason that
+ * distinction matters: the code path looked right there too, and had been dead
+ * since the first save.
+ */
+describe('§9.2 — the chosen pace visibly reshapes the plan', () => {
+  const planFor = (moods: TripMood[]) => {
+    const result = build(melbourneProfile(moods), 3);
+    const day = result.days[0];
+    return {
+      pace: result.behaviour.pace,
+      placesPerDay: result.days.map((d) => d.activities.filter((a) => a.kind === 'place').length),
+      firstStart: day.activities[0]?.time ?? '',
+      mealMinutes: day.activities.find((a) => a.kind === 'meal-window')?.durationMinutes ?? 0,
+      walking: result.dayLoads[0]?.walkingMinutes ?? 0,
+    };
+  };
+
+  it('routes the three moods onto three different paces', () => {
+    expect(planFor(['calm']).pace).toBe('relaxed');
+    expect(planFor([]).pace).toBe('balanced');
+    expect(planFor(['fast-paced']).pace).toBe('active');
+  });
+
+  it('gives a calm trip fewer stops on its busiest day', () => {
+    const calm = planFor(['calm']);
+    const fast = planFor(['fast-paced']);
+    expect(Math.max(...calm.placesPerDay)).toBeLessThan(Math.max(...fast.placesPerDay));
+  });
+
+  it('starts a calm day later than a fast-paced one', () => {
+    // Verified: 10:13 against 09:13.
+    expect(planFor(['calm']).firstStart > planFor(['fast-paced']).firstStart).toBe(true);
+  });
+
+  it('gives a calm trip longer meals', () => {
+    // Verified: 85 minutes against 55. PACE_DEFAULTS.diningMinutes reaching
+    // the plan, not merely being declared.
+    expect(planFor(['calm']).mealMinutes).toBeGreaterThan(planFor(['fast-paced']).mealMinutes);
+  });
+
+  it('walks a calm traveller less far', () => {
+    expect(planFor(['calm']).walking).toBeLessThan(planFor(['fast-paced']).walking);
+  });
+});
+
+describe('§9.4 — flight times reshape the edges of a real plan', () => {
+  const buildWithEdges = (tripEdges: Record<string, string>, days = 3) => {
+    const profile = melbourneProfile();
+    const ranked = rankDestinationCandidates(MELBOURNE, profile);
+    return buildDestinationItinerary(
+      emptyItinerary(days), profile, ranked, defaultDiscoveryDecisions(ranked), { tripEdges },
+    );
+  };
+
+  it('leaves no room at all on the day a 19:30 flight lands', () => {
+    /**
+     * Verified behaviour, and *not* what `shapeTripEdge`'s own comment claims.
+     * It says an evening arrival "leaves a day that is really just dinner", but
+     * 19:30 plus two hours to clear the airport and drop bags starts the day at
+     * 21:30 — past the hour a balanced pace heads back — so nothing fits,
+     * dinner included.
+     */
+    const result = buildWithEdges({ arrivalTime: '19:30' });
+    expect(result.days[0].activities).toHaveLength(0);
+  });
+
+  it('tells the traveller why day one is empty rather than looking broken', () => {
+    const result = buildWithEdges({ arrivalTime: '19:30' });
+    expect(result.warnings.join(' ')).toContain('19:30 arrival');
+  });
+
+  it('still accounts for every place it could not fit', () => {
+    // The "nothing is dropped silently" guarantee has to survive an edge that
+    // removes a whole day of capacity.
+    const result = buildWithEdges({ arrivalTime: '19:30' });
+    expect(result.unscheduledReasons.length).toBeGreaterThan(0);
+    expect(result.unscheduledReasons.every((entry) => entry.detail.trim().length > 0)).toBe(true);
+  });
+
+  it('shortens the last day for a 20:00 departure instead of filling it', () => {
+    const shaped = buildWithEdges({ departureTime: '20:00' });
+    const plain = buildWithEdges({});
+    const lastOf = (r: typeof shaped) => r.days[r.days.length - 1].activities.filter((a) => a.kind === 'place');
+    expect(lastOf(shaped).length).toBeLessThanOrEqual(lastOf(plain).length);
+    expect(shaped.warnings.join(' ')).toContain('20:00 departure');
+  });
+
+  it('survives a departure so early the day ends before it starts', () => {
+    /**
+     * A 12:33 flight means leaving by 09:03, which is earlier than the 09:30 a
+     * balanced day begins — an inverted window. This was untested and is the
+     * case most likely to throw or to silently produce nonsense.
+     */
+    const result = buildWithEdges({ departureTime: '12:33' });
+    expect(result.days[result.days.length - 1].activities).toHaveLength(0);
+    // And it says so, rather than pretending the day worked out.
+    expect(result.warnings.join(' ')).toMatch(/09:03 target/);
+  });
+});
