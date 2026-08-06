@@ -24,6 +24,8 @@ import {
 import { OptionChips } from './ui/OptionChips';
 import { CountryPicker } from './ui/CountryPicker';
 import { CitySearchInput } from './ui/CitySearchInput';
+import { DateRangeCalendar } from './ui/DateRangeCalendar';
+import { CityStayPlanner } from './ui/CityStayPlanner';
 import { ToggleRow } from './ui/ToggleRow';
 import { VisualDesignControls } from './VisualDesignControls';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
@@ -436,31 +438,42 @@ export function TripCreateWizard({
 
           {step.id === 'when' && (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                    Start date
-                  </label>
-                  <input
-                    type="date"
-                    className="editorial-input w-full"
-                    value={profile.startDate || ''}
-                    onChange={(event) => update({ startDate: event.target.value || undefined })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                    End date
-                  </label>
-                  <input
-                    type="date"
-                    className="editorial-input w-full"
-                    min={profile.startDate || undefined}
-                    value={profile.endDate || ''}
-                    onChange={(event) => update({ endDate: event.target.value || undefined })}
-                  />
-                </div>
+              {/*
+                * One calendar for both ends of the trip. Two `type="date"`
+                * fields never showed the trip as a whole: you chose a start,
+                * the picker closed, and the days you had committed to were
+                * drawn nowhere.
+                */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                  When are you going
+                </label>
+                <DateRangeCalendar
+                  label="Trip dates"
+                  value={{ start: profile.startDate, end: profile.endDate }}
+                  onChange={(range) => update({ startDate: range.start, endDate: range.end })}
+                />
               </div>
+
+              {/*
+                * Asked, not assumed. On a multi-city trip the app does not get
+                * to decide which nights are in which city, so it asks here —
+                * before discovery, so every later stage follows the answer.
+                */}
+              {profile.destinations.length > 1 && nights !== null && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                    How long in each city
+                  </label>
+                  <CityStayPlanner
+                    cities={profile.destinations.map((destination) => destination.city)}
+                    dayCount={nights + 1}
+                    startDate={profile.startDate}
+                    value={profile.cityStays}
+                    onChange={(cityStays) => update({ cityStays })}
+                  />
+                </div>
+              )}
 
               {/*
                 * Optional, and deliberately placed under the dates rather than

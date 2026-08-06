@@ -35,7 +35,10 @@ import {
 import { applyTravellerConstraints, deriveTravelBehaviour } from '../lib/travelBehaviour';
 import { isFoodOnly } from '../lib/humanScheduler';
 import { recordShortlistDiagnostic } from '../lib/plannerDiagnostics';
-import type { TripProfile } from '../lib/tripProfile';
+import { describeCityLegs } from '../lib/cityLegs';
+import { describeStayDates, legsFromCityStays, reconcileCityStays } from '../lib/cityStays';
+import { SWIPE_COMMIT_PX, isDragIntent, shouldCloseFromSurface, swipeDecision } from '../lib/deckGestures';
+import { manualDestination, type TripProfile } from '../lib/tripProfile';
 
 interface DestinationDiscoveryPanelProps {
   itinerary: Itinerary;
@@ -44,15 +47,6 @@ interface DestinationDiscoveryPanelProps {
 }
 
 type DiscoveryPhase = 'idle' | 'review' | 'preview' | 'built';
-
-const SWIPE_COMMIT_PX = 110;
-/**
- * Past this much movement a pointer gesture is a drag, not a tap. A mouse drag
- * still ends with a click on whatever was underneath it, so without a threshold
- * every desktop swipe would also flip the card it just decided on. Well under
- * `SWIPE_COMMIT_PX`, because an abandoned swipe is still not a tap.
- */
-const DRAG_INTENT_PX = 8;
 
 const GROUPS = [
   { id: 'essentials', label: 'Essentials', matches: ['essential'] },
@@ -370,7 +364,7 @@ function CandidateCard({
  * keyboard and button routes to a decision exist on each, because a pointer is
  * a pointer whether it is a finger or a mouse.
  */
-function DeckCard({
+export function DeckCard({
   ranked,
   onDecision,
   context,
@@ -415,14 +409,12 @@ function DeckCard({
   };
 
   /**
-   * Clicking the back flips it shut, which is what Space has always done. Only
-   * the card's own surface closes it: interactive children and a live text
-   * selection are left alone, so opening a source or copying an excerpt does
-   * not throw away the details the traveller was reading.
+   * Clicking the back flips it shut, which is what Space has always done. The
+   * rule itself lives in `deckGestures.ts`; this reads the live selection,
+   * which only the browser can answer.
    */
   const closeDetailsFromSurface = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest('a, button, input, textarea, select')) return;
-    if (window.getSelection()?.toString()) return;
+    if (!shouldCloseFromSurface(event.target, Boolean(window.getSelection()?.toString()))) return;
     flip(false);
   };
 
@@ -443,16 +435,11 @@ function DeckCard({
         dragElastic={0.92}
         onDragStart={() => { dragMovedRef.current = false; }}
         onDrag={(_, info) => {
-          if (Math.abs(info.offset.x) > DRAG_INTENT_PX) dragMovedRef.current = true;
+          if (isDragIntent(info.offset.x)) dragMovedRef.current = true;
         }}
         onDragEnd={(_, info) => {
-          if (info.offset.x >= SWIPE_COMMIT_PX || info.velocity.x > 700) {
-            commit('must-do');
-            return;
-          }
-          if (info.offset.x <= -SWIPE_COMMIT_PX || info.velocity.x < -700) {
-            commit('skip');
-          }
+          const decision = swipeDecision(info.offset.x, info.velocity.x);
+          if (decision) commit(decision);
         }}
       >
         <motion.span className="destination-deck-stamp is-must" style={{ opacity: mustOpacity }}>Must do</motion.span>
@@ -647,8 +634,19 @@ function DiscoveryPreview({
       <div className="destination-preview-header">
         <div>
           <button type="button" className="destination-back-link" onClick={onBack}><ArrowLeft className="w-4 h-4" /> Back</button>
-          <h4>Your {cityLabel} plan</h4>
+          {/*
+            * A multi-city plan is named after the trip, not after whichever
+            * deck was open when Build was pressed — and the division between
+            * cities is stated here, because it is the decision a traveller is
+            * most likely to want to argue with.
+            */}
+          <h4>Your {result.cityLegs.length > 1
+            ? result.cityLegs.map((leg) => leg.city).join(' · ')
+            : cityLabel} plan</h4>
           <p>{placeCount} places across {plannedDays} {plannedDays === 1 ? 'day' : 'days'}.</p>
+          {result.cityLegs.length > 1 && (
+            <p className="destination-preview-legs">{describeCityLegs(result.cityLegs)}</p>
+          )}
         </div>
       </div>
 
@@ -731,8 +729,26 @@ function DiscoveryPreview({
 }
 
 export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChange }: DestinationDiscoveryPanelProps) {
-  const primaryCity = profile.destinations[0]?.city || itinerary.cities[0] || '';
-  const destination = profile.destinations[0];
+  /**
+   * A trip is reviewed one city at a time, and built from all of them.
+   *
+   * Discovery used to read `profile.destinations[0]` and nothing else, so a
+   * traveller who chose Osaka, Nara, Kyoto and Kobe was shown Osaka places,
+   * shortlisted Osaka places, and got an Osaka plan. Each city now has its own
+   * deck; the decisions are one map across the whole trip, because a place id
+   * is unique and a build needs every city at once.
+   */
+  const tripDestinations = useMemo(() => {
+    const fromProfile = profile.destinations.filter((entry) => entry.city.trim().length > 0);
+    if (fromProfile.length > 0) return fromProfile;
+    // A trip saved before destinations existed still has its city list.
+    return itinerary.cities.filter(Boolean).map((city) => manualDestination(city, ''));
+  }, [profile.destinations, itinerary.cities]);
+  const [activeCityIndex, setActiveCityIndex] = useState(0);
+  const destination = tripDestinations[Math.min(activeCityIndex, Math.max(0, tripDestinations.length - 1))]
+    ?? profile.destinations[0];
+  const primaryCity = destination?.city || itinerary.cities[0] || '';
+  const isMultiCity = tripDestinations.length > 1;
   const [providerRuntime, setProviderRuntime] = useState<ProviderRuntime | null>(null);
   useEffect(() => {
     let active = true;
@@ -753,9 +769,16 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const capabilityLoading = providerRuntime === null && isSupabaseConfigured();
   // Canonical display name for the active destination — never a hardcoded city.
   const cityLabel = capability.destination.city || primaryCity || 'this destination';
+  /**
+   * Saved decisions belong to the *trip*, not to whichever city is on screen.
+   * Matching only the active city would throw away a whole multi-city review
+   * the moment the traveller reopened the panel on a different tab.
+   */
   const savedStateMatchesCity = Boolean(
     itinerary.discoveryState
-    && itinerary.discoveryState.city.toLowerCase() === capability.destination.city.toLowerCase(),
+    && [capability.destination.city, ...tripDestinations.map((entry) => entry.city), ...itinerary.cities]
+      .filter(Boolean)
+      .some((city) => city.toLowerCase() === itinerary.discoveryState!.city.toLowerCase()),
   );
   const [phase, setPhase] = useState<DiscoveryPhase>(() => {
     if (itinerary.discoveryState?.stage === 'itinerary-built' && savedStateMatchesCity) return 'built';
@@ -764,7 +787,35 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     // cannot render an empty review panel with no way to fetch candidates.
     return 'idle';
   });
-  const [candidates, setCandidates] = useState<PlaceCandidate[]>([]);
+  /**
+   * Candidates per city, keyed by the canonical city label.
+   *
+   * Kept apart rather than in one list so switching cities does not re-fetch
+   * what has already been reviewed, and so a build can draw on every city the
+   * traveller has been through in this session. Candidates are not persisted —
+   * only decisions are — so this empties on reload, exactly as before.
+   */
+  const [candidatesByCity, setCandidatesByCity] = useState<Record<string, PlaceCandidate[]>>({});
+  /**
+   * Memoised so the empty case is a stable reference: `?? []` allocates a new
+   * array every render, which would re-run every memo and effect keyed on the
+   * deck — including the one that buys evidence.
+   */
+  const candidates = useMemo(() => candidatesByCity[cityLabel] ?? [], [candidatesByCity, cityLabel]);
+  const setCandidates = useCallback(
+    (update: PlaceCandidate[] | ((previous: PlaceCandidate[]) => PlaceCandidate[])) => {
+      setCandidatesByCity((previous) => ({
+        ...previous,
+        [cityLabel]: typeof update === 'function' ? update(previous[cityLabel] ?? []) : update,
+      }));
+    },
+    [cityLabel],
+  );
+  /** Every place the traveller has been shown this session, across all cities. */
+  const allCandidates = useMemo(
+    () => Object.values(candidatesByCity).flat(),
+    [candidatesByCity],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** True once results are known to come from the captured library, not a provider. */
@@ -782,6 +833,17 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     [candidates, profile, evidenceSummaries, trends],
   );
   /**
+   * The whole trip's places, ranked together. The deck reviews one city at a
+   * time; the plan is built from all of them at once, which is the only way a
+   * Kyoto day can hold Kyoto places.
+   */
+  const rankedAll = useMemo(
+    () => (isMultiCity
+      ? rankWithIntelligence(allCandidates, profile, { evidence: evidenceSummaries, trends })
+      : ranked),
+    [isMultiCity, allCandidates, profile, evidenceSummaries, trends, ranked],
+  );
+  /**
    * Trip capacity, derived the same way `buildDestinationItinerary` derives it,
    * so the deck recommends the number of places the build can actually use.
    */
@@ -790,9 +852,28 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     () => applyTravellerConstraints(deriveTravelBehaviour(profile)),
     [profile],
   );
+  /**
+   * The days this city actually has.
+   *
+   * Taken from the traveller's stay plan wherever they have set one, because
+   * that is a decision they made rather than a number to infer. Without a plan
+   * — an older trip, or one still being filled in — an even split is the
+   * fallback, and the panel says so rather than presenting it as settled.
+   */
+  const statedLegs = useMemo(
+    () => legsFromCityStays(
+      reconcileCityStays(profile.cityStays, tripDestinations.map((entry) => entry.city)),
+      tripDayCount,
+    ),
+    [profile.cityStays, tripDestinations, tripDayCount],
+  );
+  const activeLeg = statedLegs.find((leg) => leg.city.toLowerCase() === (destination?.city || '').toLowerCase());
+  const hasStayPlan = statedLegs.length > 0;
+  const cityDayCount = activeLeg?.days
+    ?? Math.max(1, Math.round(tripDayCount / Math.max(1, tripDestinations.length)));
   const shortlistSize = useMemo(
-    () => shortlistTarget(tripDayCount, tripBehaviour, ranked.filter(({ candidate }) => !isFoodOnly(candidate)).length),
-    [tripDayCount, tripBehaviour, ranked],
+    () => shortlistTarget(cityDayCount, tripBehaviour, ranked.filter(({ candidate }) => !isFoodOnly(candidate)).length),
+    [cityDayCount, tripBehaviour, ranked],
   );
   const groupedRanked = useMemo(() => {
     const assigned = new Set<string>();
@@ -848,8 +929,25 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       // Preference persistence is optional; the in-memory choice still works.
     }
   }, [desktopMode]);
-  const selectedCount = Object.values(decisions).filter((decision) => decision === 'must-do' || decision === 'interested').length;
-  const reviewedCount = Object.keys(decisions).length;
+  /**
+   * Progress is reported for the city on screen. A trip-wide count beside a
+   * one-city deck reads as "45 of 20 reviewed" — the same class of nonsense
+   * `d89bbe8` removed, arrived at from the other direction.
+   */
+  const activeCandidateIds = useMemo(() => new Set(ranked.map(({ candidate }) => candidate.id)), [ranked]);
+  const isSelected = (decision: CandidateDecision | undefined) =>
+    decision === 'must-do' || decision === 'interested';
+  const selectedCount = Object.entries(decisions)
+    .filter(([id, decision]) => activeCandidateIds.has(id) && isSelected(decision)).length;
+  const reviewedCount = Object.keys(decisions).filter((id) => activeCandidateIds.has(id)).length;
+  /** Across every city, which is what the build will actually receive. */
+  const tripSelectedCount = Object.values(decisions).filter(isSelected).length;
+  /**
+   * What "build" is judged against. On a multi-city trip a traveller may be
+   * looking at an untouched Kobe deck with twenty places kept in Osaka — the
+   * button must not be disabled by the city that happens to be on screen.
+   */
+  const buildableCount = isMultiCity ? tripSelectedCount : selectedCount;
   const pendingDeck = useMemo(
     () => ranked.filter(({ candidate }) => !decisions[candidate.id]),
     [ranked, decisions],
@@ -916,7 +1014,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       }
     });
     return () => { active = false; };
-  }, [phase, usingFixture, currentDeckCard, pendingDeck, capability.destination.city, capability.destination.countryCode, capability.places.provider]);
+  }, [phase, usingFixture, currentDeckCard, pendingDeck, setCandidates, capability.destination.city, capability.destination.countryCode, capability.places.provider]);
   const deckContext = useMemo<CandidateContext | undefined>(() => {
     if (!currentDeckCard) return undefined;
     const id = currentDeckCard.candidate.id;
@@ -937,7 +1035,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       discoveryState: {
         city: cityLabel,
         mode: usingFixture ? 'fixture' : 'live',
-        candidateIds: candidates.map((candidate) => candidate.id),
+        // Every city reviewed this session, so a reload can tell which of the
+        // restored decisions still belong to places the trip has seen.
+        candidateIds: [...allCandidates.map((candidate) => candidate.id), ...candidates.map((candidate) => candidate.id)]
+          .filter((id, index, all) => all.indexOf(id) === index),
         decisions: next,
         discoveredAt,
         updatedAt: new Date().toISOString(),
@@ -946,25 +1047,34 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     });
   };
 
-  const beginDiscovery = async () => {
-    if (!supportsDiscovery) return;
+  /**
+   * @param cityIndex Which destination to discover. Passed explicitly because
+   * switching city and discovering it happen in one action, and the state set
+   * by the switch is not visible to this closure until the next render.
+   */
+  const beginDiscovery = async (cityIndex = activeCityIndex) => {
+    const target = tripDestinations[cityIndex] ?? destination;
+    const targetCapability = target
+      ? capabilityFor({ city: target.city, region: target.region, countryCode: target.countryCode || '' }, runtime)
+      : capability;
+    const targetLabel = targetCapability.destination.city || target?.city || cityLabel;
+    if (!canDiscover(targetCapability)) return;
     setLoading(true);
     setError(null);
     try {
       // Live provider first; the captured library is the labelled fallback.
-      const destination = profile.destinations[0];
-      const runtime = await loadProviderRuntime(
+      const activeRuntime = await loadProviderRuntime(
         isSupabaseConfigured() ? (name) => invokeTravelFunction(name) : undefined,
       );
       const outcome = await discoverPlaces(
         {
-          city: capability.destination.city,
-          region: destination?.region,
-          countryCode: destination?.countryCode || capability.destination.countryCode,
-          lat: destination?.lat,
-          lng: destination?.lng,
+          city: targetCapability.destination.city,
+          region: target?.region,
+          countryCode: target?.countryCode || targetCapability.destination.countryCode,
+          lat: target?.lat,
+          lng: target?.lng,
         },
-        runtime,
+        activeRuntime,
         isSupabaseConfigured() ? invokeTravelFunction : undefined,
       );
       setUsingFixture(outcome.usingFixture);
@@ -979,8 +1089,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       const discovered = outcome.candidates.length > 0
         ? outcome.candidates
         : await new FixturePlaceDiscoveryProvider().search({
-          city: capability.destination.city,
-          countryCode: capability.destination.countryCode,
+          city: targetCapability.destination.city,
+          countryCode: targetCapability.destination.countryCode,
           queries: [],
           interests: profile.styles,
           startDate: profile.startDate,
@@ -996,9 +1106,21 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
        * Decisions survive a re-discovery, but only for places still on offer.
        * A provider can return a different set for the same city, and keeping
        * the rest leaves the deck counting choices about cards it does not have.
+       *
+       * Pruned against *every* city's candidates rather than this one's. Using
+       * only the active deck would delete the traveller's Kyoto choices the
+       * moment they opened Nara — the failure `d89bbe8` fixed, in a new
+       * disguise.
        */
-      const pruned = pruneDecisionsToCandidates(decisionsRef.current, discovered);
-      setCandidates(discovered);
+      const stillOffered = [
+        ...discovered,
+        ...Object.entries(candidatesByCity)
+          .filter(([city]) => city !== targetLabel)
+          .flatMap(([, cityCandidates]) => cityCandidates),
+      ];
+      const pruned = pruneDecisionsToCandidates(decisionsRef.current, stillOffered);
+      setCandidatesByCity((previous) => ({ ...previous, [targetLabel]: discovered }));
+      setActiveCityIndex(cityIndex);
       decisionsRef.current = pruned.decisions;
       setDecisions(pruned.decisions);
       // Nothing is dropped silently: a selection that vanishes between runs is
@@ -1013,6 +1135,75 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * Move the deck to another city. Already-reviewed cities come back instantly
+   * from `candidatesByCity`; a city opened for the first time is discovered
+   * then, not up front — four cities' worth of provider calls a traveller may
+   * never look at is exactly the cost the caching work went to avoid.
+   */
+  const switchCity = (index: number) => {
+    if (index === activeCityIndex || loading) return;
+    hapticTap();
+    const label = tripDestinations[index]?.city ?? '';
+    const known = Object.keys(candidatesByCity).find((city) => city.toLowerCase() === label.toLowerCase());
+    setActiveCityIndex(index);
+    setFocusedCandidateId(null);
+    setDecisionNotice(null);
+    setError(null);
+    if (!known || (candidatesByCity[known]?.length ?? 0) === 0) void beginDiscovery(index);
+  };
+
+  /** Per-city review state and stay length, for the switcher's own labels. */
+  const cityProgress = useMemo(() => tripDestinations.map((entry) => {
+    const label = Object.keys(candidatesByCity).find((city) => city.toLowerCase() === entry.city.toLowerCase());
+    const cityCandidates = label ? candidatesByCity[label] ?? [] : [];
+    const ids = new Set(cityCandidates.map((candidate) => candidate.id));
+    const leg = statedLegs.find((item) => item.city.toLowerCase() === entry.city.toLowerCase());
+    return {
+      city: entry.city,
+      discovered: cityCandidates.length,
+      reviewed: Object.keys(decisions).filter((id) => ids.has(id)).length,
+      selected: Object.entries(decisions)
+        .filter(([id, decision]) => ids.has(id) && (decision === 'must-do' || decision === 'interested')).length,
+      // The dates the traveller booked for this city, when they have said.
+      dates: leg ? describeStayDates(leg, profile.startDate) : null,
+      days: leg?.days ?? null,
+    };
+  }), [tripDestinations, candidatesByCity, decisions, statedLegs, profile.startDate]);
+
+  const CitySwitcher = ({ compact = false }: { compact?: boolean }) => {
+    if (!isMultiCity) return null;
+    return (
+      <div
+        className={`destination-city-switcher${compact ? ' is-compact' : ''}`}
+        role="tablist"
+        aria-label="Cities on this trip"
+      >
+        {cityProgress.map((entry, index) => (
+          <button
+            key={entry.city}
+            type="button"
+            role="tab"
+            aria-selected={index === activeCityIndex}
+            className={index === activeCityIndex ? 'is-active' : ''}
+            onClick={() => switchCity(index)}
+            disabled={loading}
+          >
+            <span className="destination-city-switcher-name">{entry.city}</span>
+            {/*
+              * The dates come first: a traveller reviewing Kyoto places needs
+              * to know they have two days there, or they will keep twelve.
+              */}
+            <span className="destination-city-switcher-meta">
+              {entry.dates ? `${entry.dates} · ` : ''}
+              {entry.discovered === 0 ? 'not reviewed' : `${entry.selected} kept`}
+            </span>
+          </button>
+        ))}
+      </div>
+    );
   };
 
   const updateDecision = (candidateId: string, decision: CandidateDecision, options?: { name?: string; silent?: boolean }) => {
@@ -1164,7 +1355,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     }
     const nextWeatherRiskDays: number[] = [];
     try {
-      const selected = ranked
+      const selected = rankedAll
         .filter(({ candidate }) => decisions[candidate.id] === 'must-do' || decisions[candidate.id] === 'interested')
         .map(({ candidate }) => candidate)
         .filter((candidate) => candidate.coordinates)
@@ -1251,7 +1442,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         eventsWarning = 'Current events were unavailable for this preview; the itinerary does not assume events exist.';
       }
     }
-    const result = buildDestinationItinerary(itinerary, profile, ranked, decisions, {
+    // Every city the traveller reviewed, so a Kyoto day can hold Kyoto places.
+    const result = buildDestinationItinerary(itinerary, profile, rankedAll, decisions, {
       queueEvidence,
       routeResolver,
       weatherRiskDays: nextWeatherRiskDays,
@@ -1292,12 +1484,24 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     onItineraryChange({
       ...itinerary,
       days: buildResult.days,
-      cities: Array.from(new Set(buildResult.days.map((day) => day.city).filter(Boolean))),
+      /**
+       * Cities in the order the trip now visits them, followed by any the
+       * traveller chose that this plan gave no days to. A city with nothing
+       * shortlisted in it is still a city they said they were going to, and
+       * dropping it here would quietly edit their trip.
+       */
+      cities: Array.from(new Set([
+        ...buildResult.days.map((day) => day.city).filter(Boolean),
+        ...tripDestinations.map((entry) => entry.city).filter(Boolean),
+      ])),
       revision: (itinerary.revision || 0) + 1,
       discoveryState: {
         city: cityLabel,
         mode: usingFixture ? 'fixture' : 'live',
-        candidateIds: candidates.map((candidate) => candidate.id),
+        // Every city reviewed this session, so a reload can tell which of the
+        // restored decisions still belong to places the trip has seen.
+        candidateIds: [...allCandidates.map((candidate) => candidate.id), ...candidates.map((candidate) => candidate.id)]
+          .filter((id, index, all) => all.indexOf(id) === index),
         decisions,
         discoveredAt: itinerary.discoveryState?.discoveredAt || timestamp,
         updatedAt: timestamp,
@@ -1382,8 +1586,19 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     return (
       <section className="destination-discovery-shell destination-discovery-intro">
         <div className="destination-intro-copy">
-          <h3>Build a {cityLabel} itinerary</h3>
-          <p>Verified places, one at a time.</p>
+          <h3>{isMultiCity ? `Build your ${tripDestinations.map((entry) => entry.city).join(' · ')} itinerary` : `Build a ${cityLabel} itinerary`}</h3>
+          <p>
+            {!isMultiCity
+              ? 'Verified places, one at a time.'
+              : hasStayPlan
+                // Their plan, read back. They already know where they are
+                // sleeping; what they need here is which deck matches which days.
+                ? `Verified places, one city at a time — ${describeCityLegs(statedLegs)}.`
+                // Said plainly, because a traveller reviewing Osaka would
+                // otherwise assume the other three cities were forgotten.
+                : `Verified places, one city at a time. Set how long you are staying in each city in Settings, or the days will be divided from what you shortlist.`}
+          </p>
+          <CitySwitcher compact />
         </div>
         <div className="destination-intro-actions">
           {canResumeReview && candidates.length > 0 && (
@@ -1391,7 +1606,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
               Continue reviewing
             </button>
           )}
-          <button type="button" className={`pill-btn ${canResumeReview && candidates.length > 0 ? 'pill-ghost' : 'pill-primary'}`} onClick={beginDiscovery} disabled={loading}>
+          <button type="button" className={`pill-btn ${canResumeReview && candidates.length > 0 ? 'pill-ghost' : 'pill-primary'}`} onClick={() => void beginDiscovery()} disabled={loading}>
             <Sparkles className="w-4 h-4" /> {loading ? 'Loading places…' : 'Start'}
           </button>
         </div>
@@ -1430,7 +1645,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
             </button>
           </div>
           <h3>Choose places for {cityLabel}</h3>
-          <div className="destination-review-progress" aria-label={`${reviewedCount} of ${ranked.length} places reviewed`}>
+          <CitySwitcher compact />
+          <div className="destination-review-progress" aria-label={`${reviewedCount} of ${ranked.length} places reviewed in ${cityLabel}`}>
             <div className="destination-review-progress-track">
               <div
                 className="destination-review-progress-fill"
@@ -1462,10 +1678,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           </div>
         ) : (
           <div className="destination-deck-complete">
-            <strong>Shortlist ready</strong>
-            <p>{selectedCount} places selected. Build your itinerary, or keep adjusting with recommended picks.</p>
+            <strong>{isMultiCity ? `${cityLabel} reviewed` : 'Shortlist ready'}</strong>
+            <p>
+              {isMultiCity
+                ? `${selectedCount} kept in ${cityLabel}, ${tripSelectedCount} across the trip. Review another city, or build now.`
+                : `${selectedCount} places selected. Build your itinerary, or keep adjusting with recommended picks.`}
+            </p>
+            <CitySwitcher compact />
             <div className="destination-deck-complete-actions">
-              <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={selectedCount < 2 || routeLoading}>
+              <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={buildableCount < 2 || routeLoading}>
                 {routeLoading ? 'Checking routes…' : 'Build itinerary'}
               </button>
               {decisionHistory.length > 0 && (
@@ -1485,7 +1706,13 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
                 {shortlistSize.capped && shortlistSize.shortlist < shortlistSize.capacity
                   // Only a trip long enough to out-run the ceiling loses places.
                   ? `About ${shortlistSize.shortlist} places — as many as is practical to review at once. ${tripDayCount} days at this pace could hold around ${shortlistSize.capacity}, so add more once you have worked through these.`
-                  : `About ${shortlistSize.shortlist} places for ${tripDayCount} ${tripDayCount === 1 ? 'day' : 'days'} — roughly what a ${tripBehaviour.pace.replace('-', ' ')} pace fits, with room for the ones that will not slot in.`}
+                  : isMultiCity
+                    ? hasStayPlan
+                      // A number from their own plan, not an inference. The
+                      // lever is the stay plan, and it is named.
+                      ? `About ${shortlistSize.shortlist} places for your ${cityDayCount} ${cityDayCount === 1 ? 'day' : 'days'} in ${cityLabel}, at a ${tripBehaviour.pace.replace('-', ' ')} pace. Change the days in Settings if this city deserves more of the trip.`
+                      : `About ${shortlistSize.shortlist} places for ${cityLabel} — its likely share of ${tripDayCount} days at a ${tripBehaviour.pace.replace('-', ' ')} pace. Set how long you are staying in each city to make this exact.`
+                    : `About ${shortlistSize.shortlist} places for ${tripDayCount} ${tripDayCount === 1 ? 'day' : 'days'} — roughly what a ${tripBehaviour.pace.replace('-', ' ')} pace fits, with room for the ones that will not slot in.`}
               </p>
               <button type="button" className="pill-btn pill-ghost" onClick={() => { hapticTap(); setPhase('idle'); }}>Close</button>
             </div>
@@ -1509,7 +1736,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           )}
         </AnimatePresence>
 
-        {currentDeckCard && selectedCount >= 2 && (
+        {currentDeckCard && buildableCount >= 2 && (
           <div className="destination-review-footer destination-deck-footer">
             <div>
               <strong>{selectedCount} selected</strong>
@@ -1531,8 +1758,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           <span className="fixture-badge">
             <Database className="w-4 h-4" /> {ranked.length} verified{usingFixture ? ' · may be out of date' : ''}
           </span>
-          <h3>Choose what belongs in your {cityLabel} trip</h3>
-          <div className="destination-review-progress" aria-label={`${reviewedCount} of ${ranked.length} places reviewed`}>
+          <h3>Choose what belongs in your {cityLabel} {isMultiCity ? 'days' : 'trip'}</h3>
+          <CitySwitcher />
+          <div className="destination-review-progress" aria-label={`${reviewedCount} of ${ranked.length} places reviewed in ${cityLabel}`}>
             <div className="destination-review-progress-track">
               <div
                 className="destination-review-progress-fill"
@@ -1694,7 +1922,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           <strong>{selectedCount} selected</strong>
           <span>{reviewedCount} reviewed · skip stays out of the plan</span>
         </div>
-        <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={selectedCount < 2 || routeLoading}>
+        <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={buildableCount < 2 || routeLoading}>
           {routeLoading ? 'Checking routes…' : 'Build itinerary'}
         </button>
       </div>

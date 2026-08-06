@@ -173,6 +173,368 @@ body.planner-intelligence-active .pet-overlay {
   margin-top: 0.85rem;
 }
 
+/* --- Where the traveller stays, and for how long -------------------------- */
+
+.city-stay-planner {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.city-stay-planner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.city-stay-planner-status {
+  font-size: 0.74rem;
+  font-weight: 750;
+  color: var(--ink);
+}
+
+.city-stay-planner-even,
+.city-stay-planner-note {
+  font-size: 0.7rem;
+}
+
+.city-stay-planner-even {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.city-stay-planner-note {
+  color: var(--accent);
+}
+
+.city-stay-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.city-stay-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+/* A city with no days yet is a decision still outstanding, not a styled row. */
+.city-stay-row[data-empty='true'] {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.city-stay-order {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.city-stay-order button,
+.city-stay-stepper button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.city-stay-order button {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.city-stay-stepper button {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
+.city-stay-order button:disabled,
+.city-stay-stepper button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.city-stay-name {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.city-stay-name strong {
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+
+.city-stay-name span {
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+}
+
+.city-stay-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.city-stay-days {
+  min-width: 1.25rem;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.destination-preview-legs {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* --- Date range calendar ------------------------------------------------- */
+
+.date-range-calendar {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.date-range-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.date-range-summary {
+  flex: 1;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 750;
+  color: var(--ink);
+}
+
+.date-range-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.date-range-page:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.date-range-months {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+/* Two months only where there is genuinely room for both. */
+@media (min-width: 40rem) {
+  .date-range-months {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.date-range-month h4 {
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.date-range-weekdays,
+.date-range-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.date-range-weekdays span {
+  text-align: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding-bottom: 0.3rem;
+}
+
+.date-range-day {
+  position: relative;
+  aspect-ratio: 1;
+  min-height: 2rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  /*
+   * The connecting band is drawn on the cell itself with square edges, and the
+   * endpoints round only their outer corner — that is what makes the range read
+   * as one continuous stretch rather than a row of separate chips.
+   */
+  border-radius: 0;
+}
+
+.date-range-day:disabled {
+  color: color-mix(in srgb, var(--ink-muted) 55%, transparent);
+  cursor: default;
+}
+
+.date-range-day[data-today='true']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0.28rem;
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  background: var(--accent);
+}
+
+.date-range-day[data-role='in-range'] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.date-range-day[data-role='start'],
+.date-range-day[data-role='end'] {
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 800;
+}
+
+.date-range-day[data-role='start'] {
+  border-radius: 999px 0 0 999px;
+}
+
+.date-range-day[data-role='end'] {
+  border-radius: 0 999px 999px 0;
+}
+
+/* A one-day trip is both ends at once, and should read as a single dot. */
+.date-range-day[data-role='start'][aria-pressed='true']:only-child {
+  border-radius: 999px;
+}
+
+.date-range-day[data-role='start'][data-today='true']::after,
+.date-range-day[data-role='end'][data-today='true']::after {
+  background: var(--surface);
+}
+
+.date-range-day:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.date-range-day[data-role='start']:hover,
+.date-range-day[data-role='end']:hover {
+  background: var(--accent);
+}
+
+.date-range-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+
+.date-range-clear {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+/*
+ * One tab per city on a multi-city trip. Scrolls rather than wraps: four
+ * cities on a phone would otherwise push the deck itself below the fold, and
+ * the deck is what the traveller came here to use.
+ */
+.destination-city-switcher {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.destination-city-switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.destination-city-switcher button {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.destination-city-switcher button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.destination-city-switcher button.is-active {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.destination-city-switcher-name {
+  font-size: 0.8rem;
+  font-weight: 750;
+  line-height: 1.1;
+}
+
+.destination-city-switcher-meta {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.destination-city-switcher.is-compact button {
+  padding: 0.3rem 0.6rem;
+}
+
 .destination-review-progress-track {
   height: 0.35rem;
   overflow: hidden;

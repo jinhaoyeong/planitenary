@@ -3,6 +3,8 @@ import { ChevronDown, MapPin, Wand2, X } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { findCountry, type PlaceSuggestion } from '../lib/destinations';
 import { CitySearchInput } from './ui/CitySearchInput';
+import { DateRangeCalendar } from './ui/DateRangeCalendar';
+import { CityStayPlanner } from './ui/CityStayPlanner';
 import { ToggleRow } from './ui/ToggleRow';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { RegenerationPreview } from './RegenerationPreview';
@@ -102,37 +104,46 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
   return (
     <div className="space-y-6">
       {/*
-        * Every label here is tied to its input by id. They were previously bare
+        * The same calendar the wizard uses, so changing dates afterwards is the
+        * same gesture as choosing them — and the days between the two ends stay
+        * visible while they are being changed.
+        *
+        * Every remaining input below is tied to its label by id. They were bare
         * <label> siblings, which reads as an unlabelled field to a screen
         * reader — and is why nothing could find them by name.
         */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <label htmlFor="trip-start-date" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-            Start date
-          </label>
-          <input
-            id="trip-start-date"
-            type="date"
-            className="editorial-input w-full"
-            value={profile.startDate || ''}
-            onChange={(event) => update({ startDate: event.target.value || undefined })}
-          />
-        </div>
-        <div className="space-y-2">
-          <label htmlFor="trip-end-date" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-            End date
-          </label>
-          <input
-            id="trip-end-date"
-            type="date"
-            className="editorial-input w-full"
-            min={profile.startDate || undefined}
-            value={profile.endDate || ''}
-            onChange={(event) => update({ endDate: event.target.value || undefined })}
-          />
-        </div>
+      <div className="space-y-2">
+        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+          Trip dates
+        </label>
+        <DateRangeCalendar
+          label="Trip dates"
+          value={{ start: profile.startDate, end: profile.endDate }}
+          onChange={(range) => update({ startDate: range.start, endDate: range.end })}
+        />
       </div>
+
+      {/*
+        * The stay plan, editable after the fact for the same reason the dates
+        * are: hotels get rebooked. Changing it changes which city each day
+        * belongs to on the next build — it does not silently rewrite a plan
+        * already applied, because moving someone's scheduled days without
+        * asking is exactly what this control exists to stop.
+        */}
+      {profile.destinations.length > 1 && duration.days > 0 && (
+        <div className="space-y-2">
+          <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+            How long in each city
+          </label>
+          <CityStayPlanner
+            cities={profile.destinations.map((destination) => destination.city)}
+            dayCount={duration.days}
+            startDate={profile.startDate}
+            value={profile.cityStays}
+            onChange={(cityStays) => update({ cityStays })}
+          />
+        </div>
+      )}
 
       {/*
         * Flight times, editable after the fact because they are usually booked
