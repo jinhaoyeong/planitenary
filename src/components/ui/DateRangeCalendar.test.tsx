@@ -67,9 +67,16 @@ describe('drawing the trip', () => {
 
     expect(day('2027-01-21').dataset.role).toBe('start');
     expect(day('2027-01-31').dataset.role).toBe('end');
+    expect(day('2027-01-21').dataset.bound).toBe('range');
+    expect(day('2027-01-31').dataset.bound).toBe('range');
     for (let date = 22; date <= 30; date += 1) {
       expect(day(`2027-01-${date}`).dataset.role).toBe('in-range');
     }
+  });
+
+  it('marks a lone start as a solo circle, not a half-range', () => {
+    renderCalendar({ start: '2027-01-21' });
+    expect(day('2027-01-21').dataset.bound).toBe('solo');
   });
 
   it('leaves days outside the trip unmarked', () => {

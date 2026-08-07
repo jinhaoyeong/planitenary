@@ -150,37 +150,42 @@ export function DateRangeCalendar({
           <div className="date-range-weekdays" aria-hidden="true">
             {WEEKDAY_LABELS.map((weekday) => <span key={weekday}>{weekday.slice(0, 2)}</span>)}
           </div>
-          <div className="date-range-grid">
-            {monthGrid(visibleMonth).flat().map((cell) => {
-              const role = rangeRole(cell.iso, previewSelection);
-              const selectable = cell.inMonth && isSelectable(cell.iso, bounds);
-              return (
-                <button
-                  key={cell.iso}
-                  type="button"
-                  data-iso={cell.iso}
-                  className="date-range-day"
-                  data-role={role}
-                  data-today={cell.iso === today ? 'true' : undefined}
-                  // Padding days belong to the neighbouring month, which has
-                  // its own grid. Rendering them keeps the weeks aligned;
-                  // hiding them from assistive tech keeps them from being
-                  // read twice.
-                  aria-hidden={!cell.inMonth}
-                  tabIndex={cell.inMonth ? 0 : -1}
-                  disabled={!selectable}
-                  aria-pressed={role === 'start' || role === 'end'}
-                  aria-label={FULL_DATE.format(toLocalDate(cell.iso))}
-                  onClick={() => choose(cell.iso)}
-                  onKeyDown={(event) => onKeyDown(event, cell.iso)}
-                  onMouseEnter={() => setHovered(cell.iso)}
-                  onFocus={() => setHovered(cell.iso)}
-                >
-                  {cell.inMonth ? cell.day : ''}
-                </button>
-              );
-            })}
-          </div>
+            <div className="date-range-grid">
+              {monthGrid(visibleMonth).flat().map((cell) => {
+                const role = rangeRole(cell.iso, previewSelection);
+                const selectable = cell.inMonth && isSelectable(cell.iso, bounds);
+                const spanned =
+                  Boolean(previewSelection.start)
+                  && Boolean(previewSelection.end)
+                  && previewSelection.start !== previewSelection.end;
+                return (
+                  <button
+                    key={cell.iso}
+                    type="button"
+                    data-iso={cell.iso}
+                    className="date-range-day"
+                    data-role={role}
+                    data-bound={role === 'start' || role === 'end' ? (spanned ? 'range' : 'solo') : undefined}
+                    data-today={cell.iso === today ? 'true' : undefined}
+                    // Padding days belong to the neighbouring month, which has
+                    // its own grid. Rendering them keeps the weeks aligned;
+                    // hiding them from assistive tech keeps them from being
+                    // read twice.
+                    aria-hidden={!cell.inMonth}
+                    tabIndex={cell.inMonth ? 0 : -1}
+                    disabled={!selectable}
+                    aria-pressed={role === 'start' || role === 'end'}
+                    aria-label={FULL_DATE.format(toLocalDate(cell.iso))}
+                    onClick={() => choose(cell.iso)}
+                    onKeyDown={(event) => onKeyDown(event, cell.iso)}
+                    onMouseEnter={() => setHovered(cell.iso)}
+                    onFocus={() => setHovered(cell.iso)}
+                  >
+                    {cell.inMonth ? cell.day : ''}
+                  </button>
+                );
+              })}
+            </div>
         </div>
       </div>
 

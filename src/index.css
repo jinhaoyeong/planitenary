@@ -418,12 +418,8 @@ body.planner-intelligence-active .pet-overlay {
   font-size: 0.8rem;
   font-weight: 650;
   cursor: pointer;
-  /*
-   * The connecting band is drawn on the cell itself with square edges, and the
-   * endpoints round only their outer corner — that is what makes the range read
-   * as one continuous stretch rather than a row of separate chips.
-   */
   border-radius: 0;
+  isolation: isolate;
 }
 
 @media (min-width: 40rem) {
@@ -449,30 +445,61 @@ body.planner-intelligence-active .pet-overlay {
   border-radius: 999px;
   transform: translateX(-50%);
   background: var(--accent);
+  z-index: 1;
 }
 
 .date-range-day[data-role='in-range'] {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+/*
+ * Start and end are solid circles centred in the cell. The light range band
+ * still runs through mid-cell via the half-fill on `data-bound="range"`, so a
+ * multi-day trip reads as two dots joined by a strip rather than pill ends.
+ */
 .date-range-day[data-role='start'],
 .date-range-day[data-role='end'] {
-  background: var(--accent);
   color: var(--surface);
   font-weight: 800;
+  background: transparent;
 }
 
-.date-range-day[data-role='start'] {
-  border-radius: 999px 0 0 999px;
-}
-
-.date-range-day[data-role='end'] {
-  border-radius: 0 999px 999px 0;
-}
-
-/* A one-day trip is both ends at once, and should read as a single dot. */
-.date-range-day[data-role='start'][aria-pressed='true']:only-child {
+.date-range-day[data-role='start']::before,
+.date-range-day[data-role='end']::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2.05rem;
+  height: 2.05rem;
   border-radius: 999px;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+  z-index: -1;
+}
+
+@media (min-width: 40rem) {
+  .date-range-day[data-role='start']::before,
+  .date-range-day[data-role='end']::before {
+    width: 2.2rem;
+    height: 2.2rem;
+  }
+}
+
+.date-range-day[data-role='start'][data-bound='range'] {
+  background: linear-gradient(
+    to right,
+    transparent 50%,
+    color-mix(in srgb, var(--accent) 16%, transparent) 50%
+  );
+}
+
+.date-range-day[data-role='end'][data-bound='range'] {
+  background: linear-gradient(
+    to left,
+    transparent 50%,
+    color-mix(in srgb, var(--accent) 16%, transparent) 50%
+  );
 }
 
 .date-range-day[data-role='start'][data-today='true']::after,
@@ -486,7 +513,27 @@ body.planner-intelligence-active .pet-overlay {
 
 .date-range-day[data-role='start']:hover,
 .date-range-day[data-role='end']:hover {
-  background: var(--accent);
+  background: transparent;
+}
+
+.date-range-day[data-role='start'][data-bound='range']:hover {
+  background: linear-gradient(
+    to right,
+    transparent 50%,
+    color-mix(in srgb, var(--accent) 16%, transparent) 50%
+  );
+}
+
+.date-range-day[data-role='end'][data-bound='range']:hover {
+  background: linear-gradient(
+    to left,
+    transparent 50%,
+    color-mix(in srgb, var(--accent) 16%, transparent) 50%
+  );
+}
+
+.date-range-day[data-role='in-range']:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .date-range-foot {
