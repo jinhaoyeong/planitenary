@@ -4,9 +4,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  admissionFromJsonLd,
   closureNotices,
   extractJsonLd,
   isSafePublicUrl,
+  officialAdmissionClaims,
   openingRulesFromJsonLd,
   visibleText,
 } from '../../supabase/functions/_shared/officialSource';
@@ -103,6 +105,86 @@ describe('reading structured opening hours', () => {
   it('reports nothing for a page with no structured data', () => {
     expect(extractJsonLd('<html><body>Open daily!</body></html>')).toEqual([]);
     expect(rules([])).toEqual([]);
+  });
+});
+
+describe('reading structured admission offers', () => {
+  const page = (body: string) => `<script type="application/ld+json">${body}</script>`;
+
+  it('reads an explicit adult fare and keeps a verbatim JSON-LD excerpt', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({
+      '@type': 'Museum',
+      offers: { '@type': 'Offer', price: '600', priceCurrency: 'JPY' },
+    })));
+    const admission = admissionFromJsonLd(nodes, 'JP');
+    expect(admission).toMatchObject({ class: 'ticketed', source: 'official-website', confidence: 'high' });
+    expect(admission?.fares).toEqual([{ audience: 'adult', amount: 600, currency: 'JPY' }]);
+    expect(officialAdmissionClaims(nodes, admission)[0].excerpt).toContain('600');
+    expect(officialAdmissionClaims(nodes, admission)[0].excerpt).toContain('JPY');
+  });
+
+  it('handles AggregateOffer low and high prices without inventing a second audience', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({
+      offers: { '@type': 'AggregateOffer', lowPrice: '600', highPrice: '1000', priceCurrency: 'JPY' },
+    })));
+    const fare = admissionFromJsonLd(nodes, 'JP')?.fares?.[0];
+    expect(fare).toMatchObject({ audience: 'adult', amount: 600, currency: 'JPY', note: 'from 600 to 1000 JPY' });
+  });
+
+  it('uses isAccessibleForFree when the operator says entry is free', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({ isAccessibleForFree: true })));
+    const admission = admissionFromJsonLd(nodes, 'JP');
+    expect(admission).toMatchObject({ class: 'free', source: 'official-website' });
+    expect(officialAdmissionClaims(nodes, admission)[0].summary).toContain('admission is free');
+  });
+
+  /**
+   * A zero-priced `Offer` is how a great many operators publish free entry —
+   * `isAccessibleForFree` is optional and frequently omitted. Requiring both
+   * signals classified those places as ticketed, and the card then read
+   * "JP¥0 · adult ticket": technically derived from the source, and the worst
+   * possible way to say "free".
+   */
+  it('treats a zero-priced offer as free entry even without isAccessibleForFree', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'JPY' },
+    })));
+    expect(admissionFromJsonLd(nodes, 'JP')).toMatchObject({ class: 'free', source: 'official-website' });
+  });
+
+  it('does not call a paid place free because one audience gets in for nothing', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({
+      offers: [
+        { '@type': 'Offer', price: '1500', priceCurrency: 'JPY' },
+        { '@type': 'Offer', price: '0', priceCurrency: 'JPY', eligibleCustomerType: 'child' },
+      ],
+    })));
+    const admission = admissionFromJsonLd(nodes, 'JP');
+    expect(admission?.class).toBe('ticketed');
+    expect(admission?.fares?.some((fare) => fare.amount === 1500)).toBe(true);
+  });
+
+  it('resolves a bare structured number only when the country supplies the currency', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({ offers: { price: '600' } })));
+    expect(admissionFromJsonLd(nodes, 'JP')?.fares?.[0]).toMatchObject({ amount: 600, currency: 'JPY' });
+    expect(admissionFromJsonLd(nodes)?.fares).toEqual([]);
+  });
+
+  it('keeps an unparseable price range as text instead of treating a band as a fare', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({ priceRange: '$$' })));
+    expect(admissionFromJsonLd(nodes, 'JP')).toMatchObject({
+      class: 'unknown',
+      rawText: '$$',
+      source: 'official-website',
+    });
+    expect(officialAdmissionClaims(nodes, admissionFromJsonLd(nodes, 'JP'))).toEqual([]);
+  });
+
+  it('keeps the original text when a numeric range only yields its lower fare', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({ priceRange: '¥600–¥1,000' })));
+    const admission = admissionFromJsonLd(nodes, 'JP');
+    expect(admission?.fares?.[0]).toMatchObject({ amount: 600, currency: 'JPY' });
+    expect(admission?.rawText).toContain('¥1,000');
   });
 });
 

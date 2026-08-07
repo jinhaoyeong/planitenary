@@ -341,6 +341,26 @@ export const YOUTUBE_QUOTA_TIMEZONE = 'America/Los_Angeles';
 export const YOUTUBE_SEARCH_UNITS = 100;
 
 /**
+ * The day's allowance for the one provider that sends a bill.
+ *
+ * Deliberately small and deliberately separate from the discovery counters:
+ * a busy day of searching must not be able to spend the model budget, and a
+ * runaway model loop must not be able to starve discovery. The default is low
+ * enough that a misconfiguration is cheap to discover. Override with
+ * `GEMINI_DAILY_CALL_LIMIT`.
+ */
+export const geminiCallLimit = (): number => {
+  const configured = Number(env('GEMINI_DAILY_CALL_LIMIT'));
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 50;
+};
+
+/** Billing is accounted in UTC, and nothing here needs to match a reset. */
+export const GEMINI_QUOTA_TIMEZONE = 'UTC';
+
+/** The model to call. Pinned by env so a rollout is a config change. */
+export const geminiModel = (): string => env('GEMINI_MODEL') || 'gemini-2.5-flash';
+
+/**
  * Cache lifetimes, in seconds. Travel data rots at very different rates, and
  * everything gets shorter as departure approaches.
  */

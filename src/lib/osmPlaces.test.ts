@@ -12,6 +12,7 @@ import {
   osmIndoorOutdoor,
   osmNames,
   osmNotability,
+  osmOpeningCaveats,
   osmPlaceId,
   osmPriceLevel,
   osmVisitMinutes,
@@ -171,6 +172,49 @@ describe('opening hours', () => {
 
   it('refuses a range that crosses midnight instead of inverting it', () => {
     expect(parseOsmOpeningRules('22:00-02:00')).toEqual([]);
+  });
+});
+
+describe('stating what the hours parser dropped', () => {
+  /**
+   * Every case above where the parser correctly refuses to guess leaves the
+   * traveller with a confident-looking weekly schedule that quietly omits a
+   * clause the venue did publish. These turn each silent drop into a sentence.
+   */
+  const caveatText = (value?: string) => osmOpeningCaveats(value).join(' ');
+
+  it('says nothing at all about an ordinary weekly schedule', () => {
+    // A caveat on every place would be noise, and noise gets ignored — which
+    // would cost us the cases that matter.
+    expect(osmOpeningCaveats('Tu-Su 10:00-18:00')).toEqual([]);
+    expect(osmOpeningCaveats('24/7')).toEqual([]);
+    expect(osmOpeningCaveats(undefined)).toEqual([]);
+    expect(osmOpeningCaveats('  ')).toEqual([]);
+  });
+
+  it('warns when holiday hours were published but not read', () => {
+    expect(caveatText('Mo-Su 09:00-17:00; PH off')).toMatch(/holiday/i);
+    expect(caveatText('Mo-Su 09:00-17:00; SH 10:00-14:00')).toMatch(/holiday/i);
+  });
+
+  it('warns when the hours vary by season', () => {
+    expect(caveatText('Apr-Oct 09:00-18:00; Nov-Mar 09:00-16:00')).toMatch(/season/i);
+  });
+
+  it('warns when opening follows the sun', () => {
+    expect(caveatText('sunrise-sunset')).toMatch(/sunrise or sunset/i);
+  });
+
+  it('warns when a place stays open past midnight', () => {
+    // For a bar or a night market this is the only window that matters, and it
+    // is precisely the one the parser drops.
+    expect(caveatText('Fr-Sa 22:00-02:00')).toMatch(/past midnight/i);
+    // A normal same-day range must not trip it.
+    expect(caveatText('Mo-Su 10:00-18:00')).not.toMatch(/past midnight/i);
+  });
+
+  it('reports several gaps at once when a string has several', () => {
+    expect(osmOpeningCaveats('Apr-Oct 22:00-02:00; PH off').length).toBeGreaterThanOrEqual(3);
   });
 });
 

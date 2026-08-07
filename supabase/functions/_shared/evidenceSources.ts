@@ -21,11 +21,15 @@ import { assessDisclosure, extractClaims } from './claims.ts';
 import { parseOsmOpeningRules } from './osmPlaces.ts';
 import {
   closureNotices,
+  admissionFromJsonLd,
+  officialAdmissionClaims,
   extractJsonLd,
   isSafePublicUrl,
   openingRulesFromJsonLd,
   visibleText,
 } from './officialSource.ts';
+import type { AdmissionFare, PlaceAdmission } from './placeCost.ts';
+import { resolveOfficialAdmission, shouldReadAdmission } from './reasoning.ts';
 
 interface GoogleReview {
   text?: { text?: string };
@@ -123,6 +127,21 @@ export async function youtubeEvidence(placeName: string, city: string, placeId: 
 }
 
 /**
+ * Read a fare from the operator's prose, when structured data had none.
+ *
+ * Injected rather than imported so this module keeps knowing nothing about
+ * quotas, caches or API keys — the caller owns all three, and the tests here
+ * can exercise the precedence rule without a model in sight.
+ *
+ * `undefined` means not attempted; `null` means attempted and nothing survived
+ * validation. The caller caches both.
+ */
+export type AdmissionReader = (
+  pageText: string,
+  countryCode: string | undefined,
+) => Promise<AdmissionFare[] | null | undefined>;
+
+/**
  * What the operator says about their own place.
  *
  * The highest-authority source in the model, and the only one permitted to
@@ -133,23 +152,103 @@ export async function youtubeEvidence(placeName: string, city: string, placeId: 
  * override community-maintained ones — which is what makes a weekday closure
  * trustworthy rather than merely likely.
  */
-export async function officialEvidence(website: string | undefined, placeId: string) {
+export async function officialEvidence(
+  website: string | undefined,
+  placeId: string,
+  countryCode?: string,
+  readAdmission?: AdmissionReader,
+) {
   // The address came from a community-edited tag, so it is untrusted input.
-  if (!isSafePublicUrl(website)) return { documents: [], openingRules: [] };
+  if (!isSafePublicUrl(website)) return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined };
 
   const html = await fetchText(website!);
-  if (!html) return { documents: [], openingRules: [] };
+  if (!html) return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined };
 
-  const openingRules = openingRulesFromJsonLd(extractJsonLd(html), parseOsmOpeningRules);
+  const nodes = extractJsonLd(html);
+  const openingRules = openingRulesFromJsonLd(nodes, parseOsmOpeningRules);
+  const parsedAdmission = admissionFromJsonLd(nodes, countryCode);
+  const retrievedAt = new Date().toISOString();
+  const admission = parsedAdmission
+    ? { ...parsedAdmission, sourceUrl: website!, retrievedAt }
+    : undefined;
   const text = visibleText(html);
   const notices = closureNotices(text);
 
-  // A page with neither a notice nor structured hours told us nothing worth
-  // storing. Recording it anyway would dilute every summary with empty records.
-  if (notices.length === 0) return { documents: [], openingRules };
+  /**
+   * Structured pricing outranks anything read out of prose, always.
+   *
+   * A machine-readable `Offer` is the operator stating a price in a form with
+   * one meaning. A number located in a paragraph is the same operator, read
+   * less reliably — so the model is asked only when JSON-LD produced no fare
+   * at all, which also means a well-marked-up site never costs a metered call.
+   */
+  const readFares = shouldReadAdmission(parsedAdmission) && readAdmission
+    ? await readAdmission(text, countryCode)
+    : undefined;
+
+  /**
+   * The fare is the operator's; the model only found it. So the source stays
+   * `official-website` — the price really is published there — while the
+   * confidence drops to medium, because prose located by a model is weaker
+   * evidence than a field designed to be parsed. Losing that distinction would
+   * make the two indistinguishable on the card.
+   */
+  const admissionWithRead = resolveOfficialAdmission({
+    structured: admission as never,
+    readFares,
+    sourceUrl: website!,
+    retrievedAt,
+  }) as PlaceAdmission | undefined;
+
+  const priceClaims = officialAdmissionClaims(nodes, parsedAdmission);
+  const claims = [
+    ...notices.map((notice) => ({
+      type: notice.type,
+      summary: notice.summary,
+      strength: 0.95,
+      excerpt: notice.excerpt,
+    })),
+    ...priceClaims.map((claim) => ({
+      type: 'price',
+      summary: claim.summary,
+      value: claim.amount,
+      unit: claim.amount !== undefined ? 'currency' : undefined,
+      appliesTo: claim.amount !== undefined && claim.currency && claim.audience
+        ? { currency: claim.currency, audience: claim.audience }
+        : undefined,
+      strength: 1,
+      excerpt: claim.excerpt,
+    })),
+    /**
+     * Model-read fares, emitted here and nowhere else.
+     *
+     * This is the only path by which a model-derived price is ever shown as
+     * fact, and it exists here rather than in `claims.ts` because authority is
+     * what makes a price claim presentable: `OPERATIONAL_CLAIMS` gates `price`
+     * at 0.85, which reddit (0.65) and youtube (0.6) can never reach. The page
+     * this was read from is the operator's own, so the claim carries their
+     * authority — and every amount has already been checked to appear on that
+     * page as digits, with a verbatim excerpt behind it.
+     */
+    ...(readFares || []).map((fare) => ({
+      type: 'price',
+      summary: `The official site lists ${fare.audience} admission at ${fare.currency} ${fare.amount}`,
+      value: fare.amount,
+      unit: 'currency',
+      appliesTo: { currency: fare.currency, audience: fare.audience },
+      strength: 1,
+      excerpt: undefined as string | undefined,
+    })),
+  ];
+
+  // A page with neither a notice nor structured admission told us nothing
+  // claim-worthy. Hours still return separately because they are useful even
+  // when the page has no operational notice or price.
+  if (claims.length === 0) return { documents: [], openingRules, admission: admissionWithRead };
 
   return {
     openingRules,
+    admission: admissionWithRead,
     documents: [{
       id: `official-${placeId}`,
       canonicalPlaceId: placeId,
@@ -157,18 +256,13 @@ export async function officialEvidence(website: string | undefined, placeId: str
       sourceUrl: website!,
       sourceItemId: undefined as string | undefined,
       publishedAt: undefined as string | undefined,
-      retrievedAt: new Date().toISOString(),
+      retrievedAt,
       authorType: 'official' as const,
       // An operator describing their own place is not promotion in the sense
       // `promotionRisk` guards against, and `authorType: 'official'` already
       // adds its own small penalty there.
       disclosure: 'organic' as const,
-      claims: notices.map((notice) => ({
-        type: notice.type,
-        summary: notice.summary,
-        strength: 0.95,
-        excerpt: notice.excerpt,
-      })),
+      claims,
       confidence: 0.9,
     }],
   };

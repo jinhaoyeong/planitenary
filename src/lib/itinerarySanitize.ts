@@ -14,6 +14,13 @@
  * would make every echo look like a change and loop the sync.
  */
 import type {
+  AdmissionClass,
+  AdmissionExpectation,
+  AdmissionFare,
+  AdmissionSource,
+  PlaceAdmission,
+} from '../../supabase/functions/_shared/placeCost';
+import type {
   Activity,
   ActivityCost,
   ActivityGeneratedMetadata,
@@ -97,6 +104,111 @@ const VALID_DISCOVERY_DECISIONS: DiscoveryCandidateDecision[] = ['must-do', 'int
 const VALID_DISCOVERY_STAGES: DiscoveryStage[] = ['not-started', 'reviewing', 'shortlist-ready', 'itinerary-built', 'needs-review'];
 const VALID_DISCOVERY_UNSCHEDULED_REASONS: DiscoveryUnscheduledReason[] = ['opening-hours-conflict', 'daily-capacity-reached', 'incompatible-location', 'insufficient-route-data', 'duplicate', 'no-viable-day'];
 
+/**
+ * Keyed records rather than arrays, so the compiler fails the build when a
+ * value is added to the union without being listed here. Every drift bug this
+ * file documents — the three-way `provider` comparison, the missing
+ * `indoorOutdoor` — was a runtime list falling behind a type.
+ */
+const ADMISSION_CLASSES: Record<AdmissionClass, true> = {
+  free: true,
+  ticketed: true,
+  'spend-based': true,
+  unknown: true,
+};
+const ADMISSION_EXPECTATIONS: Record<AdmissionExpectation, true> = {
+  'usually-ticketed': true,
+  'often-free': true,
+  'spending-inside': true,
+};
+const ADMISSION_SOURCES: Record<AdmissionSource, true> = {
+  'official-website': true,
+  provider: true,
+  'osm-tag': true,
+  wikivoyage: true,
+  category: true,
+};
+const has = (record: Record<string, true>, value: unknown): boolean =>
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(record, value);
+
+const trimmed = (value: unknown): string | undefined =>
+  (typeof value === 'string' && value.trim() ? value.trim() : undefined);
+
+/**
+ * One fare, or nothing.
+ *
+ * A fare without a currency is dropped rather than kept as a bare number: an
+ * amount whose unit is unknown is exactly what the old `'¥'.repeat(n)` display
+ * was, and letting one through the save path would reintroduce it from storage
+ * instead of from a provider.
+ */
+const sanitizeFare = (value: unknown): AdmissionFare | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const currency = trimmed(raw.currency)?.toUpperCase();
+  const audience = trimmed(raw.audience)?.toLowerCase();
+  if (!currency || !audience) return undefined;
+  if (typeof raw.amount !== 'number' || !Number.isFinite(raw.amount) || raw.amount < 0) return undefined;
+  return { audience, amount: raw.amount, currency, note: trimmed(raw.note) };
+};
+
+/**
+ * Admission through a save and back, unchanged.
+ *
+ * Nested structure is the risk here. The realtime sync compares
+ * `JSON.stringify` output, so this has to be deterministic down to key order
+ * and stable under repetition — and a fare list that silently reordered, or a
+ * `source` that failed validation and vanished, would strip the provenance that
+ * lets a card say where its price came from.
+ *
+ * Malformed fares are dropped individually. Losing one concession price is
+ * better than losing the adult fare with it.
+ */
+const sanitizeAdmission = (value: unknown): PlaceAdmission | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  if (!has(ADMISSION_CLASSES, raw.class)) return undefined;
+  // Without a source there is no provenance, and an admission we cannot
+  // attribute is one the panel must not present as sourced.
+  if (!has(ADMISSION_SOURCES, raw.source)) return undefined;
+
+  const confidence = raw.confidence === 'high' || raw.confidence === 'medium' || raw.confidence === 'low'
+    ? raw.confidence
+    : 'low';
+
+  return {
+    class: raw.class as AdmissionClass,
+    // `[]` is meaningful — a ticket is required and no price was published — so
+    // an empty list is preserved rather than collapsed to undefined.
+    fares: Array.isArray(raw.fares)
+      ? raw.fares.flatMap((fare) => { const parsed = sanitizeFare(fare); return parsed ? [parsed] : []; })
+      : undefined,
+    typicalSpend: sanitizeFare(raw.typicalSpend),
+    expectation: has(ADMISSION_EXPECTATIONS, raw.expectation) ? raw.expectation as AdmissionExpectation : undefined,
+    rawText: trimmed(raw.rawText),
+    source: raw.source as AdmissionSource,
+    sourceUrl: trimmed(raw.sourceUrl),
+    confidence,
+    retrievedAt: trimmed(raw.retrievedAt),
+  };
+};
+
+/** One opening window. Shared by the single field and the weekly list. */
+const sanitizeActivityHours = (value: unknown) => {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const days = Array.isArray(raw.days)
+    ? raw.days.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6)
+    : undefined;
+  return {
+    label: typeof raw.label === 'string' ? raw.label.trim() : undefined,
+    opensAt: typeof raw.opensAt === 'string' ? raw.opensAt.trim() : undefined,
+    closesAt: typeof raw.closesAt === 'string' ? raw.closesAt.trim() : undefined,
+    days,
+    sourceUpdatedAt: typeof raw.sourceUpdatedAt === 'string' ? raw.sourceUpdatedAt : undefined,
+  };
+};
+
 const stableHash = (value: string) => {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -150,19 +262,17 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
         return { amount: Math.max(0, raw.amount), currency: raw.currency.trim().toUpperCase(), basis };
       })()
     : undefined;
-  const openingHours = source.openingHours && typeof source.openingHours === 'object'
-    ? (() => {
-        const raw = source.openingHours as unknown as Record<string, unknown>;
-        const days = Array.isArray(raw.days) ? raw.days.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6) : undefined;
-        return {
-          label: typeof raw.label === 'string' ? raw.label.trim() : undefined,
-          opensAt: typeof raw.opensAt === 'string' ? raw.opensAt.trim() : undefined,
-          closesAt: typeof raw.closesAt === 'string' ? raw.closesAt.trim() : undefined,
-          days,
-          sourceUpdatedAt: typeof raw.sourceUpdatedAt === 'string' ? raw.sourceUpdatedAt : undefined,
-        };
-      })()
+  const openingHours = sanitizeActivityHours(source.openingHours);
+  // Order is preserved, not sorted: the morning window of a place that shuts
+  // for lunch must stay before the afternoon one, and re-sorting would make
+  // every sync echo look like a change.
+  const openingHoursWeek = Array.isArray(source.openingHoursWeek)
+    ? source.openingHoursWeek.flatMap((period) => {
+        const parsed = sanitizeActivityHours(period);
+        return parsed ? [parsed] : [];
+      })
     : undefined;
+  const admission = sanitizeAdmission(source.admission);
   const sourceValue = typeof source.source === 'string' && VALID_ACTIVITY_SOURCES.includes(source.source as ActivitySource)
     ? source.source as ActivitySource
     : 'manual';
@@ -237,11 +347,13 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
     location,
     cost: typeof source.cost === 'string' ? source.cost : undefined,
     estimatedCost,
+    admission,
     bookingStatus,
     reservationRequirement: source.reservationRequirement === 'not-needed' || source.reservationRequirement === 'recommended' || source.reservationRequirement === 'required' || source.reservationRequirement === 'unknown'
       ? source.reservationRequirement
       : undefined,
     openingHours,
+    openingHoursWeek,
     transportMinutes: typeof source.transportMinutes === 'number' && Number.isFinite(source.transportMinutes)
       ? Math.max(0, Math.min(1440, Math.round(source.transportMinutes)))
       : undefined,

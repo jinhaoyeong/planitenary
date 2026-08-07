@@ -22,10 +22,12 @@ import type { DateAwareOpeningHours, PlaceCandidate } from './destinationIntelli
 import {
   summarisePlaceEvidence,
   trendStrength,
+  type PlaceBriefSummary,
   type PlaceEvidenceSummary,
   type SourceEvidence,
 } from './travelEvidence';
 import type { TripDestination } from './tripProfile';
+import { isPlaceAdmission, type PlaceAdmission } from '../../supabase/functions/_shared/placeCost';
 
 /** Cached so every panel mount does not re-ask the server. */
 let runtimeCache: { value: ProviderRuntime; fetchedAt: number } | null = null;
@@ -53,6 +55,7 @@ function parseRuntime(payload: unknown): ProviderRuntime {
     tiktokPartner: asBoolean(source.tiktokPartner),
     douyinPartner: asBoolean(source.douyinPartner),
     rednotePartner: asBoolean(source.rednotePartner),
+    aiReasoning: asBoolean(source.aiReasoning),
     // Fixtures ship with the client, so they are always available as a fallback.
     fixtures: true,
   };
@@ -111,6 +114,8 @@ export interface DiscoveryOutcome {
    * stale, and an official page is the thing that can correct them.
    */
   officialHours: Record<string, DateAwareOpeningHours>;
+  /** Admission facts from an operator's own site, keyed by candidate id. */
+  officialAdmissions: Record<string, PlaceAdmission>;
   /**
    * When sources agree a place is best visited, by candidate id. The scheduler
    * treats this as a preference strong enough to decline a placement, so it is
@@ -188,17 +193,49 @@ export function parseCurrentEvents(payload: unknown): CurrentEventSummary[] {
  * queried with. Everything downstream keys by candidate id, so the mapping
  * happens here, once.
  */
+/**
+ * Re-validate a brief that has crossed the network.
+ *
+ * The server already dropped every sentence that could not quote its source,
+ * so this is not a second grounding check — it cannot be, since the source
+ * text is not here. It only refuses a malformed shape, so a bad payload
+ * degrades to no description rather than to a card that throws. A sentence
+ * missing its `sourceUrl` is dropped: the label promises every sentence is
+ * quoted from a source, and one that cannot name its own would make that
+ * promise false.
+ */
+function parseBrief(value: unknown): PlaceBriefSummary | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as { sentences?: unknown };
+  if (!Array.isArray(raw.sentences)) return undefined;
+
+  const sentences = raw.sentences.flatMap((entry) => {
+    const item = entry as { text?: unknown; sourceUrl?: unknown; excerpt?: unknown };
+    const text = typeof item?.text === 'string' ? item.text.trim() : '';
+    const sourceUrl = typeof item?.sourceUrl === 'string' ? item.sourceUrl.trim() : '';
+    const excerpt = typeof item?.excerpt === 'string' ? item.excerpt.trim() : '';
+    return text && sourceUrl && excerpt ? [{ text, sourceUrl, excerpt }] : [];
+  });
+
+  if (sentences.length === 0) return undefined;
+  return { sentences, sourceCount: new Set(sentences.map((s) => s.sourceUrl)).size };
+}
+
 function digestEvidence(
   payload: unknown,
   candidates: PlaceCandidate[],
 ): EvidenceDigest {
-  const empty = { queueEvidence: {}, evidenceSummaries: {}, trends: {}, officialHours: {}, bestTimeWindows: {} };
+  const empty = { queueEvidence: {}, evidenceSummaries: {}, trends: {}, officialHours: {}, officialAdmissions: {}, bestTimeWindows: {} };
   if (!payload || typeof payload !== 'object') return empty;
 
+  // Hours and admission are valid responses even when a page produced no
+  // evidence document. Do not let an empty `documents` field erase them.
   const documents = (payload as { documents?: unknown }).documents;
+  const evidenceDocuments = Array.isArray(documents) ? documents : [];
   const rawTrends = (payload as { trends?: unknown }).trends;
   const rawHours = (payload as { openingHours?: unknown }).openingHours;
-  if (!Array.isArray(documents)) return empty;
+  const rawAdmissions = (payload as { admissions?: unknown }).admissions;
+  const rawBriefs = (payload as { briefs?: unknown }).briefs;
 
   const byProviderId = new Map(
     candidates
@@ -206,7 +243,7 @@ function digestEvidence(
       .map((candidate) => [candidate.providerPlaceId!, candidate.id]),
   );
 
-  const evidence = documents.filter(
+  const evidence = evidenceDocuments.filter(
     (document): document is SourceEvidence =>
       Boolean(document)
       && typeof document === 'object'
@@ -217,6 +254,7 @@ function digestEvidence(
   const evidenceSummaries: Record<string, PlaceEvidenceSummary> = {};
   const trends: Record<string, number> = {};
   const officialHours: Record<string, DateAwareOpeningHours> = {};
+  const officialAdmissions: Record<string, PlaceAdmission> = {};
   const bestTimeWindows: Record<string, Array<{ start: string; end: string }>> = {};
 
   for (const [providerId, candidateId] of byProviderId) {
@@ -231,9 +269,23 @@ function digestEvidence(
       };
     }
 
+    const admission = (rawAdmissions as Record<string, unknown> | undefined)?.[providerId];
+    if (isPlaceAdmission(admission) && admission.source === 'official-website') {
+      officialAdmissions[candidateId] = admission;
+    }
+
     const summary = summarisePlaceEvidence(providerId, evidence);
     if (summary.sourceCount === 0) continue;
-    evidenceSummaries[candidateId] = { ...summary, canonicalPlaceId: candidateId };
+    /**
+     * The brief rides along on the summary rather than becoming its own map,
+     * because it is only ever shown beside the rest of a place's evidence and
+     * a separate map would be one more thing to keep in step. Validation
+     * already happened server-side; this re-checks the shape because the
+     * payload crosses a network boundary and a malformed brief must degrade to
+     * no brief rather than to a broken card.
+     */
+    const brief = parseBrief((rawBriefs as Record<string, unknown> | undefined)?.[providerId]);
+    evidenceSummaries[candidateId] = { ...summary, canonicalPlaceId: candidateId, brief };
 
     // Require corroboration before a queue claim is allowed to reshape a day.
     if (summary.typicalQueueMinutes !== undefined && summary.sourceCount >= 2) {
@@ -252,7 +304,7 @@ function digestEvidence(
     }
   }
 
-  return { queueEvidence, evidenceSummaries, trends, officialHours, bestTimeWindows };
+  return { queueEvidence, evidenceSummaries, trends, officialHours, officialAdmissions, bestTimeWindows };
 }
 
 /** The empty digest, used whenever evidence is unavailable or not yet fetched. */
@@ -261,12 +313,13 @@ export const EMPTY_EVIDENCE_DIGEST: EvidenceDigest = {
   evidenceSummaries: {},
   trends: {},
   officialHours: {},
+  officialAdmissions: {},
   bestTimeWindows: {},
 };
 
 export type EvidenceDigest = Pick<
   DiscoveryOutcome,
-  'queueEvidence' | 'evidenceSummaries' | 'trends' | 'officialHours' | 'bestTimeWindows'
+  'queueEvidence' | 'evidenceSummaries' | 'trends' | 'officialHours' | 'officialAdmissions' | 'bestTimeWindows'
 >;
 
 /**
@@ -296,6 +349,11 @@ export async function fetchPlaceEvidence(
       placeIds: withProviderId.map((candidate) => candidate.providerPlaceId),
       placeNames: withProviderId.map((candidate) => candidate.name),
       placeWebsites: withProviderId.map((candidate) => candidate.website),
+      placeCountryCodes: withProviderId.map((candidate) => candidate.countryCode),
+      // Only places with no prose of their own are worth a metered call. The
+      // server cannot work this out: a description arrives with a matched
+      // Wikivoyage listing, which happened back on the discovery path.
+      placeNeedsDescription: withProviderId.map((candidate) => !candidate.description?.trim()),
       provider: options?.provider,
       travelStartsInDays: options?.travelStartsInDays,
     });

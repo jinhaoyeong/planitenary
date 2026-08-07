@@ -13,6 +13,12 @@
  */
 
 import type { PlaceCandidate } from './destinationIntelligence';
+import {
+  buildRationale,
+  collectShortlistStats,
+  type RationalePoint,
+  type ShortlistStats,
+} from './placeRationale';
 import type { PlaceEvidenceSummary } from './travelEvidence';
 import type { RecommendationMix, TravelBehaviourProfile } from './travelBehaviour';
 import type { TripProfile } from './tripProfile';
@@ -41,7 +47,9 @@ export interface ScoredPlace {
   /** 0–100, after weighting and penalties. */
   score: number;
   dimensions: PlaceIntelligenceScore;
-  /** Plain-language reasons, strongest first, for the explanation panel. */
+  /** Structured, traceable explanation points — what the panel should render. */
+  rationale: RationalePoint[];
+  /** The same points flattened, for callers that still take a string list. */
   reasons: string[];
   /** Things the traveller should know before choosing it. */
   cautions: string[];
@@ -91,8 +99,13 @@ function weightsFor(mix: RecommendationMix) {
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-/** Travel styles → the category and tag vocabulary places are labelled with. */
-const STYLE_TAGS: Record<string, string[]> = {
+/**
+ * Travel styles → the category and tag vocabulary places are labelled with.
+ *
+ * Exported because `destinationPlanner` held a verbatim copy of this table and
+ * the two had to be edited in lockstep to stay honest. One table, one place.
+ */
+export const STYLE_TAGS: Record<string, string[]> = {
   cafes: ['cafes', 'food'],
   'street-food': ['street-food', 'food', 'market', 'food-district'],
   'night-markets': ['market', 'evening', 'nightlife'],
@@ -110,6 +123,58 @@ const STYLE_TAGS: Record<string, string[]> = {
   anime: ['anime', 'theme-park'],
   nightlife: ['nightlife', 'evening', 'view'],
 };
+
+/**
+ * Which of the traveller's own stated styles this place actually satisfies.
+ *
+ * `travellerFit` computed an intersection and kept only its size, so the panel
+ * could say "Matches what you said you like" and nothing more — the same
+ * sentence on every card, naming neither the style nor the place. The names are
+ * the whole value: "you said temples and history" is checkable, and differs
+ * card to card.
+ *
+ * **Stricter than the scoring intersection, deliberately.** `STYLE_TAGS` is
+ * fuzzy on purpose — `temples` expands to include `history` so a shrine scores
+ * for a history-minded traveller — and that is fine inside a number. Said out
+ * loud it becomes false: the Osaka Museum of History carries no temple tag, and
+ * telling someone "you asked for temples, and this is that" is a wrong claim
+ * about their own input, which is worse than a vague one.
+ *
+ * So a style is named only on the tags that *define* it, not the ones it
+ * borrows. Each list is read up to the first entry that is another style's own
+ * name — the point where it stops describing itself and starts reaching across.
+ * `temples: ['temples', 'temple', 'shrine', 'history']` defines itself with the
+ * first three and borrows the fourth, so a place tagged only `history` scores
+ * for temples but is never described as one.
+ *
+ * When one tag would name two chosen styles, only the style that owns it is
+ * named: a park is `nature`, not `mountains`, when both were asked for.
+ *
+ * Returns the traveller's own words, not the internal tags, because those are
+ * the words they chose.
+ */
+const STYLE_KEYS = new Set(Object.keys(STYLE_TAGS));
+
+function definingTags(style: string): string[] {
+  const expansion = STYLE_TAGS[style] || [style];
+  const borrowed = expansion.findIndex((tag) => tag !== style && STYLE_KEYS.has(tag));
+  const defining = borrowed === -1 ? expansion : expansion.slice(0, borrowed);
+  // Some styles are borrowed vocabulary all the way down — `mountains` is
+  // described entirely as `nature`, `hiking`, `view`. Truncating those to
+  // nothing would mean they could never be named at all, so they keep the whole
+  // list and rely on the ownership rule below to yield to a better-fitting
+  // style when the traveller asked for one.
+  return defining.length > 0 ? defining : expansion;
+}
+
+export function matchedStyleTags(candidate: PlaceCandidate, profile: TripProfile): string[] {
+  const tags = new Set<string>([...candidate.categories, ...candidate.experienceTags]);
+  const matched = profile.styles.filter((style) => definingTags(style).some((tag) => tags.has(tag)));
+
+  // A tag that is another chosen style's own name belongs to that style.
+  const claimed = new Set<string>(matched.filter((style) => tags.has(style)));
+  return matched.filter((style) => tags.has(style) || !definingTags(style).some((tag) => claimed.has(tag)));
+}
 
 function travellerFit(candidate: PlaceCandidate, profile: TripProfile): number {
   const wanted = new Set(profile.styles.flatMap((style) => STYLE_TAGS[style] || [style]));
@@ -238,6 +303,8 @@ export function scorePlace(
   candidate: PlaceCandidate,
   inputs: ScoringInputs,
   clusterSizes: Map<string, number> = new Map(),
+  /** The finished population, when there is one. Comparative reasons need it. */
+  shortlist?: ShortlistStats,
 ): ScoredPlace {
   const evidence = inputs.evidence?.[candidate.id];
   const dimensions: PlaceIntelligenceScore = {
@@ -286,35 +353,67 @@ export function scorePlace(
 
   const score = Math.round(100 * clamp01(weighted - promotionPenalty - closurePenalty));
 
-  // --- Explanations, strongest dimension first ----------------------------
-  const reasons: string[] = [];
-  const ranked: Array<[keyof PlaceIntelligenceScore, string]> = [
-    ['travellerFit', 'Matches what you said you like'],
-    ['destinationSignificance', 'Central to understanding this city'],
-    ['currentQuality', 'Recent visitors rate the experience highly'],
-    ['trendStrength', 'Getting a lot of attention right now'],
-    ['localRelevance', 'Has genuine local character'],
-    ['practicality', 'Straightforward to fit into a day'],
-  ];
-  for (const [key, label] of ranked.sort((a, b) => dimensions[b[0]] - dimensions[a[0]])) {
-    if (dimensions[key] >= 0.7 && reasons.length < 3) reasons.push(label);
-  }
-  if (reasons.length === 0) reasons.push('Adds variety to your shortlist');
+  // --- Explanations --------------------------------------------------------
+  // Built in `placeRationale`, which orders by what actually carried the score
+  // and names the evidence behind it. This used to be a table of six fixed
+  // sentences picked by threshold, so most of a thirty-place shortlist read
+  // identically — the reason a traveller told us it felt hardcoded.
+  const rationale = buildRationale({
+    candidate,
+    dimensions,
+    weights,
+    matchedStyles: matchedStyleTags(candidate, inputs.profile),
+    evidence,
+    shortlist,
+  });
+
+  return { candidate, score, dimensions, rationale, reasons: toReasons(rationale, evidence), cautions };
+}
+
+/** The flat string list the existing UI consumes, derived from the points. */
+function toReasons(rationale: RationalePoint[], evidence?: PlaceEvidenceSummary): string[] {
+  const reasons = rationale.map((point) => point.text);
   if (evidence && evidence.sourceCount > 0) {
     reasons.push(`Backed by ${evidence.sourceCount} ${evidence.sourceCount === 1 ? 'source' : 'sources'}`);
   }
-
-  return { candidate, score, dimensions, reasons, cautions };
+  return reasons;
 }
 
-/** Score and order a whole shortlist. */
-export function scorePlaces(candidates: PlaceCandidate[], inputs: ScoringInputs): ScoredPlace[] {
+/**
+ * Score and order a whole shortlist.
+ *
+ * Two passes, deliberately. Comparative reasons — "the most documented on your
+ * Osaka list" — are only meaningful against the finished population, so every
+ * card must be scored before any card is explained. Doing it per-card as they
+ * were scored would let two cards compare themselves against different
+ * denominators.
+ */
+export function scorePlaces(
+  candidates: PlaceCandidate[],
+  inputs: ScoringInputs,
+  options: { cityLabel?: string } = {},
+): ScoredPlace[] {
   const clusterSizes = new Map<string, number>();
   for (const candidate of candidates) {
     const key = candidate.neighbourhood || candidate.city;
     clusterSizes.set(key, (clusterSizes.get(key) || 0) + 1);
   }
-  return candidates
-    .map((candidate) => scorePlace(candidate, inputs, clusterSizes))
+
+  const scored = candidates.map((candidate) => scorePlace(candidate, inputs, clusterSizes));
+  const shortlist = collectShortlistStats(scored, options.cityLabel ?? candidates[0]?.city);
+  const weights = weightsFor(inputs.behaviour.recommendationMix);
+
+  return scored
+    .map((place) => {
+      const rationale = buildRationale({
+        candidate: place.candidate,
+        dimensions: place.dimensions,
+        weights,
+        matchedStyles: matchedStyleTags(place.candidate, inputs.profile),
+        evidence: inputs.evidence?.[place.candidate.id],
+        shortlist,
+      });
+      return { ...place, rationale, reasons: toReasons(rationale, inputs.evidence?.[place.candidate.id]) };
+    })
     .sort((a, b) => b.score - a.score || a.candidate.name.localeCompare(b.candidate.name));
 }

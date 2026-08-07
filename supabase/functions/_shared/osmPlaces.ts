@@ -140,6 +140,27 @@ export function osmNotability(tags: OsmTags): number {
   return Math.min(1, score);
 }
 
+/**
+ * The same signals {@link osmNotability} scores, named rather than summed.
+ *
+ * A number cannot be shown to a traveller — "significance 0.75" explains
+ * nothing, and the panel's stand-in for it was the sentence "Central to
+ * understanding this city", which is equally true of every well-known place and
+ * so says nothing about *this* one. Naming the evidence turns the same data
+ * into something specific: a heritage listing is a fact about this place that
+ * its neighbours on the list may not share.
+ *
+ * Strongest first, so a caller taking the first two gets the best two.
+ */
+export function osmNotabilitySignals(tags: OsmTags): string[] {
+  const signals: string[] = [];
+  if (tags.wikidata || tags.wikipedia) signals.push('has an encyclopedia entry');
+  if (tags.heritage || tags['heritage:operator']) signals.push('is a listed heritage site');
+  if (tags.tourism === 'attraction') signals.push('is mapped as a visitor attraction');
+  if (Object.keys(tags).some((key) => key.startsWith('name:'))) signals.push('has a translated name');
+  return signals;
+}
+
 /** Prefer a name the traveller can read, but never lose the local one. */
 export function osmNames(tags: OsmTags, language = 'en'): { name?: string; localName?: string } {
   const local = tags.name;
@@ -287,6 +308,50 @@ export function parseOsmOpeningRules(value?: string): OpeningRule[] {
     else grouped.set(key, { daysOfWeek: [day], opensAt: window.opensAt, closesAt: window.closesAt });
   }
   return [...grouped.values()].map((rule) => ({ ...rule, daysOfWeek: rule.daysOfWeek.sort((a, b) => a - b) }));
+}
+
+/**
+ * What `parseOsmOpeningRules` saw and deliberately did not read.
+ *
+ * The parser drops public holidays, month ranges, `sunrise`/`sunset` and
+ * midnight-crossing windows rather than guessing at them — the right call, but
+ * it makes the omission invisible. A traveller shown `Tue–Sun 10:00–18:00` has
+ * no way to know the venue also published separate holiday hours that this app
+ * cannot read.
+ *
+ * This turns each silent drop into a sentence the panel can show. It reports
+ * only what was actually present in the source string, so a plain weekly
+ * schedule produces nothing at all.
+ */
+export function osmOpeningCaveats(value?: string): string[] {
+  if (!value?.trim()) return [];
+  const text = value.trim();
+  const caveats: string[] = [];
+
+  if (/(^|;|\s)(ph|sh)\b/i.test(text)) {
+    caveats.push('Holiday hours are published for this place but are not read here — check before a public holiday.');
+  }
+  if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(text)) {
+    caveats.push('Hours change by season here; only the year-round pattern is shown.');
+  }
+  if (/\b(sunrise|sunset|dusk|dawn)\b/i.test(text)) {
+    caveats.push('This place opens or closes relative to sunrise or sunset, which is not shown here.');
+  }
+  if (/\bweek\s*\d/i.test(text) || /\[\s*-?\d/.test(text)) {
+    caveats.push('Some hours apply only in particular weeks of the month and are not shown.');
+  }
+
+  // A window that closes before it opens runs past midnight. The scheduler has
+  // no representation for that, so the whole clause is dropped — worth saying
+  // for a bar or night market, where it is the only window that matters.
+  const crossesMidnight = text.split(';').some((clause) => {
+    const match = clause.match(TIME_RANGE);
+    if (!match) return false;
+    return `${pad(match[1])}:${match[2]}` >= `${pad(match[3])}:${match[4]}`;
+  });
+  if (crossesMidnight) caveats.push('This place stays open past midnight; those hours are not shown.');
+
+  return caveats;
 }
 
 /** Typical visit length by category — a default only, overridden by evidence. */

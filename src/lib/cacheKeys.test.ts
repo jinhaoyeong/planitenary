@@ -11,6 +11,7 @@ import {
   evidenceSourceUrl,
   isFresh,
   pairsNeedingProvider,
+  parseAppliesTo,
   probeKey,
   reviewItemKey,
   routePairKey,
@@ -39,7 +40,46 @@ describe('discovery city keys', () => {
   });
 
   it('tolerates a missing country code rather than throwing', () => {
-    expect(discoveryCityKey('Osaka')).toBe('osaka|');
+    expect(discoveryCityKey('Osaka')).toBe('v2|osaka|');
+  });
+
+  it('carries a schema version, so rows written before a new field expire at deploy', () => {
+    // `discovery_cache` holds candidates verbatim for 30 days. Without a
+    // version in the key, adding a field to discovery means a month of rows
+    // that silently lack it.
+    expect(discoveryCityKey('Osaka', 'JP')).toMatch(/^v\d+\|/);
+  });
+});
+
+describe('claim scope round trip', () => {
+  it('reads back a best-time window', () => {
+    expect(parseAppliesTo({ start: '08:00', end: '10:00' })).toEqual({
+      start: '08:00',
+      end: '10:00',
+      daysOfWeek: undefined,
+      currency: undefined,
+      audience: undefined,
+    });
+  });
+
+  it('treats a scope with nothing valid in it as no scope at all', () => {
+    // Returning `{}` would read as "scoped to nothing", which is not what an
+    // unparseable column means.
+    expect(parseAppliesTo({ start: 'morning', end: 42 })).toBeUndefined();
+    expect(parseAppliesTo({})).toBeUndefined();
+    expect(parseAppliesTo(null)).toBeUndefined();
+    expect(parseAppliesTo('08:00-10:00')).toBeUndefined();
+    expect(parseAppliesTo([{ start: '08:00' }])).toBeUndefined();
+  });
+
+  it('drops a malformed half rather than the whole scope', () => {
+    expect(parseAppliesTo({ start: '08:00', end: 'noon' })?.start).toBe('08:00');
+    expect(parseAppliesTo({ start: '08:00', end: 'noon' })?.end).toBeUndefined();
+  });
+
+  it('keeps only real weekday numbers', () => {
+    expect(parseAppliesTo({ daysOfWeek: [1, 9, 'Tue', 3.5, 6] })?.daysOfWeek).toEqual([1, 6]);
+    expect(parseAppliesTo({ daysOfWeek: [] })).toBeUndefined();
   });
 });
 

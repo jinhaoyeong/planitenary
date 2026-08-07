@@ -140,7 +140,17 @@ const getRestoreCandidateRaw = (key: string): string | null => {
   return bestRaw;
 };
 
-export const loadFromStorage = <T>(key: string): T | null => {
+export interface StorageLoadOptions<T> {
+  /**
+   * A caller may identify a recovery snapshot that is more complete than a
+   * still-valid primary. The default remains deliberately primary-first: a
+   * shorter itinerary is still a legitimate user edit and must not be
+   * replaced by an older snapshot just because it scores higher.
+   */
+  preferRecovery?: (primary: T, recovery: T) => boolean;
+}
+
+export const loadFromStorage = <T>(key: string, options?: StorageLoadOptions<T>): T | null => {
   const parse = (raw: string | null): T | null => {
     if (!raw) return null;
     try {
@@ -151,10 +161,14 @@ export const loadFromStorage = <T>(key: string): T | null => {
   };
 
   const primary = parse(localStorage.getItem(key));
-  if (primary) return primary;
+  if (primary && !options?.preferRecovery) return primary;
 
   const backupRaw = getRestoreCandidateRaw(key);
   const backup = parse(backupRaw);
+
+  if (primary && (!backup || !options?.preferRecovery || !options.preferRecovery(primary, backup))) {
+    return primary;
+  }
   if (!backup) return null;
 
   localStorage.setItem(key, backupRaw as string);

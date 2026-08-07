@@ -145,6 +145,13 @@ function App() {
   const { theme, toggleTheme } = useTheme();
   const { bindTrip } = useCurrency();
   const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
+  /**
+   * Persistence must wait until the current storage key has been read. On an
+   * auth transition into Demo Mode, the previous account-scoped seed can
+   * otherwise be saved to the new demo key before the load effect applies the
+   * profile that is already there.
+   */
+  const [hydratedItineraryStorageKey, setHydratedItineraryStorageKey] = useState<string | null>(null);
   useTripIdentityTheme(customItinerary?.tripProfile, theme);
 
   // A trip carries its own home → destination currency pair.
@@ -343,15 +350,20 @@ function App() {
     itinerarySyncReadyRef.current = false;
     remoteItineraryLoadedRef.current = false;
     hasLocalItineraryRef.current = false;
+    setHydratedItineraryStorageKey(null);
     const storageKey = itineraryStorageKey;
     try {
-      const recovered = loadFromStorage<Itinerary>(storageKey);
+      const preferProfileRecovery = isDemoUser
+        ? (primary: Itinerary, recovery: Itinerary) =>
+          !sanitizeTripProfile(primary.tripProfile) && Boolean(sanitizeTripProfile(recovery.tripProfile))
+        : undefined;
+      const recovered = loadFromStorage<Itinerary>(storageKey, { preferRecovery: preferProfileRecovery });
       if (recovered) {
         setCustomItinerary(sanitizeItinerary(recovered, activeItinerary));
         hasLocalItineraryRef.current = true;
       } else if (isDemoUser) {
         // Keep edits made before account-scoped storage was introduced.
-        const legacyDemoData = loadFromStorage<Itinerary>(`itinerary-${activeItineraryId}`);
+        const legacyDemoData = loadFromStorage<Itinerary>(`itinerary-${activeItineraryId}`, { preferRecovery: preferProfileRecovery });
         if (legacyDemoData) {
           setCustomItinerary(sanitizeItinerary(legacyDemoData, activeItinerary));
           hasLocalItineraryRef.current = true;
@@ -365,6 +377,7 @@ function App() {
       console.error("Failed to load itinerary", e);
       setCustomItinerary(activeItinerary);
     }
+    setHydratedItineraryStorageKey(storageKey);
   }, [activeItineraryId, activeItinerary, isDemoUser, itineraryStorageKey, selectedTripId]);
 
   useEffect(() => {
@@ -460,7 +473,12 @@ function App() {
 
   useEffect(() => {
     const itineraryToSync = customItinerary;
-    if (!itineraryToSync || !itinerarySyncReadyRef.current || !remoteItineraryLoadedRef.current) return;
+    if (
+      !itineraryToSync ||
+      hydratedItineraryStorageKey !== itineraryStorageKey ||
+      !itinerarySyncReadyRef.current ||
+      !remoteItineraryLoadedRef.current
+    ) return;
 
     saveToStorage(itineraryStorageKey, itineraryToSync);
     if (!hasLocalItineraryRef.current && JSON.stringify(itineraryToSync) === JSON.stringify(activeItinerary)) return;
@@ -490,7 +508,7 @@ function App() {
     }, 800);
 
     return () => clearTimeout(timeoutId);
-  }, [customItinerary, activeItinerary, itineraryStorageKey, isDemoUser, user]);
+  }, [customItinerary, activeItinerary, hydratedItineraryStorageKey, itineraryStorageKey, isDemoUser, user]);
 
   useEffect(() => {
     const key = itineraryStorageKey;

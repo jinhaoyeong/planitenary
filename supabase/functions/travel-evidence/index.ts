@@ -20,6 +20,9 @@
  */
 import {
   expiryFor,
+  geminiCallLimit,
+  geminiModel,
+  GEMINI_QUOTA_TIMEZONE,
   json,
   preflight,
   secrets,
@@ -27,25 +30,37 @@ import {
   YOUTUBE_SEARCH_UNITS,
   youtubeSearchLimit,
 } from '../_shared/providers.ts';
+import {
+  boundSources,
+  emptyCounters,
+  evidenceRevision,
+  requestAdmissionRead,
+  requestPlaceBrief,
+  type PlaceBrief,
+} from '../_shared/reasoning.ts';
 import { reserveQuota, usageToday } from '../_shared/quota.ts';
 import {
+  type CachedAiBrief,
   type CachedEvidence,
+  readAiBriefs,
   readCanonicalPlaceIds,
   readEvidenceCache,
   readEvidenceProbes,
   readOpeningHours,
   serviceClient,
   writeEvidenceCache,
+  writeAiBriefs,
   writeEvidenceProbes,
   writeOpeningHours,
 } from '../_shared/cache.ts';
-import { shouldFetchEvidence } from '../_shared/cacheKeys.ts';
+import { lookupAiBrief, shouldFetchEvidence } from '../_shared/cacheKeys.ts';
 import {
   googleReviews,
   officialEvidence,
   redditEvidence,
   youtubeEvidence,
 } from '../_shared/evidenceSources.ts';
+import { admissionFromOfficialClaims, type AdmissionFare, type PlaceAdmission } from '../_shared/placeCost.ts';
 
 interface EvidenceBody {
   city?: string;
@@ -53,6 +68,15 @@ interface EvidenceBody {
   placeNames?: string[];
   /** Each place's own website, for the official-source check. */
   placeWebsites?: Array<string | undefined>;
+  /** Country codes resolve bare official JSON-LD amounts safely. */
+  placeCountryCodes?: Array<string | undefined>;
+  /**
+   * Which places have no prose of their own. The client knows this and the
+   * server does not — a description arrives with a matched Wikivoyage listing,
+   * which happens on the discovery path. Only these places are worth spending
+   * a metered call on.
+   */
+  placeNeedsDescription?: boolean[];
   travelStartsInDays?: number;
   /** Which map provider the ids belong to. Defaults to Google. */
   provider?: string;
@@ -107,6 +131,21 @@ Deno.serve(async (request) => {
     ? await readOpeningHours(cache, [...canonicalIds.values()])
     : new Map<string, Array<{ daysOfWeek: number[]; opensAt: string; closesAt: string }>>();
 
+  /**
+   * Model answers cached against this place's evidence, read once for the
+   * whole batch. Fetched by place id across every revision, because the
+   * revision for this run is only known after the grounding sources have been
+   * assembled inside the loop below.
+   */
+  const cachedAiBriefs = cache && canonicalIds.size > 0
+    ? await readAiBriefs(
+      cache,
+      [...canonicalIds.values()].map((canonicalPlaceId) => ({
+        canonicalPlaceId, operation: 'place-brief', evidenceRevision: '',
+      })),
+    )
+    : new Map<string, unknown | null>();
+
   /** A cached row becomes a wire document; the wire keys by *provider* id. */
   const toWireDocument = (placeId: string, entry: CachedEvidence, index: number) => ({
     id: `${entry.source}-${placeId}-${entry.sourceItemId || index}`,
@@ -126,6 +165,33 @@ Deno.serve(async (request) => {
   const trends: Record<string, number> = {};
   /** Operator-published hours by provider place id, for the client to merge. */
   const openingHours: Record<string, Array<{ daysOfWeek: number[]; opensAt: string; closesAt: string }>> = {};
+  /** Operator-published admission by provider place id, for the client to merge. */
+  const admissions: Record<string, PlaceAdmission> = {};
+  /** Validated model descriptions by provider place id. Often empty. */
+  const briefs: Record<string, PlaceBrief> = {};
+  const freshAiBriefs: CachedAiBrief[] = [];
+  const reasoningCounters = emptyCounters();
+  const geminiKey = secrets.gemini();
+
+  /**
+   * Turn gathered documents into grounding text, keyed by the URL they came
+   * from. Claim excerpts are verbatim fragments of the retrieved page, which
+   * is exactly what the substring rule needs; nothing else we hold server-side
+   * is guaranteed to be quotable.
+   */
+  const briefSourcesFrom = (docs: unknown[]) => {
+    const byUrl = new Map<string, string[]>();
+    for (const raw of docs) {
+      const doc = raw as { sourceUrl?: string; claims?: Array<{ excerpt?: string; summary?: string }> };
+      if (!doc?.sourceUrl) continue;
+      const texts = (doc.claims || [])
+        .map((claim) => claim.excerpt?.trim())
+        .filter((text): text is string => Boolean(text));
+      if (texts.length === 0) continue;
+      byUrl.set(doc.sourceUrl, [...(byUrl.get(doc.sourceUrl) || []), ...texts]);
+    }
+    return [...byUrl.entries()].map(([sourceUrl, texts]) => ({ sourceUrl, text: texts.join('\n') }));
+  };
   const freshDocuments: CachedEvidence[] = [];
   const freshHours: Array<{ canonicalPlaceId: string; rules: Array<{ daysOfWeek: number[]; opensAt: string; closesAt: string }> }> = [];
   const attemptedProbes: Array<{ canonicalPlaceId: string; source: string }> = [];
@@ -210,13 +276,71 @@ Deno.serve(async (request) => {
           : entry.source === 'official-website' ? officialIsFresh
             : true
     ));
+    const cachedOfficialEntries = canonicalId
+      ? (cachedByCanonical.get(canonicalId) || []).filter((entry) => entry.source === 'official-website')
+      : [];
+    const cachedOfficialAdmission = officialIsFresh && cachedOfficialEntries.length > 0
+      ? admissionFromOfficialClaims(
+        cachedOfficialEntries.flatMap((entry) => entry.claims),
+        cachedOfficialEntries[0]?.sourceUrl,
+        cachedOfficialEntries[0]?.retrievedAt,
+      )
+      : undefined;
     const cachedDocuments = cachedEntries.map((entry, position) => toWireDocument(placeId, entry, position));
 
     const [reviews, videos, threads, official] = await Promise.all([
       wantReviews ? googleReviews(placeId) : Promise.resolve([]),
       videosAllowed ? youtubeEvidence(name, city, placeId) : Promise.resolve([]),
       wantThreads ? redditEvidence(name, city, placeId) : Promise.resolve([]),
-      wantOfficial ? officialEvidence(website, placeId) : Promise.resolve({ documents: [], openingRules: [] }),
+      wantOfficial
+        ? officialEvidence(
+          website,
+          placeId,
+          body.placeCountryCodes?.[index],
+          /**
+           * Only reached when the operator's JSON-LD published no fare at all —
+           * `officialEvidence` enforces that, so a well-marked-up site never
+           * costs a metered call. Everything a call needs to be refused lives
+           * here: no key, no canonical id to cache against, no quota.
+           */
+          geminiKey && canonicalId
+            ? async (pageText, country) => {
+              const revision = evidenceRevision([{ sourceUrl: website || '', text: pageText }]);
+              const cached = lookupAiBrief(cachedAiBriefs, canonicalId, 'admission-read', revision);
+              if (cached !== undefined) {
+                // Including a cached `null`: a page the model could not read a
+                // price from will not become readable tomorrow.
+                reasoningCounters.cacheHits += 1;
+                return cached as AdmissionFare[] | null;
+              }
+              if (!await reserveQuota(cache, {
+                provider: 'gemini-reasoning',
+                calls: 1,
+                units: 1,
+                callLimit: geminiCallLimit(),
+                resetTimezone: GEMINI_QUOTA_TIMEZONE,
+                failClosed: true,
+              })) {
+                reasoningCounters.skipped += 1;
+                return undefined;
+              }
+              const { fares, rejected } = await requestAdmissionRead(
+                { pageText, countryCode: country },
+                { apiKey: geminiKey, model: geminiModel() },
+              );
+              reasoningCounters.rejectedSentences += rejected;
+              if (fares) reasoningCounters.succeeded += 1; else reasoningCounters.failed += 1;
+              freshAiBriefs.push({
+                canonicalPlaceId: canonicalId,
+                operation: 'admission-read',
+                evidenceRevision: revision,
+                brief: fares,
+              });
+              return fares;
+            }
+            : undefined,
+        )
+        : Promise.resolve({ documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined }),
     ]);
     if (wantReviews) providerCalls += 1;
     if (videosAllowed) providerCalls += 1;
@@ -238,7 +362,78 @@ Deno.serve(async (request) => {
       if (stored) openingHours[placeId] = stored;
     }
 
+    const officialAdmission = official.admission || cachedOfficialAdmission;
+    if (officialAdmission) admissions[placeId] = officialAdmission;
+
     documents.push(...cachedDocuments, ...reviews, ...videos, ...threads, ...official.documents);
+
+    /**
+     * A description, for the many places that have none.
+     *
+     * Only asked for when the client says this place has no prose of its own —
+     * most OSM results, because prose arrives only with a matched Wikivoyage
+     * listing. Grounded in the claim excerpts we just gathered, which are
+     * verbatim fragments of real pages, so the substring rule in
+     * `validateBriefSentences` has something true to check against.
+     *
+     * Everything about this call is arranged so that failing is cheap and
+     * silent: it runs last, it never blocks a card, and every negative
+     * outcome — no key, no sources, no quota, a timeout, or every sentence
+     * rejected — produces the same result, which is no brief.
+     */
+    if (geminiKey && body.placeNeedsDescription?.[index]) {
+      const briefSources = boundSources(briefSourcesFrom([...cachedDocuments, ...reviews, ...threads, ...official.documents]));
+      const revision = evidenceRevision(briefSources);
+      const cachedBrief = canonicalId && cache
+        ? lookupAiBrief(cachedAiBriefs, canonicalId, 'place-brief', revision)
+        : undefined;
+
+      if (briefSources.length === 0) {
+        reasoningCounters.skipped += 1;
+      } else if (cachedBrief !== undefined) {
+        /**
+         * A hit, and `null` is a legitimate hit — it records that we asked
+         * about this exact evidence and nothing survived validation. Re-asking
+         * would spend a metered call to learn the same thing again.
+         */
+        reasoningCounters.cacheHits += 1;
+        if (cachedBrief) briefs[placeId] = cachedBrief as PlaceBrief;
+      } else if (!await reserveQuota(cache, {
+        provider: 'gemini-reasoning',
+        calls: 1,
+        units: 1,
+        callLimit: geminiCallLimit(),
+        resetTimezone: GEMINI_QUOTA_TIMEZONE,
+        // The one metered provider here. An unreachable counter must mean
+        // "don't call", never "call anyway and find out from the bill".
+        failClosed: true,
+      })) {
+        reasoningCounters.skipped += 1;
+      } else {
+        const { brief, rejected } = await requestPlaceBrief(
+          { name, city, categories: [] },
+          briefSources,
+          { apiKey: geminiKey, model: geminiModel() },
+        );
+        reasoningCounters.rejectedSentences += rejected;
+        if (brief) {
+          briefs[placeId] = brief;
+          reasoningCounters.succeeded += 1;
+        } else {
+          reasoningCounters.failed += 1;
+        }
+        // The empty answer is written too. That is the whole point: a place
+        // with nothing to say must not be re-asked tomorrow.
+        if (canonicalId) {
+          freshAiBriefs.push({
+            canonicalPlaceId: canonicalId,
+            operation: 'place-brief',
+            evidenceRevision: revision,
+            brief: brief ?? null,
+          });
+        }
+      }
+    }
 
     if (canonicalId) {
       if (wantReviews) attemptedProbes.push({ canonicalPlaceId: canonicalId, source: 'google-places' });
@@ -281,12 +476,22 @@ Deno.serve(async (request) => {
     await writeEvidenceCache(cache, freshDocuments, expiresAt);
     await writeOpeningHours(cache, freshHours, expiryFor('openingHours', body.travelStartsInDays));
     await writeEvidenceProbes(cache, attemptedProbes, expiresAt);
+    /**
+     * Model answers get the long TTL, because correctness here is governed by
+     * `evidenceRevision` and not by the clock: a description stops being right
+     * when what we read changes, which the key already catches. The expiry is
+     * therefore garbage collection rather than freshness, and a short one
+     * would only mean paying to regenerate an answer that was still correct.
+     */
+    await writeAiBriefs(cache, freshAiBriefs, expiryFor('placeIdentity', body.travelStartsInDays));
   }
 
   return json({
     documents,
     trends,
     openingHours,
+    admissions,
+    briefs,
     // Summarisation runs client-side via summarisePlaceEvidence, so the
     // weighting rules live in one place rather than being duplicated here.
     expiresAt,
@@ -302,6 +507,18 @@ Deno.serve(async (request) => {
       limit: youtubeSearchLimit(),
       used: (await usageToday(cache, 'youtube-search', YOUTUBE_QUOTA_TIMEZONE))?.calls ?? null,
       blockedThisRequest: quotaBlocked,
+    },
+    /**
+     * What the model tier cost and refused. `rejectedSentences` is the number
+     * that matters: a grounding validator whose rejection rate nobody watches
+     * is a validator nobody notices has stopped working — whether because the
+     * model improved or because the rule silently started passing everything.
+     */
+    reasoning: {
+      configured: Boolean(geminiKey),
+      limit: geminiCallLimit(),
+      used: geminiKey ? (await usageToday(cache, 'gemini-reasoning', GEMINI_QUOTA_TIMEZONE))?.calls ?? null : null,
+      ...reasoningCounters,
     },
   });
 });

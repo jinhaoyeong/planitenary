@@ -23,6 +23,13 @@ import {
 } from '../_shared/cache.ts';
 import { discoveryCityKey } from '../_shared/cacheKeys.ts';
 import {
+  categoryAdmission,
+  mergeAdmission,
+  osmAdmission,
+  parseAdmissionText,
+  type PlaceAdmission,
+} from '../_shared/placeCost.ts';
+import {
   isExcludedOsmPlace,
   osmCategories,
   osmDietaryOptions,
@@ -30,6 +37,8 @@ import {
   osmIndoorOutdoor,
   osmNames,
   osmNotability,
+  osmNotabilitySignals,
+  osmOpeningCaveats,
   osmPlaceId,
   osmPriceLevel,
   osmVisitMinutes,
@@ -160,6 +169,23 @@ const PRICE_LEVELS: Record<string, number> = {
   PRICE_LEVEL_VERY_EXPENSIVE: 4,
 };
 
+/**
+ * Amap's `biz_ext.cost` and Baidu's `detail_info.price` are a typical per-head
+ * spend, not an entry fee — so this is `spend-based` rather than `ticketed`,
+ * and the distinction survives to the card. Both providers only cover mainland
+ * China, so the currency is not in doubt.
+ */
+function regionalSpend(value?: string): PlaceAdmission | undefined {
+  const amount = Number(String(value ?? '').trim());
+  if (!Number.isFinite(amount) || amount <= 0) return undefined;
+  return {
+    class: 'spend-based',
+    typicalSpend: { audience: 'person', amount, currency: 'CNY' },
+    source: 'provider',
+    confidence: 'medium',
+  };
+}
+
 const pad = (value: number) => String(value).padStart(2, '0');
 
 /**
@@ -234,7 +260,10 @@ function toCandidate(
     experienceTags: categories,
     rating: place.rating,
     reviewCount: place.userRatingCount,
+    // Google's band is restaurant spend, not admission — the two are different
+    // questions and `priceLevel` keeps answering only the first.
     priceLevel: place.priceLevel ? PRICE_LEVELS[place.priceLevel] : undefined,
+    admission: mergeAdmission(categoryAdmission(categories)),
     openingHours: toOpeningHours(place),
     estimatedVisitMinutes: visitMinutes,
     indoorOutdoor: 'mixed' as const,
@@ -353,6 +382,11 @@ function regionalCandidate(
     categories: ['essential'],
     experienceTags: ['regional-provider'],
     rating: Number.isFinite(rating) ? rating : undefined,
+    // Both providers publish a typical per-head spend, declared in the
+    // interfaces above and never read until now. It is spending, not admission,
+    // and it says so — but a source stated it, so it is a fact rather than an
+    // inference from the category. Currency is unambiguous for these two.
+    admission: regionalSpend(isAmap ? amap.biz_ext?.cost : baidu.detail_info?.price),
     estimatedVisitMinutes: 90,
     indoorOutdoor: 'mixed' as const,
     reservationStatus: 'unknown' as const,
@@ -649,6 +683,7 @@ async function searchOsm(
     // same shapes often enough ("Tu-Su 10:00-18:00") to be worth reading, and
     // anything unrecognised yields no rule rather than a guess.
     const hours = parseOsmOpeningRules(listing.hours);
+    const hoursCaveats = osmOpeningCaveats(listing.hours);
     byKey.set(`wv|${listing.name.toLowerCase()}`, {
       id: `wikivoyage-${encodeURIComponent(listing.name)}`,
       provider: 'wikivoyage' as const,
@@ -663,8 +698,15 @@ async function searchOsm(
       // A hand-written guidebook entry is a strong significance signal on its own.
       notability: 0.6,
       priceLevel: undefined,
+      // `listing.price` has been parsed by `wikivoyage.ts` all along and
+      // discarded here — this branch used to hardcode `priceLevel: undefined`
+      // with the price sitting in scope one line away.
+      admission: mergeAdmission(
+        parseAdmissionText(listing.price, countryCode, 'wikivoyage'),
+        categoryAdmission(categories),
+      ),
       openingHours: hours.length > 0
-        ? { periods: hours, sourceConfidence: 'low' as const }
+        ? { periods: hours, sourceConfidence: 'low' as const, caveats: hoursCaveats }
         : undefined,
       estimatedVisitMinutes: osmVisitMinutes(categories),
       indoorOutdoor: 'mixed' as const,
@@ -748,12 +790,28 @@ function buildOsmCandidate(
     categories,
     experienceTags: [...new Set([...categories, ...cuisines])],
     notability,
+    // The same signals `notability` sums, kept by name so the panel can say
+    // *why* a place is significant instead of asserting that it is.
+    notabilitySignals: [
+      ...osmNotabilitySignals(tags),
+      ...(listing ? ['appears in the Wikivoyage city guide'] : []),
+    ],
     dietaryOptions: osmDietaryOptions(tags),
     priceLevel: osmPriceLevel(tags),
+    // `osmPriceLevel` answers one question — is entry free — and this branch
+    // read only that, ignoring both the `charge` tag already in the Overpass
+    // payload and any price the matched guidebook listing carried.
+    admission: mergeAdmission(
+      osmAdmission(tags, countryCode),
+      parseAdmissionText(listing?.price, countryCode, 'wikivoyage'),
+      categoryAdmission(categories),
+    ),
     openingHours: hours.length > 0
       // Low, deliberately: OSM hours are community-maintained, and this parser
       // reads weekdays but not holidays, seasons or sunrise-relative times.
-      ? { periods: hours, sourceConfidence: 'low' as const }
+      // `caveats` names whichever of those the source actually published, so
+      // the omission is stated rather than silent.
+      ? { periods: hours, sourceConfidence: 'low' as const, caveats: osmOpeningCaveats(tags.opening_hours) }
       : undefined,
     estimatedVisitMinutes: osmVisitMinutes(categories),
     indoorOutdoor: osmIndoorOutdoor(tags),

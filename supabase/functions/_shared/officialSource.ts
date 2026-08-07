@@ -16,10 +16,11 @@
  *     anyone on earth can edit, so it is a server-side request to an
  *     attacker-influenceable address. See {@link isSafePublicUrl}.
  *
- * No imports and no Deno APIs, so the vitest suite exercises this directly.
+ * No Deno APIs, so the vitest suite exercises this directly.
  */
 
 import type { OpeningRule } from './osmPlaces.ts';
+import { parseAdmissionText, resolveCurrency, type AdmissionFare, type PlaceAdmission } from './placeCost.ts';
 
 /**
  * Whether a URL is safe for the server to fetch.
@@ -113,17 +114,252 @@ export function extractJsonLd(html: string): Array<Record<string, unknown>> {
       // A malformed block is skipped; one bad script must not lose the others.
       continue;
     }
-    const queue = [parsed];
+    const sourceJson = block[1].trim();
+    const queue: Array<{ value: unknown; sourceJson: string }> = [{ value: parsed, sourceJson }];
     while (queue.length > 0 && nodes.length < 50) {
-      const item = queue.shift();
-      if (Array.isArray(item)) { queue.push(...item); continue; }
+      const current = queue.shift()!;
+      const item = current.value;
+      if (Array.isArray(item)) {
+        queue.push(...item.map((value) => ({ value, sourceJson: current.sourceJson })));
+        continue;
+      }
       if (!item || typeof item !== 'object') continue;
       const record = item as Record<string, unknown>;
-      if (record['@graph']) queue.push(...asArray(record['@graph']));
+      // Keep the original JSON-LD block out of the public shape while making
+      // it available for verbatim claim excerpts later.
+      Object.defineProperty(record, '__sourceJson', {
+        configurable: true,
+        value: current.sourceJson,
+      });
+      if (record['@graph']) {
+        queue.push(...asArray(record['@graph']).map((value) => ({ value, sourceJson: current.sourceJson })));
+      }
       nodes.push(record);
     }
   }
   return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// Admission offers
+// ---------------------------------------------------------------------------
+
+/** A structured price claim that can be persisted beside the official page. */
+export interface OfficialPriceClaim {
+  summary: string;
+  amount?: number;
+  currency?: string;
+  audience?: string;
+  excerpt?: string;
+}
+
+const PRICE_SYMBOL = /[\p{Sc}]/u;
+
+const numericValue = (value: unknown): number | undefined => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== 'string') return undefined;
+  const match = value.trim().match(/(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/);
+  if (!match) return undefined;
+  const amount = Number(match[0].replace(/,/g, ''));
+  return Number.isFinite(amount) ? amount : undefined;
+};
+
+const normaliseAudience = (value: string | undefined): string | undefined => {
+  if (!value) return undefined;
+  const lower = value.trim().toLowerCase();
+  if (/adult|general|regular/.test(lower)) return 'adult';
+  if (/child|kid|infant|youth/.test(lower)) return 'child';
+  if (/student/.test(lower)) return 'student';
+  if (/senior|elderly/.test(lower)) return 'senior';
+  if (/concession|discount/.test(lower)) return 'concession';
+  if (/group/.test(lower)) return 'group';
+  if (/family/.test(lower)) return 'family';
+  return value.trim();
+};
+
+const audienceFromOffer = (offer: Record<string, unknown>): string => {
+  for (const key of ['audience', 'eligibleCustomerType', 'category']) {
+    const value = offer[key];
+    const text = typeof value === 'string'
+      ? value
+      : value && typeof value === 'object' && typeof (value as Record<string, unknown>).name === 'string'
+        ? String((value as Record<string, unknown>).name)
+        : undefined;
+    const audience = normaliseAudience(text);
+    if (audience) return audience;
+  }
+  return 'adult';
+};
+
+const sourceJson = (node: Record<string, unknown>): string | undefined => {
+  const value = (node as Record<string, unknown> & { __sourceJson?: unknown }).__sourceJson;
+  return typeof value === 'string' ? value : undefined;
+};
+
+/** Return a small exact substring of the JSON-LD block, never a paraphrase. */
+const jsonLdExcerpt = (nodes: Array<Record<string, unknown>>, tokens: string[]): string | undefined => {
+  const wanted = tokens.filter(Boolean);
+  if (wanted.length === 0) return undefined;
+  for (const node of nodes) {
+    const source = sourceJson(node);
+    if (!source) continue;
+    const searchable = source.toLowerCase();
+    const positions = wanted.map((token) => searchable.indexOf(token.toLowerCase()));
+    const present = positions.filter((position) => position >= 0);
+    if (present.length === wanted.length) {
+      const start = Math.max(0, Math.min(...present) - 60);
+      const end = Math.min(source.length, Math.max(...present) + 100);
+      return source.slice(start, end).trim();
+    }
+  }
+  return undefined;
+};
+
+const priceText = (value: unknown): string | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return typeof value === 'string' ? value.trim() : undefined;
+};
+
+interface StructuredFare {
+  fare: AdmissionFare;
+}
+
+const structuredFare = (
+  offer: Record<string, unknown>,
+  parent: Record<string, unknown>,
+  countryCode?: string,
+): StructuredFare | undefined => {
+  const priceValue = offer.price ?? offer.lowPrice;
+  const text = priceText(priceValue);
+  const amount = numericValue(priceValue);
+  if (amount === undefined || !text) return undefined;
+
+  const explicitCurrency = typeof offer.priceCurrency === 'string'
+    ? offer.priceCurrency
+    : typeof parent.priceCurrency === 'string' ? parent.priceCurrency : undefined;
+  const symbol = text.match(PRICE_SYMBOL)?.[0];
+  const currency = resolveCurrency(explicitCurrency, symbol, countryCode);
+  if (!currency) return undefined;
+
+  const audience = audienceFromOffer(offer);
+  const high = numericValue(offer.highPrice);
+  const note = high !== undefined && high > amount
+    ? `from ${amount} to ${high} ${currency}`
+    : undefined;
+  return {
+    fare: { audience, amount, currency, note },
+  };
+};
+
+/**
+ * Read admission from schema.org JSON-LD already present on an official page.
+ * Structured offers outrank a category expectation, but an unparseable number
+ * never becomes a guessed fare.
+ */
+export function admissionFromJsonLd(
+  nodes: Array<Record<string, unknown>>,
+  countryCode?: string,
+): PlaceAdmission | undefined {
+  const fares: AdmissionFare[] = [];
+  const fareKeys = new Set<string>();
+  let sawOffer = false;
+  let explicitFree = false;
+  let explicitPaid = false;
+  let rawText: string | undefined;
+
+  const addFare = (candidate: StructuredFare | undefined) => {
+    if (!candidate) return;
+    const key = `${candidate.fare.audience}|${candidate.fare.currency}|${candidate.fare.amount}`;
+    if (fareKeys.has(key)) return;
+    fareKeys.add(key);
+    fares.push(candidate.fare);
+  };
+
+  for (const node of nodes) {
+    if (node.isAccessibleForFree === true) explicitFree = true;
+    if (node.isAccessibleForFree === false) explicitPaid = true;
+
+    for (const offerValue of asArray(node.offers as unknown)) {
+      if (!offerValue || typeof offerValue !== 'object') continue;
+      const offer = offerValue as Record<string, unknown>;
+      sawOffer = true;
+      addFare(structuredFare(offer, node, countryCode));
+
+      const range = typeof offer.priceRange === 'string' ? offer.priceRange.trim() : undefined;
+      if (range) {
+        const parsed = parseAdmissionText(range, countryCode, 'official-website');
+        if (parsed?.fares?.[0]) {
+          const fare = parsed.fares[0];
+          if (parsed.rawText && !rawText) rawText = parsed.rawText;
+          addFare({ fare: { ...fare, audience: audienceFromOffer(offer) } });
+        } else if (!rawText) {
+          rawText = range;
+        }
+      }
+    }
+
+    if (typeof node.priceRange === 'string' && node.priceRange.trim()) {
+      const range = node.priceRange.trim();
+      const parsed = parseAdmissionText(range, countryCode, 'official-website');
+      if (parsed?.fares?.[0]) {
+        if (parsed.rawText && !rawText) rawText = parsed.rawText;
+        addFare({ fare: parsed.fares[0] });
+      }
+      else if (!rawText) rawText = range;
+    }
+  }
+
+  if (fares.length > 0) {
+    /**
+     * Every published fare is zero, so the operator is saying entry costs
+     * nothing — whether or not they also set `isAccessibleForFree`, which is
+     * optional and widely omitted. Requiring both signals classified these as
+     * ticketed and the card read "JP¥0 · adult ticket".
+     *
+     * `every` rather than `some`: a museum with a free child ticket beside a
+     * paid adult one is not a free museum.
+     */
+    if (fares.every((fare) => fare.amount === 0)) {
+      return { class: 'free', source: 'official-website', confidence: 'high', rawText };
+    }
+    return { class: 'ticketed', fares, source: 'official-website', confidence: 'high', rawText };
+  }
+  if (explicitFree) return { class: 'free', source: 'official-website', confidence: 'high', rawText };
+  if (sawOffer || explicitPaid) {
+    return { class: 'ticketed', fares: [], source: 'official-website', confidence: 'high', rawText };
+  }
+  if (rawText) return { class: 'unknown', rawText, source: 'official-website', confidence: 'low' };
+  return undefined;
+}
+
+/** Turn the structured result into claims that survive the evidence cache. */
+export function officialAdmissionClaims(
+  nodes: Array<Record<string, unknown>>,
+  admission: PlaceAdmission | undefined,
+): OfficialPriceClaim[] {
+  if (!admission) return [];
+  if (admission.class === 'free') {
+    return [{
+      summary: 'The official site says admission is free',
+      excerpt: jsonLdExcerpt(nodes, ['isAccessibleForFree', 'true']),
+    }];
+  }
+  if (admission.class !== 'ticketed') return [];
+
+  const fares = admission.fares || [];
+  if (fares.length === 0) {
+    return [{
+      summary: 'The official site says a ticket is required but publishes no machine-readable price',
+      excerpt: jsonLdExcerpt(nodes, ['offers']) || jsonLdExcerpt(nodes, ['isAccessibleForFree', 'false']),
+    }];
+  }
+  return fares.map((fare) => ({
+    summary: `The official site lists ${fare.audience} admission at ${fare.currency} ${fare.amount}${fare.note ? ` (${fare.note})` : ''}`,
+    amount: fare.amount,
+    currency: fare.currency,
+    audience: fare.audience,
+    excerpt: jsonLdExcerpt(nodes, [String(fare.amount), fare.currency]),
+  }));
 }
 
 /**

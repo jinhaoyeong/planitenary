@@ -60,6 +60,7 @@ interface DuePlace {
   source: string;
   name: string;
   city: string;
+  countryCode?: string;
   website?: string;
   providerPlaceId: string;
 }
@@ -105,7 +106,7 @@ Deno.serve(async (request) => {
   const placeIds = [...new Set(rows.map((row) => String(row.canonical_place_id)))];
   const { data: places } = await cache
     .from('canonical_places')
-    .select('id, primary_name, city, website')
+    .select('id, primary_name, city, country_code, website')
     .in('id', placeIds);
   const { data: links } = await cache
     .from('place_provider_links')
@@ -125,6 +126,7 @@ Deno.serve(async (request) => {
       source: String(row.source),
       name: String(place.primary_name || ''),
       city: String(place.city || ''),
+      countryCode: place.country_code ? String(place.country_code) : undefined,
       website: place.website ? String(place.website) : undefined,
       providerPlaceId,
     }];
@@ -145,7 +147,7 @@ Deno.serve(async (request) => {
   for (const place of due) {
     if (place.source === 'official-website') {
       if (!place.website) continue;
-      const official = await officialEvidence(place.website, place.providerPlaceId);
+      const official = await officialEvidence(place.website, place.providerPlaceId, place.countryCode);
       officialRefreshed += 1;
       probes.push({ canonicalPlaceId: place.canonicalPlaceId, source: 'official-website' });
       /**

@@ -66,4 +66,19 @@ describe('storage resilience', () => {
       saveToStorage('itinerary-live', { version: 1, places: ['second'] });
     }).not.toThrow();
   });
+
+  it('keeps a valid primary unless the caller identifies a more complete recovery snapshot', () => {
+    vi.stubGlobal('localStorage', createStorage());
+    const key = 'itinerary-demo-cq-cd';
+    const profile = { destination: 'Osaka', startDate: '2027-04-10', endDate: '2027-04-17' };
+
+    localStorage.setItem(key, JSON.stringify({ id: 'cq-cd', name: 'Osaka', days: [] }));
+    localStorage.setItem(`${key}-backup`, JSON.stringify({ id: 'cq-cd', name: 'Osaka', days: [], tripProfile: profile }));
+
+    expect(loadFromStorage<{ tripProfile?: typeof profile }>(key)?.tripProfile).toBeUndefined();
+    expect(loadFromStorage<{ tripProfile?: typeof profile }>(key, {
+      preferRecovery: (primary, recovery) => !primary.tripProfile && Boolean(recovery.tripProfile),
+    })?.tripProfile).toEqual(profile);
+    expect(JSON.parse(localStorage.getItem(key) || '{}').tripProfile).toEqual(profile);
+  });
 });

@@ -13,7 +13,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { probeKey, routePairKey } from './cacheKeys.ts';
+import { aiBriefKey, parseAppliesTo, probeKey, routePairKey } from './cacheKeys.ts';
 
 let cachedClient: SupabaseClient | null | undefined;
 
@@ -393,6 +393,17 @@ export interface CachedClaim {
   summary: string;
   value?: number;
   unit?: string;
+  /**
+   * What the claim is scoped to — the part of the day for `best-time`, the
+   * currency and ticket audience for `price`.
+   *
+   * This was written to the database and never read back, so a `best-time`
+   * claim survived a cache hit with its window stripped and
+   * `summarisePlaceEvidence` stopped producing a best-time window for any place
+   * whose evidence was cached. The claim looked present; only its meaning was
+   * gone.
+   */
+  appliesTo?: { start?: string; end?: string; daysOfWeek?: number[]; currency?: string; audience?: string };
   strength: number;
   excerpt?: string;
 }
@@ -443,7 +454,7 @@ export async function readEvidenceCache(
     const claimsByDocument = new Map<string, CachedClaim[]>();
     const { data: claimRows } = await client
       .from('travel_claims')
-      .select('source_document_id, claim_type, summary, value, unit, strength, excerpt')
+      .select('source_document_id, claim_type, summary, value, unit, applies_to, strength, excerpt')
       .in('source_document_id', documentIds);
 
     for (const claim of claimRows || []) {
@@ -455,6 +466,7 @@ export async function readEvidenceCache(
         // a queue schedulable, so it must survive the round trip as a number.
         value: claim.value != null && Number.isFinite(Number(claim.value)) ? Number(claim.value) : undefined,
         unit: claim.unit ? String(claim.unit) : undefined,
+        appliesTo: parseAppliesTo(claim.applies_to),
         strength: Number.isFinite(Number(claim.strength)) ? Number(claim.strength) : 0.5,
         excerpt: claim.excerpt ? String(claim.excerpt) : undefined,
       };
@@ -543,6 +555,80 @@ export async function writeEvidenceProbes(
 }
 
 /**
+ * A cached model answer, where "we asked and got nothing" is itself an answer.
+ *
+ * `brief` is null for a place the model had nothing usable to say about. The
+ * row existing is the cache hit; the payload being null is the result. Callers
+ * must check presence, not truthiness — treating a null payload as a miss
+ * would re-ask, on the metered provider, forever, which is the entire thing
+ * this cache exists to prevent.
+ */
+export interface CachedAiBrief {
+  canonicalPlaceId: string;
+  operation: string;
+  evidenceRevision: string;
+  brief: unknown | null;
+}
+
+
+/**
+ * Read cached model answers. Returns a map whose *keys* are the hits, so a
+ * null value stays distinguishable from an absent one.
+ */
+export async function readAiBriefs(
+  client: SupabaseClient,
+  wanted: Array<{ canonicalPlaceId: string; operation: string; evidenceRevision: string }>,
+): Promise<Map<string, unknown | null>> {
+  const hits = new Map<string, unknown | null>();
+  const ids = [...new Set(wanted.map((item) => item.canonicalPlaceId))].filter(Boolean);
+  if (ids.length === 0) return hits;
+  try {
+    const { data, error } = await client
+      .from('ai_place_briefs')
+      .select('canonical_place_id, operation, evidence_revision, brief')
+      .in('canonical_place_id', ids)
+      .gt('expires_at', new Date().toISOString());
+    if (error || !data) return hits;
+    for (const row of data) {
+      hits.set(
+        aiBriefKey(String(row.canonical_place_id), String(row.operation), String(row.evidence_revision)),
+        row.brief ?? null,
+      );
+    }
+  } catch {
+    // Best-effort: an unreadable cache costs a call, never a wrong answer.
+  }
+  return hits;
+}
+
+
+/** Persist a model answer, including the empty one. */
+export async function writeAiBriefs(
+  client: SupabaseClient,
+  entries: CachedAiBrief[],
+  expiresAt: string,
+): Promise<void> {
+  if (entries.length === 0) return;
+  try {
+    await client
+      .from('ai_place_briefs')
+      .upsert(
+        entries.map((entry) => ({
+          canonical_place_id: entry.canonicalPlaceId,
+          operation: entry.operation,
+          evidence_revision: entry.evidenceRevision,
+          brief: entry.brief ?? null,
+          retrieved_at: new Date().toISOString(),
+          expires_at: expiresAt,
+        })),
+        { onConflict: 'canonical_place_id,operation,evidence_revision' },
+      );
+  } catch {
+    // Best-effort.
+  }
+}
+
+/**
  * Persist freshly fetched evidence and its claims.
  *
  * Documents upsert on (source, source_url), so a refreshed review updates in
@@ -593,6 +679,10 @@ export async function writeEvidenceCache(
         summary: claim.summary,
         value: claim.value ?? null,
         unit: claim.unit ?? null,
+        // Without this the column is always null, so `readEvidenceCache` has
+        // nothing to read back and a cached `best-time` claim loses the window
+        // that gave it meaning.
+        applies_to: claim.appliesTo ?? null,
         strength: claim.strength,
         excerpt: claim.excerpt ?? null,
       }));

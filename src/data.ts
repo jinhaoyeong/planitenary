@@ -1,4 +1,7 @@
 import type { FieldSourceMap } from './lib/identityFields';
+// Declared once, server-side, where currency is resolved. Imported direct
+// rather than via `destinationIntelligence`, which imports this file.
+import type { PlaceAdmission } from '../supabase/functions/_shared/placeCost';
 
 export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 'travel' | 'flight' | 'cafe' | 'shop' | 'nightlife' | 'other';
 
@@ -41,11 +44,37 @@ export interface Activity {
   description: string;
   type: ActivityType;
   location?: string;
-  cost?: string; // Legacy display value, retained for old records.
+  cost?: string; // Legacy display value, retained for old records. Never written to.
+  /**
+   * A single figure for budgeting, carrying its own currency so 2500 can never
+   * be read as anything but ¥2,500. Derived from the adult fare;
+   * {@link admission} is the canonical record.
+   */
   estimatedCost?: ActivityCost;
+  /**
+   * What it costs to get in, as the source published it — every fare, the
+   * currency, where it came from and how sure we are.
+   *
+   * This is the value that must survive a save. `estimatedCost` is one number
+   * pulled out of it for convenience, and `cost` is a legacy display string
+   * kept only so old records still render.
+   */
+  admission?: PlaceAdmission;
   bookingStatus?: BookingStatus;
   reservationRequirement?: 'not-needed' | 'recommended' | 'required' | 'unknown';
+  /**
+   * The single window used for conflict checks. Kept as-is so
+   * `PlannerPreview`'s existing comparison is untouched.
+   */
   openingHours?: ActivityOpeningHours;
+  /**
+   * Every window of the week.
+   *
+   * `openingHours` is `periods[0]` and always was, so a place shut on Mondays
+   * or closed over lunch looked open on the day card. Additive rather than a
+   * replacement, so nothing that reads the single window has to change.
+   */
+  openingHoursWeek?: ActivityOpeningHours[];
   transportMinutes?: number;
   transportMode?: string;
   travelEstimateSource?: 'provider-route' | 'offline-straight-line' | 'unknown';

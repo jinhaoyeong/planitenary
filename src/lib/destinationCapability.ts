@@ -84,6 +84,16 @@ export interface ProviderRuntime {
   tiktokPartner: boolean;
   douyinPartner: boolean;
   rednotePartner: boolean;
+  /**
+   * A grounded model tier is configured (`GEMINI_API_KEY` is set server-side).
+   *
+   * `travel-capabilities` has always reported this and both the parser and
+   * this type dropped it on the floor, so the client could not tell "no brief
+   * was written for this place" from "this deployment has no model at all".
+   * The UI needs the difference to decide between omitting the section and
+   * leaving an empty slot where prose should be.
+   */
+  aiReasoning: boolean;
   /** Captured fixtures available as an offline fallback. */
   fixtures: boolean;
 }
@@ -108,6 +118,7 @@ export const EMPTY_PROVIDER_RUNTIME: ProviderRuntime = {
   tiktokPartner: false,
   douyinPartner: false,
   rednotePartner: false,
+  aiReasoning: false,
   fixtures: true,
 };
 

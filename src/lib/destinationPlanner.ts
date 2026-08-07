@@ -25,29 +25,10 @@ import {
   type ScheduledSlot,
   type SimulatedDay,
 } from './humanScheduler';
-import { scorePlaces, type ScoringInputs } from './placeIntelligence';
+import { scorePlaces, STYLE_TAGS, type ScoringInputs } from './placeIntelligence';
 import { cityForDay as cityForLegDay, describeCityLegs, orderedCities, planCityLegs, type CityLeg } from './cityLegs';
 import { cityStayTotal, fitCityStays, legsFromCityStays, reconcileCityStays } from './cityStays';
 import { distanceMeters } from './placeIdentity';
-
-const STYLE_TAGS: Record<string, string[]> = {
-  cafes: ['cafes', 'food'],
-  'street-food': ['street-food', 'food', 'market', 'food-district'],
-  'night-markets': ['market', 'evening', 'nightlife'],
-  temples: ['temples', 'temple', 'shrine', 'history'],
-  museums: ['museums', 'museum', 'art'],
-  history: ['history', 'temple', 'shrine'],
-  architecture: ['architecture', 'view'],
-  shopping: ['shopping', 'market'],
-  mountains: ['nature', 'hiking', 'view'],
-  hiking: ['hiking', 'walk', 'nature'],
-  nature: ['nature', 'park', 'garden'],
-  beaches: ['waterfront', 'nature'],
-  wildlife: ['wildlife', 'aquarium'],
-  'scenic-train': ['view', 'waterfront'],
-  anime: ['anime', 'theme-park'],
-  nightlife: ['nightlife', 'evening', 'view'],
-};
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -64,7 +45,16 @@ const dataCompleteness = (candidate: PlaceCandidate) => {
 };
 
 const budgetFit = (candidate: PlaceCandidate, profile: TripProfile) => {
-  const price = candidate.priceLevel ?? 2;
+  // Free entry fits every budget, and now that a source can actually say so,
+  // that answer beats any band.
+  if (candidate.admission?.class === 'free') return 1;
+
+  const price = candidate.priceLevel;
+  // Most places carry no price band at all, and defaulting them to 2 scored an
+  // unknown cost as a confident mid-price — the same silent guess the "Cost
+  // unknown" label was making in the panel. A neutral value says "no
+  // information" without pretending to have any.
+  if (price === undefined) return 0.75;
   if (profile.budgetTier === 'budget') return clamp01(1 - Math.max(0, price - 1) * 0.25);
   if (profile.budgetTier === 'luxury') return price >= 2 ? 1 : 0.75;
   return price <= 3 ? 1 : 0.7;
@@ -91,7 +81,7 @@ export function rankWithIntelligence(
     trends: options.trends,
   });
 
-  return scored.map(({ candidate, score, dimensions, reasons, cautions }) => ({
+  return scored.map(({ candidate, score, dimensions, rationale, reasons, cautions }) => ({
     candidate,
     score,
     breakdown: {
@@ -104,6 +94,7 @@ export function rankWithIntelligence(
       routeCompatibility: dimensions.practicality,
       diversityContribution: dimensions.currentQuality,
     },
+    rationale,
     reasons,
     cautions,
   }));

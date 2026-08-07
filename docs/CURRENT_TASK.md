@@ -1,265 +1,511 @@
 # Current Task
 
 Feature:
-Multi-city planning, and a range calendar for the dates
+Smart place details — what a place costs, when it is open, and why it ranks
+where it does
 
 Branch: `main`, at `d742caf` plus this session's work.
 
-744 tests across 46 files, `tsc -b` clean, production build clean, eslint clean
-on changed files (the 53 remaining problems are pre-existing and unchanged).
+992 tests across 53 files, `tsc -b` clean, production build clean.
 
-## Completed — the trip changing length after it is built
+Lint, stated precisely, because "changed files are clean" was too broad a claim
+to make about this diff: **every file created by this work is lint-clean**, and
+the two pre-existing files it edits are unchanged against the baseline —
+`App.tsx` reports the same 3 `no-explicit-any` errors it reported before, and
+`ItineraryView.tsx` the same 3 errors and 3 hook warnings, all on lines this
+work never touched.
 
-- `syncDaysWithDuration` inside `syncDurationDependentFields`: day cards follow
-  the dates on every profile write. Growing appends; shrinking removes trailing
-  cards **only while empty** and reports the rest as stranded; clearing the
-  dates changes nothing; dates refresh when the trip moves
-- `fitCityStays` keeps a finished stay plan through a length change, stretching
-  the last stay or trimming from the end, and the build names what it did.
-  `cityStayDayCount` distinguishes a finished plan from an abandoned one, so
-  only the latter falls back to inference
-- Trip Identity reports the consequence: an empty last day says to rebuild
-  through discovery; stranded days say they were kept
+## The complaint
 
-## Completed — multi-city
+> "the details is kinda useless… the cost is unknown… i dont get the opening
+> hour… why it rank here feels hardcoded as well… generic and surface default
+> hardcode style answer"
 
-### The traveller divides the days, not the planner
+Four failures, each with a concrete cause:
 
-- `TripProfile.cityStays`: city and days **in travel order**, so the array is
-  the route as well as the lengths. Sanitised on save, filtered to cities the
-  trip still has, and never rebalanced — an incomplete plan is a state the
-  traveller is in the middle of, not corruption to repair
-- `src/lib/cityStays.ts` proposes, reconciles and reports. A day added to one
-  city comes from an unassigned pool, **never from a neighbour**
-- `CityStayPlanner` in the wizard's *when* step and in Trip Identity, for any
-  trip with more than one city. Steppers, route reordering, and each stay shown
-  as the dates it covers — a hotel is booked against dates, not day numbers
-- `buildDestinationItinerary` follows a complete plan against every signal in
-  the shortlist, including keeping days in a city with nothing shortlisted.
-  Inference survives only as the fallback for trips never asked, and says so
-- Discovery sizes each city's recommended shortlist to that city's real days,
-  and the switcher shows its dates
+- `formatPrice` said **"Cost unknown"** on nearly every card, because
+  `osmPriceLevel` only ever answers "free" or nothing — while Wikivoyage's price
+  string was already parsed and thrown away, and OSM's `charge` tag was already
+  in the Overpass payload and discarded
+- `openingSummary` read `periods[0]` and appended the raw enum, printing
+  **`09:00–17:00 · high confidence`**. A museum shut on Mondays showed Tuesday's
+  hours. The scheduler has resolved weekdays correctly since the Monday-closure
+  fix; only the UI was blind
+- **"Why it ranks here"** was a table of six fixed sentences, top three above a
+  0.7 threshold — so most of a thirty-place shortlist read identically
+- Most OSM places have **no description at all**, because prose only arrives
+  when a Wikivoyage listing matches
 
-### Days belong to stays, not to `destinations[0]`
+Plan: `~/.claude/plans/resilient-jumping-noodle.md`. Eight steps; data contracts
+first, then the UI, then Gemini — so the deterministic version can be judged
+honestly before any model is in the loop.
 
-- `src/lib/cityLegs.ts`: `planCityLegs` divides the trip by largest-remainder
-  apportionment over the shortlist, floor of one day per city, contiguous legs
-  in travel order. More cities than days drops by **weight**, not by position
-- `buildDestinationItinerary` clusters within each leg, resets carry-over at
-  leg boundaries with a reason the traveller can read, keeps meals to the day's
-  city, and confines fatigue rebalancing to days of the same stay
-- A **day trip is not a leg**: legs come from chosen destinations only, and a
-  place outside every leg city attaches to the nearest stay by the centroid of
-  its shortlisted places. `allowCrossCityDays` still decides whether it can be
-  scheduled at all
-- `DestinationBuildResult.cityLegs` exposes the division; the preview header and
-  a build warning both state it, along with any city that got no days
-- `buildDaysFromProfile` no longer guesses at creation: a multi-city trip gets
-  blank cities and neutral titles, a single-city trip still names its city
+## Done — steps 1–8
 
-### Discovery reviews every city — uncommitted
+Both model operations are wired: grounded, quota-limited, fail-closed, cached
+(including the empty answer), and labelled where they reach the screen.
 
-- City switcher: one deck per city, discovered on first open, cached per city,
-  built from all of them at once through `rankedAll`
-- Decisions are one map across the trip and are pruned against **every** city's
-  candidates — pruning to the active deck would repeat `d89bbe8`'s bug
-- Per-city progress counters; the Build button counts the whole trip
-- `applyPlan` writes the visited cities in order, keeping any chosen city the
-  plan gave no days to rather than quietly editing the trip
+**Nothing is deployed.** `supabase/migrations/20260807000100_add_ai_brief_cache.sql`
+needs `supabase db push` before `travel-evidence` is deployed, and it has not
+been run against a live Postgres — only read. Deploying the function without
+the table would not break the app (every cache helper is best-effort and
+degrades to re-asking) but it would spend metered calls it should not.
 
-## Completed — the date range calendar
+### 1. The claim cache was losing what claims meant
 
-- `src/lib/dateRange.ts` + `src/components/ui/DateRangeCalendar.tsx`, replacing
-  both `<input type="date">` fields in the wizard and Trip Identity. Click the
-  first day, click the last, and the days between are one connected band with a
-  live "21 Jan – 31 Jan 2027 · 11 days, 10 nights"
-- Local midnight, never UTC — `new Date('2027-01-21')` lands on the 20th west of
-  Greenwich. `addMonths` clamps to a shorter month. `isIsoDate` round-trips,
-  because `2027-02-30` is 2 March to a browser rather than `NaN`
-- Clicking before a pending start restarts the range; a complete range restarts
-  on the next click, so no "clear" step has to be found first
-- Arrow keys walk a day and a week at a time and page at the edges; every day is
-  a real `<button>` with a full `aria-label`
+`applies_to` was written to `travel_claims` and **never read back**, and the
+write was missing it too. A cached `best-time` claim came back with the window
+that gave it meaning stripped, so `summarisePlaceEvidence` silently stopped
+producing a best-time window for any place whose evidence was cached. The claim
+looked present; only its meaning was gone.
 
-## Completed — earlier this session
+- Both ends fixed. `parseAppliesTo` lives in `cacheKeys.ts`, not beside
+  `CachedClaim` in `cache.ts`, because `cache.ts` imports the Supabase client
+  and so cannot be loaded by vitest — a round trip nothing can test is how this
+  went unnoticed
+- Every field validated rather than cast: the column is jsonb and can hold
+  whatever an older writer put there. An object whose every field fails
+  validation returns `undefined`, not `{}`, which would read as "scoped to
+  nothing"
+- `discoveryCityKey` carries a schema version. `discovery_cache` holds
+  candidates verbatim for 30 days, so a new field would otherwise be absent from
+  cached rows for a month — on the one path meant to make the app feel fast
 
-### Shortlist sized to the trip — `141e6f4`, `b126f2b`
+### 2. One reading of opening hours, not two
 
-- `defaultDiscoveryDecisions` pre-selected a hardcoded 29 places regardless of
-  trip length. Capacity is now `dayCount × maxMainActivities` for the pace
-  actually used, so a three-day Calm trip pre-selects 9 and a twenty-one day one
-  59 — choosing Calm shortens the deck with no second rule existing anywhere
-- Food-only places are passed over: `buildDestinationItinerary` draws meals from
-  the whole ranked list, so pre-selecting restaurants would spend sightseeing
-  capacity on lunch. A night market still counts as a sight
-- Hard ceiling of **100** applied *after* capacity, so a capped trip still
-  reports the capacity it has. At 21 active days the cap takes 118 down to 100,
-  still above the 84 the days hold — the shortfall copy checks rather than
-  assumes
-- `SHORTLIST_HEADROOM = 1.4` is labelled a guess, not presented as measured
-- The recommended-shortlist button names the trip length and pace behind its
-  number, so a traveller who wants more knows the lever is the pace
+`openingWindow` moved from `humanScheduler` to **`src/lib/openingHours.ts`** and
+is imported back. `humanScheduler.test.ts` passes **unmodified**, which is the
+proof the extraction changed no behaviour.
 
-### Shortlist fit measured, and deliberately not acted on — `e419534`
+`describeOpeningHours` gives the panel what the scheduler already knew:
 
-- `measureShortlistFit` / `recordShortlistDiagnostic` read a finished
-  `DestinationBuildResult` and write nothing back. Gated to dev builds or
-  `VITE_PLANNER_DIAGNOSTICS=true`, so no traveller sees a rejection rate
-- Samples carry accepted, scheduled, `impliedHeadroom` and `byReason` plus city,
-  day count and the pace *actually used* — `applyTravellerConstraints` can lower
-  it, and samples are only comparable within one pace
-- Up to 50 accumulate on `window.__plannerDiagnostics`; a tuning pass is
-  `copy(__plannerDiagnostics)`. A build that scheduled nothing reports headroom 0
-- **Result (roadmap §6, Phase 7):** a 36-build fixture sweep produced only 10
-  usable samples — 26 were pool-bound. Median implied headroom 1.75, but the
-  metric is partly self-referential and fixture hours are uniformly 09:00–18:00.
-  Active-pace underfill was dominated by `no-viable-day`, which points at
-  `maxMainActivities` being aspirational for fast pace, not at headroom being
-  too small. **Decision: keep `1.4` and its provisional label**
+- Contiguous day runs collapse to `Tue–Sun`; days sharing hours without being
+  adjacent join as `Mon–Tue, Thu–Sun`. Sunday never wraps into Monday
+- **Every window of a day**, so a temple that shuts for lunch shows both
+- The destination's clock, via `countryTimezone` — 23:00 UTC Monday is already
+  Tuesday in Tokyo, and the traveller is asking about the destination's day
+- On a day card, the activity's own trip date replaces "today"
+- **`Closed on Monday 19 Apr — a day of your trip.`** The highest-value line in
+  the panel, and it costs nothing but walking the trip's dates
+- Confidence as a sentence — *"Community-maintained hours — worth checking on
+  the day"* — never `· low confidence`
 
-### Stale decisions pruned to the live candidate set — `d89bbe8`
+Only weekday closures may be asserted for a future date. A holiday closure needs
+a **date-specific** rule from a source; OSM's `PH` clauses never reach us, so
+`osmOpeningCaveats` states the gap instead: *"Holiday hours are published for
+this place but are not read here."* Same for seasonal ranges, sunrise-relative
+times and windows crossing midnight — all of which the parser correctly refuses
+to guess at, and all of which were silently invisible.
 
-- Decisions were restored by city and survived a re-discovery; the candidate list
-  did not. That produced the reported "45 of 20 reviewed — 33 selected" header
-  and a build that accepted nothing while a shortlist of 33 was on screen
-- `pruneDecisionsToCandidates` intersects on candidate **id**, not name (two
-  places in one city genuinely share names), and returns the discarded count so
-  the loss is shown — a vanished selection is the traveller's own work
+### 3. Reasons that differ from card to card
 
-### Pace and flight edges proven on finished builds — `6b369a6`, `d742caf`
+The six-sentence table is gone; `src/lib/placeRationale.ts` replaces it.
 
-- Roadmap §9.2 and §9.4 run through `buildDestinationItinerary` against the
-  Melbourne fixture, so the result is reproducible rather than argued
-- Calm / default / Fast paced route onto relaxed, balanced, active: busiest day
-  2 / 3 / 3 stops, days open 10:13 / 09:28 / 09:13, meals 85 / 70 / 55 minutes,
-  walking 16 minutes against 34. `PACE_DEFAULTS` demonstrably reaches the plan
-- Departure shaping holds, including the inverted window: a 12:33 departure
-  gives a 09:03 limit against a 09:30 start, and `simulateDay` schedules nothing
-  and says so rather than throwing or inventing a day
-- `6b369a6` found that an evening arrival did **not** leave "a day that is really
-  just dinner" as `shapeTripEdge`'s comment claimed — 19:30 plus two hours to
-  clear the airport starts the day at 21:30, past the balanced return time, so
-  day one came back bare. `d742caf` closes that: `ARRIVAL_MEAL_ALLOWANCE_MINUTES`
-  keeps a `maxMainOverride: 0` day open 180 minutes (capped at end of day) so one
-  dinner fits. No main sight is invented, and past the late-dinner cutoff the day
-  is honestly empty with a warning
+- **Names the traveller's own words** — *"You asked for temples and history"*,
+  not *"Matches what you said you like"*. The intersection was always computed
+  and always discarded
+- **Ordered by contribution (`value × weight`)**, not raw value. Significance at
+  0.9 × 0.16 contributed less than traveller fit at 0.8 × 0.24, yet led the
+  list — the direct mechanical cause of every card reading alike
+- **Names the evidence**: `osmNotabilitySignals` turns the number
+  `notability` sums into *"it has an encyclopedia entry and is a listed heritage
+  site"*
+- **Comparative against the shortlist**, computed once over the finished
+  population so two cards can never compare against different denominators
+- **Suppresses what does not distinguish** — a dimension true of >70% of the
+  shortlist says nothing about any one member of it
 
-### Component test harness — `c5dfce5`
+Superlatives are guarded, because that is where overclaiming happens: *"the only
+one open in the evening"* needs a real count of one, ties read as *"among the
+most"*, percentiles are dropped below 8 candidates and comparison entirely below
+3.
 
-- `sanitizeItinerary` / `sanitizeActivity` extracted to
-  `src/lib/itinerarySanitize.ts`, behaviour unchanged, and covered by 13 tests.
-  Three fail against pre-`4c3d6c6` code — verified by reverting, not assumed
-- jsdom + React Testing Library added. `node` stays the default environment; a
-  component test opts in per file with a `vitest-environment` docblock. Shared
-  setup registers jest-dom, cleans up between tests, and stubs `matchMedia`,
-  which `ThemeContext` reads on mount
-- The first component test (`TripIdentityPanel.test.tsx`) found the flight-time
-  and date labels were bare `<label>` siblings with no `htmlFor` — unlabelled to
-  a screen reader, not merely unfindable by a test. Fixed
+**A bug found by printing real output rather than trusting the tests.**
+`STYLE_TAGS.temples` includes `history` so a shrine scores for a history-minded
+traveller — fine inside a number. Said out loud it told someone the *Osaka
+Museum of History* was one of the temples they asked for: a false claim about
+their own input, which is worse than a vague one. `matchedStyleTags` now reads
+each style's list only up to the first entry that is another style's own name —
+the point where it stops describing itself and starts borrowing.
 
-### Deck gestures made testable, and tested — uncommitted
+### 4. What a place costs
 
-- Roadmap §9.6 credited the jsdom harness with covering the deck; it did not.
-  `TripIdentityPanel.test.tsx` was the only component test, and the deck's
-  interactions had exactly the coverage that let both sanitiser losses through
-- The gesture *rules* — `DRAG_INTENT_PX`, `SWIPE_COMMIT_PX`, the velocity flick
-  threshold, and the interactive-target / text-selection guards — moved to
-  `src/lib/deckGestures.ts` as `isDragIntent`, `swipeDecision` and
-  `shouldCloseFromSurface`. The component keeps the wiring; this keeps the
-  judgement, which is what a regression would change
-- Framer Motion's pointer drag cannot be driven honestly in jsdom, so the split
-  is deliberate rather than incidental: 15 tests cover the arithmetic,
-  8 component tests cover the flip a browser is genuinely needed for
-- Checked by mutation, not by assumption: removing the interactive-target and
-  selection guards turns four tests red, including the component-level "leaves
-  the source link alone"
-- `DeckCard` is now exported from `DestinationDiscoveryPanel.tsx`
-- Roadmap §9.6, §9.1 and the status section corrected to say what is covered
-  by pure-lib tests, what by the harness, and what is still unproven
+`supabase/functions/_shared/placeCost.ts` — no imports, so vitest exercises it
+directly, the same precedent as `osmPlaces.ts`.
 
-## Remaining
+**A category is never a price.** A shopping street may be free to walk into, a
+food market may hand out samples, a club may charge at the door. `class` is only
+ever set by a source that spoke about money; categories set `expectation`, which
+is rendered hedged and never promoted. An unpriced market resolves to
+`class: 'unknown'` + `expectation: 'spending-inside'` — *"No admission price
+published · spending happens inside"*, which separates admission from spending
+without claiming either.
 
-- **None of the multi-city work has been through a browser.** The four-city plan
-  was read out of a real `buildDestinationItinerary` run (Osaka 1–5, Nara 6,
-  Kyoto 7, Kobe 8), but the switcher, the calendar and live multi-city discovery
-  have only been exercised in jsdom. Worth one pass: create a Kansai trip, review
-  two cities, build, and check the day cards and the dashboard card location
-- **Reordering is arrow buttons, not drag.** Accessible and testable, but a
-  four-city route is fiddlier to reorder than it should be
-- **The drag gesture itself is still a browser observation.** `isDragIntent` and
-  `swipeDecision` are tested and the component calls them, but that a real mouse
-  drag suppresses its trailing click cannot be shown in jsdom
-- **`ITINERARY_SYNC_DEBUG` is still `true`** in `src/lib/itinerarySanitize.ts:387`.
-  Roadmap §9.3 is the last unfinished no-credentials check: rebuild a long trip,
-  confirm no `realtime-echo` or `remote-fetch` line reports `applied: true` with
-  an `incomingDays` lower than `currentDays`, then set the flag to `false` and
-  delete `logItinerarySync` and its call sites
-- **Deployed save round trip (§9.1).** The sanitisers are covered in `src/lib`;
-  what remains is discovery → save → reload against a real OSM place in the
-  deployed app, checking `provider` and `indoorOutdoor` survive
-- **Collect non-pool-bound shortlist samples** from live places with real opening
-  hours before touching `SHORTLIST_HEADROOM`. Fixture pools cannot exercise the
-  weekday-closure and walking-limit paths that the margin exists for
-- **The revision guard's call sites in `App.tsx` are untested.** The comparison
-  is covered; that the remote fetch and the realtime handler both consult it is
-  not. Same for `DestinationDiscoveryPanel`'s use of
-  `pruneDecisionsToCandidates` — the pruning is tested, the wiring is not
+**A number without a currency is not a price.** Resolution is code → symbol
+disambiguated by country → country default → **stop**. `¥600` is JPY in Osaka
+and CNY in Shanghai; with no country, or in France, it yields **no amount** and
+keeps `rawText`. This is the rule the old `'¥'.repeat(n)` broke.
 
-## Known gaps, not yet addressed
+Recovered, all of it already fetched and discarded:
 
-- **Nothing tells the traveller the day plan is stale after a profile edit.**
-  `profileRevision` guards generated *copy* only; there is no equivalent for the
-  days. Set flight times, see the plan unchanged, conclude the feature does
-  nothing — which is exactly what happened on 2026-08-06
-- **Amap POI noise reaches the shortlist.** A Guangzhou deck ranked "AAG Markets",
-  a financial-services office, at 58. Regional keyword search has no category
-  gate equivalent to `osmPlaces.ts`
-- **No photos.** `photoUrl` / `photoAttribution` exist and `PlaceMedia` renders
-  them, but nothing populates them since Google was removed. Wikidata `P18`, the
-  OSM `wikimedia_commons` tag and MediaWiki `pageimages` are free and keyless;
-  Commons requires visible attribution
-- **Sourcing breadth (roadmap Phase 8).** TripAdvisor unimplemented; the bounded
-  LLM extraction pass that turns a pasted RedNote or TikTok link into structured
-  claims is unbuilt and needs `GEMINI_API_KEY`. Platform search on TikTok, Douyin
-  and RedNote stays blocked by their terms — pasted links are the lawful route
-- **Contextual tips are partial.** Best-time windows, queue advice, event
-  conflicts and source explanations exist; local etiquette, safety notes, photo
-  spots, hidden entrances and crowd prediction do not
-- **Hotel location, dietary profile and accessibility needs** are honoured where
-  present in scheduling, but are not first-class `TripProfile` inputs
+- OSM `charge`, `fee`, `fee:conditional`, `charge:adult`, `admission`
+- Wikivoyage `listing.price`, at both sites that dropped it —
+  `travel-discover:665` hardcoded `priceLevel: undefined` with the parsed price
+  in scope one line away
+- Amap `biz_ext.cost` / Baidu `detail_info.price`, declared in the interfaces
+  and never read — a per-head spend, so `spend-based`, not `ticketed`
 
-## Blocked on credentials
+`fee=yes` with no readable charge is **`ticketed` with no fares**: *"Ticket
+required · no source published the price"* is the same knowledge as "Cost
+unknown", stated usefully.
 
-`.env.local` holds only `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
-`VITE_SUPABASE_AUTH_REDIRECT_URL` and `YOUTUBE_API_KEY`; the Supabase CLI is
-not installed.
+Precedence is one function: official-website > provider > osm-tag/wikivoyage >
+category, ties broken by fare count then by structured tag, and asserted
+order-independent.
 
-- Test `travel-refresh` with real due records:
-  ```sql
-  update evidence_probes set expires_at = now() - interval '1 day'
-  where source = 'official-website'
-    and canonical_place_id in (select id from canonical_places limit 1);
-  ```
-  Re-run the protected curl; expect `officialRefreshed: 1`. No undo needed.
-- Verify the Vercel frontend; confirm the cron fires at 03:00 and that
-  `youtubeBlocked` stays at 0 until the refresh budget is genuinely exhausted
-- **Check whether `AMAP_API_KEY` is set.** Mainland China destinations route to
-  Amap or Baidu, never OpenStreetMap — `resolveDestinationCapability` excludes
-  OSM when `regional` is true. A Guangzhou deck rendering live data means a
-  **paid** provider is configured. Worth confirming deliberately
+`budgetFit` no longer defaults a missing price to `2`, which scored "we have no
+idea" as a confident mid-price. Known-free now scores 1 outright.
 
-## Do not modify
+Three bugs the tests caught:
 
-- `shapeTripEdge`'s constants beyond the arrival-meal allowance added in
-  `d742caf`. The departure half and jet-lag shift are complete and tested.
-- Quota logic — `_shared/quota.ts` and `consume_provider_quota()`. The reserve
-  works *because* refresh and live share one counter and differ only in the
-  ceiling they pass.
-- Evidence schema — `source_documents`, `travel_claims`, `evidence_probes`.
-  A probe means "this source was asked".
-- `_shared` purity — `cacheKeys.ts`, `claims.ts`, `osmPlaces.ts`,
-  `wikivoyage.ts`, `officialSource.ts`, `quota.ts` must stay free of Deno APIs
-  and runtime imports.
-- `isSafePublicUrl` in the official-source fetch.
-- `SHORTLIST_HEADROOM` until non-pool-bound live samples exist. The fixture
-  sweep is not evidence for changing it.
+- `6.00 EUR;3.00 EUR concession` labelled the **adult** ticket a concession —
+  the look-ahead crossed the semicolon into the next price, then dropped the
+  real concession as a duplicate. Both audience windows are now bounded by the
+  neighbouring prices
+- `600 yen` resolved to currency `YEN` — three letters, so it passed the ISO
+  regex. Words are checked before codes
+- `¥600–¥1,000` dropped the upper figure without keeping `rawText`
+
+### 5. It survives the save
+
+`Activity.admission` and `Activity.openingHoursWeek`, through
+`candidateToActivity` → `sanitizeActivity` → storage → reload.
+
+- `admission.fares` is canonical. `estimatedCost` is one figure pulled from the
+  **adult** fare with its currency attached — a bare 1500 reads as dollars,
+  ringgit or yen depending on who is looking. A child fare is never taken as the
+  budget figure. Legacy `cost: string` still renders and is never written to
+- `openingHoursWeek` is additive, so `PlannerPreview`'s `periods[0]` conflict
+  check is untouched. Order is preserved, not sorted: a morning window must stay
+  before the afternoon one, and re-sorting would make every sync echo look like
+  a change
+- Class, expectation and source are validated against **keyed records**, so
+  adding a value to the union without listing it fails the build. That is the
+  bug class that cost this file `indoorOutdoor` and four of seven providers
+- Malformed fares are dropped **individually** — losing one concession price
+  beats losing the adult fare with it. An admission with no attributable source
+  is refused outright: a number on screen with nothing behind it is what the
+  provenance line exists to prevent
+- `fares: []` is preserved, because it means "ticket required, price not
+  published" and must not collapse into "no information"
+- Idempotent down to key order, verified through a real JSON round trip — the
+  realtime path at `App.tsx:426` sanitises then compares `JSON.stringify`
+- Records written before any of this exist reload with both fields absent, and
+  stay idempotent
+
+`admissionFor(candidate)` fills the category expectation for the three paths
+that reach the UI without a server-resolved admission: offline fixtures, Google
+(whose band is restaurant spend, not entry), and `discovery_cache` rows written
+before the field existed. It can only ever supply an `expectation` — asserted as
+a property across every category the table knows.
+
+### Fixtures can now demonstrate any of this
+
+Every fixture opened every day at one uniform window and had no price, so
+nothing offline could show a weekly closure or a real fare. Added: a Tue–Sun
+museum, a temple that shuts for lunch, and five published fares including a
+free-entry park and a multi-fare museum.
+
+### 6. The UI, both surfaces — walked in a browser, two bugs fixed
+
+`src/lib/admissionCopy.ts` decides what a price reads as, shared by both
+surfaces so a place cannot describe its cost one way while it is being chosen
+and another way once it is in the plan. `formatPrice` and `openingSummary` are
+deleted.
+
+**`CandidateDetails`**, top to bottom, every section omitted when unsourced:
+
+1. **Verdict strip** — Cost · Time needed · Today. Sticky inside the scrolling
+   back face, so the three facts the traveller called useless stay answerable
+   while the rest scrolls under them. Card geometry is set by
+   `.destination-flip-scene`'s `aspect-ratio`, so nothing here can resize it
+2. **Trip-critical alert** — a closure landing on a day of their own trip, or a
+   reported closure promoted out of the caution list. Nothing else earns it
+3. Description, rating and tag chips
+4. **"Why it is #3 for you"** — the heading names the position, because that is
+   the question. Falls back to "Why it is on your list" with no position
+5. **Admission** — the other fares, the source's own words when parsing could
+   not represent all of them, and where the price came from. Shown whenever
+   there is anything to attribute, not only when there are extra fares: a lone
+   ¥600 with nothing behind it is a number the traveller cannot weigh
+6. **Opening hours** — grouped week, named closed days, provenance sentence
+7. **Caveats** — the holiday/seasonal/past-midnight gaps, quieter than a caution
+   because they are about the limits of what we read, not about the place
+8. Practical grid, traveller themes, then cautions **as a list** — `join(' ')`
+   ran six warnings together exactly when they mattered most
+9. Provenance, with `sourceConfidence` as a sentence
+
+Copy now answers all four complaints: no "Cost unknown" anywhere, exact fares in
+the published currency with an optional explicitly-approximate home-currency
+figure, `Ticket required · no price published`, `No admission price published ·
+spending happens inside`, and hours that lead with the real day.
+
+**`ActivityItem`** gets one row, not a panel — a day card is a timeline, and the
+full record lives in discovery. The hardcoded `¥ {activity.cost}` is replaced by
+`admissionChip`; a `Clock` chip shows that day's real hours and turns red on
+"Closed this day"; booking appears only when required. `DayPlan.date` is a
+display string ("12 Apr"), so the ISO date comes from `profile.startDate +
+(day − 1)` — otherwise the card cannot ask the only question that matters.
+
+Tests written **before** the markup, since `DeckCard.test.tsx` asserts only flip
+mechanics and there was no safety net on content: `CandidateDetails.test.tsx`
+(25) and `ActivityFacts.test.tsx` (13), the latter asserting through the whole
+discovery → convert → save → JSON → reload path rather than from an in-memory
+object, plus that both surfaces describe the same place identically.
+
+One gap the tests caught: a single-fare place rendered its price with **no
+attribution at all**, because the admission section was gated on having *extra*
+fares.
+
+**Local browser pass (2026-08-07).** The Demo Mode profile persistence bug was
+found and fixed while trying to run this check. On the auth transition into
+Demo Mode, persistence could save the previous profile-less seed before the
+current key had hydrated; a valid primary then won over the richer backup on
+the next reload. Persistence now waits for key hydration, and Demo Mode can
+prefer a recovery snapshot only when it contains a valid profile missing from
+the primary. A regression test covers the recovery policy.
+
+The running app was reloaded at `http://localhost:5199` with the existing
+Osaka profile (10–17 Apr 2027). The profile and dates survived reload, and the
+discovery review opened again. The first visible card rendered sourced
+admission expectation, weekday hours, provenance, and a place-specific
+rationale. This proves the local Demo persistence and discovery entry path;
+it does not yet prove the deployed OSM save/reload path or every named Osaka
+fixture card.
+
+### 7. Official-site offers — implemented, not deployed
+
+`admissionFromJsonLd` now reads schema.org `isAccessibleForFree`, `Offer` and
+`AggregateOffer` prices, currency codes, audience labels, numeric `priceRange`
+values, and keeps an unparseable range as source text. JSON-LD excerpts are
+literal substrings of the original script block, so the claim still has a
+verifiable source rather than a reconstructed sentence.
+
+`officialEvidence` emits price claims at authority 1.0, alongside closure
+claims, without adding a price rule to the low-authority review/video claim
+extractor. `travel-evidence` returns an admission map beside official hours;
+the client remaps provider IDs to candidate IDs and merges the official record
+above OSM/Wikivoyage/provider values. Cached official claims rebuild the same
+admission on a probe hit, including free entry and ticket-required/no-price
+answers. The nightly refresh passes the canonical country code so bare official
+numbers are resolved safely as well.
+
+The client contract now carries `unit: 'currency'` and admission audience/
+currency in `appliesTo`; no migration is needed because the existing claims
+JSONB column already stores it. The implementation is local and tested; the
+Edge Function still needs deployment before live non-fixture cards can receive
+operator-published fares.
+
+**One gap found reviewing the extractor: a free place read as a priced one.**
+`admissionFromJsonLd` only classified a zero-priced offer as `free` when the
+node *also* carried `isAccessibleForFree` — but that property is optional and
+widely omitted, and `offers: { price: "0" }` is a normal way to publish free
+entry. Such a place resolved to `ticketed`, and the card then read
+**`JP¥0 · adult ticket`**: derived from the source, and the worst available way
+to say "free".
+
+Fixed at both levels, because zero is a price other sources can publish too
+(OSM `charge=0`), and the classifier is not the last line of defence:
+
+- `admissionFromJsonLd` treats an all-zero fare set as free on its own
+- `describeAdmission` and `admissionChip` render an all-zero `ticketed`
+  admission as **`Free entry`**, so the two surfaces cannot disagree about it
+
+Guarded on **every** fare being zero, not *some* — a museum with a free child
+ticket beside a ¥1,500 adult one is not a free museum, and a test holds that
+line.
+
+### 8. The model tier, grounded and fail-closed
+
+`supabase/functions/_shared/reasoning.ts`. No Supabase or provider imports, so
+vitest exercises every rule directly — the `placeCost.ts` precedent.
+
+**The contract is mechanical, not a prompt.** A system prompt asking a model
+not to invent things is a request. What is enforced is: every displayed
+sentence carries a `sourceUrl` we supplied and an `excerpt` that is a **literal
+substring** of the text we supplied for that URL. A sentence that cannot
+produce one is dropped and the rest are kept — one bad sentence is no reason to
+lose four good ones, and no reason to show the bad one.
+
+The substring rule is the real guarantee. A digit check cannot see *"the finest
+garden in Kansai"*, and a qualitative invention is exactly what a traveller
+acts on. Numbers are checked too, but as a pre-filter beside the rule, never
+instead of it.
+
+Rules a sentence must clear, in order:
+
+1. Shape, then a `sourceUrl` we actually supplied
+2. **A minimum excerpt length.** Without a floor the rule is trivially
+   satisfiable — `"the"` is a substring of virtually any page, so a model could
+   attach it to a wholly invented sentence and pass
+3. The excerpt is literally present, comparing with whitespace collapsed and
+   case ignored (HTML extraction reflows text; an excerpt differing only in
+   capitalisation is the same quotation). **No punctuation stripping** — that
+   is where a paraphrase starts passing as a quotation
+4. No brochure phrasing (`must-see`, `hidden gem`, `nestled`, `boasts`, …) —
+   each asserts a verdict no source made, and each hides in the sentence rather
+   than the excerpt
+5. **No hours, closures or prices.** Those have their own pipeline, provenance
+   and currency handling. A brief repeating them can only agree, which is
+   noise, or disagree, which puts two answers to one question on a single card.
+   Checked *before* the digit filter, because the dangerous version is the one
+   whose numbers are genuinely in the source and would otherwise pass
+6. Every number in the sentence appears in the source
+
+`admission-read` is stricter still, since a fare renders as a bare fact: the
+amount must appear as digits on the operator's page (both `1500` and `1,500`
+are tried), the excerpt must be verbatim, and the currency is resolved through
+the same path as every other price rather than trusted from the model — `YEN`
+is three letters and passes any ISO-shaped regex, a bug this project already
+fixed once deterministically.
+
+**Budget, because this is the only provider that bills.**
+
+- A separate `gemini-reasoning` quota, `GEMINI_DAILY_CALL_LIMIT`, default 50 —
+  independent of the discovery counters, so a busy search day cannot spend the
+  model budget and a runaway model cannot starve discovery
+- `reserveQuota` gained `failClosed`. It deliberately fails *open*, and its own
+  doc comment reasons about YouTube costing nothing on overrun — that reasoning
+  depends entirely on the call being free. An unreachable counter now means
+  "don't call" for the metered provider. A missing client counts too: that
+  means nothing is counting the spend at all
+- One attempt, one timeout, **no retry** — a failed brief is a missing brief,
+  and retrying converts a provider wobble into a bill
+- Ceilings enforced before sending: 8 sources, 6k chars each
+- Counters for skipped / rejected / succeeded / failed, returned in the
+  payload. A grounding validator whose rejection rate nobody watches is one
+  nobody notices has stopped working
+
+**Only where it is needed.** The client sends `placeNeedsDescription` — the
+server cannot know, since prose arrives with a matched Wikivoyage listing back
+on the discovery path. Briefs are grounded in the claim excerpts already
+gathered for that place, which are verbatim fragments of real pages.
+
+**Labelled on the card.** `Description written by AI from N sources, each
+sentence quoted from one of them`, inside its own bordered element that model
+prose can never share with human prose. Grounded is not the same as
+human-written, and a traveller is entitled to know which they are reading
+before they weigh it. Shown only when no human description exists.
+
+`aiReasoning` now survives from `travel-capabilities` into `ProviderRuntime` —
+both the parser and the type dropped it, so the client could not tell "no brief
+for this place" from "no model in this deployment".
+
+33 tests on the validators alone, none touching the network.
+
+**The cache, and why the empty answer is stored.** `ai_place_briefs`, its own
+table rather than a new `evidence_probes.source` value — a generated
+description is not a source of evidence, and reusing the probe log would have
+meant widening an evidence-source union for something that is not evidence.
+
+The daily cap stops runaway spend but not waste: without this, a place the
+model had nothing to say about is asked about again tomorrow, and the day
+after, forever. So `brief` is nullable and **a row's existence is the cache
+hit while its payload is allowed to be null** — "we asked and nothing survived
+validation" is a real answer worth remembering. `lookupAiBrief` therefore
+returns `undefined` for a miss and `null` for a cached empty answer, and
+callers must branch on presence rather than truthiness. Four tests hold that
+line, because collapsing the two is the obvious mistake and it is invisible.
+
+The key is place + operation + **`evidenceRevision`**, a content hash of the
+grounding sources. Correctness is governed by that, not by the clock: a
+description stops being right when what we read changes, not when a week
+passes. So the row gets the long TTL — expiry here is garbage collection, and a
+short one would only pay to regenerate answers that were still correct. The
+hash covers URLs *and* their text, sorted, so the same page re-read with new
+wording invalidates the answer while a reordered source list does not.
+
+`lookupAiBrief` and `aiBriefKey` live in `cacheKeys.ts`, not beside the table
+access in `cache.ts` — `tsc` caught the import dragging `Deno` globals into the
+browser program the moment a client test used it. Exactly the precedent
+`parseAppliesTo` set, and for the same reason: a key helper nothing can load is
+a key helper nothing can test.
+
+**`admission-read`, wired.** The only path by which a model-derived price is
+ever shown as fact, and it runs on **official-site visible text only** — never
+a review or a forum post, whose authority could not carry a price anyway
+(`OPERATIONAL_CLAIMS` gates `price` at 0.85; reddit is 0.65).
+
+Two decisions live in `resolveOfficialAdmission`, pure and in the testable
+module rather than inside `officialEvidence`, which reaches for `Deno` and
+cannot be loaded by vitest:
+
+- **Structured pricing always wins.** A marked-up `Offer` is the operator
+  stating a price in a form with one meaning; a number in a paragraph is the
+  same operator read less reliably. `shouldReadAdmission` means a well-marked-up
+  site is never even asked about — which is also why it never costs a call
+- **A model-read fare is demoted, not disguised.** `source` stays
+  `official-website`, because the price genuinely is published there, but
+  confidence drops to `medium`. Leaving it at `high` would make a number found
+  in prose indistinguishable from one the operator marked up
+
+Cached under `operation: 'admission-read'` in the same table, keyed by a hash
+of the page text, and **the null result is cached too** — a page the model
+could not read a price from will not become readable tomorrow. The reader is
+injected into `officialEvidence` rather than imported, so that module still
+knows nothing about keys, quotas or caches.
+
+Step 9 (`rank-rationale`) is deferred and likely dropped — a rephrasing layer
+adds latency and a second validation surface without adding intelligence.
+
+## The acceptance walk, done (2026-08-07)
+
+Walked in Chrome against the Osaka fixtures, on a demo trip spanning **Monday
+12 Apr 2027**. Every step-6 acceptance item now has an observation behind it
+rather than an argument:
+
+| Claim | What the browser showed |
+| --- | --- |
+| Card geometry stable on flip | `.destination-flip-scene` measured **520×426 at x=545 before and after** — identical. The item the plan flagged as verified only by construction |
+| Exact fare, published currency first | Osaka Castle Museum **`JP¥600 · adult ticket · ≈ RM 16`** |
+| Multi-fare admission | Nakanoshima **`JP¥1,500`**, with Student ¥1,100 and Child beneath |
+| Category-only market | Kuromon **`No admission price published · spending happens inside`** |
+| Free entry | Osaka Castle Park **`Free entry`** |
+| Hours genuinely absent | **`Not published · no source published them`** — no invented schedule |
+| A place that shuts for lunch | Shitennoji **`08:30–12:00, 13:00–16:30`** — both windows, on the discovery card *and* the day card |
+| Closure inside the traveller's trip | **`Closed on Monday 12 Apr — a day of your trip.`** |
+| The traveller's own words | **`You asked for temples and history — this is tagged for all of them`** |
+| Superlatives stay tie-safe | **`Among the most documented on your Osaka list`**, never "the most" |
+| Persistence | fares, currencies and **Shitennoji's two windows** survived build → save → reload |
+| Day-card facts row, after reload | `Tennoji · JP¥300 · ≈ RM 8 · 08:30–12:00, 13:00–16:30` |
+
+The scheduler also placed Nakanoshima on **Day 4 rather than Day 3**, routing
+around the Monday closure unprompted — the hours work paying off somewhere no
+test was pointed at.
+
+### Two bugs only a browser could have shown
+
+Both were the panel overclaiming, which is the single thing this work exists to
+stop. Both are fixed, and both now have regression tests written from what was
+on screen.
+
+- **`1 source · corroborated across sources`.** The count and the confidence
+  sentence were chosen independently, so nothing stopped them contradicting
+  each other inside one line. Corroboration needs two things to corroborate;
+  below that, high confidence can only speak to the one source's authority
+- **`Why it is #1 for you`** printed directly above *"Nothing stands out on
+  paper — it is here for variety"*. Each half is defensible; together the
+  heading makes a promise the next line immediately breaks. Where
+  `placeRationale` emits only its `variety` fallback, the heading stops
+  claiming a rank reason
+
+### Still open
+
+- **Dark mode on the `--warn` alert** and the back face scrolling on a real
+  mobile viewport — not looked at.
+- **Live (non-fixture) discovery shows the category expectation on every
+  card**, because the step 2/4 edge functions are **not deployed**. Nothing is
+  wrong with the copy; there is no fare in the payload yet. Deploying them is
+  what makes the fare paths reachable outside fixtures.
+- Official-site fares are implemented locally but remain unreachable on live
+  discovery until the updated `travel-evidence` function is deployed.

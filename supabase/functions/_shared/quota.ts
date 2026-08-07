@@ -27,6 +27,20 @@ export interface QuotaRequest {
    * Pacific; counting in UTC would misalign the reset by up to eight hours.
    */
   resetTimezone: string;
+  /**
+   * Refuse the call when the counter cannot be read, instead of allowing it.
+   *
+   * The default below is to fail *open*, and the reasoning for that is written
+   * out there: overrunning a free provider costs an error response, and losing
+   * all evidence to a brief database wobble is the worse outcome. That
+   * reasoning depends entirely on the call being free.
+   *
+   * Gemini is not free. If the counter is unreachable we do not know how much
+   * of today's allowance is spent, and "spend money because we cannot tell" is
+   * not a defensible default — an unreachable counter has to mean "don't
+   * call". Set this only for providers that send a bill.
+   */
+  failClosed?: boolean;
 }
 
 /**
@@ -35,17 +49,24 @@ export interface QuotaRequest {
  * Returns true when the call may proceed. The reservation is atomic, so two
  * concurrent requests cannot both slip past the last unit.
  *
- * **Fails open.** If the counter cannot be reached the call is allowed, because
- * exceeding a YouTube quota costs nothing but an error response — unlike the
- * paid providers, there is no bill on the other side of this. Failing closed
- * would turn a brief database problem into a total loss of evidence, which is
- * the worse outcome of the two.
+ * **Fails open by default.** If the counter cannot be reached the call is
+ * allowed, because exceeding a YouTube quota costs nothing but an error
+ * response — unlike the paid providers, there is no bill on the other side of
+ * this. Failing closed would turn a brief database problem into a total loss
+ * of evidence, which is the worse outcome of the two.
+ *
+ * That argument holds only for free providers. Pass `failClosed` for a metered
+ * one; see the field's own note for why the default inverts there.
  */
 export async function reserveQuota(
   client: SupabaseClient | null,
   request: QuotaRequest,
 ): Promise<boolean> {
-  if (!client) return true;
+  // No client is not the same as an unreachable one: it means quota accounting
+  // is not configured in this deployment at all. A metered provider still
+  // refuses, because nothing would be counting the spend.
+  if (!client) return !request.failClosed;
+  const onUnknown = () => !request.failClosed;
   try {
     const { data, error } = await client.rpc('consume_provider_quota', {
       p_provider: request.provider,
@@ -54,10 +75,10 @@ export async function reserveQuota(
       p_call_limit: request.callLimit,
       p_reset_timezone: request.resetTimezone,
     });
-    if (error) return true;
+    if (error) return onUnknown();
     return data !== false;
   } catch {
-    return true;
+    return onUnknown();
   }
 }
 

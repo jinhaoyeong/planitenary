@@ -4,6 +4,253 @@ Running log. Newest first. Rationale lives in `CLAUDE_CONTEXT.md`.
 
 ---
 
+## 2026-08-07 (place details: cost, hours, and why it ranks)
+
+> "the details is kinda useless… the cost is unknown… i dont get the opening
+> hour… why it rank here feels hardcoded as well… generic and surface default
+> hardcode style answer"
+
+All eight steps. Data contracts first, UI next, Gemini last — so the
+deterministic version could be judged before any model was in the loop.
+
+**The claim cache was losing what claims meant.** `applies_to` was written to
+`travel_claims` and never read back — and the write was missing it too. A
+cached `best-time` claim returned with its window stripped, so
+`summarisePlaceEvidence` silently stopped producing best-time windows for any
+place whose evidence was cached. Both ends fixed; `parseAppliesTo` lives in
+`cacheKeys.ts` because `cache.ts` cannot be loaded by vitest, and a round trip
+nothing can test is how this survived. `discoveryCityKey` now carries a schema
+version, so a new candidate field is not absent from cached rows for 30 days.
+
+**One reading of opening hours, not two.** `openingWindow` moved to
+`src/lib/openingHours.ts` and the scheduler imports it back —
+`humanScheduler.test.ts` passes unmodified, which is the proof. The panel had
+been reading `periods[0]` and printing `09:00–17:00 · high confidence`, so a
+museum published `Tu-Su` looked open on Monday to the person deciding whether to
+go, while the planner knew otherwise. `describeOpeningHours` groups the week
+(`Tue–Sun`), keeps both windows of a day that shuts for lunch, reads the clock
+in the destination, names closed days, and says *"Closed on Monday 19 Apr — a
+day of your trip."* A holiday closure is asserted only from a date-specific
+source rule; `osmOpeningCaveats` states the gaps the parser refuses to guess at
+instead of leaving them invisible.
+
+**Reasons that differ from card to card.** The six-sentence table is gone.
+`placeRationale.ts` names the traveller's own style words, orders by
+contribution (`value × weight`) rather than raw value — the mechanical cause of
+every card reading alike — names the evidence under each dimension, compares
+against the finished shortlist, and drops any dimension true of more than 70% of
+it. Superlatives are guarded: "the only one" needs a count of one, ties read as
+"among the most", percentiles vanish below eight candidates.
+
+Found by printing real output rather than trusting the tests: `STYLE_TAGS.temples`
+includes `history`, so the first working version told a traveller the *Osaka
+Museum of History* was one of the temples they had asked for. Fuzzy expansion is
+fine inside a score; said out loud it is a false claim about their own input.
+Styles are now named only from the tags that define them.
+
+**What a place costs.** `_shared/placeCost.ts`. A category never sets `class` —
+a shopping street may be free to enter and a market may hand out samples — so
+categories set `expectation` only, and an unpriced market reads "No admission
+price published · spending happens inside". A number without a resolvable
+currency is never shown: `¥600` is JPY in Osaka, CNY in Shanghai, and *nothing*
+with no country to read it against. Recovered the Wikivoyage price that
+`travel-discover:665` discarded with it in scope one line away, the OSM `charge`
+tag already in the Overpass payload, and the Amap/Baidu spend figures declared
+in the interfaces and never read. `fee=yes` with no charge is now "Ticket
+required · no source published the price" rather than "Cost unknown".
+`budgetFit` no longer scores an unknown cost as a confident mid-price.
+
+Three bugs the tests caught: `6.00 EUR;3.00 EUR concession` labelled the *adult*
+ticket a concession (the look-ahead crossed into the next price); `600 yen`
+resolved to currency `YEN`, three letters passing the ISO regex; `¥600–¥1,000`
+dropped the upper figure without keeping the raw text.
+
+**It survives the save.** `Activity.admission` and `Activity.openingHoursWeek`
+through `candidateToActivity` → `sanitizeActivity` → reload. `admission.fares`
+is canonical; `estimatedCost` takes the *adult* fare with its currency attached,
+never a child fare. `fares: []` is preserved because it means something.
+Malformed fares are dropped individually rather than taking the adult fare with
+them, and an admission with no attributable source is refused. Validation uses
+keyed records so the build fails when a union grows — the bug class that
+previously cost this file `indoorOutdoor` and four of seven providers.
+Idempotent down to key order, since the realtime path sanitises then compares
+`JSON.stringify`.
+
+Fixtures gained a Tue–Sun museum, a temple that shuts for lunch, and five real
+fares: every fixture previously opened every day at one uniform window with no
+price, so nothing offline could demonstrate any of this.
+
+**The UI, both surfaces (step 6).** `admissionCopy.ts` decides what a price
+reads as, shared by the discovery card and the day card so a place cannot
+describe its cost one way while it is being chosen and another once it is
+planned. `formatPrice` and `openingSummary` are deleted.
+
+`CandidateDetails` leads with a sticky verdict strip — Cost · Time needed ·
+Today — because those are the three things the traveller called useless, and
+they now stay answerable while the rest scrolls under them. Beneath it: an alert
+slot reserved for a closure landing on a day of *their own trip*, a "Why it is
+#3 for you" heading that names the position because that is the question, the
+other fares with the source's own words when parsing could not represent all of
+them, a grouped week of hours with named closed days, the stated caveats, and
+cautions as a **list** — `join(' ')` had been running six warnings together
+exactly when they mattered most. `sourceConfidence` is a sentence now, not an
+enum.
+
+`ActivityItem` gets one row, not a panel: the hardcoded `¥ {activity.cost}`
+becomes a real fare, a clock chip showing *that day's* hours which turns red on
+"Closed this day", and booking only when required. `DayPlan.date` is a display
+string ("12 Apr"), so the ISO date comes from `profile.startDate + (day − 1)` —
+without it the card cannot ask the only question that matters.
+
+Tests were written before the markup, since `DeckCard.test.tsx` asserts only
+flip mechanics and there was no safety net on content at all.
+`ActivityFacts.test.tsx` asserts through the whole discovery → convert → save →
+JSON → reload path rather than from an in-memory object, and that both surfaces
+describe the same place identically. It caught a real gap: a single-fare place
+rendered its price with no attribution, because the admission section was gated
+on having *extra* fares.
+
+**The local browser pass found one real persistence bug.** On the transition
+into Demo Mode, App could save the previous profile-less seed before the demo
+storage key had hydrated. That left a valid but stale primary ahead of the
+profile-rich backup on the next reload. Persistence now gates on the hydrated
+storage key, and Demo Mode opts into recovery only when the backup contains a
+valid profile missing from the primary. `storageResilience.test.ts` covers the
+primary-first default and the explicit recovery policy.
+
+With the fix live at `http://localhost:5199`, an existing Osaka Demo trip
+(10–17 Apr 2027) survived a full reload and reopened the discovery review.
+
+**The full acceptance walk then ran against the Osaka fixtures**, on a trip
+spanning Monday 12 Apr 2027. The card measured **520×426 at x=545 before and
+after the flip** — identical, which settles the one item the plan had flagged
+as verified only by construction. Osaka Castle Museum read `JP¥600 · adult
+ticket · ≈ RM 16`; Nakanoshima `JP¥1,500` with its student and child fares
+beneath, plus `Closed on Monday 12 Apr — a day of your trip.`; Kuromon `No
+admission price published · spending happens inside`; Osaka Castle Park `Free
+entry`, and where nothing was published, `Not published · no source published
+them` rather than an invented schedule. Shitennoji showed both halves of its
+day, `08:30–12:00, 13:00–16:30`, on the discovery card and again on the day
+card after a save and a reload. The scheduler put Nakanoshima on day four
+rather than day three, routing around the Monday closure without being asked
+to — the hours work paying off somewhere no test was pointed at.
+
+**Two bugs surfaced that only a browser could have shown**, both of them the
+panel overclaiming, which is the one thing this work exists to stop. A card
+read `1 source · corroborated across sources`: the count and the confidence
+sentence were chosen independently, so nothing stopped them contradicting each
+other inside a single line — corroboration needs two things to corroborate.
+And `Why it is #1 for you` sat directly above *"Nothing stands out on paper —
+it is here for variety"*, a heading making a promise the next line broke;
+where the rationale has only its fallback point, the heading now stops
+claiming a rank reason. Both are fixed and both have regression tests written
+from what was on screen.
+
+**Official-site admission is now a real evidence source.** `admissionFromJsonLd`
+reads schema.org `isAccessibleForFree`, `Offer`, `AggregateOffer`, and
+`priceRange` data from the same JSON-LD block already used for operator hours.
+Explicit currencies win; bare numbers use the canonical country code, and
+unresolved ranges remain source text rather than becoming a guessed fare.
+JSON-LD excerpts retain a literal substring of the original script, so the
+price claim remains inspectable.
+
+`officialEvidence` emits those prices at authority 1.0, with audience and
+currency in `appliesTo`; review/video claim extraction remains unchanged and
+cannot establish an operational price. `travel-evidence` returns an admission
+map beside official hours, `discoveryRuntime` remaps provider IDs to candidate
+IDs even when there is no prose document, and the panel merges the operator's
+answer above OSM/Wikivoyage/provider data. Cached official claims reconstruct
+the same admission on a fresh-probe hit, so the first read and the warm read do
+not disagree. The nightly refresh also passes country code for safe currency
+resolution.
+
+Reviewing that extractor turned up a free place reading as a priced one:
+`admissionFromJsonLd` classified a zero-priced offer as free only when the node
+*also* carried `isAccessibleForFree`, which is optional and widely omitted, so
+`offers: { price: "0" }` resolved to `ticketed` and the card would have read
+`JP¥0 · adult ticket`. Fixed in the classifier and again in `admissionCopy`,
+because zero is a price other sources publish too and the classifier is not the
+last line of defence — guarded on *every* fare being zero, since a free child
+ticket beside a ¥1,500 adult one is not a free museum.
+
+**The model tier (step 8), the only place a sentence no human wrote can reach a
+traveller.** `_shared/reasoning.ts` is written backwards from normal code: the
+validators come first and the network call is bolted to the end of them,
+because a system prompt asking a model not to invent things is a request, not a
+guarantee. What is enforced is mechanical — every displayed sentence must carry
+a `sourceUrl` we supplied and an `excerpt` that is a literal substring of the
+text we supplied for it. A sentence that cannot is dropped and the rest are
+kept; zero survivors means no brief at all, the same outcome as having no key.
+
+The substring rule is the guarantee and the digit check only a pre-filter,
+because "the finest garden in Kansai" contains no digits and an invented
+adjective is what a traveller acts on. Three further rules exist because the
+obvious version of this is defeatable: a **minimum excerpt length**, since
+`"the"` is a substring of nearly any page and would otherwise launder a wholly
+invented sentence; **no punctuation stripping** when normalising, since that is
+where a paraphrase starts passing as a quotation; and **no hours, closures or
+prices**, checked before the digit filter because the dangerous version of a
+sentence about opening times is the one whose numbers really are in the source,
+which would sail through and then contradict the structured hours beside it.
+
+Gemini bills, so `reserveQuota` gained `failClosed`. It fails open by design,
+and its own comment reasons about YouTube costing nothing on overrun — an
+argument that holds only while the call is free. An unreachable counter now
+means "don't call" here, as does a missing client, since that means nothing is
+counting the spend at all. One attempt, one timeout, no retry: a failed brief
+is a missing brief, and retrying turns a provider wobble into a bill. Separate
+daily cap, enforced input ceilings, and counters for skipped, rejected and
+kept — a grounding validator whose rejection rate nobody watches is one nobody
+notices has stopped working.
+
+On the card the brief is labelled *"Description written by AI from N sources,
+each sentence quoted from one of them"*, inside its own bordered element that
+model prose can never share with human prose, and only where no human wrote
+any. Grounded is not the same as written by a person, and the traveller is
+entitled to know which they are reading before weighing it. `aiReasoning` now
+survives from `travel-capabilities` into `ProviderRuntime` — both the parser
+and the type had been dropping it, so the client could not tell "no brief for
+this place" from "no model in this deployment".
+
+**The empty answer is cached too**, in `ai_place_briefs` — its own table,
+because a generated description is not a source of evidence and reusing the
+probe log would have meant widening an evidence-source union for something that
+is not evidence. The daily cap stops runaway spend but not waste: without this,
+a place the model had nothing to say about is asked about again tomorrow, and
+every day after. So a row's *existence* is the cache hit and its payload is
+allowed to be null, and `lookupAiBrief` returns `undefined` for a miss but
+`null` for "we asked and nothing survived". Callers branch on presence, never
+truthiness; four tests hold that line, because collapsing the two is the
+obvious mistake and it is invisible when you make it.
+
+The key is place plus a content hash of the grounding sources, so correctness
+tracks what we read rather than the clock — a description stops being right
+when the source changes, not when a week passes. The expiry is therefore
+garbage collection, and the row gets the long TTL. `tsc` caught the key helper
+dragging `Deno` globals into the browser program the moment a client test
+imported it, so it sits in `cacheKeys.ts` beside `parseAppliesTo`, for the
+reason that comment already gives: a key helper nothing can load is a key
+helper nothing can test.
+
+Two NUL bytes went into source files as string delimiters along the way —
+functional, collision-proof, and enough to make `grep` and `file` classify both
+files as binary. Replaced with printable separators.
+
+Still unseen: dark mode on the `--warn` alert, and the back face on a real
+mobile viewport. Live discovery still shows the category expectation on every
+card because the step 2/4/7 edge functions are not deployed — the copy is
+right, there is simply no fare in the payload yet. `admission-read` is now wired, and it is the only path by which a
+model-derived price is ever shown as fact. It runs on official-site text only,
+and two rules sit in a pure, tested function rather than inside the Deno-only
+fetcher: structured pricing always wins, so a marked-up `Offer` is never
+overridden and a well-marked-up site is never even asked about; and a
+model-read fare is demoted rather than disguised — the source stays
+`official-website` because the price really is published there, while
+confidence drops to medium, so a number found in prose stays distinguishable
+from one the operator marked up. The null result is cached like the brief's.
+
+---
+
 ## 2026-08-06 (trip length changes)
 
 > "What if user add one more day in the app after building and setting up the

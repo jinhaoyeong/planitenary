@@ -3,6 +3,7 @@ import type {
   DestinationKnowledgePack,
   DiscoveryRequest,
   PlaceCandidate,
+  PlaceAdmission,
   PlaceCandidateDetails,
   PlaceDiscoveryProvider,
 } from './destinationIntelligence';
@@ -15,6 +16,63 @@ const hours = (opensAt: string, closesAt: string, confidence: DateAwareOpeningHo
   timezone: 'Asia/Tokyo',
   periods: [{ opensAt, closesAt }],
   sourceConfidence: confidence,
+});
+
+/**
+ * The same window, but only on the weekdays named.
+ *
+ * Every fixture used to open every day, which made the fixtures blind to the
+ * one hours bug that matters: a place shut on Mondays. Nothing offline could
+ * demonstrate a weekly closure, so nothing offline could show it being handled.
+ *
+ * `daysOfWeek` is `Date.getDay()`, 0 being Sunday.
+ */
+const hoursOn = (
+  daysOfWeek: number[],
+  opensAt: string,
+  closesAt: string,
+  confidence: DateAwareOpeningHours['sourceConfidence'] = 'medium',
+): DateAwareOpeningHours => ({
+  timezone: 'Asia/Tokyo',
+  periods: [{ daysOfWeek, opensAt, closesAt }],
+  sourceConfidence: confidence,
+});
+
+/** Two windows in one day — a temple that shuts over the middle of the day. */
+const splitHours = (
+  morning: [string, string],
+  afternoon: [string, string],
+  confidence: DateAwareOpeningHours['sourceConfidence'] = 'medium',
+): DateAwareOpeningHours => ({
+  timezone: 'Asia/Tokyo',
+  periods: [
+    { opensAt: morning[0], closesAt: morning[1] },
+    { opensAt: afternoon[0], closesAt: afternoon[1] },
+  ],
+  sourceConfidence: confidence,
+});
+
+/**
+ * A published adult fare. Fixtures carry these so the offline path can show a
+ * real price — every fixture used to fall through to "Cost unknown", which
+ * meant nothing offline could demonstrate the fix for it.
+ */
+const ticket = (amount: number, extra: Array<[string, number]> = []): PlaceAdmission => ({
+  class: 'ticketed',
+  fares: [
+    { audience: 'adult', amount, currency: 'JPY' },
+    ...extra.map(([audience, value]) => ({ audience, amount: value, currency: 'JPY' })),
+  ],
+  source: 'official-website',
+  confidence: 'high',
+  retrievedAt: VERIFIED_AT,
+});
+
+const freeEntry = (): PlaceAdmission => ({
+  class: 'free',
+  source: 'official-website',
+  confidence: 'high',
+  retrievedAt: VERIFIED_AT,
 });
 
 type FixtureInput = Omit<PlaceCandidate,
@@ -45,11 +103,11 @@ export const OSAKA_PLACE_FIXTURE: PlaceCandidate[] = [
   osaka({ slug: 'kuromon-market', name: 'Kuromon Ichiba Market', description: 'A covered market known for seafood, produce and casual tastings.', neighbourhood: 'Minami', coordinates: [34.6654, 135.5064], categories: ['market', 'food'], experienceTags: ['street-food', 'shopping'], estimatedVisitMinutes: 120, indoorOutdoor: 'mixed', reservationStatus: 'not-needed', bestTimeWindows: [{ start: '09:30', end: '13:30' }], priceLevel: 2, openingHours: hours('09:00', '18:00', 'low'), sourceUrl: JNTO_OSAKA, sourceLabel: 'Japan National Tourism Organization Osaka guide' }),
   osaka({ slug: 'shinsaibashi-suji', name: 'Shinsaibashi-suji Shopping Street', description: 'A long covered shopping street connecting central Minami districts.', neighbourhood: 'Minami', coordinates: [34.6751, 135.5014], categories: ['shopping', 'local-character'], experienceTags: ['shopping', 'architecture'], estimatedVisitMinutes: 120, indoorOutdoor: 'mixed', reservationStatus: 'not-needed', priceLevel: 2, openingHours: hours('10:00', '20:00', 'low'), sourceUrl: JNTO_OSAKA, sourceLabel: 'Japan National Tourism Organization Osaka guide' }),
   osaka({ slug: 'namba-yasaka', name: 'Namba Yasaka Shrine', description: 'A neighbourhood shrine recognised for its monumental lion-head stage.', neighbourhood: 'Namba', coordinates: [34.6604, 135.4965], categories: ['shrine', 'architecture'], experienceTags: ['temples', 'photography', 'hidden-gems'], estimatedVisitMinutes: 50, indoorOutdoor: 'outdoor', reservationStatus: 'not-needed', priceLevel: 0, openingHours: hours('06:30', '17:00', 'medium'), sourceUrl: `${OSAKA_INFO}namba-yasaka-jinja/` }),
-  osaka({ slug: 'osaka-castle-museum', name: 'Osaka Castle Museum', description: 'The city’s landmark history museum inside the reconstructed main keep.', neighbourhood: 'Osaka Castle', coordinates: [34.6873, 135.5262], categories: ['essential', 'history', 'museum'], experienceTags: ['history', 'architecture', 'museums'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 1, openingHours: hours('09:00', '18:00', 'medium'), sourceUrl: `${OSAKA_INFO}osaka-castle-main-keep/` }),
-  osaka({ slug: 'osaka-castle-park', name: 'Osaka Castle Park', description: 'Extensive grounds surrounding the castle, moats and historic stonework.', neighbourhood: 'Osaka Castle', coordinates: [34.6873, 135.5259], categories: ['park', 'essential'], experienceTags: ['nature', 'walking', 'photography'], estimatedVisitMinutes: 90, indoorOutdoor: 'outdoor', reservationStatus: 'not-needed', priceLevel: 0, sourceUrl: `${OSAKA_INFO}area_osakacastle/index.html` }),
+  osaka({ slug: 'osaka-castle-museum', name: 'Osaka Castle Museum', description: 'The city’s landmark history museum inside the reconstructed main keep.', neighbourhood: 'Osaka Castle', coordinates: [34.6873, 135.5262], categories: ['essential', 'history', 'museum'], experienceTags: ['history', 'architecture', 'museums'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 1, openingHours: hours('09:00', '18:00', 'medium'), admission: ticket(600), sourceUrl: `${OSAKA_INFO}osaka-castle-main-keep/` }),
+  osaka({ slug: 'osaka-castle-park', name: 'Osaka Castle Park', description: 'Extensive grounds surrounding the castle, moats and historic stonework.', neighbourhood: 'Osaka Castle', coordinates: [34.6873, 135.5259], categories: ['park', 'essential'], experienceTags: ['nature', 'walking', 'photography'], estimatedVisitMinutes: 90, indoorOutdoor: 'outdoor', reservationStatus: 'not-needed', priceLevel: 0, admission: freeEntry(), sourceUrl: `${OSAKA_INFO}area_osakacastle/index.html` }),
   osaka({ slug: 'nishinomaru-garden', name: 'Nishinomaru Garden', description: 'A quieter lawn and garden with a classic view toward Osaka Castle.', neighbourhood: 'Osaka Castle', coordinates: [34.6887, 135.5233], categories: ['garden', 'view'], experienceTags: ['nature', 'photography', 'slow-living'], estimatedVisitMinutes: 75, indoorOutdoor: 'outdoor', reservationStatus: 'not-needed', priceLevel: 1, openingHours: hours('09:00', '17:00', 'medium'), sourceUrl: `${OSAKA_INFO}area_osakacastle/index.html` }),
-  osaka({ slug: 'osaka-museum-history', name: 'Osaka Museum of History', description: 'City history galleries with elevated views over the castle precinct.', neighbourhood: 'Osaka Castle', coordinates: [34.6824, 135.5206], categories: ['museum', 'history'], experienceTags: ['museums', 'history', 'architecture'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'not-needed', priceLevel: 1, openingHours: hours('09:30', '17:00', 'medium'), sourceUrl: `${OSAKA_INFO}area_osakacastle/index.html` }),
-  osaka({ slug: 'nakanoshima-museum-art', name: 'Nakanoshima Museum of Art, Osaka', description: 'Modern and contemporary art in Osaka’s river-island museum district.', neighbourhood: 'Nakanoshima', coordinates: [34.6913, 135.4931], categories: ['museum', 'art'], experienceTags: ['museums', 'architecture', 'calm'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 2, openingHours: hours('10:00', '17:00', 'medium'), sourceUrl: JNTO_OSAKA, sourceLabel: 'Japan National Tourism Organization northern Osaka guide' }),
+  osaka({ slug: 'osaka-museum-history', name: 'Osaka Museum of History', description: 'City history galleries with elevated views over the castle precinct.', neighbourhood: 'Osaka Castle', coordinates: [34.6824, 135.5206], categories: ['museum', 'history'], experienceTags: ['museums', 'history', 'architecture'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'not-needed', priceLevel: 1, openingHours: hours('09:30', '17:00', 'medium'), admission: ticket(600), sourceUrl: `${OSAKA_INFO}area_osakacastle/index.html` }),
+  osaka({ slug: 'nakanoshima-museum-art', name: 'Nakanoshima Museum of Art, Osaka', description: 'Modern and contemporary art in Osaka’s river-island museum district.', neighbourhood: 'Nakanoshima', coordinates: [34.6913, 135.4931], categories: ['museum', 'art'], experienceTags: ['museums', 'architecture', 'calm'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 2, openingHours: hoursOn([2, 3, 4, 5, 6, 0], '10:00', '17:00', 'medium'), admission: ticket(1500, [['student', 1100], ['child', 0]]), sourceUrl: JNTO_OSAKA, sourceLabel: 'Japan National Tourism Organization northern Osaka guide' }),
   osaka({ slug: 'osaka-science-museum', name: 'Osaka Science Museum', description: 'Hands-on science exhibits and a planetarium beside the river.', neighbourhood: 'Nakanoshima', coordinates: [34.691, 135.4914], categories: ['museum', 'family'], experienceTags: ['museums', 'architecture'], estimatedVisitMinutes: 150, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 1, openingHours: hours('09:30', '17:00', 'medium'), sourceUrl: JNTO_OSAKA, sourceLabel: 'Japan National Tourism Organization northern Osaka guide' }),
   osaka({ slug: 'tenjinbashisuji', name: 'Tenjinbashisuji Shopping Street', description: 'A long local arcade suited to browsing and an informal food crawl.', neighbourhood: 'Tenma', coordinates: [34.7063, 135.5102], categories: ['market', 'local-character'], experienceTags: ['street-food', 'shopping', 'hidden-gems'], estimatedVisitMinutes: 150, indoorOutdoor: 'mixed', reservationStatus: 'not-needed', priceLevel: 1, openingHours: hours('10:00', '20:00', 'low'), sourceUrl: 'https://www.japan.travel/en/destinations/kansai/osaka/shin-osaka-station-and-umeda/', sourceLabel: 'Japan National Tourism Organization northern Osaka guide' }),
   osaka({ slug: 'housing-living', name: 'Osaka Museum of Housing and Living', description: 'A recreated Edo-period streetscape above the Tenjinbashisuji area.', neighbourhood: 'Tenma', coordinates: [34.7108, 135.511], categories: ['museum', 'history'], experienceTags: ['museums', 'history', 'architecture'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 1, openingHours: hours('10:00', '17:00', 'medium'), sourceUrl: 'https://www.japan.travel/en/destinations/kansai/osaka/shin-osaka-station-and-umeda/', sourceLabel: 'Japan National Tourism Organization northern Osaka guide' }),
@@ -57,7 +115,7 @@ export const OSAKA_PLACE_FIXTURE: PlaceCandidate[] = [
   osaka({ slug: 'grand-front-osaka', name: 'Grand Front Osaka', description: 'Contemporary shopping and public spaces directly beside Osaka Station.', neighbourhood: 'Umeda', coordinates: [34.7049, 135.4949], categories: ['shopping', 'architecture'], experienceTags: ['shopping', 'architecture', 'cafes'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'not-needed', priceLevel: 2, openingHours: hours('11:00', '21:00', 'low'), sourceUrl: 'https://www.japan.travel/en/destinations/kansai/osaka/shin-osaka-station-and-umeda/', sourceLabel: 'Japan National Tourism Organization northern Osaka guide' }),
   osaka({ slug: 'shinsekai', name: 'Shinsekai', description: 'A retro downtown district of neon signs, kushikatsu counters and old Osaka atmosphere.', neighbourhood: 'Shinsekai', coordinates: [34.6524, 135.5063], categories: ['local-character', 'food-district', 'evening'], experienceTags: ['street-food', 'nightlife', 'photography'], estimatedVisitMinutes: 150, indoorOutdoor: 'outdoor', reservationStatus: 'not-needed', priceLevel: 1, sourceUrl: `${OSAKA_INFO}shinsekai/` }),
   osaka({ slug: 'tsutenkaku', name: 'Tsutenkaku Tower', description: 'The observation tower at the centre of Osaka’s retro Shinsekai district.', neighbourhood: 'Shinsekai', coordinates: [34.6525, 135.5063], categories: ['view', 'local-character'], experienceTags: ['architecture', 'photography', 'nightlife'], estimatedVisitMinutes: 75, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 1, openingHours: hours('10:00', '20:00', 'medium'), sourceUrl: `${OSAKA_INFO}shinsekai/` }),
-  osaka({ slug: 'shitennoji', name: 'Shitennoji Temple', description: 'One of Japan’s oldest Buddhist temple complexes, close to Tennoji.', neighbourhood: 'Tennoji', coordinates: [34.6546, 135.5164], categories: ['temple', 'history'], experienceTags: ['temples', 'history', 'architecture'], estimatedVisitMinutes: 100, indoorOutdoor: 'mixed', reservationStatus: 'not-needed', priceLevel: 1, openingHours: hours('08:30', '16:30', 'medium'), sourceUrl: `${OSAKA_INFO}shitennoji/` }),
+  osaka({ slug: 'shitennoji', name: 'Shitennoji Temple', description: 'One of Japan’s oldest Buddhist temple complexes, close to Tennoji.', neighbourhood: 'Tennoji', coordinates: [34.6546, 135.5164], categories: ['temple', 'history'], experienceTags: ['temples', 'history', 'architecture'], estimatedVisitMinutes: 100, indoorOutdoor: 'mixed', reservationStatus: 'not-needed', priceLevel: 1, openingHours: splitHours(['08:30', '12:00'], ['13:00', '16:30'], 'medium'), admission: ticket(300), sourceUrl: `${OSAKA_INFO}shitennoji/` }),
   osaka({ slug: 'osaka-city-fine-arts', name: 'Osaka City Museum of Fine Arts', description: 'A historic art museum in Tennoji Park, reopened after major renovation.', neighbourhood: 'Tennoji', coordinates: [34.6493, 135.5111], categories: ['museum', 'art'], experienceTags: ['museums', 'architecture'], estimatedVisitMinutes: 120, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 1, openingHours: hours('09:30', '17:00', 'medium'), sourceUrl: `${OSAKA_INFO}` }),
   osaka({ slug: 'abeno-harukas', name: 'Abeno Harukas Observatory', description: 'A high-rise city panorama above the Tennoji transport hub.', neighbourhood: 'Tennoji', coordinates: [34.6459, 135.5134], categories: ['view', 'architecture'], experienceTags: ['architecture', 'photography', 'nightlife'], estimatedVisitMinutes: 90, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 2, openingHours: hours('09:00', '22:00', 'medium'), bestTimeWindows: [{ start: '16:30', end: '20:30' }], sourceUrl: `${OSAKA_INFO}` }),
   osaka({ slug: 'kaiyukan', name: 'Osaka Aquarium Kaiyukan', description: 'A major aquarium arranged around Pacific Ocean habitats and a central tank.', neighbourhood: 'Osaka Bay', coordinates: [34.6545, 135.4289], categories: ['essential', 'aquarium', 'family'], experienceTags: ['wildlife', 'photography', 'nature'], estimatedVisitMinutes: 180, indoorOutdoor: 'indoor', reservationStatus: 'recommended', priceLevel: 3, openingHours: hours('10:00', '20:00', 'medium'), sourceUrl: 'https://www.japan.travel/en/destinations/kansai/osaka/osaka-bay-area/', sourceLabel: 'Japan National Tourism Organization Osaka Bay guide' }),

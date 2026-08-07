@@ -44,12 +44,28 @@ export function weatherLocationKey(coordinates: [number, number]): string {
 }
 
 /**
+ * The shape of a cached `PlaceCandidate`, as a number.
+ *
+ * `discovery_cache` stores candidates verbatim with a 30-day TTL, so a field
+ * added to the candidate is simply *absent* from every row written before it
+ * existed — and stays absent for a month, on the one path that is meant to make
+ * the app feel fast. Bumping this retires those rows at deploy time instead of
+ * letting them decay, which trades one round of provider calls for a month of
+ * silently missing data.
+ *
+ * Bump this whenever a field is added to what discovery returns.
+ *
+ * - v2: `admission` (structured entry cost, replacing the `priceLevel`-only view)
+ */
+const DISCOVERY_SCHEMA_VERSION = 2;
+
+/**
  * Cache key for one city's discovery results. Case and surrounding whitespace
  * must not split the cache — "osaka" and "Osaka " are the same search — but the
  * country code stays, because city names repeat across the world.
  */
 export function discoveryCityKey(city: string, countryCode?: string): string {
-  return `${city.trim().toLowerCase()}|${(countryCode || '').trim().toUpperCase()}`;
+  return `v${DISCOVERY_SCHEMA_VERSION}|${city.trim().toLowerCase()}|${(countryCode || '').trim().toUpperCase()}`;
 }
 
 /**
@@ -72,6 +88,46 @@ export function reviewItemKey(
 /** Set key for "was this place asked of this source recently". */
 export function probeKey(canonicalPlaceId: string, source: string): string {
   return `${canonicalPlaceId}|${source}`;
+}
+
+/**
+ * Read a claim's `applies_to` back out of jsonb.
+ *
+ * This lives here rather than beside `CachedClaim` in `cache.ts` for one
+ * reason: `cache.ts` imports the Supabase client and so cannot be loaded by
+ * vitest, and the bug this function fixes was a *silent shape loss* on the
+ * cache path. A round trip that nothing can test is how it went unnoticed in
+ * the first place.
+ *
+ * Every field is validated rather than cast. The column is jsonb, so it can
+ * hold anything an older or newer writer put there, and a malformed scope must
+ * degrade to "unscoped" instead of poisoning a window with `NaN`.
+ */
+export function parseAppliesTo(value: unknown): {
+  start?: string;
+  end?: string;
+  daysOfWeek?: number[];
+  currency?: string;
+  audience?: string;
+} | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const time = (field: unknown) => (typeof field === 'string' && /^\d{2}:\d{2}$/.test(field) ? field : undefined);
+  const text = (field: unknown) => (typeof field === 'string' && field.trim() ? field.trim() : undefined);
+  const days = Array.isArray(raw.daysOfWeek)
+    ? raw.daysOfWeek.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6)
+    : undefined;
+
+  const parsed = {
+    start: time(raw.start),
+    end: time(raw.end),
+    daysOfWeek: days && days.length > 0 ? days : undefined,
+    currency: text(raw.currency),
+    audience: text(raw.audience),
+  };
+  // An object whose every field failed validation is not a scope, and returning
+  // `{}` would make callers think the claim was scoped to nothing at all.
+  return Object.values(parsed).some((field) => field !== undefined) ? parsed : undefined;
 }
 
 /**
@@ -166,4 +222,42 @@ export function pairsNeedingProvider(
     }
   }
   return { missing, complete: missing.length === 0 };
+}
+
+/**
+ * Key for one cached model answer.
+ *
+ * Lives here rather than beside the table access in `cache.ts` for the same
+ * reason `parseAppliesTo` does: `cache.ts` reaches for `Deno` and the Supabase
+ * client, so importing it from a client-side test drags both into the browser
+ * type program. A key helper nothing can load is a key helper nothing can
+ * test, which is precisely how the `applies_to` round trip broke unnoticed.
+ *
+ * The delimiter is a printable space. All three parts are internal
+ * identifiers that never contain one, and a non-printing separator would
+ * quietly make this file read as binary to `grep` and `file`.
+ */
+export const aiBriefKey = (
+  canonicalPlaceId: string,
+  operation: string,
+  evidenceRevision: string,
+): string => `${canonicalPlaceId} ${operation} ${evidenceRevision}`;
+
+/**
+ * Look one cached model answer up.
+ *
+ * Returns `undefined` for a miss and `null` for "we asked about exactly this
+ * evidence and nothing survived validation". Those are different facts and
+ * callers must branch on presence, not truthiness: treating the cached empty
+ * answer as a miss would re-ask the metered provider about every silent place,
+ * every day, forever — the waste this cache exists to prevent.
+ */
+export function lookupAiBrief(
+  hits: Map<string, unknown | null>,
+  canonicalPlaceId: string,
+  operation: string,
+  evidenceRevision: string,
+): unknown | null | undefined {
+  const key = aiBriefKey(canonicalPlaceId, operation, evidenceRevision);
+  return hits.has(key) ? hits.get(key) : undefined;
 }

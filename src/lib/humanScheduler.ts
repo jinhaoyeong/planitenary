@@ -16,6 +16,7 @@
 
 import type { SchedulerRejectionReason } from '../data';
 import type { PlaceCandidate } from './destinationIntelligence';
+import { openingWindow, toMinutes, toTime } from './openingHours';
 import { distanceMeters } from './placeIdentity';
 import { PACE_DEFAULTS, type TravelBehaviourProfile } from './travelBehaviour';
 
@@ -103,17 +104,12 @@ export interface SimulatedDay {
   warnings: string[];
 }
 
-const MINUTES_PER_DAY = 24 * 60;
-
-export const toMinutes = (time: string): number => {
-  const [hours, minutes] = time.split(':').map(Number);
-  return (hours || 0) * 60 + (minutes || 0);
-};
-
-export const toTime = (minutes: number): string => {
-  const clamped = Math.max(0, Math.min(MINUTES_PER_DAY - 1, Math.round(minutes)));
-  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
-};
+/**
+ * Clock helpers and weekday hour resolution now live in `openingHours.ts`,
+ * alongside the traveller-facing summary built from the same rules. Re-exported
+ * here because several callers have always imported them from the scheduler.
+ */
+export { toMinutes, toTime };
 
 /** Average urban walking speed, ~4.5 km/h, with a little slack for crossings. */
 const WALKING_METRES_PER_MINUTE = 72;
@@ -272,7 +268,7 @@ export function selectMealPlace(
     if (context.used.has(candidate.id) || !isFoodPlace(candidate)) continue;
 
     // --- Hard requirements ------------------------------------------------
-    const hours = openingWindow(candidate, context.weekday);
+    const hours = openingWindow(candidate.openingHours, context.weekday);
     if (hours.closedToday) continue;
     if (hours.known && (context.atMinutes < hours.opensAt || context.atMinutes >= hours.closesAt)) continue;
 
@@ -312,54 +308,6 @@ export function selectMealPlace(
   }
 
   return best ? { candidate: best.candidate, leg: best.leg, queueMinutes: best.queueMinutes } : undefined;
-}
-
-interface OpeningWindow {
-  opensAt: number;
-  closesAt: number;
-  known: boolean;
-  /** True when the place has published hours and none cover this weekday. */
-  closedToday: boolean;
-}
-
-/**
- * The opening window that applies on a specific weekday.
- *
- * Previously this read `periods[0]` and applied it to every day, so a museum
- * published as `Tu-Su 10:00-18:00` looked open on Monday. That produced plans
- * built entirely around closed doors — an error the traveller only discovers
- * once they are standing outside.
- *
- * A place with published hours that name no window for `weekday` is *closed*
- * that day, which is a different answer from "hours unknown" and must not be
- * quietly treated as a generous window.
- */
-function openingWindow(candidate: PlaceCandidate, weekday?: number): OpeningWindow {
-  const unknown: OpeningWindow = { opensAt: 0, closesAt: MINUTES_PER_DAY, known: false, closedToday: false };
-  const periods = candidate.openingHours?.periods || [];
-  if (periods.length === 0) return unknown;
-
-  const usable = periods.filter((period) => period.opensAt && period.closesAt && !period.closed);
-  if (usable.length === 0) return unknown;
-
-  // No weekday to reason about (an undated trip): fall back to the first
-  // window, which is the old behaviour and the best available answer.
-  if (weekday === undefined) {
-    const period = usable[0];
-    return { opensAt: toMinutes(period.opensAt!), closesAt: toMinutes(period.closesAt!), known: true, closedToday: false };
-  }
-
-  const matching = usable.find((period) => !period.daysOfWeek || period.daysOfWeek.includes(weekday));
-  if (!matching) {
-    // Hours are published and none of them cover today.
-    return { opensAt: 0, closesAt: 0, known: true, closedToday: true };
-  }
-  return {
-    opensAt: toMinutes(matching.opensAt!),
-    closesAt: toMinutes(matching.closesAt!),
-    known: true,
-    closedToday: false,
-  };
 }
 
 /** A place's own preferred window, e.g. a night market that only works after dark. */
@@ -707,7 +655,7 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
     const arrival = clock + legMinutes + (leg ? buffer : 0);
 
     // --- Opening hours and the place's own best window -------------------
-    const hours = openingWindow(candidate, weekday);
+    const hours = openingWindow(candidate.openingHours, weekday);
     // Published hours that name no window today mean closed — a different
     // answer from "unknown", and the one that used to build plans around a
     // locked door.

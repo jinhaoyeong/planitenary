@@ -133,6 +133,41 @@ genuinely unused. `timezoneShiftHours` returns `undefined` for an unknown zone.
 `openingWindow` separates "hours unknown" from "closed today". A confident wrong
 number is worse than an admitted gap.
 
+Two corollaries, both learned from bugs that shipped:
+
+**A category is not a price.** `PlaceAdmission.class` is only ever set by a
+source that spoke about money. A shopping street may be free to walk into, a
+food market may hand out samples, a nightclub may charge at the door — the
+category proves none of it. Categories set `expectation`, which is rendered in
+visibly hedged language and is never promoted to a class, wherever it is applied
+from. This is why `admissionFor()` is safe to call as a client-side fallback.
+
+**A number without a currency is not a price.** Currency is resolved once,
+server-side, where the country code is known: explicit ISO code → symbol
+disambiguated by country → country default → *stop*. `¥600` is JPY in Osaka and
+CNY in Shanghai, and with no country to read it against it yields no amount at
+all, only `rawText`. The predecessor of this rule rendered `'¥'.repeat(n)` for
+every country on earth.
+
+**An admitted gap must still be admitted out loud.** The OSM hours parser
+correctly refuses to guess at public holidays, seasonal ranges,
+sunrise-relative times and windows crossing midnight — but silently, which left
+a confident-looking weekly schedule missing the one clause that mattered.
+`osmOpeningCaveats` names each drop the source actually published.
+
+### An explanation shared by everything explains nothing
+A reason shown on most of a shortlist carries no information about any member of
+it. `placeRationale` orders points by score *contribution* rather than raw
+dimension value, suppresses any dimension true of more than 70% of the
+shortlist, and guards comparatives: "the only one" requires a count of one, ties
+read as "among the most", percentiles are dropped below eight candidates.
+
+Copy shown to a traveller is held to a stricter standard than the score behind
+it. `STYLE_TAGS` is deliberately fuzzy — `temples` expands to include `history`
+so a shrine scores for a history-minded traveller — but naming that back as "you
+asked for temples" on a history museum is a false claim about the traveller's
+own input. Fuzzy is fine inside a number; it is not fine in a sentence.
+
 ### Fail open on quota, fail closed on spending
 `reserveQuota` allows the call when the counter is unreachable — exceeding a
 YouTube quota costs a `403`, not money, and failing closed would turn a brief
@@ -262,6 +297,13 @@ ratings; real `indoorOutdoor` from tags.
 notices, behind an SSRF guard); YouTube video evidence; pasted
 TikTok/YouTube links via oEmbed; claim extraction with verbatim excerpts
 including `best-time`; nightly `travel-refresh`.
+
+**Place facts** — admission cost as a structured `PlaceAdmission` (class, fares
+with explicit ISO currency, provenance), extracted from OSM `charge`/`fee`,
+Wikivoyage listing prices and regional-provider spend figures; a single
+weekday-aware reading of opening hours in `src/lib/openingHours.ts`, shared by
+the scheduler and the UI; per-place explanation points in `placeRationale.ts`
+ordered by score contribution and compared against the finished shortlist.
 
 **Scheduling** — weekday-aware opening hours; all four previously-dead
 `PACE_DEFAULTS` fields enforced; real restaurants in meal slots with dietary and

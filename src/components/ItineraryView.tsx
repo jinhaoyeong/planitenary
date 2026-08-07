@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Star, Lock, Unlock } from 'lucide-react';
+import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Star, Lock, Unlock, Clock } from 'lucide-react';
 import { itineraries } from '../data';
 import type { Itinerary, Activity, ActivityType, DayPhoto } from '../data';
 import { clsx } from 'clsx';
@@ -10,6 +10,12 @@ import { PhotoGallery } from './PhotoGallery';
 import { PlannerPreview } from './PlannerPreview';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
+import { admissionChip } from '../lib/admissionCopy';
+import { activityHoursToDateAware, describeOpeningHours } from '../lib/openingHours';
+import { convertCurrency, formatCurrency } from '../lib/currency';
+import { addDays } from '../lib/dateRange';
+import { countryTimezone } from '../lib/destinations';
+import { useCurrency } from '../contexts/CurrencyContext';
 import { sanitizeTripProfile } from '../lib/tripProfile';
 import { declaredTripDays, longTripItineraryNotice } from '../lib/tripDuration';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
@@ -147,11 +153,18 @@ const ActivityIcon = ({ type }: { type: string }) => {
   }
 };
 
-const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: { 
-  activity: Activity; 
+const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone }: {
+  activity: Activity;
   isEditing: boolean;
   onEdit?: (updated: Activity) => void;
   onDelete?: () => void;
+  /**
+   * The real date this day falls on, ISO. `DayPlan.date` is a display string
+   * ("12 Apr"), so the question "is this open on the day I am there" cannot be
+   * answered from it.
+   */
+  dayDate?: string;
+  timezone?: string;
 }) => {
   const [editedActivity, setEditedActivity] = useState(activity);
   const [showIconPicker, setShowIconPicker] = useState(false);
@@ -167,6 +180,43 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
     comment: activity.moodVotes?.comment,
     commentBy: activity.moodVotes?.commentBy,
   });
+  const { homeCurrency, rates } = useCurrency();
+
+  /**
+   * Cost and hours for this card, using the same modules the discovery panel
+   * uses — so a place cannot describe itself one way while the traveller is
+   * choosing it and another way once it is in the plan.
+   */
+  const costChip = useMemo(() => {
+    const chip = admissionChip(activity.admission, {
+      toHomeCurrency: (amount, currency) => (currency === homeCurrency
+        ? undefined
+        : formatCurrency(convertCurrency(amount, currency, homeCurrency, rates), homeCurrency)),
+    });
+    // Records written before admission existed still carry a free-text `cost`.
+    // It renders as the traveller typed it — never with a currency glyph
+    // bolted on, which is what the old `¥ {activity.cost}` did.
+    return chip ?? (activity.cost?.trim() || undefined);
+  }, [activity.admission, activity.cost, homeCurrency, rates]);
+
+  const dayHours = useMemo(() => describeOpeningHours(
+    activityHoursToDateAware(
+      activity.openingHoursWeek ?? (activity.openingHours ? [activity.openingHours] : []),
+      // The saved activity carries no confidence of its own, and the day card
+      // shows no provenance line, so nothing is presented as better sourced
+      // than it is.
+      'medium',
+      timezone,
+    ),
+    { onDate: dayDate, timezone },
+  ), [activity.openingHoursWeek, activity.openingHours, dayDate, timezone]);
+
+  const hoursChip = dayHours.unknown
+    ? undefined
+    : dayHours.closedToday
+      ? 'Closed this day'
+      : dayHours.todayLine?.replace(/^Open /, '');
+
   const cardRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -840,15 +890,41 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete }: {
           </div>
         )}
 
+        {/**
+         * One row, deliberately. The day card is a timeline the traveller
+         * scans, not a place-details panel — the full record lives in
+         * discovery. What earns a place here is what would change the plan:
+         * where it is, what it costs, whether it is open on *this* day, and
+         * whether it has to be booked.
+         *
+         * The cost chip used to be a hardcoded `¥ {activity.cost}` — the yen
+         * glyph applied to every country, in front of a free-text string.
+         */}
         <div className="flex flex-wrap gap-3 text-xs mb-3">
           {activity.location && (
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-medium">
               <MapPin className="w-3.5 h-3.5" /> {activity.location}
             </span>
           )}
-          {activity.cost && (
+          {costChip && (
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-100/50 dark:border-emerald-800/50">
-              ¥ {activity.cost}
+              {costChip}
+            </span>
+          )}
+          {hoursChip && (
+            <span
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold border ${
+                dayHours.closedToday
+                  ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 border-rose-100/50 dark:border-rose-800/50'
+                  : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-transparent'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" /> {hoursChip}
+            </span>
+          )}
+          {activity.reservationRequirement === 'required' && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 font-bold border border-amber-100/50 dark:border-amber-800/50">
+              Booking required
             </span>
           )}
         </div>
@@ -1059,6 +1135,23 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
   // Use the prop as the source of truth; parent handles persistence and Supabase sync
   const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
   const plannerProfile = useMemo(() => sanitizeTripProfile(customItinerary.tripProfile), [customItinerary.tripProfile]);
+  /**
+   * The real date a day number falls on. `DayPlan.date` is a display string
+   * ("12 Apr"), so a card cannot ask "is this open that day" from it — and
+   * whether a museum is shut on the day you are standing outside it is the
+   * whole question.
+   */
+  const isoDateForDay = useCallback(
+    (dayNumber: number) => (plannerProfile?.startDate
+      ? addDays(plannerProfile.startDate, Math.max(0, dayNumber - 1))
+      : undefined),
+    [plannerProfile?.startDate],
+  );
+  /** The destination's zone, so "open now" means open there. */
+  const tripTimezone = useMemo(
+    () => countryTimezone(plannerProfile?.destinations?.[0]?.countryCode),
+    [plannerProfile?.destinations],
+  );
   const visualIdentity = useMemo(
     () => (plannerProfile ? resolveVisualIdentity(plannerProfile) : null),
     [plannerProfile],
@@ -2130,8 +2223,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                 key={`${activity.name}-${activity.time}-${originalIndex}`}
                 className="relative group/edit"
               >
-                <ActivityItem 
-                  activity={activity} 
+                <ActivityItem
+                  activity={activity}
+                  dayDate={isoDateForDay(currentDay.day)}
+                  timezone={tripTimezone}
                   isEditing={isEditingMode && editingActivityIndex === originalIndex}
                   onEdit={(updated) => handleUpdateActivity(currentDay.day, originalIndex, updated)}
                   onDelete={() => handleDeleteActivity(currentDay.day, originalIndex)}

@@ -13,6 +13,7 @@ import {
 import { candidateToActivity } from './destinationIntelligence';
 import type { PlaceCandidate } from './destinationIntelligence';
 import type { Activity, Itinerary } from '../data';
+import type { PlaceAdmission } from '../../supabase/functions/_shared/placeCost';
 
 const fallbackActivity: Activity = {
   time: '09:00',
@@ -140,6 +141,236 @@ describe('sanitising is idempotent', () => {
     const saved = sanitizeItinerary({ ...emptyItinerary, id: 'trip-1', days }, emptyItinerary);
     expect(saved.days).toHaveLength(21);
     expect(saved.days[20].day).toBe(21);
+  });
+});
+
+/**
+ * Admission is the most nested thing this file has ever had to carry: a class,
+ * a list of fares each with its own currency, an expectation, provenance and a
+ * confidence. Every one of them is a chance to lose something quietly, which is
+ * exactly how `indoorOutdoor` and `provider` were lost before.
+ */
+describe('admission survives a save and reload', () => {
+  const ticketed = (): PlaceAdmission => ({
+    class: 'ticketed',
+    fares: [
+      { audience: 'adult', amount: 1500, currency: 'JPY' },
+      { audience: 'student', amount: 1100, currency: 'JPY' },
+      { audience: 'child', amount: 0, currency: 'JPY' },
+    ],
+    expectation: 'usually-ticketed',
+    rawText: 'Adults ¥1,500 · students ¥1,100 · under 16 free',
+    source: 'official-website',
+    sourceUrl: 'https://example.museum/tickets',
+    confidence: 'high',
+    retrievedAt: '2026-08-04T00:00:00.000Z',
+  });
+
+  const reload = (activity: Activity): Activity => {
+    // JSON round trip, because that is literally what storage does to it.
+    const saved = sanitizeItinerary(tripWith([activity]), emptyItinerary);
+    const reloaded = sanitizeItinerary(JSON.parse(JSON.stringify(saved)), emptyItinerary);
+    return reloaded.days[0].activities[0];
+  };
+
+  it('keeps every fare, in order, with its currency', () => {
+    const place = reload(candidateToActivity(osmCandidate({ admission: ticketed() })));
+    expect(place.admission?.fares).toEqual([
+      { audience: 'adult', amount: 1500, currency: 'JPY', note: undefined },
+      { audience: 'student', amount: 1100, currency: 'JPY', note: undefined },
+      { audience: 'child', amount: 0, currency: 'JPY', note: undefined },
+    ]);
+  });
+
+  it('keeps the raw text, the source and the confidence', () => {
+    // Provenance is what lets a card say where a price came from. Dropping it
+    // would leave a number on screen with nothing behind it.
+    const place = reload(candidateToActivity(osmCandidate({ admission: ticketed() })));
+    expect(place.admission).toMatchObject({
+      class: 'ticketed',
+      expectation: 'usually-ticketed',
+      rawText: 'Adults ¥1,500 · students ¥1,100 · under 16 free',
+      source: 'official-website',
+      sourceUrl: 'https://example.museum/tickets',
+      confidence: 'high',
+      retrievedAt: '2026-08-04T00:00:00.000Z',
+    });
+  });
+
+  it('carries the adult fare into estimatedCost with its currency attached', () => {
+    // A bare 1500 is the failure mode: it reads as dollars, ringgit or yen
+    // depending on who is looking.
+    const place = reload(candidateToActivity(osmCandidate({ admission: ticketed() })));
+    expect(place.estimatedCost).toEqual({ amount: 1500, currency: 'JPY', basis: 'per-person' });
+  });
+
+  it('never takes a child fare as the budget figure', () => {
+    const childOnly: PlaceAdmission = {
+      class: 'ticketed',
+      fares: [{ audience: 'child', amount: 300, currency: 'JPY' }],
+      source: 'osm-tag',
+      confidence: 'medium',
+    };
+    const place = reload(candidateToActivity(osmCandidate({ admission: childOnly })));
+    expect(place.estimatedCost).toBeUndefined();
+    expect(place.admission?.fares).toHaveLength(1);
+  });
+
+  it('keeps an empty fare list, because it means something', () => {
+    // "A ticket is required, no source published the price" is a real answer
+    // and must not collapse into "no admission information".
+    const bare: PlaceAdmission = { class: 'ticketed', fares: [], source: 'osm-tag', confidence: 'medium' };
+    const place = reload(candidateToActivity(osmCandidate({ admission: bare })));
+    expect(place.admission?.class).toBe('ticketed');
+    expect(place.admission?.fares).toEqual([]);
+  });
+
+  it('keeps a spend-based typical spend', () => {
+    const spend: PlaceAdmission = {
+      class: 'spend-based',
+      typicalSpend: { audience: 'person', amount: 80, currency: 'CNY' },
+      source: 'provider',
+      confidence: 'medium',
+    };
+    const place = reload(candidateToActivity(osmCandidate({ admission: spend })));
+    expect(place.admission?.typicalSpend).toEqual({ audience: 'person', amount: 80, currency: 'CNY', note: undefined });
+  });
+
+  it('drops one malformed fare without losing the rest', () => {
+    const messy = {
+      class: 'ticketed',
+      fares: [
+        { audience: 'adult', amount: 600, currency: 'jpy' },
+        { audience: 'student', amount: 400 },              // no currency
+        { audience: 'child', amount: 'free', currency: 'JPY' }, // not a number
+        { amount: 200, currency: 'JPY' },                   // no audience
+      ],
+      source: 'wikivoyage',
+      confidence: 'medium',
+    };
+    const activity = { ...candidateToActivity(osmCandidate()), admission: messy as unknown as PlaceAdmission };
+    const place = reload(activity);
+    // Only the well-formed fare survives, normalised.
+    expect(place.admission?.fares).toEqual([{ audience: 'adult', amount: 600, currency: 'JPY', note: undefined }]);
+  });
+
+  it('refuses an admission with no attributable source', () => {
+    const orphan = { class: 'ticketed', fares: [{ audience: 'adult', amount: 600, currency: 'JPY' }] };
+    const activity = { ...candidateToActivity(osmCandidate()), admission: orphan as unknown as PlaceAdmission };
+    expect(reload(activity).admission).toBeUndefined();
+  });
+
+  it('refuses a class it does not recognise', () => {
+    const bogus = { class: 'donation', source: 'osm-tag', confidence: 'high' };
+    const activity = { ...candidateToActivity(osmCandidate()), admission: bogus as unknown as PlaceAdmission };
+    expect(reload(activity).admission).toBeUndefined();
+  });
+
+  it('persists a category expectation as an expectation, never as a price', () => {
+    /**
+     * A candidate with no sourced price still reaches the day card, and the
+     * card should be able to say "spending happens inside" rather than nothing.
+     * So the expectation is persisted — but it is stored as what it is:
+     * `class: 'unknown'`, `source: 'category'`, no fares, no cost. A reader
+     * cannot mistake it for something a source said.
+     */
+    const market = osmCandidate({ categories: ['market', 'food'], experienceTags: ['street-food'] });
+    expect(market.admission).toBeUndefined();
+    const place = reload(candidateToActivity(market));
+    expect(place.admission).toMatchObject({
+      class: 'unknown',
+      expectation: 'spending-inside',
+      source: 'category',
+      confidence: 'low',
+    });
+    expect(place.admission?.fares).toBeUndefined();
+    expect(place.admission?.typicalSpend).toBeUndefined();
+    expect(place.estimatedCost).toBeUndefined();
+  });
+
+  it('is idempotent, key order included', () => {
+    // The realtime sync compares JSON.stringify output. A reordered fare list
+    // or a shifted key would make every echo of our own write look like a
+    // remote change and loop the sync.
+    const trip = tripWith([candidateToActivity(osmCandidate({ admission: ticketed() }))]);
+    const once = sanitizeItinerary(trip, emptyItinerary);
+    const twice = sanitizeItinerary(JSON.parse(JSON.stringify(once)), emptyItinerary);
+    expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
+  });
+});
+
+describe('the whole week of opening hours survives a save', () => {
+  const splitWeek = {
+    periods: [
+      { daysOfWeek: [2, 3, 4, 5, 6, 0], opensAt: '08:30', closesAt: '12:00' },
+      { daysOfWeek: [2, 3, 4, 5, 6, 0], opensAt: '13:00', closesAt: '16:30' },
+    ],
+    sourceConfidence: 'medium' as const,
+  };
+
+  const reloadedPlace = () => {
+    const activity = candidateToActivity(osmCandidate({ openingHours: splitWeek }));
+    const saved = sanitizeItinerary(tripWith([activity]), emptyItinerary);
+    return sanitizeItinerary(JSON.parse(JSON.stringify(saved)), emptyItinerary).days[0].activities[0];
+  };
+
+  it('keeps both windows of a day that shuts for lunch', () => {
+    // `openingHours` is `periods[0]` and always was, so the afternoon — most of
+    // the visiting day — never reached the day card at all.
+    expect(reloadedPlace().openingHoursWeek).toHaveLength(2);
+  });
+
+  it('keeps the weekdays each window applies to', () => {
+    // Without these a Monday closure is invisible on the itinerary.
+    expect(reloadedPlace().openingHoursWeek?.[0].days).toEqual([2, 3, 4, 5, 6, 0]);
+  });
+
+  it('preserves order rather than sorting', () => {
+    const windows = reloadedPlace().openingHoursWeek;
+    expect(windows?.[0].opensAt).toBe('08:30');
+    expect(windows?.[1].opensAt).toBe('13:00');
+  });
+
+  it('leaves the single-window field alone for the conflict check', () => {
+    expect(reloadedPlace().openingHours).toMatchObject({ opensAt: '08:30', closesAt: '12:00' });
+  });
+
+  it('drops a malformed window without losing the others', () => {
+    const activity = {
+      ...candidateToActivity(osmCandidate()),
+      openingHoursWeek: [{ opensAt: '09:00', closesAt: '17:00', days: [1, 99, 'Tue'] }, null, 'nonsense'],
+    };
+    const saved = sanitizeItinerary(tripWith([activity as unknown as Activity]), emptyItinerary);
+    const place = saved.days[0].activities[0];
+    expect(place.openingHoursWeek).toHaveLength(1);
+    expect(place.openingHoursWeek?.[0].days).toEqual([1]);
+  });
+});
+
+describe('records written before any of this existed', () => {
+  it('reloads without admission or weekly hours rather than failing', () => {
+    // Every trip already saved predates both fields. Absent must stay absent.
+    const legacy: Activity = {
+      id: 'legacy-1',
+      time: '10:00',
+      name: 'Panda Base',
+      description: 'From an older record.',
+      type: 'sight',
+      cost: '55 RMB',
+    };
+    const saved = sanitizeItinerary(tripWith([legacy]), emptyItinerary);
+    const place = saved.days[0].activities[0];
+    expect(place.admission).toBeUndefined();
+    expect(place.openingHoursWeek).toBeUndefined();
+    // The legacy display string is still readable, and still never written to.
+    expect(place.cost).toBe('55 RMB');
+  });
+
+  it('stays idempotent for an old record too', () => {
+    const legacy: Activity = { id: 'legacy-2', time: '10:00', name: 'Old stop', description: '', type: 'other', cost: '10 RMB' };
+    const once = sanitizeItinerary(tripWith([legacy]), emptyItinerary);
+    const twice = sanitizeItinerary(JSON.parse(JSON.stringify(once)), emptyItinerary);
+    expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
   });
 });
 

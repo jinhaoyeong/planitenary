@@ -50,6 +50,13 @@ flip and gesture rules (`DeckCard.test.tsx`, `deckGestures.test.ts`) now have
 automated coverage; §9 remains for the parts that need real builds or deployed
 services.
 
+On 2026-08-07 the first local Demo browser pass also found and fixed a storage
+hydration race: the profile-less seed could overwrite the demo itinerary before
+its key finished loading, and then primary-first recovery hid the richer
+backup. The profile survived a reload after the fix and the discovery review
+opened again. This improves the confirmed local path, but does not turn the
+deployed OSM or Supabase refresh checks into verified claims.
+
 ---
 
 ## 0. What already exists
@@ -632,7 +639,16 @@ one.
 **Still open**
 
 - Departure-date targeting for the refresh job, per the deviation above.
-- Phase 4: LLM claim extraction, which needs `GEMINI_API_KEY`.
+- Phase 4: LLM claim extraction, which needs `GEMINI_API_KEY`. Now scheduled as
+  step 8 of the place-details work (`CURRENT_TASK.md`), with a sentence-level
+  grounding contract — `{text, sourceUrl, excerpt}` where every excerpt must be
+  a literal substring of the supplied source — a separate fail-closed Gemini
+  quota, and caching keyed by place plus evidence revision.
+- `reservationStatus` is hardcoded `'unknown'` on every live path despite OSM
+  carrying `reservation=*`; `estimatedVisitMinutes` is always a category-table
+  guess; `photoUrl`/`photoAttribution`/`accessibility` are declared with **zero
+  producers**, so the deck always shows the placard fallback. All found while
+  auditing the details panel; all deliberately out of scope there.
 
 Closed since this list was written: flight times on `TripProfile` (`0fa4a02`),
 the `sanitizeActivity` field losses (`4c3d6c6`), the component-test harness
@@ -713,6 +729,29 @@ travel time are real, not that `SHORTLIST_HEADROOM` should increase.
 Decision: keep `SHORTLIST_HEADROOM = 1.4` and its provisional label. Revisit
 after collecting non-pool-bound samples from live places with real hours.
 
+**Smart place details — steps 1–7 done; step 8 remains (2026-08-07)**
+
+The details work now has an operator-price path in addition to the deterministic
+OSM/Wikivoyage/provider paths:
+
+- `admissionFromJsonLd` reads schema.org free-entry flags, `Offer` and
+  `AggregateOffer` fares, audience labels, currency, and price ranges from the
+  official page's existing JSON-LD.
+- `officialEvidence` emits authority-1.0 price claims with `currency` and
+  `audience` in `appliesTo`; the ordinary review/video extractor is unchanged,
+  so low-authority opinion sources cannot establish a price fact.
+- `travel-evidence` returns an admission map beside official hours, and
+  `discoveryRuntime` remaps provider IDs to candidate IDs even when the page
+  has no prose document. Official records override community/provider values.
+- Cached official claims rebuild fares, free entry, and ticket-required/no-price
+  answers on a probe hit. The nightly refresh passes country code so a bare
+  structured number is not shown without a resolved ISO currency.
+
+This is implemented and tested locally but not deployed; the live non-fixture
+fare path becomes reachable after `travel-evidence` is deployed. Step 8 is the
+grounded Gemini place brief, with fail-closed quota and literal-excerpt
+validation. The optional rank-rephrasing step remains deferred.
+
 **Phase 8 — Sourcing breadth — PARTLY BLOCKED**
 
 35. **Done** — fix carried-over decisions on re-discovery (below; it blocked any honest
@@ -785,6 +824,16 @@ watching three tests go red — and `TripIdentityPanel.test.tsx` covers the Trip
 Identity save path. Neither exercises Supabase, `localStorage` or a real
 provider payload, so the deployed OSM round trip remains a live-environment
 check.
+
+**Local Demo browser amendment — 2026-08-07:** the profile persistence part of
+the path is now verified. Reloading the running app after the Osaka Demo profile
+was saved preserved the 10–17 Apr 2027 dates and reopened the discovery review.
+The check found a real race: Demo persistence could write the previous
+profile-less seed before the current key hydrated, then primary-first loading
+would ignore the richer backup. App now gates persistence on hydration, and
+`loadFromStorage` accepts an explicit recovery predicate used only for the
+Demo profile case. The deployed OSM activity save/reload and itinerary day-card
+checks remain open.
 
 ### 9.2 Mood actually changes the plan — no credentials needed
 

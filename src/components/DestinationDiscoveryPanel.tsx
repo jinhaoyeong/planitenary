@@ -39,6 +39,13 @@ import { describeCityLegs } from '../lib/cityLegs';
 import { describeStayDates, legsFromCityStays, reconcileCityStays } from '../lib/cityStays';
 import { SWIPE_COMMIT_PX, isDragIntent, shouldCloseFromSurface, swipeDecision } from '../lib/deckGestures';
 import { manualDestination, type TripProfile } from '../lib/tripProfile';
+import { admissionFor } from '../lib/destinationIntelligence';
+import { admissionLine, describeAdmission } from '../lib/admissionCopy';
+import { describeOpeningHours } from '../lib/openingHours';
+import { countryTimezone } from '../lib/destinations';
+import { convertCurrency, formatCurrency } from '../lib/currency';
+import { useCurrency } from '../contexts/CurrencyContext';
+import { mergeAdmission } from '../../supabase/functions/_shared/placeCost';
 
 interface DestinationDiscoveryPanelProps {
   itinerary: Itinerary;
@@ -85,18 +92,14 @@ const DESKTOP_REVIEW_MODE_KEY = 'planitenary:destination-review-mode';
  */
 const EVIDENCE_PREFETCH_COUNT = 4;
 
-const formatPrice = (priceLevel?: number) => {
-  if (priceLevel === undefined) return 'Cost unknown';
-  if (priceLevel === 0) return 'Free';
-  return `${'¥'.repeat(Math.min(4, Math.max(1, priceLevel)))} price level`;
-};
-
-const openingSummary = (candidate: PlaceCandidate) => {
-  const period = candidate.openingHours?.periods[0];
-  if (!period?.opensAt || !period.closesAt) return 'Hours need live verification';
-  return `${period.opensAt}–${period.closesAt} · ${candidate.openingHours?.sourceConfidence} confidence`;
-};
-
+/**
+ * Cost and hours used to be two one-line helpers here, and both were wrong in
+ * the same way: they printed whatever they had without saying what it meant.
+ * `formatPrice` rendered a yen glyph for every country on earth and said "Cost
+ * unknown" for almost every place; `openingSummary` read `periods[0]` and
+ * appended the raw confidence enum. Both now come from shared modules —
+ * `admissionCopy` and `openingHours` — so the itinerary says the same things.
+ */
 const RESERVATION_LABEL: Record<PlaceCandidate['reservationStatus'], string | null> = {
   required: 'Booking required',
   recommended: 'Booking recommended',
@@ -109,6 +112,32 @@ const INDOOR_LABEL: Record<PlaceCandidate['indoorOutdoor'], string> = {
   outdoor: 'Outdoor · weather matters',
   mixed: 'Indoor and outdoor',
 };
+
+/**
+ * How well-sourced the record is, said in words. The panel used to interpolate
+ * the enum — "· medium confidence" — which named a rating rather than a reason.
+ */
+const SOURCE_CONFIDENCE_NOTE: Record<PlaceCandidate['sourceConfidence'], string> = {
+  high: 'corroborated across sources',
+  medium: 'from a single reliable source',
+  low: 'thinly sourced, worth checking',
+};
+
+/**
+ * The confidence sentence, said against the number printed beside it.
+ *
+ * The table above is written for the common case and reads as a lie in the
+ * uncommon one: a card showing `1 source · corroborated across sources` claims
+ * agreement between sources it does not have. The count and the phrase were
+ * chosen independently, so nothing stopped them contradicting each other on
+ * screen. Corroboration needs two things to corroborate; below that, high
+ * confidence can only be a statement about the one source's authority.
+ */
+const sourceConfidenceNote = (confidence: PlaceCandidate['sourceConfidence'], sourceCount: number) => (
+  confidence === 'high' && sourceCount < 2
+    ? 'from an authoritative source'
+    : SOURCE_CONFIDENCE_NOTE[confidence]
+);
 
 const formatVerifiedAt = (value: string) => {
   const date = new Date(value);
@@ -136,9 +165,21 @@ interface UndoState {
 }
 
 /** Extra, honestly-sourced context a card can show when there is room for it. */
-interface CandidateContext {
+export interface CandidateContext {
   evidence?: PlaceEvidenceSummary;
   queueMinutes?: number;
+  /**
+   * The traveller's own dates, so a weekly closure can be named as a day of
+   * their trip rather than left as an abstract "closed Mondays".
+   */
+  tripStart?: string;
+  tripEnd?: string;
+  /** Position in the ranked shortlist, 1-based — the question being answered. */
+  position?: number;
+  /** Approximate home-currency equivalent, when live rates are available. */
+  toHomeCurrency?: (amount: number, currency: string) => string | undefined;
+  /** Fixed clock, for tests. */
+  now?: Date;
 }
 
 /**
@@ -183,8 +224,8 @@ function PlaceMedia({ candidate, className }: { candidate: PlaceCandidate; class
  * consistently say, and where all of that came from. Facts with no source are
  * simply omitted rather than filled with a plausible guess.
  */
-function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; context?: CandidateContext }) {
-  const { candidate, reasons, cautions = [] } = ranked;
+export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; context?: CandidateContext }) {
+  const { candidate, rationale, reasons, cautions = [] } = ranked;
   const evidence = context?.evidence;
   const queueMinutes = context?.queueMinutes ?? evidence?.typicalQueueMinutes;
   const bestWindow = candidate.bestTimeWindows?.[0];
@@ -196,11 +237,40 @@ function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; contex
       : evidence.crowdRisk >= 0.33 ? 'Moderately busy' : 'Rarely crowded';
   const tags = candidate.experienceTags.slice(0, 5);
 
-  const specs: Array<{ label: string; value: string }> = [
+  const admission = describeAdmission(admissionFor(candidate), { toHomeCurrency: context?.toHomeCurrency });
+  const hours = describeOpeningHours(candidate.openingHours, {
+    tripStart: context?.tripStart,
+    tripEnd: context?.tripEnd,
+    now: context?.now,
+    timezone: candidate.openingHours?.timezone ?? countryTimezone(candidate.countryCode),
+    verifiedAt: candidate.lastVerifiedAt,
+    caveats: candidate.openingHours?.caveats,
+  });
+
+  /**
+   * The one closure that is about the traveller rather than about the place.
+   * Everything else can wait until they have read the description; a day of
+   * their own trip cannot.
+   */
+  const tripClosure = hours.closedTripDates[0];
+  const reportedClosure = cautions.find((caution) => /reports this place as closed/i.test(caution));
+  const otherCautions = cautions.filter((caution) => caution !== reportedClosure);
+
+  // Cost, time and hours were the three things the traveller said were useless.
+  // They go above everything else, and the strip stays put while the rest
+  // scrolls under it.
+  const verdict: Array<{ label: string; value: string; note?: string }> = [
+    { label: 'Cost', value: admission.headline, note: admission.note },
     { label: 'Time needed', value: formatDuration(evidence?.typicalVisitMinutes || candidate.estimatedVisitMinutes) },
-    { label: 'Cost', value: formatPrice(candidate.priceLevel) },
-    { label: 'Opening hours', value: openingSummary(candidate) },
+    {
+      label: hours.unknown ? 'Hours' : 'Today',
+      value: hours.todayLine ?? 'Not published',
+      note: hours.unknown ? 'no source published them' : undefined,
+    },
   ];
+
+  // What is left after the three facts above were promoted out of it.
+  const specs: Array<{ label: string; value: string }> = [];
   if (queueMinutes) specs.push({ label: 'Typical queue', value: `${Math.round(queueMinutes)} min reported` });
   if (bestWindow) specs.push({ label: 'Best time', value: `${bestWindow.start}–${bestWindow.end}` });
   if (crowdLabel) specs.push({ label: 'Crowding', value: crowdLabel });
@@ -208,9 +278,68 @@ function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; contex
   specs.push({ label: 'Weather', value: INDOOR_LABEL[candidate.indoorOutdoor] });
   specs.push({ label: 'Area', value: candidate.neighbourhood || candidate.city });
 
+  const points = rationale?.length ? rationale.map((point) => ({ key: point.id, text: point.text })) : reasons.map((reason) => ({ key: reason, text: reason }));
+
+  /**
+   * Whether the ranking can actually be explained for this place.
+   *
+   * `placeRationale` emits a single `variety` point when no dimension cleared
+   * the notable threshold — an honest "nothing stands out on paper". Printing
+   * that under a heading reading *"Why it is #1 for you"* makes the heading a
+   * promise the body immediately breaks, which reads worse than either half
+   * alone. Where there is no reason, the heading stops claiming there is one.
+   */
+  const hasRankReason = points.some((point) => point.key !== 'variety');
+
+  /** The number the provenance line prints, so the sentence can agree with it. */
+  const sourceCount = evidence?.sourceCount || candidate.sourceReferences.length;
+
+  /** Model prose, shown only where no human wrote any. Always labelled. */
+  const brief = evidence?.brief;
+
   return (
     <div className="destination-detail">
+      <dl className="destination-detail-verdict">
+        {verdict.map((item) => (
+          <div key={item.label}>
+            <dt>{item.label}</dt>
+            <dd>
+              {item.value}
+              {item.note && <small>{item.note}</small>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      {(tripClosure || reportedClosure) && (
+        <p className="destination-detail-alert">
+          {reportedClosure ?? `Closed on ${tripClosure!.label} — a day of your trip.`}
+        </p>
+      )}
+
       {candidate.description && <p className="destination-detail-description">{candidate.description}</p>}
+
+      {/**
+        * A model-written description, and only when a human-written one is
+        * absent — most OSM places have no prose at all because no Wikivoyage
+        * listing matched, which is the gap this fills.
+        *
+        * The label is not decoration. Every sentence here has been checked to
+        * quote its source verbatim, but "grounded" is not the same as "written
+        * by a person", and a traveller is entitled to know which they are
+        * reading before they weigh it. Blending the two into one paragraph
+        * would make that impossible, so the two can never share an element.
+        */}
+      {!candidate.description && brief && (
+        <div className="destination-detail-brief">
+          <p className="destination-detail-description">
+            {brief.sentences.map((sentence) => sentence.text).join(' ')}
+          </p>
+          <p className="destination-detail-provenance">
+            {`Description written by AI from ${brief.sourceCount} ${brief.sourceCount === 1 ? 'source' : 'sources'}, each sentence quoted from one of them`}
+          </p>
+        </div>
+      )}
 
       {(candidate.rating || tags.length > 0) && (
         <div className="destination-detail-chips">
@@ -227,6 +356,74 @@ function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; contex
         </div>
       )}
 
+      {points.length > 0 && (
+        <div className="destination-detail-section">
+          {/* The heading names the position, because that is the actual question
+              — but only when there is an answer to give. */}
+          <h6>
+            {context?.position && hasRankReason
+              ? `Why it is #${context.position} for you`
+              : 'Why it is on your list'}
+          </h6>
+          <ul className="destination-detail-list">
+            {points.slice(0, 4).map((point) => <li key={point.key}>{point.text}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Shown whenever there is something to attribute — not only when there
+          are extra fares. A single ¥600 with no source behind it is a number
+          the traveller has no way to weigh, which is what the provenance line
+          exists to prevent. */}
+      {(admission.fares.length > 0 || admission.rawText || (admission.sourced && admission.provenance)) && (
+        <div className="destination-detail-section">
+          <h6>Admission</h6>
+          {admission.fares.length > 0 && (
+            <dl className="destination-detail-fares">
+              {admission.fares.map((fare) => (
+                <div key={fare.label}>
+                  <dt>{fare.label}</dt>
+                  <dd>{fare.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {/* The source's own words, whenever parsing could not represent all
+              of them. Better a quote than a number we had to round off. */}
+          {admission.rawText && <p className="destination-detail-quote">“{admission.rawText}”</p>}
+          {admission.provenance && <p className="destination-detail-provenance">{admission.provenance}</p>}
+        </div>
+      )}
+
+      {!hours.unknown && (
+        <div className="destination-detail-section">
+          <h6>Opening hours</h6>
+          <dl className="destination-detail-hours">
+            {hours.weekly.map((group) => (
+              <div key={group.label}>
+                <dt>{group.label}</dt>
+                <dd>{group.windows.join(', ')}</dd>
+              </div>
+            ))}
+          </dl>
+          {hours.closedDays.length > 0 && (
+            <p className="destination-detail-closed">
+              {`Closed ${hours.closedDays.join(', ')}`}
+            </p>
+          )}
+          {hours.provenanceLine && <p className="destination-detail-provenance">{hours.provenanceLine}</p>}
+        </div>
+      )}
+
+      {/* Stated gaps. The parser refuses to guess at holiday or seasonal hours,
+          which is right — but silently, which left a confident-looking weekly
+          schedule missing the one clause that mattered. */}
+      {hours.caveats.length > 0 && (
+        <ul className="destination-detail-list is-caveats">
+          {hours.caveats.map((caveat) => <li key={caveat}>{caveat}</li>)}
+        </ul>
+      )}
+
       <dl className="destination-detail-specs">
         {specs.map((spec) => (
           <div key={spec.label}>
@@ -235,15 +432,6 @@ function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; contex
           </div>
         ))}
       </dl>
-
-      {reasons.length > 0 && (
-        <div className="destination-detail-section">
-          <h6>Why it ranks here</h6>
-          <ul className="destination-detail-list">
-            {reasons.slice(0, 4).map((reason) => <li key={reason}>{reason}</li>)}
-          </ul>
-        </div>
-      )}
 
       {evidence && (evidence.positiveThemes.length > 0 || evidence.negativeThemes.length > 0) && (
         <div className="destination-detail-section">
@@ -259,13 +447,19 @@ function CandidateDetails({ ranked, context }: { ranked: RankedCandidate; contex
         </div>
       )}
 
-      {cautions.length > 0 && <p className="destination-match-caution">{cautions.join(' ')}</p>}
+      {/* A list, not `join(' ')`. Six sentences run together were unreadable
+          exactly when they mattered most. */}
+      {otherCautions.length > 0 && (
+        <ul className="destination-match-caution">
+          {otherCautions.map((caution) => <li key={caution}>{caution}</li>)}
+        </ul>
+      )}
 
       <p className="destination-detail-provenance">
         {evidence?.sourceCount
           ? `${evidence.sourceCount} independent ${evidence.sourceCount === 1 ? 'source' : 'sources'}`
           : `${candidate.sourceReferences.length} ${candidate.sourceReferences.length === 1 ? 'source' : 'sources'}`}
-        {` · ${candidate.sourceConfidence} confidence`}
+        {` · ${sourceConfidenceNote(candidate.sourceConfidence, sourceCount)}`}
         {verifiedAt ? ` · checked ${verifiedAt}` : ''}
       </p>
     </div>
@@ -311,7 +505,14 @@ function CandidateCard({
 
         {expanded
           ? <CandidateDetails ranked={ranked} context={context} />
-          : <p className="destination-candidate-description">{candidate.description || openingSummary(candidate)}</p>}
+          : (
+            // Most OSM places have no description at all — prose only arrives
+            // with a matched Wikivoyage listing. What it costs is the next most
+            // decision-relevant thing, and now there is always an answer.
+            <p className="destination-candidate-description">
+              {candidate.description || admissionLine(admissionFor(candidate))}
+            </p>
+          )}
 
         <div className="destination-candidate-footer">
           <fieldset className="destination-decision-group">
@@ -729,6 +930,9 @@ function DiscoveryPreview({
 }
 
 export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChange }: DestinationDiscoveryPanelProps) {
+  // Live rates, so a sourced fare can carry an approximate home-currency
+  // equivalent beside it. The published figure always leads.
+  const { homeCurrency, rates } = useCurrency();
   /**
    * A trip is reviewed one city at a time, and built from all of them.
    *
@@ -996,15 +1200,22 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       // held. Community-maintained hours go stale; this is what corrects them,
       // and it is what stops a day being built around a closed door.
       const official = digest.officialHours;
+      const officialAdmissions = digest.officialAdmissions;
       const windows = digest.bestTimeWindows;
-      if (Object.keys(official).length > 0 || Object.keys(windows).length > 0) {
+      if (Object.keys(official).length > 0 || Object.keys(officialAdmissions).length > 0 || Object.keys(windows).length > 0) {
         setCandidates((previous) => previous.map((candidate) => {
           const hours = official[candidate.id];
+          const admission = officialAdmissions[candidate.id];
           const best = windows[candidate.id];
-          if (!hours && !best) return candidate;
+          if (!hours && !admission && !best) return candidate;
           return {
             ...candidate,
             ...(hours ? { openingHours: hours } : {}),
+            // An operator's structured offer outranks the map or guidebook
+            // value already on the candidate. `mergeAdmission` also carries a
+            // category expectation along when the official page only answered
+            // part of the question.
+            ...(admission ? { admission: mergeAdmission(admission, candidate.admission) } : {}),
             // When travellers agree a place is best at a particular time, the
             // scheduler aims for it rather than dropping the place in wherever
             // it happens to fit.
@@ -1015,11 +1226,40 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     });
     return () => { active = false; };
   }, [phase, usingFixture, currentDeckCard, pendingDeck, setCandidates, capability.destination.city, capability.destination.countryCode, capability.places.provider]);
+  /**
+   * Context every card shares: the traveller's dates, so a weekly closure can
+   * be named as a day of *their* trip, and a conversion for sourced fares. Held
+   * apart from the per-card fields so the deck and the browse list cannot drift
+   * into describing the same place differently.
+   */
+  const sharedContext = useMemo(() => ({
+    tripStart: profile.startDate,
+    tripEnd: profile.endDate,
+    toHomeCurrency: (amount: number, currency: string) => {
+      if (!homeCurrency || currency === homeCurrency) return undefined;
+      // Explicitly approximate: a ticket price is fixed, an exchange rate is
+      // not, and the published figure always leads.
+      return formatCurrency(convertCurrency(amount, currency, homeCurrency, rates), homeCurrency);
+    },
+  }), [profile.startDate, profile.endDate, homeCurrency, rates]);
+
+  /** Rank position by candidate id, so a card can say what it is ranked. */
+  const rankPositions = useMemo(() => {
+    const positions = new Map<string, number>();
+    ranked.forEach((entry, index) => positions.set(entry.candidate.id, index + 1));
+    return positions;
+  }, [ranked]);
+
   const deckContext = useMemo<CandidateContext | undefined>(() => {
     if (!currentDeckCard) return undefined;
     const id = currentDeckCard.candidate.id;
-    return { evidence: evidenceSummaries[id], queueMinutes: queueEvidence[id] };
-  }, [currentDeckCard, evidenceSummaries, queueEvidence]);
+    return {
+      ...sharedContext,
+      evidence: evidenceSummaries[id],
+      queueMinutes: queueEvidence[id],
+      position: rankPositions.get(id),
+    };
+  }, [currentDeckCard, evidenceSummaries, queueEvidence, sharedContext, rankPositions]);
   /** Decided places, most recent first — the desktop rail's running record. */
   const recentDecisions = useMemo(
     () => [...decisionHistory].reverse().slice(0, 8),
@@ -1889,7 +2129,12 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
                       key={item.candidate.id}
                       ranked={item}
                       decision={decisions[item.candidate.id]}
-                      context={{ evidence: evidenceSummaries[item.candidate.id], queueMinutes: queueEvidence[item.candidate.id] }}
+                      context={{
+                        ...sharedContext,
+                        evidence: evidenceSummaries[item.candidate.id],
+                        queueMinutes: queueEvidence[item.candidate.id],
+                        position: rankPositions.get(item.candidate.id),
+                      }}
                       onDecision={(decision) => updateDecision(item.candidate.id, decision, { name: item.candidate.name })}
                     />
                   ))}

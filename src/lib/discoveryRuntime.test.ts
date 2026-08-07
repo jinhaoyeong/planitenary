@@ -156,6 +156,30 @@ describe('discovering places', () => {
     expect(digest.evidenceSummaries['cand-1'].canonicalPlaceId).toBe('cand-1');
   });
 
+  it('maps official admission even when the page produced no evidence document', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      documents: [],
+      admissions: {
+        g1: {
+          class: 'ticketed',
+          fares: [{ audience: 'adult', amount: 600, currency: 'JPY' }],
+          source: 'official-website',
+          confidence: 'high',
+          sourceUrl: 'https://museum.example/admission',
+        },
+      },
+    });
+    const digest = await fetchPlaceEvidence(
+      { city: 'Osaka', countryCode: 'JP' },
+      [candidate('cand-1', 'g1')],
+      invoke,
+    );
+    expect(digest.officialAdmissions['cand-1']).toMatchObject({
+      class: 'ticketed',
+      fares: [{ amount: 600, currency: 'JPY' }],
+    });
+  });
+
   it('asks only for the candidates it was given', async () => {
     const invoke = vi.fn().mockResolvedValue({ documents: [] });
     await fetchPlaceEvidence(

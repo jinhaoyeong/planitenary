@@ -75,9 +75,9 @@ export interface TravelClaim {
   summary: string;
   /** Quantitative reading where the claim has one (minutes, price level…). */
   value?: number;
-  unit?: 'minutes' | 'hours' | 'price-level' | 'people';
+  unit?: 'minutes' | 'hours' | 'price-level' | 'people' | 'currency';
   /** Time window the claim applies to, e.g. queues only in the evening. */
-  appliesTo?: { start?: string; end?: string; daysOfWeek?: number[] };
+  appliesTo?: { start?: string; end?: string; daysOfWeek?: number[]; currency?: string; audience?: string };
   /** 0–1. How strongly the source states this, not how much we believe it. */
   strength: number;
   /** Verbatim fragment the claim was read from, for the evidence drawer. */
@@ -264,6 +264,23 @@ export interface PlaceEvidenceSummary {
   /** 0–1. High means the shortlist should treat the praise cautiously. */
   promotionRisk: number;
   warnings: string[];
+  /**
+   * A model-written description, for the many OSM places that have no prose of
+   * their own because no Wikivoyage listing matched.
+   *
+   * Every sentence has already been validated to quote its source verbatim
+   * before it can arrive here — see `_shared/reasoning.ts`. It is kept
+   * separate from `PlaceCandidate.description`, which holds text a human
+   * wrote, because the card has to label the two differently and a single
+   * field would make that impossible.
+   */
+  brief?: PlaceBriefSummary;
+}
+
+/** A validated model description and the sources each sentence rests on. */
+export interface PlaceBriefSummary {
+  sentences: Array<{ text: string; sourceUrl: string; excerpt: string }>;
+  sourceCount: number;
 }
 
 const median = (values: number[]): number | undefined => {
