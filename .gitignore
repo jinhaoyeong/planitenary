@@ -37,10 +37,6 @@ deps/
 # Supabase CLI local state
 supabase/.temp/
 
-# Native iOS artifacts (not shipped in this repo)
-ios/
-TravelHandbook-iOS/
-*.xcodeproj/
-*.xcworkspace/
+# Native iOS build output
 Pods/
 DerivedData/

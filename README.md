@@ -19,11 +19,34 @@ Add your Supabase project values to `.env.local` (see `.env.example`). Never com
 - `npm run preview` — preview the production build
 - `npm run lint` — ESLint
 
-## Android (optional)
+## Native apps
 
-This repo includes a Capacitor Android shell under `android/`. After building the web app:
+The web UI is also the native UI: Capacitor loads the same React + TypeScript bundle in a
+native shell, so the 390pt mobile layout, fonts, safe-area handling, navigation, and
+interactions stay in one source of truth.
+
+### Android
+
+The repo includes a Capacitor Android shell under `android/`. After building the web app:
 
 ```bash
-npm run build
-npx cap sync android
+npm run cap:sync
 ```
+
+### iOS
+
+The repo includes a Capacitor iOS shell under `ios/`. Sync the latest web bundle with:
+
+```bash
+npm run ios:sync
+```
+
+Open `ios/App/App.xcodeproj` in Xcode with:
+
+```bash
+npm run ios:open
+```
+
+Building and signing the iOS target requires macOS, Xcode, and an Apple developer
+account. Windows can prepare the project and verify the web build, but cannot run
+the Xcode simulator or produce an App Store archive.
