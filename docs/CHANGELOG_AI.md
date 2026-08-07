@@ -4,6 +4,65 @@ Running log. Newest first. Rationale lives in `CLAUDE_CONTEXT.md`.
 
 ---
 
+## 2026-08-08 (admission-read: the excerpt floor that ate every price)
+
+Deployed `b60133c`: `travel-evidence` v25→v26, `travel-refresh` v3→v4.
+Migration `20260807000100_add_ai_brief_cache.sql` applied against live
+Postgres.
+
+**The live failure from the previous deploy diagnosed and fixed.** A page
+containing "Adults $10" reached Gemini, came back with no validated fare, and
+the empty result cached — read at the time as a credential or provider
+problem. It was a validator bug: the brief's 16-character excerpt floor
+(`MIN_EXCERPT_CHARS`) was reused unchanged for fare excerpts, and operators
+write prices short — `Adults $10` is ten characters. Every ordinary price line
+was refused, silently, on every page. Fares now get their own floor
+(`MIN_FARE_EXCERPT_CHARS = 6`) plus a rule stronger than any length could be:
+the excerpt must contain the fare's own figure, so a genuine quotation from
+elsewhere on the page can no longer vouch for an amount it never mentions.
+
+Fixing the rule was not enough on its own — the cache key hashes source
+material, which a validator change does not alter, so every wrongly-empty
+`null` already stored would have kept being served for the full
+`placeIdentity` TTL. `VALIDATOR_VERSION` now folds into `evidenceRevision`,
+the same fix `discoveryCityKey`'s schema version applies one layer down.
+Diagnosing this took a guess rather than a measurement, so counters gained
+`rejectedReasons` — a refusal and an outage produced the identical visible
+outcome, and a count without its reason could not tell them apart.
+
+**Five more issues, from a review before this shipped:**
+
+- A place the operator declared `free` carries no `fares` array, so a rule
+  that only checked fare count treated it the same as "we know nothing" — a
+  free museum listing a guided-tour price would come back reclassified as
+  ticketed at that price. `resolveOfficialAdmission` and `shouldReadAdmission`
+  both now short-circuit on `class === 'free'`, and never spend a call
+  looking for a price a page has just said does not exist.
+- `resolveCurrency(excerpt, countryCode)` was called with the country code in
+  the *symbol* argument slot, so the excerpt-currency fallback could never
+  resolve anything and silently fell through every time. Routed through
+  `parseAdmissionText` instead, removing the call-shape hazard rather than
+  just fixing the order.
+- A dozen currencies `placeCost` can emit have no entry in the exchange-rate
+  catalog — COP, RUB, NGN, PKR among them — and `rateFor` ends in `?? 1`, so a
+  `COP 50,000` fare was converting to `≈ RM 50,000` against a true value of
+  about RM 55. New `hasRate` guard: no real rate now means no approximation
+  shown, on both the discovery card and the day card.
+- `formatCurrency` hardcoded whole units, right for a converted approximation
+  and wrong for a published fare — `€6.50` rendered as `€7`, matching nothing
+  on the operator's own page. A published figure now formats exactly; a
+  conversion still rounds, since it is explicitly approximate.
+- The day-card hours chip answered about the *reader's* today whenever the
+  trip had no start date — which includes the bundled demo trip — so a
+  Tuesday–Sunday museum could show a red "Closed this day" on a Saturday card
+  because the plan was opened on a Monday. The chip is now omitted rather than
+  guessing at the wrong day.
+
+All six fixed with regression tests. 1008 tests, `tsc -b` clean, production
+build clean.
+
+---
+
 ## 2026-08-07 (place details: cost, hours, and why it ranks)
 
 > "the details is kinda useless… the cost is unknown… i dont get the opening

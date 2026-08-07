@@ -4,9 +4,9 @@ Feature:
 Smart place details — what a place costs, when it is open, and why it ranks
 where it does
 
-Branch: `main`, at `d742caf` plus this session's work.
+Branch: `main`, at `b60133c`.
 
-992 tests across 53 files, `tsc -b` clean, production build clean.
+1008 tests across 53 files, `tsc -b` clean, production build clean.
 
 Lint, stated precisely, because "changed files are clean" was too broad a claim
 to make about this diff: **every file created by this work is lint-clean**, and
@@ -40,16 +40,35 @@ Plan: `~/.claude/plans/resilient-jumping-noodle.md`. Eight steps; data contracts
 first, then the UI, then Gemini — so the deterministic version can be judged
 honestly before any model is in the loop.
 
-## Done — steps 1–8
+## Done — steps 1–8, deployed
 
 Both model operations are wired: grounded, quota-limited, fail-closed, cached
 (including the empty answer), and labelled where they reach the screen.
 
-**Nothing is deployed.** `supabase/migrations/20260807000100_add_ai_brief_cache.sql`
-needs `supabase db push` before `travel-evidence` is deployed, and it has not
-been run against a live Postgres — only read. Deploying the function without
-the table would not break the app (every cache helper is best-effort and
-degrades to re-asking) but it would spend metered calls it should not.
+**Deployed 2026-08-08.** Migration `20260807000100_add_ai_brief_cache.sql`
+applied against live Postgres; `travel-evidence` → v26, `travel-refresh` → v4,
+`travel-capabilities` v24 and `travel-discover` v23 already current. Commit
+`b60133c` on `main`, pushed.
+
+That deploy carried a real fix, found live before the earlier deploy (v25) had
+even finished being exercised: the brief's 16-char excerpt floor was applied
+unchanged to fare excerpts, so an ordinary price line like `Adults $10` was
+refused on every page and the empty result cached — indistinguishable from the
+model or the credential failing, which is what it first looked like. Fares now
+get their own floor plus a stronger rule (the excerpt must contain the fare's
+own figure), and `VALIDATOR_VERSION` is folded into the cache key so the fix
+invalidates every wrongly-empty result the buggy version had already cached,
+rather than leaving them to expire on the normal TTL.
+
+A same-day review caught five more issues before this shipped: a place the
+operator declared free could be overwritten by a paid price found in prose; a
+currency-resolution call had its arguments swapped, silently disabling the
+excerpt fallback; a dozen currencies absent from the rate catalog were
+converting at a false 1:1 rate (`COP 50,000` → `RM 50,000`, true value ≈ RM 55);
+published fares were rounded to whole units (`€6.50` shown as `€7`); and the
+day-card hours chip could answer about the wrong day when a plan has no start
+date. All six fixed, all with regression tests — 1008 tests, `tsc -b` clean,
+production build clean.
 
 ### 1. The claim cache was losing what claims meant
 
