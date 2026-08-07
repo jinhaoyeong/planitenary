@@ -302,7 +302,7 @@ rationale. This proves the local Demo persistence and discovery entry path;
 it does not yet prove the deployed OSM save/reload path or every named Osaka
 fixture card.
 
-### 7. Official-site offers — implemented, not deployed
+### 7. Official-site offers — deployed 2026-08-08
 
 `admissionFromJsonLd` now reads schema.org `isAccessibleForFree`, `Offer` and
 `AggregateOffer` prices, currency codes, audience labels, numeric `priceRange`
@@ -321,9 +321,11 @@ numbers are resolved safely as well.
 
 The client contract now carries `unit: 'currency'` and admission audience/
 currency in `appliesTo`; no migration is needed because the existing claims
-JSONB column already stores it. The implementation is local and tested; the
-Edge Function still needs deployment before live non-fixture cards can receive
-operator-published fares.
+JSONB column already stores it. `travel-evidence` (v26), `travel-refresh` (v4),
+`travel-capabilities` (v24) and `travel-discover` (v23) are all deployed, so
+live non-fixture discovery can now receive operator-published fares — this has
+not yet been exercised against a real page in production, only proven through
+the fixtures and the unit suite.
 
 **One gap found reviewing the extractor: a free place read as a priced one.**
 `admissionFromJsonLd` only classified a zero-priced offer as `free` when the
@@ -520,11 +522,19 @@ on screen.
 
 ### Still open
 
+Everything server-side is deployed as of 2026-08-08. What is left is purely
+verification and one deferred decision:
+
 - **Dark mode on the `--warn` alert** and the back face scrolling on a real
-  mobile viewport — not looked at.
-- **Live (non-fixture) discovery shows the category expectation on every
-  card**, because the step 2/4 edge functions are **not deployed**. Nothing is
-  wrong with the copy; there is no fare in the payload yet. Deploying them is
-  what makes the fare paths reachable outside fixtures.
-- Official-site fares are implemented locally but remain unreachable on live
-  discovery until the updated `travel-evidence` function is deployed.
+  mobile viewport — never looked at in a real browser at any point in this
+  work.
+- **Live (non-fixture) discovery through the now-deployed functions has not
+  been exercised end to end against a real operator page.** The unit suite and
+  the offline fixture walk both pass; a live smoke test — open discovery for a
+  real city, confirm a real page's admission or hours reaches a card — has not
+  been done since the v26/v4 deploy.
+- **Step 9 (`rank-rationale`) is deferred, likely permanently.** A rephrasing
+  layer over the deterministic rationale in step 3 would add latency and a
+  second validation surface without adding intelligence; step 3's points
+  already read specifically per card. Revisit only if they still read poorly
+  after being seen live.
