@@ -332,16 +332,22 @@ body.planner-intelligence-active .pet-overlay {
   gap: 0.65rem;
   /*
    * Full width of the wizard column so it lines up with the city-stay block
-   * below. Height is controlled on the day cells themselves — fixed row
-   * height instead of aspect-ratio squares, so a wide modal grows the grid
-   * sideways without making the month tall again.
+   * below. Day-row height matches the start/end circle via --date-marker, so
+   * the light range band and the circles stay the same size.
    */
+  --date-marker: 2.15rem;
   width: 100%;
   max-width: none;
   padding: 0.85rem;
   border: 1px solid var(--border);
   border-radius: 1rem;
   background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+@media (min-width: 40rem) {
+  .date-range-calendar {
+    --date-marker: 2.35rem;
+  }
 }
 
 .date-range-calendar-head {
@@ -409,9 +415,9 @@ body.planner-intelligence-active .pet-overlay {
 
 .date-range-day {
   position: relative;
-  /* Fixed row height: wide screens get a full-width month without tall cells. */
-  height: 2.4rem;
-  min-height: 2.4rem;
+  /* Row height === circle diameter, so the range band matches the endpoints. */
+  height: var(--date-marker);
+  min-height: var(--date-marker);
   border: 0;
   background: transparent;
   color: var(--ink);
@@ -424,8 +430,6 @@ body.planner-intelligence-active .pet-overlay {
 
 @media (min-width: 40rem) {
   .date-range-day {
-    height: 2.55rem;
-    min-height: 2.55rem;
     font-size: 0.84rem;
   }
 }
@@ -435,11 +439,21 @@ body.planner-intelligence-active .pet-overlay {
   cursor: default;
 }
 
+.date-range-day:focus {
+  outline: none;
+}
+
+.date-range-day:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
 .date-range-day[data-today='true']::after {
   content: '';
   position: absolute;
   left: 50%;
-  bottom: 0.22rem;
+  bottom: 0.18rem;
   width: 0.22rem;
   height: 0.22rem;
   border-radius: 999px;
@@ -453,9 +467,8 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 /*
- * Start and end are solid circles centred in the cell. The light range band
- * still runs through mid-cell via the half-fill on `data-bound="range"`, so a
- * multi-day trip reads as two dots joined by a strip rather than pill ends.
+ * Start and end are solid circles the same height as the range band (the cell
+ * itself). Half-fill on `data-bound="range"` joins them to the mid-trip strip.
  */
 .date-range-day[data-role='start'],
 .date-range-day[data-role='end'] {
@@ -470,20 +483,12 @@ body.planner-intelligence-active .pet-overlay {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 2.05rem;
-  height: 2.05rem;
+  width: var(--date-marker);
+  height: var(--date-marker);
   border-radius: 999px;
   background: var(--accent);
   transform: translate(-50%, -50%);
   z-index: -1;
-}
-
-@media (min-width: 40rem) {
-  .date-range-day[data-role='start']::before,
-  .date-range-day[data-role='end']::before {
-    width: 2.2rem;
-    height: 2.2rem;
-  }
 }
 
 .date-range-day[data-role='start'][data-bound='range'] {
@@ -500,6 +505,17 @@ body.planner-intelligence-active .pet-overlay {
     transparent 50%,
     color-mix(in srgb, var(--accent) 16%, transparent) 50%
   );
+}
+
+.date-range-day[data-role='start']:focus-visible,
+.date-range-day[data-role='end']:focus-visible {
+  outline: none;
+  border-radius: 0;
+}
+
+.date-range-day[data-role='start']:focus-visible::before,
+.date-range-day[data-role='end']:focus-visible::before {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
 
 .date-range-day[data-role='start'][data-today='true']::after,
