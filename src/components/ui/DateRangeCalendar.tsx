@@ -22,8 +22,6 @@ interface DateRangeCalendarProps {
   min?: IsoDate;
   /** Latest selectable day, inclusive. */
   max?: IsoDate;
-  /** Two months side by side where there is room; one on a phone. */
-  months?: 1 | 2;
   /** Labels the group for assistive technology. */
   label?: string;
 }
@@ -40,6 +38,10 @@ const FULL_DATE = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'nume
  * a whole — the traveller chose a start, the picker closed, and the eleven days
  * they had actually committed to were never drawn anywhere.
  *
+ * One month is shown at a time on every screen size. Side-by-side months eat
+ * the modal and bury the city-stay controls underneath; paging with the
+ * previous/next controls is how a range that crosses a month boundary is made.
+ *
  * Every day is a real `<button>`. Roving focus would be fewer tab stops, but a
  * month is 31 stops at most, and a plain button is the thing every screen
  * reader, switch device and keyboard already understands.
@@ -49,7 +51,6 @@ export function DateRangeCalendar({
   onChange,
   min,
   max,
-  months = 2,
   label = 'Trip dates',
 }: DateRangeCalendarProps) {
   const today = useMemo(() => toIso(new Date()), []);
@@ -74,8 +75,7 @@ export function DateRangeCalendar({
   if (value.start !== seenStart) {
     setSeenStart(value.start);
     if (value.start && isIsoDate(value.start)) {
-      const visible = Array.from({ length: months }, (_, index) => addMonths(cursor, index).slice(0, 7));
-      if (!visible.includes(value.start.slice(0, 7))) setCursor(value.start);
+      if (value.start.slice(0, 7) !== cursor.slice(0, 7)) setCursor(value.start);
     }
   }
 
@@ -86,14 +86,12 @@ export function DateRangeCalendar({
     return hovered >= value.start ? { start: value.start, end: hovered } : value;
   }, [value, hovered]);
 
-  const visibleMonths = useMemo(
-    () => Array.from({ length: months }, (_, index) => addMonths(cursor, index)),
-    [cursor, months],
-  );
+  const visibleMonth = cursor;
+  const visibleMonthKey = visibleMonth.slice(0, 7);
 
   const bounds = { min, max };
   const canPageBack = !min || addMonths(cursor, -1) >= min.slice(0, 7).concat('-01');
-  const canPageForward = !max || visibleMonths[0].slice(0, 7) < max.slice(0, 7);
+  const canPageForward = !max || visibleMonthKey < max.slice(0, 7);
 
   const choose = (iso: IsoDate) => {
     if (!isSelectable(iso, bounds)) return;
@@ -114,8 +112,8 @@ export function DateRangeCalendar({
     event.preventDefault();
     const target = addDays(iso, step);
     if (!isSelectable(target, bounds)) return;
-    if (target.slice(0, 7) < visibleMonths[0].slice(0, 7)) setCursor(addMonths(cursor, -1));
-    if (target.slice(0, 7) > visibleMonths[visibleMonths.length - 1].slice(0, 7)) setCursor(addMonths(cursor, 1));
+    if (target.slice(0, 7) < visibleMonthKey) setCursor(addMonths(cursor, -1));
+    if (target.slice(0, 7) > visibleMonthKey) setCursor(addMonths(cursor, 1));
     // The DOM node may not exist until the paging render lands.
     window.requestAnimationFrame(() => {
       gridRef.current?.querySelector<HTMLButtonElement>(`[data-iso="${target}"]`)?.focus();
@@ -147,45 +145,43 @@ export function DateRangeCalendar({
       </div>
 
       <div className="date-range-months" ref={gridRef} onMouseLeave={() => setHovered(null)}>
-        {visibleMonths.map((month) => (
-          <div className="date-range-month" key={month}>
-            <h4>{MONTH_LABEL.format(toLocalDate(month))}</h4>
-            <div className="date-range-weekdays" aria-hidden="true">
-              {WEEKDAY_LABELS.map((weekday) => <span key={weekday}>{weekday.slice(0, 2)}</span>)}
-            </div>
-            <div className="date-range-grid">
-              {monthGrid(month).flat().map((cell) => {
-                const role = rangeRole(cell.iso, previewSelection);
-                const selectable = cell.inMonth && isSelectable(cell.iso, bounds);
-                return (
-                  <button
-                    key={cell.iso}
-                    type="button"
-                    data-iso={cell.iso}
-                    className="date-range-day"
-                    data-role={role}
-                    data-today={cell.iso === today ? 'true' : undefined}
-                    // Padding days belong to the neighbouring month, which has
-                    // its own grid. Rendering them keeps the weeks aligned;
-                    // hiding them from assistive tech keeps them from being
-                    // read twice.
-                    aria-hidden={!cell.inMonth}
-                    tabIndex={cell.inMonth ? 0 : -1}
-                    disabled={!selectable}
-                    aria-pressed={role === 'start' || role === 'end'}
-                    aria-label={FULL_DATE.format(toLocalDate(cell.iso))}
-                    onClick={() => choose(cell.iso)}
-                    onKeyDown={(event) => onKeyDown(event, cell.iso)}
-                    onMouseEnter={() => setHovered(cell.iso)}
-                    onFocus={() => setHovered(cell.iso)}
-                  >
-                    {cell.inMonth ? cell.day : ''}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="date-range-month">
+          <h4>{MONTH_LABEL.format(toLocalDate(visibleMonth))}</h4>
+          <div className="date-range-weekdays" aria-hidden="true">
+            {WEEKDAY_LABELS.map((weekday) => <span key={weekday}>{weekday.slice(0, 2)}</span>)}
           </div>
-        ))}
+          <div className="date-range-grid">
+            {monthGrid(visibleMonth).flat().map((cell) => {
+              const role = rangeRole(cell.iso, previewSelection);
+              const selectable = cell.inMonth && isSelectable(cell.iso, bounds);
+              return (
+                <button
+                  key={cell.iso}
+                  type="button"
+                  data-iso={cell.iso}
+                  className="date-range-day"
+                  data-role={role}
+                  data-today={cell.iso === today ? 'true' : undefined}
+                  // Padding days belong to the neighbouring month, which has
+                  // its own grid. Rendering them keeps the weeks aligned;
+                  // hiding them from assistive tech keeps them from being
+                  // read twice.
+                  aria-hidden={!cell.inMonth}
+                  tabIndex={cell.inMonth ? 0 : -1}
+                  disabled={!selectable}
+                  aria-pressed={role === 'start' || role === 'end'}
+                  aria-label={FULL_DATE.format(toLocalDate(cell.iso))}
+                  onClick={() => choose(cell.iso)}
+                  onKeyDown={(event) => onKeyDown(event, cell.iso)}
+                  onMouseEnter={() => setHovered(cell.iso)}
+                  onFocus={() => setHovered(cell.iso)}
+                >
+                  {cell.inMonth ? cell.day : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <div className="date-range-foot">

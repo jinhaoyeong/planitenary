@@ -348,17 +348,12 @@ body.planner-intelligence-active .pet-overlay {
   cursor: not-allowed;
 }
 
+/* One month at a time on every breakpoint — side-by-side months crowd the
+ * wizard and bury the city-stay controls. Previous/next pages between months. */
 .date-range-months {
   display: grid;
   gap: 1rem;
   grid-template-columns: 1fr;
-}
-
-/* Two months only where there is genuinely room for both. */
-@media (min-width: 40rem) {
-  .date-range-months {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 .date-range-month h4 {

@@ -21,7 +21,7 @@ const JANUARY = { start: '2027-01-21', end: '2027-01-31' } satisfies RangeSelect
 const renderCalendar = (value: RangeSelection = {}) => {
   const onChange = vi.fn();
   const view = render(
-    <DateRangeCalendar value={value} onChange={onChange} months={1} min="2027-01-01" />,
+    <DateRangeCalendar value={value} onChange={onChange} min="2027-01-01" />,
   );
   return { onChange, view };
 };
@@ -103,7 +103,7 @@ describe('drawing the trip', () => {
 describe('bounds and reachability', () => {
   it('disables days before the minimum', () => {
     const onChange = vi.fn();
-    render(<DateRangeCalendar value={{}} onChange={onChange} min="2027-01-15" months={1} />);
+    render(<DateRangeCalendar value={{}} onChange={onChange} min="2027-01-15" />);
 
     expect(day('2027-01-14')).toBeDisabled();
     fireEvent.click(day('2027-01-14'));
@@ -137,6 +137,20 @@ describe('bounds and reachability', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
 
+    expect(screen.getByRole('heading', { name: 'February 2027' })).toBeInTheDocument();
+  });
+
+  it('shows only one month at a time', () => {
+    // Side-by-side months crowd the wizard. A range that crosses a month
+    // boundary is made by paging, not by painting two grids at once.
+    renderCalendar(JANUARY);
+
+    expect(screen.getByRole('heading', { name: 'January 2027' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'February 2027' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
+
+    expect(screen.queryByRole('heading', { name: 'January 2027' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'February 2027' })).toBeInTheDocument();
   });
 });
