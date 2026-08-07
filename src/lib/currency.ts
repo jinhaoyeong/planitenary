@@ -204,17 +204,62 @@ export const rateFor = (rates: ExchangeRates, currency: Currency): number => {
   return Number.isFinite(value) && value > 0 ? value : FALLBACK_RATES[currency.toUpperCase()] ?? 1;
 };
 
-export function formatCurrency(amount: number, currency: Currency): string {
+/**
+ * Whether a real rate exists for this currency, live or as a fallback.
+ *
+ * `rateFor` ends in `?? 1`, which is a sane default for a wallet total but a
+ * silent lie beside a published fare: `COP 50,000` would render as
+ * `≈ RM 50,000` when the true figure is about RM 55. A traveller shown that is
+ * being told a price a thousand times out — the same failure the currency
+ * discipline in `placeCost` exists to prevent, arriving through the back door.
+ *
+ * `placeCost` can emit 57 currencies; a dozen of them (COP, RUB, NGN, PKR and
+ * friends) have no entry in the catalog at all. Callers that *display* a
+ * conversion must check here first and simply omit it — a missing
+ * approximation costs the traveller nothing, and a wrong one costs them the
+ * trust in every other number on the card.
+ */
+export const hasRate = (rates: ExchangeRates, currency: Currency): boolean => {
   const code = currency.toUpperCase();
+  const live = rates.rates?.[code];
+  return (Number.isFinite(live) && (live as number) > 0) || FALLBACK_RATES[code] !== undefined;
+};
+
+export interface FormatCurrencyOptions {
+  /**
+   * Show the figure exactly as published, sub-units and all.
+   *
+   * The default rounds to whole units, which is right for a converted
+   * approximation or a budget total — nobody needs `≈ RM 78.34`. It is wrong
+   * for a **published** price: an operator charging €6.50 displayed as `€7` is
+   * a figure that matches nothing on their page, and `admissionCopy`'s whole
+   * contract is that a fare is shown as its source published it.
+   *
+   * Trailing zeros are still dropped for a whole amount, so `$10` does not
+   * become `$10.00` — the decimals appear only when the price actually has
+   * them.
+   */
+  exact?: boolean;
+}
+
+export function formatCurrency(
+  amount: number,
+  currency: Currency,
+  options: FormatCurrencyOptions = {},
+): string {
+  const code = currency.toUpperCase();
+  const hasFraction = options.exact && !Number.isInteger(amount);
+  const digits = hasFraction ? currencyDecimals(code) : 0;
   try {
     return new Intl.NumberFormat('en-MY', {
       style: 'currency',
       currency: code,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
     }).format(amount);
   } catch {
-    return `${currencyMeta(code).symbol}${Math.round(amount).toLocaleString()}`;
+    const rendered = digits > 0 ? amount.toFixed(digits) : Math.round(amount).toLocaleString();
+    return `${currencyMeta(code).symbol}${rendered}`;
   }
 }
 

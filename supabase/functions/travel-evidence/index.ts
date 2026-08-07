@@ -32,6 +32,7 @@ import {
 } from '../_shared/providers.ts';
 import {
   boundSources,
+  countRejections,
   emptyCounters,
   evidenceRevision,
   requestAdmissionRead,
@@ -324,11 +325,11 @@ Deno.serve(async (request) => {
                 reasoningCounters.skipped += 1;
                 return undefined;
               }
-              const { fares, rejected } = await requestAdmissionRead(
+              const { fares, rejections } = await requestAdmissionRead(
                 { pageText, countryCode: country },
                 { apiKey: geminiKey, model: geminiModel() },
               );
-              reasoningCounters.rejectedSentences += rejected;
+              countRejections(reasoningCounters, rejections);
               if (fares) reasoningCounters.succeeded += 1; else reasoningCounters.failed += 1;
               freshAiBriefs.push({
                 canonicalPlaceId: canonicalId,
@@ -410,12 +411,12 @@ Deno.serve(async (request) => {
       })) {
         reasoningCounters.skipped += 1;
       } else {
-        const { brief, rejected } = await requestPlaceBrief(
+        const { brief, rejections } = await requestPlaceBrief(
           { name, city, categories: [] },
           briefSources,
           { apiKey: geminiKey, model: geminiModel() },
         );
-        reasoningCounters.rejectedSentences += rejected;
+        countRejections(reasoningCounters, rejections);
         if (brief) {
           briefs[placeId] = brief;
           reasoningCounters.succeeded += 1;

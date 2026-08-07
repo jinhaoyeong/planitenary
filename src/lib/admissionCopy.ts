@@ -133,7 +133,7 @@ export function describeAdmission(
 
     const converted = options.toHomeCurrency?.(headlineFare.amount, headlineFare.currency);
     return {
-      headline: formatCurrency(headlineFare.amount, headlineFare.currency),
+      headline: formatCurrency(headlineFare.amount, headlineFare.currency, { exact: true }),
       note: [
         headlineFare.audience === 'adult' ? 'adult ticket' : `${audienceLabel(headlineFare.audience).toLowerCase()} ticket`,
         headlineFare.note,
@@ -145,7 +145,7 @@ export function describeAdmission(
           label: audienceLabel(fare.audience),
           value: fare.amount === 0
             ? 'Free'
-            : [formatCurrency(fare.amount, fare.currency), fare.note].filter(Boolean).join(' · '),
+            : [formatCurrency(fare.amount, fare.currency, { exact: true }), fare.note].filter(Boolean).join(' · '),
         })),
       provenance,
       sourced: true,
@@ -162,7 +162,7 @@ export function describeAdmission(
     return {
       // "About" is doing real work: this is a typical spend, not a fare, and
       // presenting it as a price would be the same overclaim as a category one.
-      headline: `About ${formatCurrency(spend.amount, spend.currency)}`,
+      headline: `About ${formatCurrency(spend.amount, spend.currency, { exact: true })}`,
       note: [`typical spend ${audienceLabel(spend.audience).toLowerCase()}`, converted ? `≈ ${converted}` : undefined]
         .filter(Boolean).join(' · '),
       fares: [],
@@ -211,13 +211,13 @@ export function admissionChip(
     const headline = fares.find((fare) => fare.audience === 'adult') ?? fares[0];
     if (!headline) return 'Ticket required';
     const converted = options.toHomeCurrency?.(headline.amount, headline.currency);
-    const local = formatCurrency(headline.amount, headline.currency);
+    const local = formatCurrency(headline.amount, headline.currency, { exact: true });
     return [local, headline.note, converted ? `≈ ${converted}` : undefined].filter(Boolean).join(' · ');
   }
 
   if (admission.class === 'spend-based') {
     return admission.typicalSpend
-      ? `About ${formatCurrency(admission.typicalSpend.amount, admission.typicalSpend.currency)}`
+      ? `About ${formatCurrency(admission.typicalSpend.amount, admission.typicalSpend.currency, { exact: true })}`
       : 'Pay inside';
   }
 

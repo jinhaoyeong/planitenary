@@ -5,6 +5,7 @@ import {
   describeRateFreshness,
   fetchExchangeRates,
   formatRelativeTime,
+  hasRate,
   rateFor,
   type ExchangeRates,
 } from './currency';
@@ -168,5 +169,29 @@ describe('fetchExchangeRates', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(rateFor(rates, 'JPY')).toBe(31);
+  });
+});
+
+/**
+ * `rateFor` ends in `?? 1`, which is a sane wallet default and a silent lie
+ * beside a published fare: a currency the catalog has never heard of would
+ * convert at par. `placeCost` can emit 57 currencies and a dozen of them —
+ * COP, RUB, NGN, PKR among them — have no catalog entry at all.
+ */
+describe('knowing when there is no rate to convert at', () => {
+  it('reports a currency the catalog carries', () => {
+    expect(hasRate(createFallbackRates(false), 'JPY')).toBe(true);
+    expect(hasRate(createFallbackRates(false), 'EUR')).toBe(true);
+  });
+
+  it('reports a currency it has never heard of, rather than converting at par', () => {
+    expect(hasRate(createFallbackRates(false), 'COP')).toBe(false);
+    expect(rateFor(createFallbackRates(false), 'COP')).toBe(1);
+  });
+
+  it('accepts a live rate for a currency with no fallback', () => {
+    const base = createFallbackRates(false);
+    const live = { ...base, rates: { ...base.rates, COP: 1100 } };
+    expect(hasRate(live, 'COP')).toBe(true);
   });
 });

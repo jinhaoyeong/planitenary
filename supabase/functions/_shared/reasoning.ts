@@ -27,7 +27,7 @@
  */
 
 import type { AdmissionFare } from './placeCost.ts';
-import { COUNTRY_CURRENCY, resolveCurrency } from './placeCost.ts';
+import { COUNTRY_CURRENCY, parseAdmissionText } from './placeCost.ts';
 
 /** One source we handed the model, and the exact text we handed it. */
 export interface BriefSource {
@@ -109,6 +109,20 @@ const normalise = (value: string) => value.replace(/\s+/g, ' ').trim().toLowerCa
  * match means something, short enough to admit a genuine short quotation.
  */
 export const MIN_EXCERPT_CHARS = 16;
+
+/**
+ * The same floor, for a fare, would refuse almost every real price line.
+ *
+ * Operators write `Adults $10`. Ten characters. The brief's floor exists
+ * because a short substring could launder an invented *sentence*; a fare has a
+ * stronger guard available — the excerpt must contain the figure itself — so
+ * this only needs to be high enough to reject a bare `$10` offered as a
+ * quotation.
+ */
+export const MIN_FARE_EXCERPT_CHARS = 6;
+
+/** Currencies this codebase can resolve. Membership is the ISO check. */
+const KNOWN_CURRENCIES = new Set(Object.values(COUNTRY_CURRENCY));
 
 /** Every distinct run of digits in a string, as written. */
 const numbersIn = (value: string): string[] => (value.match(/\d[\d,.]*/g) || [])
@@ -221,29 +235,62 @@ export function validateAdmissionFares(
     const excerpt = typeof item?.excerpt === 'string' ? item.excerpt.trim() : '';
 
     if (!Number.isFinite(amount) || amount < 0) { rejected.push({ reason: 'amount-not-a-number' }); continue; }
-    if (excerpt.length < MIN_EXCERPT_CHARS) { rejected.push({ reason: 'excerpt-too-short' }); continue; }
-    if (!haystack.includes(normalise(excerpt))) { rejected.push({ reason: 'excerpt-not-on-page' }); continue; }
-
-    // The figure itself, as digits, must be on the page. `1,500` and `1500`
-    // are the same price written two ways, so both spellings are tried before
-    // the fare is refused.
-    const plain = String(amount);
-    const grouped = amount.toLocaleString('en-US');
-    if (!haystack.includes(plain) && !haystack.includes(grouped.toLowerCase())) {
-      rejected.push({ reason: 'amount-not-on-page' });
-      continue;
-    }
 
     /**
-     * The currency is resolved the same way every other price in this codebase
-     * is resolved, rather than trusted from the model. A three-letter string
-     * is not proof of a currency — `YEN` passes any ISO-shaped regex, which is
-     * a bug this project already fixed once on the deterministic path.
+     * A fare excerpt is judged differently from a brief's, and the difference
+     * cost a production outage: the brief's 16-character floor was applied
+     * here unchanged, so `Adults $10` — ten characters, and exactly how
+     * operators write it — was refused, silently, on every page. Every result
+     * came back empty and got cached, and the symptom was indistinguishable
+     * from the model failing.
+     *
+     * The floor stays, much lower, only to stop a bare `$10` being offered as
+     * a quotation. The real rule is the next one.
      */
-    const resolved = COUNTRY_CURRENCY[(input.countryCode || '').toUpperCase()];
-    const currency = currencyRaw && Object.values(COUNTRY_CURRENCY).includes(currencyRaw)
+    if (excerpt.length < MIN_FARE_EXCERPT_CHARS) { rejected.push({ reason: 'excerpt-too-short' }); continue; }
+    if (!haystack.includes(normalise(excerpt))) { rejected.push({ reason: 'excerpt-not-on-page' }); continue; }
+
+    // The figure itself, as digits. `1,500` and `1500` are the same price
+    // written two ways, so both spellings are tried before a fare is refused.
+    const plain = String(amount);
+    const grouped = amount.toLocaleString('en-US').toLowerCase();
+    const amountIn = (text: string) => text.includes(plain) || text.includes(grouped);
+
+    if (!amountIn(haystack)) { rejected.push({ reason: 'amount-not-on-page' }); continue; }
+    /**
+     * Stronger than any length floor, and what actually ties a quotation to
+     * the fare it is offered for: the excerpt must contain this fare's figure.
+     * Otherwise a sentence from elsewhere on the page — genuinely present, and
+     * about something else entirely — could vouch for an amount it never
+     * mentions.
+     */
+    if (!amountIn(normalise(excerpt))) { rejected.push({ reason: 'excerpt-missing-the-amount' }); continue; }
+
+    /**
+     * Real ISO code **and** either on the page or the country's — not merely
+     * a code we recognise. Accepting any member of the country table let a
+     * model put `EUR` on a US page and be believed; `USD` on a Cambodian page
+     * is fine, but only because the page says so. `YEN` still fails, as it
+     * must: three letters are not proof of a currency, which is a bug this
+     * project already fixed once on the deterministic path.
+     */
+    const countryCurrency = COUNTRY_CURRENCY[(input.countryCode || '').toUpperCase()];
+    const isKnownCode = KNOWN_CURRENCIES.has(currencyRaw);
+    const supported = currencyRaw === countryCurrency || haystack.includes(currencyRaw.toLowerCase());
+    /**
+     * The fallback reads the excerpt with the same parser every deterministic
+     * price in this codebase goes through, rather than calling `resolveCurrency`
+     * directly — that takes `(token, symbol, countryCode)`, and passing an
+     * excerpt plus a country code silently filled the *symbol* slot with `'JP'`
+     * and left the country undefined, so the branch could never resolve
+     * anything and a `€6.50` line on a page with no country was simply dropped.
+     * `parseAdmissionText` already does the tokenising and symbol
+     * disambiguation properly.
+     */
+    const currency = currencyRaw && isKnownCode && supported
       ? currencyRaw
-      : resolveCurrency(excerpt, input.countryCode) || resolved;
+      : parseAdmissionText(excerpt, input.countryCode, 'official-website')?.fares?.[0]?.currency
+        || countryCurrency;
     if (!currency) { rejected.push({ reason: 'currency-unresolvable' }); continue; }
 
     fares.push({ audience, amount, currency });
@@ -252,18 +299,40 @@ export function validateAdmissionFares(
   return { fares, rejected };
 }
 
-/** What a run of the model tier cost and produced, for observability. */
+/**
+ * What a run of the model tier cost and produced, for observability.
+ *
+ * `rejectedReasons` exists because of a real incident: a validator refusing
+ * every fare and a provider returning nothing produce the *same* visible
+ * outcome — an empty result, cached, with no error. Distinguishing them
+ * mattered and could not be done from the counters as they stood, so the
+ * diagnosis started from a guess. A count without its reason is not
+ * observability.
+ */
 export interface ReasoningCounters {
   skipped: number;
   cacheHits: number;
   succeeded: number;
   rejectedSentences: number;
   failed: number;
+  /** Rejection reason → how many, this request. Empty when nothing was refused. */
+  rejectedReasons: Record<string, number>;
 }
 
 export const emptyCounters = (): ReasoningCounters => ({
-  skipped: 0, cacheHits: 0, succeeded: 0, rejectedSentences: 0, failed: 0,
+  skipped: 0, cacheHits: 0, succeeded: 0, rejectedSentences: 0, failed: 0, rejectedReasons: {},
 });
+
+/** Fold a validator's rejections into the counters, keeping their reasons. */
+export function countRejections(
+  counters: ReasoningCounters,
+  rejections: Array<{ reason: string }>,
+): void {
+  counters.rejectedSentences += rejections.length;
+  for (const { reason } of rejections) {
+    counters.rejectedReasons[reason] = (counters.rejectedReasons[reason] || 0) + 1;
+  }
+}
 
 /** Hard ceilings on what may be sent, enforced rather than hoped for. */
 export const MAX_SOURCE_CHARS = 6_000;
@@ -352,6 +421,24 @@ export async function callGemini(
  * answer even though the source list is identical. Sorted first, because the
  * order sources come back in is not meaningful and must not churn the key.
  */
+/**
+ * Bumped whenever a validation rule changes.
+ *
+ * Without this, a fix to the validators cannot reach production: the cache key
+ * is a hash of the *source material*, which a rule change does not alter, so
+ * every wrong answer already stored — including every wrongly-empty one —
+ * keeps being served. Caching the null result is what makes this necessary;
+ * it is also what makes the cache worth having.
+ *
+ * `discoveryCityKey` carries a schema version for the same reason, and this is
+ * the same failure mode one layer up.
+ *
+ * v2: the fare excerpt floor was refusing every ordinary price line
+ * ("Adults $10"), and the currency check accepted any known code regardless of
+ * the page. Both are fixed, so every v1 answer must be re-derived.
+ */
+export const VALIDATOR_VERSION = 'v2';
+
 export function evidenceRevision(sources: BriefSource[]): string {
   // The delimiter between a source's address and its text is a newline, which
   // cannot occur inside a URL, so the boundary is unambiguous. Written as a
@@ -372,7 +459,9 @@ ${source.text}`)
     hash ^= canonical.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  return `${hash.toString(16).padStart(8, '0')}-${sources.length}`;
+  // The validator version is part of the key, not merely part of the payload:
+  // a rule change has to invalidate the answers that rule produced.
+  return `${VALIDATOR_VERSION}-${hash.toString(16).padStart(8, '0')}-${sources.length}`;
 }
 
 /** Trim sources to the enforced ceiling before anything is sent. */
@@ -398,9 +487,9 @@ export function boundSources(sources: BriefSource[]): BriefSource[] {
 export async function requestAdmissionRead(
   input: AdmissionReadInput,
   options: GeminiOptions,
-): Promise<{ fares: AdmissionFare[] | null; rejected: number }> {
+): Promise<{ fares: AdmissionFare[] | null; rejections: Array<{ reason: string }> }> {
   const pageText = input.pageText.slice(0, MAX_SOURCE_CHARS);
-  if (!pageText.trim()) return { fares: null, rejected: 0 };
+  if (!pageText.trim()) return { fares: null, rejections: [] };
 
   const raw = await callGemini('admission-read', {
     instruction: 'Read admission prices from this page text. For each fare give audience, amount as a number, currency as an ISO code, and a verbatim excerpt from the text. Return no fare you cannot quote.',
@@ -409,7 +498,7 @@ export async function requestAdmissionRead(
   }, options);
 
   const { fares, rejected } = validateAdmissionFares(raw, { ...input, pageText });
-  return { fares: fares.length > 0 ? fares : null, rejected: rejected.length };
+  return { fares: fares.length > 0 ? fares : null, rejections: rejected };
 }
 
 /**
@@ -435,6 +524,16 @@ export function resolveOfficialAdmission(input: {
   sourceUrl: string;
   retrievedAt: string;
 }): PlaceAdmissionLike | undefined {
+  /**
+   * A declared-free place is settled, and `free` carries no `fares` array — so
+   * a rule that only looked at fare *count* treated "the operator says entry is
+   * free" identically to "we know nothing". A free municipal museum whose page
+   * also lists a guided tour or a gift-shop price would come back reclassified
+   * as ticketed at that price. The operator's own machine-readable declaration
+   * outranks anything read out of their prose.
+   */
+  if (input.structured?.class === 'free') return input.structured;
+
   const structuredFares = input.structured?.fares || [];
   if (structuredFares.length > 0) return input.structured;
   if (!input.readFares || input.readFares.length === 0) return input.structured;
@@ -449,9 +548,15 @@ export function resolveOfficialAdmission(input: {
   };
 }
 
-/** Whether the prose is worth a metered call at all. */
+/**
+ * Whether the prose is worth a metered call at all.
+ *
+ * `free` is a settled answer even though it carries no `fares` — asking anyway
+ * would spend money to look for a price on a page that has just told us there
+ * isn't one, and risk finding a gift-shop figure instead.
+ */
 export const shouldReadAdmission = (structured?: PlaceAdmissionLike): boolean =>
-  (structured?.fares || []).length === 0;
+  structured?.class !== 'free' && (structured?.fares || []).length === 0;
 
 /** The subset of `PlaceAdmission` this module needs, kept structural. */
 export interface PlaceAdmissionLike {
@@ -481,9 +586,9 @@ export async function requestPlaceBrief(
   place: { name: string; city: string; categories: string[] },
   sources: BriefSource[],
   options: GeminiOptions,
-): Promise<{ brief?: PlaceBrief; rejected: number }> {
+): Promise<{ brief?: PlaceBrief; rejections: Array<{ reason: string }> }> {
   const bounded = boundSources(sources);
-  if (bounded.length === 0) return { rejected: 0 };
+  if (bounded.length === 0) return { rejections: [] };
 
   const raw = await callGemini('place-brief', {
     place,
@@ -492,10 +597,10 @@ export async function requestPlaceBrief(
   }, options);
 
   const { sentences, rejected } = validateBriefSentences(raw, bounded);
-  if (sentences.length === 0) return { rejected: rejected.length };
+  if (sentences.length === 0) return { rejections: rejected };
 
   return {
     brief: { sentences, sourceCount: new Set(sentences.map((s) => s.sourceUrl)).size },
-    rejected: rejected.length,
+    rejections: rejected,
   };
 }

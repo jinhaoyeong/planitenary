@@ -163,6 +163,51 @@ describe('free entry', () => {
   });
 });
 
+/**
+ * A published figure has to match the operator's page. `formatCurrency`
+ * rounds to whole units by default, which is right for an approximate
+ * conversion and wrong for a fare: €6.50 shown as €7 matches nothing the
+ * traveller will see at the door.
+ */
+describe('a fare is shown as it was published', () => {
+  it('keeps the sub-units of a price that has them', () => {
+    const display = describeAdmission(admission({
+      class: 'ticketed',
+      fares: [{ audience: 'adult', amount: 6.5, currency: 'EUR' }],
+      source: 'official-website',
+      confidence: 'high',
+    }));
+    expect(display.headline).toMatch(/6[.,]50/);
+  });
+
+  it('does not invent decimals on a whole-unit price', () => {
+    const display = describeAdmission(admission({
+      class: 'ticketed',
+      fares: [{ audience: 'adult', amount: 10, currency: 'USD' }],
+      source: 'official-website',
+      confidence: 'high',
+    }));
+    expect(display.headline).not.toMatch(/\.00/);
+  });
+
+  /**
+   * The conversion is explicitly approximate and stays rounded — nobody needs
+   * "≈ RM 78.34" — but it must never appear at all without a real rate behind
+   * it. That path is guarded at the call site; here we only pin that the
+   * published figure and the approximation are formatted differently.
+   */
+  it('rounds the approximation while keeping the published figure exact', () => {
+    const display = describeAdmission(admission({
+      class: 'ticketed',
+      fares: [{ audience: 'adult', amount: 6.5, currency: 'EUR' }],
+      source: 'official-website',
+      confidence: 'high',
+    }), { toHomeCurrency: () => 'RM 32' });
+    expect(display.headline).toMatch(/6[.,]50/);
+    expect(display.note).toContain('≈ RM 32');
+  });
+});
+
 describe('spend-based', () => {
   it('reads as a typical spend, not a fare', () => {
     const display = describeAdmission(admission({

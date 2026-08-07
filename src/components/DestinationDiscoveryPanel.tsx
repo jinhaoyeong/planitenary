@@ -43,7 +43,7 @@ import { admissionFor } from '../lib/destinationIntelligence';
 import { admissionLine, describeAdmission } from '../lib/admissionCopy';
 import { describeOpeningHours } from '../lib/openingHours';
 import { countryTimezone } from '../lib/destinations';
-import { convertCurrency, formatCurrency } from '../lib/currency';
+import { convertCurrency, formatCurrency, hasRate } from '../lib/currency';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { mergeAdmission } from '../../supabase/functions/_shared/placeCost';
 
@@ -1237,6 +1237,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     tripEnd: profile.endDate,
     toHomeCurrency: (amount: number, currency: string) => {
       if (!homeCurrency || currency === homeCurrency) return undefined;
+      // No real rate means no approximation. `rateFor` ends in `?? 1`, so a
+      // currency the catalog has never heard of would render COP 50,000 as
+      // "RM 50,000" — a number a thousand times out, sitting beside a
+      // correctly published one. Omitting it costs the traveller nothing.
+      if (!hasRate(rates, currency) || !hasRate(rates, homeCurrency)) return undefined;
       // Explicitly approximate: a ticket price is fixed, an exchange rate is
       // not, and the published figure always leads.
       return formatCurrency(convertCurrency(amount, currency, homeCurrency, rates), homeCurrency);

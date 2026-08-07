@@ -12,7 +12,7 @@ import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
 import { admissionChip } from '../lib/admissionCopy';
 import { activityHoursToDateAware, describeOpeningHours } from '../lib/openingHours';
-import { convertCurrency, formatCurrency } from '../lib/currency';
+import { convertCurrency, formatCurrency, hasRate } from '../lib/currency';
 import { addDays } from '../lib/dateRange';
 import { countryTimezone } from '../lib/destinations';
 import { useCurrency } from '../contexts/CurrencyContext';
@@ -189,9 +189,12 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
    */
   const costChip = useMemo(() => {
     const chip = admissionChip(activity.admission, {
-      toHomeCurrency: (amount, currency) => (currency === homeCurrency
-        ? undefined
-        : formatCurrency(convertCurrency(amount, currency, homeCurrency, rates), homeCurrency)),
+      // Same rule as the discovery card: without a real rate there is no
+      // approximation to offer, and a 1:1 fallback would print a wrong price.
+      toHomeCurrency: (amount, currency) => (
+        currency === homeCurrency || !hasRate(rates, currency) || !hasRate(rates, homeCurrency)
+          ? undefined
+          : formatCurrency(convertCurrency(amount, currency, homeCurrency, rates), homeCurrency)),
     });
     // Records written before admission existed still carry a free-text `cost`.
     // It renders as the traveller typed it — never with a currency glyph
@@ -211,7 +214,18 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
     { onDate: dayDate, timezone },
   ), [activity.openingHoursWeek, activity.openingHours, dayDate, timezone]);
 
-  const hoursChip = dayHours.unknown
+  /**
+   * The chip says "this day", so it may only appear when we know which day
+   * that is.
+   *
+   * `dayDate` comes from `profile.startDate + (day − 1)`, and the profile is
+   * null for any itinerary saved without one — including the bundled demo
+   * trip. With no date, `describeOpeningHours` falls back to the *reader's*
+   * today, so a plan opened on a Monday would put a red "Closed this day" on a
+   * Saturday card for a place that is open on Saturdays. A chip about the
+   * wrong day is worse than no chip, so it is omitted.
+   */
+  const hoursChip = !dayDate || dayHours.unknown
     ? undefined
     : dayHours.closedToday
       ? 'Closed this day'

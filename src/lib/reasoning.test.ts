@@ -14,8 +14,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   BANNED_PHRASES,
   MIN_EXCERPT_CHARS,
+  VALIDATOR_VERSION,
   boundSources,
   callGemini,
+  countRejections,
+  emptyCounters,
   evidenceRevision,
   requestAdmissionRead,
   requestPlaceBrief,
@@ -206,13 +209,33 @@ describe('fares read from an operator page', () => {
     expect(fares[0].currency).toBe('JPY');
   });
 
+  /**
+   * A bare number, no symbol, no currency word, no country. This is the case
+   * the whole `placeCost` currency discipline exists for — a figure nobody can
+   * attach a unit to is not a price, and showing it would be a guess.
+   */
   it('refuses a fare it cannot attach a currency to at all', () => {
     const { fares, rejected } = validateAdmissionFares(
-      { fares: [fare({ currency: '' })] },
-      { pageText },
+      { fares: [{ audience: 'adult', amount: 600, currency: '', excerpt: 'Adult admission 600' }] },
+      { pageText: 'Adult admission 600 per person.' },
     );
     expect(fares).toEqual([]);
     expect(rejected[0].reason).toBe('currency-unresolvable');
+  });
+
+  /**
+   * The counterpart, and the behaviour the argument-order bug was hiding: the
+   * excerpt says "yen" in words, so it resolves even with no country to read
+   * it against. `resolveCurrency` was always able to do this — it was being
+   * called with the country code in the *symbol* slot, so the branch could
+   * never resolve anything and this fell through to the country default.
+   */
+  it('reads a currency the excerpt states in words, with no country at all', () => {
+    const { fares } = validateAdmissionFares(
+      { fares: [fare({ currency: '' })] },
+      { pageText },
+    );
+    expect(fares).toEqual([{ audience: 'adult', amount: 600, currency: 'JPY' }]);
   });
 
   it('drops one bad fare without losing the adult one beside it', () => {
@@ -221,6 +244,70 @@ describe('fares read from an operator page', () => {
     }, { pageText, countryCode: 'JP' });
     expect(fares).toHaveLength(1);
     expect(fares[0].audience).toBe('adult');
+  });
+
+  /**
+   * The case that failed in production and looked like a credential problem.
+   *
+   * A fare quotation is naturally short — "Adults $10" is ten characters — and
+   * the brief's 16-character excerpt floor was being applied to it unchanged.
+   * Every ordinary price line on an operator's page was therefore refused,
+   * silently, and the empty result cached. The symptom was indistinguishable
+   * from the model returning nothing.
+   */
+  it('accepts a price line as short as operators actually write them', () => {
+    const usPage = 'Admission: Adults $10, children free. Open all year.';
+    const { fares, rejected } = validateAdmissionFares(
+      { fares: [{ audience: 'adult', amount: 10, currency: 'USD', excerpt: 'Adults $10' }] },
+      { pageText: usPage, countryCode: 'US' },
+    );
+    expect(rejected).toEqual([]);
+    expect(fares).toEqual([{ audience: 'adult', amount: 10, currency: 'USD' }]);
+  });
+
+  /**
+   * What replaces the length floor, and it is a stronger rule: the quotation
+   * has to contain the figure it is being offered as evidence for. A quotation
+   * from elsewhere on the page cannot vouch for this fare.
+   */
+  it('refuses an excerpt that does not contain the fare it is quoted for', () => {
+    const { fares, rejected } = validateAdmissionFares(
+      { fares: [{ audience: 'adult', amount: 600, currency: 'JPY', excerpt: 'Open every day of the year' }] },
+      { pageText: 'Open every day of the year. Adult admission 600 yen.', countryCode: 'JP' },
+    );
+    expect(fares).toEqual([]);
+    expect(rejected[0].reason).toBe('excerpt-missing-the-amount');
+  });
+
+  it('still refuses a bare figure with no context around it', () => {
+    const { rejected } = validateAdmissionFares(
+      { fares: [{ audience: 'adult', amount: 10, currency: 'USD', excerpt: '$10' }] },
+      { pageText: 'Admission: Adults $10, children free.', countryCode: 'US' },
+    );
+    expect(rejected[0].reason).toBe('excerpt-too-short');
+  });
+
+  /**
+   * The currency rule the plan actually specified: real ISO code *and* either
+   * on the page or the country's. Accepting any code from the country table
+   * regardless of context let a model put EUR on a US page.
+   */
+  it('refuses a currency that is neither on the page nor the country’s', () => {
+    const { fares, rejected } = validateAdmissionFares(
+      { fares: [{ audience: 'adult', amount: 10, currency: 'EUR', excerpt: 'Adults $10' }] },
+      { pageText: 'Admission: Adults $10, children free.', countryCode: 'US' },
+    );
+    // Falls back to what the page and country can actually support.
+    expect(rejected).toEqual([]);
+    expect(fares[0].currency).toBe('USD');
+  });
+
+  it('accepts a currency the page states outright even when it is not the country’s', () => {
+    const { fares } = validateAdmissionFares(
+      { fares: [{ audience: 'adult', amount: 20, currency: 'USD', excerpt: 'Entry costs USD 20' }] },
+      { pageText: 'Entry costs USD 20 for visitors.', countryCode: 'KH' },
+    );
+    expect(fares[0].currency).toBe('USD');
   });
 
   it('matches a grouped figure written without its separator', () => {
@@ -318,12 +405,12 @@ describe('asking the model to read a fare', () => {
    */
   it('returns null when nothing survives validation', async () => {
     const fetchImpl = reply({ fares: [{ audience: 'adult', amount: 9999, currency: 'JPY', excerpt: 'Adult admission 600 yen' }] });
-    const { fares, rejected } = await requestAdmissionRead(
+    const { fares, rejections } = await requestAdmissionRead(
       { pageText: 'Adult admission 600 yen for the main keep.', countryCode: 'JP' },
       { apiKey: 'k', fetchImpl: fetchImpl as never },
     );
     expect(fares).toBeNull();
-    expect(rejected).toBe(1);
+    expect(rejections.map((r) => r.reason)).toEqual(['amount-not-on-page']);
   });
 
   it('does not call out at all for a page with no text', async () => {
@@ -372,10 +459,64 @@ describe('structured pricing outranks anything read from prose', () => {
     expect(resolved?.confidence).toBe('medium');
   });
 
+  /**
+   * `free` carries no `fares` array, so a rule that counted fares treated "the
+   * operator declared entry free" the same as "we know nothing". A free
+   * municipal museum whose page also lists a guided tour would come back
+   * reclassified as ticketed at the tour price.
+   */
+  it('never lets a prose price override a declared-free place', () => {
+    const declaredFree = { class: 'free', source: 'official-website', confidence: 'high' };
+    expect(shouldReadAdmission(declaredFree)).toBe(false);
+    const resolved = resolveOfficialAdmission({
+      structured: declaredFree,
+      readFares: [{ audience: 'adult', amount: 800, currency: 'JPY' }],
+      ...at,
+    });
+    expect(resolved).toBe(declaredFree);
+  });
+
   it('changes nothing when the model found no fare', () => {
     expect(resolveOfficialAdmission({ structured: undefined, readFares: null, ...at })).toBeUndefined();
     const feeOnly = { class: 'ticketed', fares: [], source: 'official-website', confidence: 'high' };
     expect(resolveOfficialAdmission({ structured: feeOnly, readFares: null, ...at })).toBe(feeOnly);
+  });
+});
+
+/**
+ * The lesson from the incident, encoded.
+ *
+ * A validator refusing everything and a provider returning nothing produced
+ * the same visible outcome — empty result, cached, no error — so diagnosing it
+ * started from a guess. A count without its reason is not observability.
+ */
+describe('telling a refusal apart from an outage', () => {
+  it('records why things were refused, not just how many', () => {
+    const counters = emptyCounters();
+    countRejections(counters, [
+      { reason: 'excerpt-too-short' },
+      { reason: 'excerpt-too-short' },
+      { reason: 'amount-not-on-page' },
+    ]);
+    expect(counters.rejectedSentences).toBe(3);
+    expect(counters.rejectedReasons).toEqual({ 'excerpt-too-short': 2, 'amount-not-on-page': 1 });
+  });
+
+  it('leaves the breakdown empty when a provider simply returned nothing', () => {
+    const counters = emptyCounters();
+    countRejections(counters, []);
+    expect(counters.rejectedSentences).toBe(0);
+    expect(counters.rejectedReasons).toEqual({});
+  });
+
+  /**
+   * A rule change has to invalidate the answers that rule produced. The key is
+   * a hash of the *source material*, which a rule change does not alter — so
+   * without this, fixing a validator could not reach anything already cached,
+   * including every wrongly-empty result.
+   */
+  it('changes the cache key when the validation rules change', () => {
+    expect(evidenceRevision(sources)).toContain(VALIDATOR_VERSION);
   });
 });
 
@@ -416,7 +557,7 @@ describe('what may be sent, and what a failure costs', () => {
       { apiKey: 'k', fetchImpl: fetchImpl as never },
     );
     expect(result.brief).toBeUndefined();
-    expect(result.rejected).toBe(1);
+    expect(result.rejections).toHaveLength(1);
   });
 
   it('counts the distinct sources a surviving brief rests on', async () => {
