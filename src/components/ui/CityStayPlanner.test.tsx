@@ -128,4 +128,34 @@ describe('editing, without editing anything else', () => {
 
     expect(onChange).toHaveBeenCalledWith(EVEN_KANSAI);
   });
+
+  it('lets the traveller type a day count', () => {
+    const { onChange } = renderPlanner([{ city: 'Osaka', days: 3 }, { city: 'Kyoto', days: 3 }]);
+
+    const field = screen.getByRole('textbox', { name: 'Days in Osaka' });
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: '5' } });
+    fireEvent.blur(field);
+
+    expect(onChange).toHaveBeenCalledWith([
+      { city: 'Osaka', days: 5 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Nara', days: 0 },
+      { city: 'Kobe', days: 0 },
+    ]);
+  });
+
+  it('clamps a typed count that would overspend the trip', () => {
+    const { onChange } = renderPlanner(EVEN_KANSAI);
+
+    const field = screen.getByRole('textbox', { name: 'Days in Osaka' });
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: '99' } });
+    fireEvent.blur(field);
+
+    // Osaka already has 2; the other three cities hold 6. The free pool is
+    // empty, so typing 99 can only keep Osaka at the days it already owns.
+    expect(onChange).not.toHaveBeenCalled();
+    expect(field).toHaveValue('2');
+  });
 });

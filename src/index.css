@@ -291,10 +291,31 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .city-stay-days {
-  min-width: 1.25rem;
+  width: 2.4rem;
+  min-width: 2.4rem;
+  padding: 0.15rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--ink);
   text-align: center;
   font-size: 0.85rem;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.city-stay-days:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.city-stay-days::-webkit-outer-spin-button,
+.city-stay-days::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
 }
 
 .destination-preview-legs {
@@ -308,8 +329,15 @@ body.planner-intelligence-active .pet-overlay {
 
 .date-range-calendar {
   display: grid;
-  gap: 0.75rem;
-  padding: 0.9rem;
+  gap: 0.55rem;
+  /*
+   * Cap the month so a wide wizard does not stretch every day cell into a
+   * tall square. One month is already the whole grid; without a width limit
+   * the aspect-ratio cells grow with the modal and push city stays off-screen.
+   */
+  width: 100%;
+  max-width: 19.5rem;
+  padding: 0.7rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 1rem;
   background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -357,10 +385,10 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .date-range-month h4 {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 750;
   text-align: center;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
 }
 
 .date-range-weekdays,
@@ -371,21 +399,23 @@ body.planner-intelligence-active .pet-overlay {
 
 .date-range-weekdays span {
   text-align: center;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--ink-muted);
-  padding-bottom: 0.3rem;
+  padding-bottom: 0.2rem;
 }
 
 .date-range-day {
   position: relative;
   aspect-ratio: 1;
-  min-height: 2rem;
+  min-height: 0;
+  height: 100%;
+  max-height: 2.15rem;
   border: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 650;
   cursor: pointer;
   /*
@@ -405,9 +435,9 @@ body.planner-intelligence-active .pet-overlay {
   content: '';
   position: absolute;
   left: 50%;
-  bottom: 0.28rem;
-  width: 0.25rem;
-  height: 0.25rem;
+  bottom: 0.18rem;
+  width: 0.2rem;
+  height: 0.2rem;
   border-radius: 999px;
   transform: translateX(-50%);
   background: var(--accent);

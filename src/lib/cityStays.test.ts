@@ -13,6 +13,7 @@ import {
   moveCityStay,
   proposeCityStays,
   reconcileCityStays,
+  setCityStayDays,
 } from './cityStays';
 
 const KANSAI = ['Osaka', 'Nara', 'Kyoto', 'Kobe'];
@@ -139,6 +140,22 @@ describe('editing the plan', () => {
 
   it('never goes below zero', () => {
     expect(adjustCityStay([{ city: 'Osaka', days: 0 }], 'Osaka', -1, 8)[0].days).toBe(0);
+  });
+
+  it('sets a typed day count without touching the other cities', () => {
+    expect(setCityStayDays(stays, 'Osaka', 5, 8)).toEqual([
+      { city: 'Osaka', days: 5 },
+      { city: 'Kyoto', days: 3 },
+    ]);
+  });
+
+  it('clamps a typed count to what the trip still has free', () => {
+    // Osaka wants 10; Kyoto already holds 3 of 8, so Osaka can take at most 5.
+    expect(setCityStayDays(stays, 'Osaka', 10, 8)[0].days).toBe(5);
+  });
+
+  it('treats a blank or nonsense typed value as zero', () => {
+    expect(setCityStayDays(stays, 'Osaka', Number.NaN, 8)[0].days).toBe(0);
   });
 
   it('reorders the route', () => {

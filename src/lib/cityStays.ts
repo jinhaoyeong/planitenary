@@ -121,6 +121,27 @@ export function adjustCityStay(
   });
 }
 
+/**
+ * Set one city's days outright — what typing into the counter does.
+ *
+ * Same pool rule as {@link adjustCityStay}: the typed value cannot steal from
+ * another city, and cannot invent days the trip does not have. Anything above
+ * what is still free is clamped; anything below zero becomes zero.
+ */
+export function setCityStayDays(
+  stays: TripCityStay[],
+  city: string,
+  days: number,
+  dayCount: number,
+): TripCityStay[] {
+  const wanted = Number.isFinite(days) ? Math.floor(days) : 0;
+  const current = stays.find((stay) => stay.city === city)?.days ?? 0;
+  const others = cityStayTotal(stays) - current;
+  const maxForCity = Math.max(0, dayCount - others);
+  const next = Math.max(0, Math.min(wanted, maxForCity));
+  return stays.map((stay) => (stay.city === city ? { ...stay, days: next } : stay));
+}
+
 /** Reorder the route by moving one stay up or down. */
 export function moveCityStay(stays: TripCityStay[], index: number, direction: -1 | 1): TripCityStay[] {
   const target = index + direction;

@@ -1,3 +1,4 @@
+import { useState, type KeyboardEvent } from 'react';
 import { ArrowDown, ArrowUp, Minus, Plus } from 'lucide-react';
 import {
   adjustCityStay,
@@ -7,6 +8,7 @@ import {
   moveCityStay,
   proposeCityStays,
   reconcileCityStays,
+  setCityStayDays,
 } from '../../lib/cityStays';
 import type { TripCityStay } from '../../lib/tripProfile';
 
@@ -17,6 +19,74 @@ interface CityStayPlannerProps {
   startDate?: string;
   value: TripCityStay[] | undefined;
   onChange: (next: TripCityStay[]) => void;
+}
+
+interface DayCountInputProps {
+  city: string;
+  days: number;
+  dayCount: number;
+  stays: TripCityStay[];
+  onCommit: (next: TripCityStay[]) => void;
+}
+
+/**
+ * The number between − and +. Clicking it lets the traveller type a count
+ * instead of tapping one day at a time — useful once a trip is long enough
+ * that sixteen taps would be a joke.
+ *
+ * Draft text stays local while focused so clearing the field to type "16"
+ * does not briefly commit zero and scramble the other cities. Blur / Enter
+ * hand the value to {@link setCityStayDays}, which clamps to the free pool.
+ */
+function DayCountInput({ city, days, dayCount, stays, onCommit }: DayCountInputProps) {
+  const [draft, setDraft] = useState(String(days));
+  const [focused, setFocused] = useState(false);
+
+  // Keep the field in step with +/− and Split evenly while it is not being
+  // edited. Adjusted during render so a plus click never paints a stale digit.
+  if (!focused && draft !== String(days)) {
+    setDraft(String(days));
+  }
+
+  const commit = (raw: string) => {
+    const parsed = raw.trim() === '' ? 0 : Number.parseInt(raw, 10);
+    const next = setCityStayDays(stays, city, Number.isFinite(parsed) ? parsed : 0, dayCount);
+    const committed = next.find((stay) => stay.city === city)?.days ?? 0;
+    setDraft(String(committed));
+    if (committed !== days) onCommit(next);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.currentTarget.blur();
+      return;
+    }
+    if (event.key === 'Escape') {
+      setDraft(String(days));
+      event.currentTarget.blur();
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      className="city-stay-days"
+      aria-label={`Days in ${city}`}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value.replace(/\D/g, '').slice(0, 3))}
+      onFocus={(event) => {
+        setFocused(true);
+        event.currentTarget.select();
+      }}
+      onBlur={() => {
+        setFocused(false);
+        commit(draft);
+      }}
+      onKeyDown={onKeyDown}
+    />
+  );
 }
 
 /**
@@ -106,13 +176,13 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
                 >
                   <Minus className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
-                {/*
-                  * Visual only. An `<output>` here is a live region, so four
-                  * cities would announce four separate counters on every edit;
-                  * the row's own line already reads the stay out, and the
-                  * stepper buttons name the city they act on.
-                  */}
-                <span className="city-stay-days" aria-hidden="true">{stay.days}</span>
+                <DayCountInput
+                  city={stay.city}
+                  days={stay.days}
+                  dayCount={dayCount}
+                  stays={stays}
+                  onCommit={set}
+                />
                 <button
                   type="button"
                   onClick={() => set(adjustCityStay(stays, stay.city, 1, dayCount))}
