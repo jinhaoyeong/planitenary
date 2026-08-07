@@ -305,12 +305,19 @@ export function TripCreateWizard({
 
       <div
         className="wizard-dialog relative z-10 w-full sm:max-w-2xl flex flex-col sm:rounded-[1.75rem] overflow-hidden"
+        data-adaptive-handbook="true"
+        data-visual-intensity={resolvedVisualIdentity.intensity}
+        data-design-recipe={resolvedVisualIdentity.recipe.id}
         style={{
           backgroundColor: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
           maxHeight: '100dvh',
           paddingTop: 'var(--app-safe-top)',
           paddingBottom: 'var(--app-safe-bottom)',
+          // Scope the trip's design tokens onto the dialog so city controls,
+          // chips, and calendar chrome follow the recipe while creating.
+          ...resolvedVisualIdentity.cssVars,
+          borderRadius: 'var(--radius-modal, 1.75rem)',
         }}
       >
         <header className="wizard-dialog-header px-5 pt-5 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -396,7 +403,7 @@ export function TripCreateWizard({
                   {profile.destinations.map((destination, index) => (
                     <span
                       key={destination.id}
-                      className="inline-flex items-center gap-2 rounded-full pl-3 pr-2 py-1.5 text-sm"
+                      className="adaptive-chip inline-flex items-center gap-2 pl-3 pr-2 py-1.5 text-sm"
                       style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
                     >
                       <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent)' }} />
@@ -412,7 +419,7 @@ export function TripCreateWizard({
                       <button
                         type="button"
                         onClick={() => removeDestination(index)}
-                        className="p-1 rounded-full shrink-0"
+                        className="adaptive-button p-1 shrink-0"
                         aria-label={`Remove ${describeDestination(destination)}`}
                       >
                         <X className="w-3.5 h-3.5" />
@@ -731,7 +738,7 @@ export function TripCreateWizard({
                   {identity.summaryChips.map((chip) => (
                     <span
                       key={chip}
-                      className="rounded-full px-2.5 py-1 text-xs font-semibold"
+                      className="adaptive-chip px-2.5 py-1 text-xs font-semibold"
                       style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
                     >
                       {chip}

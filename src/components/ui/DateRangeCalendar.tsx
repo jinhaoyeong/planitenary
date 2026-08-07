@@ -125,7 +125,7 @@ export function DateRangeCalendar({
       <div className="date-range-calendar-head">
         <button
           type="button"
-          className="date-range-page"
+          className="date-range-page adaptive-button"
           onClick={() => setCursor(addMonths(cursor, -1))}
           disabled={!canPageBack}
           aria-label="Previous month"
@@ -135,7 +135,7 @@ export function DateRangeCalendar({
         <p className="date-range-summary" aria-live="polite">{describeRange(value)}</p>
         <button
           type="button"
-          className="date-range-page"
+          className="date-range-page adaptive-button"
           onClick={() => setCursor(addMonths(cursor, 1))}
           disabled={!canPageForward}
           aria-label="Next month"

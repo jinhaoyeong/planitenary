@@ -180,7 +180,8 @@ body.planner-intelligence-active .pet-overlay {
   gap: 0.6rem;
   padding: 0.85rem;
   border: 1px solid var(--border);
-  border-radius: 1rem;
+  border-width: var(--border-width-surface, 1px);
+  border-radius: var(--radius-card, 1rem);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
 }
 
@@ -208,6 +209,7 @@ body.planner-intelligence-active .pet-overlay {
   color: var(--accent);
   font-weight: 750;
   cursor: pointer;
+  border-radius: var(--radius-button, var(--button-radius, 9999px));
 }
 
 .city-stay-planner-note {
@@ -226,7 +228,8 @@ body.planner-intelligence-active .pet-overlay {
   gap: 0.6rem;
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-width: var(--border-width-control, 1px);
+  border-radius: var(--radius-compact-card, 0.75rem);
 }
 
 /* A city with no days yet is a decision still outstanding, not a styled row. */
@@ -246,7 +249,9 @@ body.planner-intelligence-active .pet-overlay {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-width: var(--border-width-control, 1px);
+  /* Follow the trip's design recipe instead of always painting a pill. */
+  border-radius: var(--radius-button, var(--button-radius, 9999px));
   background: transparent;
   color: var(--ink);
   cursor: pointer;
@@ -295,7 +300,8 @@ body.planner-intelligence-active .pet-overlay {
   min-width: 2.4rem;
   padding: 0.15rem 0.2rem;
   border: 1px solid var(--border);
-  border-radius: 0.45rem;
+  border-width: var(--border-width-control, 1px);
+  border-radius: var(--radius-input, 0.75rem);
   background: transparent;
   color: var(--ink);
   text-align: center;
@@ -340,7 +346,8 @@ body.planner-intelligence-active .pet-overlay {
   max-width: none;
   padding: 0.85rem;
   border: 1px solid var(--border);
-  border-radius: 1rem;
+  border-width: var(--border-width-surface, 1px);
+  border-radius: var(--radius-card, 1rem);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
 }
 
@@ -371,8 +378,9 @@ body.planner-intelligence-active .pet-overlay {
   justify-content: center;
   width: 2.15rem;
   height: 2.15rem;
-  border-radius: 999px;
+  border-radius: var(--radius-button, var(--button-radius, 9999px));
   border: 1px solid var(--border);
+  border-width: var(--border-width-control, 1px);
   background: transparent;
   color: var(--ink);
   cursor: pointer;
@@ -616,8 +624,9 @@ body.planner-intelligence-active .pet-overlay {
   display: grid;
   gap: 0.1rem;
   padding: 0.4rem 0.75rem;
-  border-radius: 999px;
+  border-radius: var(--radius-tab, var(--radius-chip, 9999px));
   border: 1px solid var(--border);
+  border-width: var(--border-width-control, 1px);
   background: transparent;
   color: var(--ink-muted);
   cursor: pointer;

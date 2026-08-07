@@ -1187,7 +1187,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
             type="button"
             role="tab"
             aria-selected={index === activeCityIndex}
-            className={index === activeCityIndex ? 'is-active' : ''}
+            className={index === activeCityIndex ? 'adaptive-tab is-active' : 'adaptive-tab'}
             onClick={() => switchCity(index)}
             disabled={loading}
           >

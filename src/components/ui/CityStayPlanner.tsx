@@ -72,7 +72,7 @@ function DayCountInput({ city, days, dayCount, stays, onCommit }: DayCountInputP
       type="text"
       inputMode="numeric"
       pattern="[0-9]*"
-      className="city-stay-days"
+      className="city-stay-days adaptive-input"
       aria-label={`Days in ${city}`}
       value={draft}
       onChange={(event) => setDraft(event.target.value.replace(/\D/g, '').slice(0, 3))}
@@ -114,7 +114,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
   const set = (next: TripCityStay[]) => onChange(next);
 
   return (
-    <div className="city-stay-planner">
+    <div className="city-stay-planner adaptive-surface adaptive-surface-card">
       <div className="city-stay-planner-head">
         <p className="city-stay-planner-status" role="status">
           {status.complete
@@ -125,7 +125,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
         </p>
         <button
           type="button"
-          className="city-stay-planner-even"
+          className="city-stay-planner-even adaptive-button"
           onClick={() => set(proposeCityStays(stays.map((stay) => stay.city), dayCount))}
         >
           Split evenly
@@ -136,10 +136,15 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
         {stays.map((stay, index) => {
           const leg = legs.find((entry) => entry.city === stay.city);
           return (
-            <li key={stay.city} className="city-stay-row" data-empty={stay.days === 0 ? 'true' : undefined}>
+            <li
+              key={stay.city}
+              className="city-stay-row adaptive-surface adaptive-surface-compact-card"
+              data-empty={stay.days === 0 ? 'true' : undefined}
+            >
               <div className="city-stay-order">
                 <button
                   type="button"
+                  className="adaptive-button"
                   onClick={() => set(moveCityStay(stays, index, -1))}
                   disabled={index === 0}
                   aria-label={`Move ${stay.city} earlier in the trip`}
@@ -148,6 +153,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
                 </button>
                 <button
                   type="button"
+                  className="adaptive-button"
                   onClick={() => set(moveCityStay(stays, index, 1))}
                   disabled={index === stays.length - 1}
                   aria-label={`Move ${stay.city} later in the trip`}
@@ -170,6 +176,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
               <div className="city-stay-stepper">
                 <button
                   type="button"
+                  className="adaptive-button"
                   onClick={() => set(adjustCityStay(stays, stay.city, -1, dayCount))}
                   disabled={stay.days === 0}
                   aria-label={`One day fewer in ${stay.city}`}
@@ -185,6 +192,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
                 />
                 <button
                   type="button"
+                  className="adaptive-button"
                   onClick={() => set(adjustCityStay(stays, stay.city, 1, dayCount))}
                   disabled={status.remaining <= 0}
                   aria-label={`One more day in ${stay.city}`}
