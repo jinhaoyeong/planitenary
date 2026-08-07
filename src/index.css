@@ -444,9 +444,7 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .date-range-day:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-  border-radius: 999px;
+  outline: none;
 }
 
 .date-range-day[data-today='true']::after {
@@ -507,12 +505,6 @@ body.planner-intelligence-active .pet-overlay {
   );
 }
 
-.date-range-day[data-role='start']:focus-visible,
-.date-range-day[data-role='end']:focus-visible {
-  outline: none;
-  border-radius: 0;
-}
-
 .date-range-day[data-role='start']:focus-visible::before,
 .date-range-day[data-role='end']:focus-visible::before {
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
@@ -523,8 +515,35 @@ body.planner-intelligence-active .pet-overlay {
   background: var(--surface);
 }
 
-.date-range-day:not(:disabled):hover {
+/*
+ * Hover and keyboard focus use the same circular marker as start/end — never
+ * a wide rectangular wash over the whole cell.
+ */
+.date-range-day:not(:disabled):not([data-role='start']):not([data-role='end'])::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--date-marker);
+  height: var(--date-marker);
+  border-radius: 999px;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.date-range-day:not(:disabled):not([data-role='start']):not([data-role='end']):hover::before {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.date-range-day:not([data-role='start']):not([data-role='end']):focus-visible::before {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.date-range-day:not(:disabled):hover {
+  background: transparent;
 }
 
 .date-range-day[data-role='start']:hover,
@@ -549,6 +568,10 @@ body.planner-intelligence-active .pet-overlay {
 }
 
 .date-range-day[data-role='in-range']:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.date-range-day[data-role='in-range']:not(:disabled):hover::before {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
