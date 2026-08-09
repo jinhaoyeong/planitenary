@@ -1293,9 +1293,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   };
 
   /**
-   * @param cityIndex Which destination to discover. Passed explicitly because
-   * switching city and discovering it happen in one action, and the state set
-   * by the switch is not visible to this closure until the next render.
+   * The selected city is read at click time, so Start always discovers the
+   * city currently shown by the switcher.
    */
   const beginDiscovery = async (cityIndex = activeCityIndex) => {
     const target = tripDestinations[cityIndex] ?? destination;
@@ -1383,10 +1382,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   };
 
   /**
-   * Move the deck to another city. Already-reviewed cities come back instantly
-   * from `candidatesByCity`; a city opened for the first time is discovered
-   * then, not up front — four cities' worth of provider calls a traveller may
-   * never look at is exactly the cost the caching work went to avoid.
+   * Move the deck to another city only when its candidates are already known.
+   * An unreviewed city stays in the intro until the traveller presses Start,
+   * so switching tabs never begins discovery by surprise.
    */
   const switchCity = (index: number) => {
     if (index === activeCityIndex || loading) return;
@@ -1397,7 +1395,12 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     setFocusedCandidateId(null);
     setDecisionNotice(null);
     setError(null);
-    if (!known || (candidatesByCity[known]?.length ?? 0) === 0) void beginDiscovery(index);
+    // City tabs select a destination; discovery remains behind the explicit
+    // Start action. If a traveller is already reviewing and picks an
+    // unreviewed city, show the intro so they can start it intentionally.
+    if (phase === 'review' && (!known || (candidatesByCity[known]?.length ?? 0) === 0)) {
+      setPhase('idle');
+    }
   };
 
   /** Per-city review state and stay length, for the switcher's own labels. */
@@ -1838,10 +1841,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
               : hasStayPlan
                 // Their plan, read back. They already know where they are
                 // sleeping; what they need here is which deck matches which days.
-                ? `Verified places, one city at a time — ${describeCityLegs(statedLegs)}.`
+                ? `Choose a city, then press Start. Verified places, one city at a time — ${describeCityLegs(statedLegs)}.`
                 // Said plainly, because a traveller reviewing Osaka would
                 // otherwise assume the other three cities were forgotten.
-                : `Verified places, one city at a time. Set how long you are staying in each city in Settings, or the days will be divided from what you shortlist.`}
+                : `Choose a city, then press Start. Verified places, one city at a time. Set how long you are staying in each city in Settings, or the days will be divided from what you shortlist.`}
           </p>
           <CitySwitcher compact />
         </div>
