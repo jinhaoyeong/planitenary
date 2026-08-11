@@ -757,10 +757,12 @@ describe('the cache key', () => {
    * test too — the version is part of the cache key precisely so answers
    * derived from a different contract cannot be served as current.
    *
-   * v2: deterministicScore, costKnown and budgetFits left the contract.
+   * v3: the payload narrowed to the material mappers, dropping name, area,
+   * category, travelMinutesFromCluster, underrepresentedCategories and
+   * budgetTier alongside the v2 removals.
    */
   it('has been bumped for the current material contract', () => {
-    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v2');
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v3');
   });
 
   /** One candidate changing must not disturb its neighbours. */
@@ -1008,10 +1010,12 @@ describe('the cache key', () => {
    * test too — the version is part of the cache key precisely so answers
    * derived from a different contract cannot be served as current.
    *
-   * v2: deterministicScore, costKnown and budgetFits left the contract.
+   * v3: the payload narrowed to the material mappers, dropping name, area,
+   * category, travelMinutesFromCluster, underrepresentedCategories and
+   * budgetTier alongside the v2 removals.
    */
   it('has been bumped for the current material contract', () => {
-    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v2');
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v3');
   });
 
   /** One candidate changing must not disturb its neighbours. */

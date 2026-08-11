@@ -24,6 +24,12 @@
  * No Deno APIs and no runtime imports, so vitest exercises every rule here.
  */
 
+import {
+  toCandidateIntelligenceMaterial,
+  toCandidateIntelligenceTripMaterial,
+  toPlannerIntelligenceMaterial,
+} from './intelligenceMaterial.ts';
+
 /** Facts about the trip the model may reason from. Nothing else is sent. */
 export interface IntelligenceTripContext {
   profileRevision: string;
@@ -600,12 +606,15 @@ export const MAX_INTELLIGENCE_BATCH = 15;
 /**
  * Bumped whenever the material the model sees changes.
  *
- * v2 removed `deterministicScore`, `costKnown` and `budgetFits` from the
- * candidate contract. Any answer produced under v1 was derived from different
- * inputs, so it must not be served as current — the version is part of the
- * cache key precisely so that cannot happen.
+ * v2 removed `deterministicScore`, `costKnown` and `budgetFits`. v3 narrowed
+ * the payload to the material mappers, dropping `name`, `area`, `category`,
+ * `travelMinutesFromCluster`, `underrepresentedCategories` and `budgetTier` —
+ * every field whose only consumers now fail closed. Answers produced under an
+ * earlier version were derived from different inputs, so they must not be
+ * served as current; the version is part of the cache key precisely so that
+ * cannot happen.
  */
-export const INTELLIGENCE_SCHEMA_VERSION = 'v2';
+export const INTELLIGENCE_SCHEMA_VERSION = 'v3';
 
 /**
  * The key a candidate's intelligence is filed under.
@@ -718,21 +727,20 @@ export const INTELLIGENCE_INSTRUCTION = [
   '"pairWithCandidateIds", "suggestedDurationMinutes"}}}.',
 ].join(' ');
 
-/** The snapshot one candidate contributes. Nothing outside this is sent. */
+/**
+ * The snapshot one candidate contributes.
+ *
+ * Assembled from the mappers rather than by listing fields again here. That is
+ * the whole structural point: the object the revision is derived from *is* the
+ * object sent, so the two cannot describe different things. Rebuilding
+ * equivalent fields at this site would restore the drift the mappers exist to
+ * prevent, and every test would still pass.
+ */
 export const intelligenceSnapshot = (candidate: IntelligenceCandidate) => ({
   candidateId: candidate.candidateId,
   candidateRevision: candidate.candidateRevision,
-  name: candidate.name,
-  category: candidate.category,
-  area: candidate.area,
-  clusterId: candidate.clusterId,
-  matchedStyleTags: candidate.matchedStyleTags,
-  matchedInterestTags: candidate.matchedInterestTags,
-  durationRangeMinutes: candidate.durationRangeMinutes,
-  indoorOutdoor: candidate.indoorOutdoor,
-  travelMinutesFromCluster: candidate.travelMinutesFromCluster,
-  pairableCandidateIds: candidate.pairableCandidateIds,
-  underrepresentedCategories: candidate.underrepresentedCategories,
+  ...toCandidateIntelligenceMaterial(candidate),
+  ...toPlannerIntelligenceMaterial(candidate),
 });
 
 /** The exact payload sent for one batch. Exported so a test can measure it. */
@@ -743,7 +751,10 @@ export const intelligenceRequestBody = (
   instruction: INTELLIGENCE_INSTRUCTION,
   reasonAtomTypes: REASON_ATOM_TYPES,
   cautionAtomTypes: CAUTION_ATOM_TYPES,
-  trip,
+  // The narrowed traveller material, not the whole context object. `trip`
+  // still carries `budgetTier` for callers that need it; the model does not
+  // see it, because no rule can check a claim resting on it.
+  trip: toCandidateIntelligenceTripMaterial(trip),
   candidates: candidates.map(intelligenceSnapshot),
 });
 
