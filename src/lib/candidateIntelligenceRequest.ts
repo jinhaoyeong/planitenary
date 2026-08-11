@@ -44,19 +44,46 @@ export interface RequestableCandidate {
  * about a candidate, so none of them may cause a request.
  */
 export function materialRequestKey(input: {
+  /**
+   * The **canonical discovery pool**, before decisions filter or reorder it.
+   *
+   * This is load-bearing and easy to get wrong. Excluding decision state from
+   * the key is not enough on its own: if the array passed in is the *visible*
+   * deck, then pressing Skip removes a candidate, the fingerprint changes, and
+   * a decision has silently become material after all. The traveller marking
+   * three places would buy three fresh answers about the places they did not
+   * mark.
+   *
+   * So the pool and the deck are different things and stay that way:
+   *
+   *   canonical candidates            → material key
+   *   canonical candidates + decisions → visible, reordered deck
+   */
+  candidates: RequestableCandidate[];
   profileRevision: string;
   plannerContextRevision?: string;
-  candidates: RequestableCandidate[];
 }): string {
-  const candidates = input.candidates
-    .map((candidate) => `${candidate.candidateId}:${candidate.candidateRevision}`)
-    .sort()
-    .join(',');
-  return [
+  /**
+   * Structured serialisation rather than delimiter-joined strings.
+   *
+   * Concatenating with separators aliases here, and not hypothetically: this
+   * app's candidate ids are OSM-style, so `osm:node:123` at revision `r1` and
+   * `osm:node` at revision `123:r1` both render as `osm:node:123:r1`. Two
+   * different material states, one key — and the consequence is serving one
+   * traveller's answers for another state without anything looking wrong.
+   *
+   * `JSON.stringify` escapes its own delimiters, so no id can impersonate a
+   * boundary.
+   */
+  return JSON.stringify([
     input.profileRevision,
-    input.plannerContextRevision || 'no-context',
-    candidates,
-  ].join('|');
+    input.plannerContextRevision ?? null,
+    input.candidates
+      .map((candidate) => [candidate.candidateId, candidate.candidateRevision])
+      // Sorted because the deck reorders as decisions are made, and a reorder
+      // changes nothing about whether a place suits the traveller.
+      .sort(([a], [b]) => a.localeCompare(b)),
+  ]);
 }
 
 export interface IntelligenceRequestState {
@@ -73,11 +100,30 @@ export interface IntelligenceRequestState {
  * the key whose answer is already held. Both are strings, which is what keeps
  * the effect's dependency a scalar.
  */
+/**
+ * How many material states are worth remembering in one session.
+ *
+ * Small on purpose. This exists to spare a round trip when a traveller undoes
+ * a profile change, not to be a cache — the backend already holds the
+ * authoritative one, keyed per candidate and shared across sessions.
+ */
+export const MAX_HELD_KEYS = 8;
+
 export class IntelligenceRequestController {
   /** The key being fetched right now, if any. */
   private inFlight: string | null = null;
-  /** The key whose answer is held. Cleared when a request fails. */
-  private resolved: string | null = null;
+  /**
+   * Answers already held, by material key.
+   *
+   * More than just the most recent one, because travellers move back and
+   * forth: adjusting a profile and undoing the change would otherwise re-ask
+   * for an answer still sitting in memory. The backend cache makes that free
+   * in provider terms, but it is still a pointless round trip.
+   *
+   * Bounded, because this is a convenience rather than a store — an unbounded
+   * map on a long session is a leak, and the backend cache is the real one.
+   */
+  private readonly held = new Map<string, Map<string, CandidateIntelligenceEntry>>();
 
   /**
    * Whether a request should start for this key.
@@ -93,8 +139,13 @@ export class IntelligenceRequestController {
   shouldRequest(key: string): boolean {
     if (!key) return false;
     if (this.inFlight === key) return false;
-    if (this.resolved === key) return false;
+    if (this.held.has(key)) return false;
     return true;
+  }
+
+  /** An answer already held for this key, or undefined. */
+  cached(key: string): Map<string, CandidateIntelligenceEntry> | undefined {
+    return this.held.get(key);
   }
 
   begin(key: string): void {
@@ -116,16 +167,30 @@ export class IntelligenceRequestController {
     return key === currentKey;
   }
 
-  /** Record a completed request. `succeeded: false` leaves a retry possible. */
-  settle(key: string, succeeded: boolean): void {
+  /**
+   * Record a completed request.
+   *
+   * A failure stores nothing, so the key stays requestable. Remembering it as
+   * done would make one bad response permanent for as long as the traveller
+   * stayed on the deck, recoverable only by a reload.
+   */
+  settle(key: string, entries?: Map<string, CandidateIntelligenceEntry>): void {
     if (this.inFlight === key) this.inFlight = null;
-    this.resolved = succeeded ? key : null;
+    if (!entries) return;
+    this.held.set(key, entries);
+    // Oldest first — `Map` preserves insertion order, so the first key is the
+    // least recently added.
+    while (this.held.size > MAX_HELD_KEYS) {
+      const oldest = this.held.keys().next().value;
+      if (oldest === undefined) break;
+      this.held.delete(oldest);
+    }
   }
 
   /** Test seam and unmount cleanup. */
   reset(): void {
     this.inFlight = null;
-    this.resolved = null;
+    this.held.clear();
   }
 
   get pending(): string | null { return this.inFlight; }

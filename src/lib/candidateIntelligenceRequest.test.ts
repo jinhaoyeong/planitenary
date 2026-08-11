@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   IntelligenceRequestController,
+  MAX_HELD_KEYS,
   foldIntelligenceResults,
   materialRequestKey,
 } from './candidateIntelligenceRequest';
@@ -67,7 +68,7 @@ describe('deciding whether to ask', () => {
     const controller = new IntelligenceRequestController();
     expect(controller.shouldRequest('k1')).toBe(true);
     controller.begin('k1');
-    controller.settle('k1', true);
+    controller.settle('k1', new Map());
     // Held, so asking again would buy the same answer.
     expect(controller.shouldRequest('k1')).toBe(false);
   });
@@ -82,7 +83,7 @@ describe('deciding whether to ask', () => {
   it('asks again when the material key changes', () => {
     const controller = new IntelligenceRequestController();
     controller.begin('k1');
-    controller.settle('k1', true);
+    controller.settle('k1', new Map());
     expect(controller.shouldRequest('k2')).toBe(true);
   });
 
@@ -94,7 +95,7 @@ describe('deciding whether to ask', () => {
   it('allows a retry after a failed request', () => {
     const controller = new IntelligenceRequestController();
     controller.begin('k1');
-    controller.settle('k1', false);
+    controller.settle('k1', undefined);
     expect(controller.shouldRequest('k1')).toBe(true);
   });
 
@@ -115,7 +116,7 @@ describe('deciding whether to ask', () => {
       if (controller.shouldRequest(fingerprint)) {
         requests += 1;
         controller.begin(fingerprint);
-        controller.settle(fingerprint, true);
+        controller.settle(fingerprint, new Map());
       }
     }
     expect(requests).toBe(1);
@@ -173,5 +174,110 @@ describe('folding a response into card state', () => {
     expect(() => foldIntelligenceResults([{ candidateId: '', intelligence: null, status: 'ready' }]))
       .not.toThrow();
     expect(foldIntelligenceResults([]).size).toBe(0);
+  });
+});
+
+describe('ids cannot impersonate a delimiter', () => {
+  /**
+   * Not hypothetical. This app's candidate ids are OSM-style, so a
+   * delimiter-joined key aliases two genuinely different material states:
+   * `osm:node:123` at revision `r1` and `osm:node` at revision `123:r1` both
+   * render as `osm:node:123:r1`. The consequence is serving one state's
+   * answers for another with nothing looking wrong.
+   */
+  it('keeps colon-bearing ids and revisions distinct', () => {
+    const a = materialRequestKey({
+      profileRevision: 'p1',
+      candidates: [{ candidateId: 'osm:node:123', candidateRevision: 'r1' }],
+    });
+    const b = materialRequestKey({
+      profileRevision: 'p1',
+      candidates: [{ candidateId: 'osm:node', candidateRevision: '123:r1' }],
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it('is not confused by commas, pipes or quotes inside an id', () => {
+    const keys = [
+      [{ candidateId: 'a,b', candidateRevision: 'r1' }],
+      [{ candidateId: 'a', candidateRevision: 'b,r1' }],
+      [{ candidateId: 'a|b', candidateRevision: 'r1' }],
+      [{ candidateId: 'a"b', candidateRevision: 'r1' }],
+    ].map((candidates) => materialRequestKey({ profileRevision: 'p1', candidates }));
+
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+/**
+ * The subtle trap. Excluding decision state from the key is not enough on its
+ * own: if the array handed in is the *visible* deck, Skip removes a candidate,
+ * the fingerprint changes, and a decision has silently become material after
+ * all. A traveller marking three places would buy fresh answers about the ones
+ * they did not mark.
+ */
+describe('decisions cannot change the key through the back door', () => {
+  const pool = [
+    { candidateId: 'a', candidateRevision: 'r1' },
+    { candidateId: 'b', candidateRevision: 'r1' },
+    { candidateId: 'c', candidateRevision: 'r1' },
+  ];
+  const poolKey = () => materialRequestKey({ profileRevision: 'p1', candidates: pool });
+
+  /**
+   * Stated as a contrast, because a pure function cannot prove which array a
+   * component hands it. What it *can* show is that the choice matters: the
+   * pool and the deck produce different keys, so passing the wrong one is a
+   * real bug rather than a stylistic preference. The component test is what
+   * proves the right one is passed.
+   */
+  it('is identical for the pool however decisions reorder the deck', () => {
+    const reordered = [...pool].reverse();
+    expect(materialRequestKey({ profileRevision: 'p1', candidates: reordered })).toBe(poolKey());
+  });
+
+  it('would change if the visible deck were used instead — the mistake this guards', () => {
+    const visible = pool.filter((candidate) => candidate.candidateId !== 'b');
+    expect(materialRequestKey({ profileRevision: 'p1', candidates: visible })).not.toBe(poolKey());
+  });
+});
+
+describe('answers already held are reused', () => {
+  const entries = () => new Map([['a', { intelligence: null, status: 'deterministic-only' as const }]]);
+
+  /**
+   * Travellers move back and forth. Adjusting a profile and undoing it would
+   * otherwise re-ask for an answer still sitting in memory — free at the
+   * provider thanks to the backend cache, but a pointless round trip.
+   */
+  it('does not re-request a key whose answer is still held', () => {
+    const controller = new IntelligenceRequestController();
+    controller.begin('A');
+    controller.settle('A', entries());
+    controller.begin('B');
+    controller.settle('B', entries());
+
+    expect(controller.shouldRequest('A')).toBe(false);
+    expect(controller.cached('A')).toBeDefined();
+  });
+
+  it('bounds what it remembers', () => {
+    const controller = new IntelligenceRequestController();
+    for (let index = 0; index < MAX_HELD_KEYS + 3; index += 1) {
+      controller.begin(`k${index}`);
+      controller.settle(`k${index}`, entries());
+    }
+    // The oldest fell out; the newest are still held.
+    expect(controller.cached('k0')).toBeUndefined();
+    expect(controller.cached(`k${MAX_HELD_KEYS + 2}`)).toBeDefined();
+    expect(controller.shouldRequest('k0')).toBe(true);
+  });
+
+  it('holds nothing for a failed request', () => {
+    const controller = new IntelligenceRequestController();
+    controller.begin('A');
+    controller.settle('A', undefined);
+    expect(controller.cached('A')).toBeUndefined();
+    expect(controller.shouldRequest('A')).toBe(true);
   });
 });
