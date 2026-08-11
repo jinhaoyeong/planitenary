@@ -28,6 +28,7 @@ import { DateRangeCalendar } from './ui/DateRangeCalendar';
 import { CityStayPlanner } from './ui/CityStayPlanner';
 import { ToggleRow } from './ui/ToggleRow';
 import { VisualDesignControls } from './VisualDesignControls';
+import { useTheme } from '../contexts/ThemeContext';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
 import {
   BUDGET_OPTIONS,
@@ -126,6 +127,7 @@ export function TripCreateWizard({
   // Already resolved upstream: a saved preference if there is one, otherwise
   // the device region.
   const detectedHomeCurrency = defaultHomeCurrency;
+  const { theme } = useTheme();
   const [stepIndex, setStepIndex] = useState(0);
   const [profile, setProfile] = useState<TripProfile>(() => createEmptyProfile(detectedHomeCurrency));
   const [countryCode, setCountryCode] = useState('');
@@ -251,9 +253,11 @@ export function TripCreateWizard({
     () => buildTripIdentity(resolvedProfile, { plannedDays: duration.days }),
     [resolvedProfile, duration.days],
   );
+  // Theme must match the shell: without it the dialog inherits dark ink while
+  // destination tokens paint light accent-soft fills, and soft panels go blank.
   const resolvedVisualIdentity = useMemo(
-    () => resolveVisualIdentity(resolvedProfile),
-    [resolvedProfile],
+    () => resolveVisualIdentity(resolvedProfile, { theme }),
+    [resolvedProfile, theme],
   );
 
   if (!open) return null;

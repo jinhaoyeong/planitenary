@@ -579,6 +579,10 @@ export interface ResolveVisualIdentityOptions {
 /**
  * Resolve an approved visual identity from destination + trip personality.
  * City → country → trip personality → generic fallback, with optional lock.
+ *
+ * Always pass `theme` when applying `cssVars` onto a live UI. The default is
+ * light for recipe tests; omitting it under a dark shell paints light soft
+ * fills under dark ink and soft panels become unreadable.
  */
 export function resolveVisualIdentity(
   profile: TripProfile,

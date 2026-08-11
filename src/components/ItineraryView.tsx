@@ -16,6 +16,7 @@ import { convertCurrency, formatCurrency, hasRate } from '../lib/currency';
 import { addDays } from '../lib/dateRange';
 import { countryTimezone } from '../lib/destinations';
 import { useCurrency } from '../contexts/CurrencyContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { sanitizeTripProfile } from '../lib/tripProfile';
 import { declaredTripDays, longTripItineraryNotice } from '../lib/tripDuration';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
@@ -1152,6 +1153,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
 
   // Use the prop as the source of truth; parent handles persistence and Supabase sync
   const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
+  const { theme } = useTheme();
   const plannerProfile = useMemo(() => sanitizeTripProfile(customItinerary.tripProfile), [customItinerary.tripProfile]);
   /**
    * The real date a day number falls on. `DayPlan.date` is a display string
@@ -1171,8 +1173,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
     [plannerProfile?.destinations],
   );
   const visualIdentity = useMemo(
-    () => (plannerProfile ? resolveVisualIdentity(plannerProfile) : null),
-    [plannerProfile],
+    () => (plannerProfile ? resolveVisualIdentity(plannerProfile, { theme }) : null),
+    [plannerProfile, theme],
   );
   const declaredDays = useMemo(
     () => (plannerProfile ? declaredTripDays(plannerProfile) : 0),
