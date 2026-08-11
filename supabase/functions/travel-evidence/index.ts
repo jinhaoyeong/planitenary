@@ -19,12 +19,15 @@
  * asserts an operational fact that no source stated.
  */
 import {
+  aiBudgetEpoch,
+  aiBudgetUsd,
   expiryFor,
-  geminiCallLimit,
-  geminiModel,
-  GEMINI_QUOTA_TIMEZONE,
   json,
   preflight,
+  reasoningCallLimit,
+  resolveReasoning,
+  REASONING_QUOTA_PROVIDER,
+  REASONING_QUOTA_TIMEZONE,
   secrets,
   YOUTUBE_QUOTA_TIMEZONE,
   YOUTUBE_SEARCH_UNITS,
@@ -35,11 +38,15 @@ import {
   countRejections,
   emptyCounters,
   evidenceRevision,
+  MAX_BRIEF_BATCH,
   requestAdmissionRead,
-  requestPlaceBrief,
+  requestPlaceBriefBatch,
+  type BriefBatchItem,
   type PlaceBrief,
 } from '../_shared/reasoning.ts';
 import { reserveQuota, usageToday } from '../_shared/quota.ts';
+import { budgetWindowStart, type ModelUsage } from '../_shared/aiCost.ts';
+import { SpendSession, meteredModelCall } from '../_shared/meteredModel.ts';
 import {
   type CachedAiBrief,
   type CachedEvidence,
@@ -48,11 +55,13 @@ import {
   readEvidenceCache,
   readEvidenceProbes,
   readOpeningHours,
+  readSpendToDate,
   serviceClient,
   writeEvidenceCache,
   writeAiBriefs,
   writeEvidenceProbes,
   writeOpeningHours,
+  writeSpendEvent,
 } from '../_shared/cache.ts';
 import { lookupAiBrief, shouldFetchEvidence } from '../_shared/cacheKeys.ts';
 import {
@@ -172,7 +181,34 @@ Deno.serve(async (request) => {
   const briefs: Record<string, PlaceBrief> = {};
   const freshAiBriefs: CachedAiBrief[] = [];
   const reasoningCounters = emptyCounters();
-  const geminiKey = secrets.gemini();
+  /**
+   * Places wanting a description that the cache could not answer.
+   *
+   * Filled during the per-place loop and drained once afterwards, so a request
+   * covering ten uncached places costs one provider call rather than ten. The
+   * cache is consulted *before* a place lands here, which is what keeps a
+   * revisited deck at zero calls instead of merely fewer.
+   */
+  const pendingBriefs: Array<{
+    placeId: string;
+    canonicalId?: string;
+    item: BriefBatchItem;
+  }> = [];
+  /**
+   * Resolved per operation, because the model allowlist is per operation and
+   * the output ceiling differs between a batched brief and a single fare read.
+   *
+   * `misconfigured` is kept apart from `unconfigured` all the way to the
+   * response. Both leave cards with their deterministic copy, but only one of
+   * them is somebody's mistake, and a mistake that renders identically to a
+   * deliberate choice is one nobody will ever find.
+   */
+  const briefResolution = resolveReasoning('place-brief');
+  const admissionResolution = resolveReasoning('admission-read');
+  const briefOptions = briefResolution.status === 'ready' ? briefResolution.options : undefined;
+  const admissionOptions = admissionResolution.status === 'ready' ? admissionResolution.options : undefined;
+  const configError = [briefResolution, admissionResolution]
+    .find((resolution) => resolution.status === 'misconfigured');
 
   /**
    * Turn gathered documents into grounding text, keyed by the URL they came
@@ -304,7 +340,7 @@ Deno.serve(async (request) => {
            * costs a metered call. Everything a call needs to be refused lives
            * here: no key, no canonical id to cache against, no quota.
            */
-          geminiKey && canonicalId
+          admissionOptions && canonicalId
             ? async (pageText, country) => {
               const revision = evidenceRevision([{ sourceUrl: website || '', text: pageText }]);
               const cached = lookupAiBrief(cachedAiBriefs, canonicalId, 'admission-read', revision);
@@ -315,11 +351,11 @@ Deno.serve(async (request) => {
                 return cached as AdmissionFare[] | null;
               }
               if (!await reserveQuota(cache, {
-                provider: 'gemini-reasoning',
+                provider: REASONING_QUOTA_PROVIDER,
                 calls: 1,
                 units: 1,
-                callLimit: geminiCallLimit(),
-                resetTimezone: GEMINI_QUOTA_TIMEZONE,
+                callLimit: reasoningCallLimit(),
+                resetTimezone: REASONING_QUOTA_TIMEZONE,
                 failClosed: true,
               })) {
                 reasoningCounters.skipped += 1;
@@ -327,7 +363,7 @@ Deno.serve(async (request) => {
               }
               const { fares, rejections } = await requestAdmissionRead(
                 { pageText, countryCode: country },
-                { apiKey: geminiKey, model: geminiModel() },
+                admissionOptions,
               );
               countRejections(reasoningCounters, rejections);
               if (fares) reasoningCounters.succeeded += 1; else reasoningCounters.failed += 1;
@@ -382,7 +418,7 @@ Deno.serve(async (request) => {
      * outcome — no key, no sources, no quota, a timeout, or every sentence
      * rejected — produces the same result, which is no brief.
      */
-    if (geminiKey && body.placeNeedsDescription?.[index]) {
+    if (briefOptions && body.placeNeedsDescription?.[index]) {
       const briefSources = boundSources(briefSourcesFrom([...cachedDocuments, ...reviews, ...threads, ...official.documents]));
       const revision = evidenceRevision(briefSources);
       const cachedBrief = canonicalId && cache
@@ -399,40 +435,25 @@ Deno.serve(async (request) => {
          */
         reasoningCounters.cacheHits += 1;
         if (cachedBrief) briefs[placeId] = cachedBrief as PlaceBrief;
-      } else if (!await reserveQuota(cache, {
-        provider: 'gemini-reasoning',
-        calls: 1,
-        units: 1,
-        callLimit: geminiCallLimit(),
-        resetTimezone: GEMINI_QUOTA_TIMEZONE,
-        // The one metered provider here. An unreachable counter must mean
-        // "don't call", never "call anyway and find out from the bill".
-        failClosed: true,
-      })) {
-        reasoningCounters.skipped += 1;
       } else {
-        const { brief, rejections } = await requestPlaceBrief(
-          { name, city, categories: [] },
-          briefSources,
-          { apiKey: geminiKey, model: geminiModel() },
-        );
-        countRejections(reasoningCounters, rejections);
-        if (brief) {
-          briefs[placeId] = brief;
-          reasoningCounters.succeeded += 1;
-        } else {
-          reasoningCounters.failed += 1;
-        }
-        // The empty answer is written too. That is the whole point: a place
-        // with nothing to say must not be re-asked tomorrow.
-        if (canonicalId) {
-          freshAiBriefs.push({
-            canonicalPlaceId: canonicalId,
-            operation: 'place-brief',
+        /**
+         * Deferred, not called. Asking here would spend one provider request
+         * per place; collecting the misses and asking once for all of them is
+         * the same answer for a tenth of the requests.
+         *
+         * Only the *uncached* places reach this list, so a second visit to a
+         * deck costs nothing at all rather than a smaller batch.
+         */
+        pendingBriefs.push({
+          placeId,
+          canonicalId,
+          item: {
+            candidateId: placeId,
             evidenceRevision: revision,
-            brief: brief ?? null,
-          });
-        }
+            place: { name, city, categories: [] },
+            sources: briefSources,
+          },
+        });
       }
     }
 
@@ -470,6 +491,118 @@ Deno.serve(async (request) => {
         return age >= 0 && age <= 120;
       }).length;
       trends[placeId] = Math.min(1, (recent / datedVideos.length) * 0.6 + Math.min(1, recent / 5) * 0.4);
+    }
+  }
+
+  /**
+   * The deferred briefs, in batches of `MAX_BRIEF_BATCH`.
+   *
+   * **One provider request is one quota call**, whatever it carries. That
+   * keeps the counter meaning what its name says — actual requests made — and
+   * the workload is bounded on the other axes instead: how many places may
+   * ride in a batch, how much serialised input may be sent, and how many
+   * tokens the reply may cost. Charging a ten-place batch as ten calls would
+   * make the counter measure neither requests nor spend.
+   *
+   * Quota is reserved per batch and checked before each one, so exhausting the
+   * allowance mid-way leaves the remaining places unasked rather than
+   * half-asked. An unasked place writes no cache row and is simply retried on
+   * a later request, which is the correct outcome — unlike an *empty answer*,
+   * which is knowledge and is stored.
+   */
+  /**
+   * The spending ceiling, read once before any batch.
+   *
+   * Two independent refusals, both failing closed:
+   *
+   * - the ledger could not be read, so what today has cost is unknown;
+   * - it *was* read, and the total has reached the ceiling.
+   *
+   * A third case is subtler and refuses too: calls whose cost could not be
+   * determined. Those are missing from `knownUsd` entirely, so the total is a
+   * floor rather than the truth, and continuing to spend against a number
+   * known to be incomplete is how a ceiling gets quietly passed. Unknown-cost
+   * events therefore stop further paid work until somebody reconciles them.
+   */
+  const session = new SpendSession(
+    {
+      readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),
+      writeLedger: (row) => writeSpendEvent(cache, row),
+    },
+    aiBudgetUsd(),
+  );
+
+  for (let start = 0; start < pendingBriefs.length; start += MAX_BRIEF_BATCH) {
+    const batch = pendingBriefs.slice(start, start + MAX_BRIEF_BATCH);
+    if (!briefOptions) break;
+
+    /**
+     * The shared metered boundary: budget, quota, provider, ledger, in that
+     * order. The budget is re-evaluated per batch and includes what earlier
+     * batches in this same invocation have already spent — reading it once and
+     * reusing the verdict would let every batch in the loop cross the ceiling
+     * together on the strength of one stale "allowed".
+     */
+    let batchUsage: ModelUsage | undefined;
+    let produced = new Map<string, PlaceBrief | null>();
+
+    const outcome = await meteredModelCall(
+      { operation: 'place-brief', provider: briefOptions.provider, requestedModel: briefOptions.model },
+      session,
+      {
+        reserveQuota: () => reserveQuota(cache, {
+          provider: REASONING_QUOTA_PROVIDER,
+          calls: 1,
+          units: 1,
+          callLimit: reasoningCallLimit(),
+          resetTimezone: REASONING_QUOTA_TIMEZONE,
+          failClosed: true,
+        }),
+        readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),
+        writeLedger: (row) => writeSpendEvent(cache, row),
+        call: async () => {
+          const answer = await requestPlaceBriefBatch(
+            batch.map((entry) => entry.item),
+            { ...briefOptions, onUsage: (reported) => { batchUsage = reported; } },
+          );
+          produced = answer.briefs;
+          countRejections(reasoningCounters, answer.rejections);
+          return {
+            result: answer,
+            usage: batchUsage,
+            // A batch that came back with nothing usable was still billed.
+            status: answer.briefs.size > 0 ? 'success' : batchUsage ? 'invalid_output' : 'provider_error',
+          };
+        },
+      },
+    );
+
+    if (!outcome.ok) {
+      // Nothing is asked, so nothing is cached: an unasked place is retried on
+      // a later request, unlike an empty *answer*, which is knowledge.
+      reasoningCounters.skipped += pendingBriefs.length - start;
+      break;
+    }
+
+    for (const entry of batch) {
+      // Keyed by the id we sent, never by position — see `validateBriefBatch`.
+      const brief = produced.get(entry.item.candidateId);
+      if (brief) {
+        briefs[entry.placeId] = brief;
+        reasoningCounters.succeeded += 1;
+      } else {
+        reasoningCounters.failed += 1;
+      }
+      // The empty answer is written too. That is the whole point: a place with
+      // nothing to say must not be re-asked tomorrow.
+      if (entry.canonicalId && brief !== undefined) {
+        freshAiBriefs.push({
+          canonicalPlaceId: entry.canonicalId,
+          operation: 'place-brief',
+          evidenceRevision: entry.item.evidenceRevision,
+          brief: brief ?? null,
+        });
+      }
     }
   }
 
@@ -516,9 +649,32 @@ Deno.serve(async (request) => {
      * model improved or because the rule silently started passing everything.
      */
     reasoning: {
-      configured: Boolean(geminiKey),
-      limit: geminiCallLimit(),
-      used: geminiKey ? (await usageToday(cache, 'gemini-reasoning', GEMINI_QUOTA_TIMEZONE))?.calls ?? null : null,
+      configured: Boolean(briefOptions || admissionOptions),
+      /**
+       * Present only when a model *is* configured and was refused. Silence
+       * here means "no model", which is an ordinary deployment; a string means
+       * somebody set one that is not approved, and every card looking exactly
+       * as it would without a key is precisely why that has to be said out
+       * loud rather than inferred from an absence.
+       */
+      configError: configError?.status === 'misconfigured' ? configError.error : undefined,
+      /**
+       * What has been spent, and whether that figure can be trusted.
+       *
+       * `knownUsd` is reported beside `unknownEvents` rather than on its own,
+       * because a total that silently excludes uncostable calls reads as
+       * complete when it is a floor. Both numbers or neither.
+       */
+      /**
+       * What has been spent, and whether that figure can be trusted.
+       *
+       * `knownUsd` is reported beside `unknownEvents` rather than on its own,
+       * because a total that silently excludes uncostable calls reads as
+       * complete when it is only a floor. Both numbers or neither.
+       */
+      spend: await session.report(),
+      limit: reasoningCallLimit(),
+      used: (briefOptions || admissionOptions) ? (await usageToday(cache, REASONING_QUOTA_PROVIDER, REASONING_QUOTA_TIMEZONE))?.calls ?? null : null,
       ...reasoningCounters,
     },
   });

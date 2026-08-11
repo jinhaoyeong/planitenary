@@ -17,6 +17,15 @@ import {
   VALIDATOR_VERSION,
   boundSources,
   callGemini,
+  callModel,
+  MAX_BRIEF_BATCH,
+  requestPlaceBriefBatch,
+  validateBriefBatch,
+  DEFAULT_OPENAI_MODEL,
+  isReasoningOperation,
+  OPENAI_MAX_OUTPUT_TOKENS,
+  openaiModelRefusal,
+  REASONING_OPERATIONS,
   countRejections,
   emptyCounters,
   evidenceRevision,
@@ -587,5 +596,405 @@ describe('what may be sent, and what a failure costs', () => {
     );
     expect(result.brief).toBeUndefined();
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Which vendor gets called, and what is sent to it.
+ *
+ * These are cheap tests for an expensive mistake. The two providers disagree
+ * about everything that matters at the wire — where the request goes, how the
+ * credential is carried, where the text comes back — so a wrong `provider`
+ * does not degrade, it fails outright. And an accidental failover would spend
+ * real money at the vendor nobody selected, which is the failure this project
+ * was rebuilt around.
+ */
+describe('model provider selection', () => {
+  const okOpenAi = (content: string) => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content } }] }),
+  });
+
+  it('sends an OpenAI request to OpenAI, with the key as a bearer token', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okOpenAi('{"ok":true}') as never);
+    const result = await callModel('place-brief', { a: 1 }, {
+      apiKey: 'sk-test', provider: 'openai', model: 'gpt-5-nano', fetchImpl: fetchImpl as never,
+    });
+
+    expect(result).toEqual({ ok: true });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://api.openai.com/v1/chat/completions');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-test');
+    // The key must never travel as a query parameter, where it would be logged
+    // by every proxy between here and the provider.
+    expect(String(url)).not.toContain('sk-test');
+    expect(JSON.parse(init.body as string).model).toBe('gpt-5-nano');
+  });
+
+  /**
+   * The accepted values differ per model — `gpt-5-nano` rejects `none` while
+   * `gpt-5.4-nano` defaults to it — so an unset effort must be *absent*, not
+   * defaulted to a guess. A wrong value is an opaque 400 from the provider.
+   */
+  it('omits reasoning_effort entirely when none was configured', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okOpenAi('{}') as never);
+    await callModel('place-brief', {}, {
+      apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never,
+    });
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body as string)).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('passes reasoning_effort through when one was configured', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okOpenAi('{}') as never);
+    await callModel('place-brief', {}, {
+      apiKey: 'k', provider: 'openai', reasoningEffort: 'minimal', fetchImpl: fetchImpl as never,
+    });
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body as string).reasoning_effort).toBe('minimal');
+  });
+
+  /**
+   * `response_format: json_object` is a request, in the same way a system
+   * prompt is. A model that wraps its JSON in a markdown fence anyway must not
+   * cost us the answer — retrying is forbidden here, so the parse has to cope.
+   */
+  it('reads JSON back out of a fenced OpenAI reply', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okOpenAi('```json\n{"sentences":[]}\n```') as never);
+    await expect(callModel('place-brief', {}, {
+      apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never,
+    })).resolves.toEqual({ sentences: [] });
+  });
+
+  it('treats an unparseable OpenAI reply as a missing answer, not an error', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okOpenAi('sorry, I cannot help with that') as never);
+    await expect(callModel('place-brief', {}, {
+      apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never,
+    })).resolves.toBeUndefined();
+  });
+
+  it('treats an OpenAI error response as a missing answer', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) } as never);
+    await expect(callModel('place-brief', {}, {
+      apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never,
+    })).resolves.toBeUndefined();
+  });
+
+  /**
+   * The whole point of having no `'auto'`. A failing OpenAI call must return
+   * nothing — never reach for Gemini, which would turn an outage or an
+   * exhausted budget into spending at a vendor the deployment did not choose.
+   */
+  it('does not fall back to the other provider when the selected one fails', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) } as never);
+    await callModel('place-brief', {}, {
+      apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(fetchImpl.mock.calls[0][0])).not.toContain('googleapis');
+  });
+
+  it('sends a Gemini request to Gemini, with the key in a header', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '{"ok":1}' }] } }] }),
+    } as never);
+    await callModel('place-brief', {}, {
+      apiKey: 'g-key', provider: 'gemini', fetchImpl: fetchImpl as never,
+    });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toContain('generativelanguage.googleapis.com');
+    expect((init.headers as Record<string, string>)['x-goog-api-key']).toBe('g-key');
+  });
+
+  /** The compatibility alias must keep meaning Gemini, whatever the default is. */
+  it('keeps callGemini pinned to Gemini', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }),
+    } as never);
+    await callGemini('place-brief', {}, { apiKey: 'k', fetchImpl: fetchImpl as never });
+    expect(String(fetchImpl.mock.calls[0][0])).toContain('generativelanguage.googleapis.com');
+  });
+
+  /** Grounding is provider-independent: the same rules, whoever answered. */
+  it('validates an OpenAI brief against the same substring rule', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okOpenAi(JSON.stringify({
+      sentences: [sentence(), sentence({ excerpt: 'a phrase that appears in no supplied source' })],
+    })) as never);
+    const result = await requestPlaceBrief(
+      { name: 'Osaka Castle Museum', city: 'Osaka', categories: ['museum'] },
+      sources,
+      { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never },
+    );
+    expect(result.brief?.sentences).toHaveLength(1);
+    expect(result.rejections).toContainEqual({
+      text: expect.any(String), reason: 'excerpt-not-in-source',
+    });
+  });
+});
+
+/**
+ * The model allowlist.
+ *
+ * The call limit protects the *number* of requests; this protects what each
+ * one costs. They are not interchangeable: swapping the model for a frontier
+ * tier leaves the call count untouched while multiplying the bill per call,
+ * which makes this the only guard standing between a one-line config edit and
+ * a genuinely expensive mistake.
+ *
+ * These rules live in `reasoning.ts` rather than beside the env lookups in
+ * `providers.ts` precisely so this suite can reach them — that module imports
+ * `Deno` and vitest cannot load it.
+ */
+describe('model allowlist', () => {
+  it('defaults to the cheapest approved model', () => {
+    expect(DEFAULT_OPENAI_MODEL).toBe('gpt-5-nano');
+    for (const operation of REASONING_OPERATIONS) {
+      expect(openaiModelRefusal(operation, DEFAULT_OPENAI_MODEL)).toBeUndefined();
+    }
+  });
+
+  it.each(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.4-nano'])(
+    'refuses %s, which is not approved for any operation yet',
+    (model) => {
+      for (const operation of REASONING_OPERATIONS) {
+        expect(openaiModelRefusal(operation, model)).toContain('not approved');
+      }
+    },
+  );
+
+  it('refuses a model name it has never heard of', () => {
+    expect(openaiModelRefusal('place-brief', 'totally-made-up')).toContain('not approved');
+  });
+
+  /**
+   * The refusal has to name both halves. "Model not allowed" sends someone to
+   * read the source; naming what was set and what is permitted does not.
+   */
+  it('names the offending model and the allowed set', () => {
+    const refusal = openaiModelRefusal('candidate-intelligence', 'gpt-5.6-sol');
+    expect(refusal).toContain('gpt-5.6-sol');
+    expect(refusal).toContain('gpt-5-nano');
+    expect(refusal).toContain('candidate-intelligence');
+  });
+
+  /**
+   * The single most important property here. A silent downgrade to nano would
+   * make a deployment that asked for an expensive model indistinguishable from
+   * one that chose the cheap one deliberately — so the mistake pointing the
+   * *other* way, at a model nobody meant to pay for, would also be invisible.
+   */
+  it('never corrects a refused model to the default', () => {
+    expect(openaiModelRefusal('place-brief', 'gpt-5.6-sol')).toBeDefined();
+    // The refusal is a string to report, not a substituted model name.
+    expect(openaiModelRefusal('place-brief', 'gpt-5.6-sol')).not.toBe(DEFAULT_OPENAI_MODEL);
+  });
+
+  it('rejects an operation that is not on the allowlist', () => {
+    expect(isReasoningOperation('place-brief')).toBe(true);
+    expect(isReasoningOperation('anything-i-want')).toBe(false);
+    expect(isReasoningOperation('')).toBe(false);
+    expect(isReasoningOperation(undefined)).toBe(false);
+    expect(isReasoningOperation({ toString: () => 'place-brief' })).toBe(false);
+  });
+
+  /** Every operation must have a ceiling; a missing one would read as no cap. */
+  it('bounds the output of every operation', () => {
+    for (const operation of REASONING_OPERATIONS) {
+      expect(OPENAI_MAX_OUTPUT_TOKENS[operation]).toBeGreaterThan(0);
+      expect(OPENAI_MAX_OUTPUT_TOKENS[operation]).toBeLessThanOrEqual(2_000);
+    }
+  });
+
+  it('caps the reply when a ceiling is supplied', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ choices: [{ message: { content: '{}' } }] }),
+    } as never);
+    await callModel('place-brief', {}, {
+      apiKey: 'k', provider: 'openai', maxOutputTokens: 1_200, fetchImpl: fetchImpl as never,
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body as string);
+    // `max_completion_tokens`, not `max_tokens`: the GPT-5 generation rejects
+    // the older name, and counts reasoning tokens against the reply too.
+    expect(body.max_completion_tokens).toBe(1_200);
+    expect(body).not.toHaveProperty('max_tokens');
+  });
+});
+
+/**
+ * Batched briefs.
+ *
+ * Batching is a transport optimisation and must not become a correctness
+ * change. These tests hold that line: identity is carried rather than
+ * positional, one bad entry costs only itself, and a place can never be
+ * grounded in another place's sources merely because they shared a request.
+ *
+ * The mis-attribution case is worth the most. A wrong answer cached under the
+ * right key is permanent and invisible, because every later lookup is a hit.
+ */
+describe('batched place briefs', () => {
+  const CASTLE = 'https://castle.example/';
+  const SHRINE = 'https://shrine.example/';
+
+  const items = [
+    {
+      candidateId: 'place-castle',
+      evidenceRevision: 'rev-castle',
+      place: { name: 'Osaka Castle Museum', city: 'Osaka', categories: ['museum'] },
+      sources: [{ sourceUrl: CASTLE, text: 'The main keep was rebuilt in 1931 in ferro-concrete and houses a museum.' }],
+    },
+    {
+      candidateId: 'place-shrine',
+      evidenceRevision: 'rev-shrine',
+      place: { name: 'Ebisu Shrine', city: 'Osaka', categories: ['shrine'] },
+      sources: [{ sourceUrl: SHRINE, text: 'The shrine holds a January festival that draws large crowds each year.' }],
+    },
+  ];
+
+  const reply = (places: Record<string, unknown>) => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: JSON.stringify({ places }) } }] }),
+  });
+
+  const castleSentence = {
+    text: 'The keep houses a museum.',
+    sourceUrl: CASTLE,
+    excerpt: 'rebuilt in 1931 in ferro-concrete',
+  };
+
+  it('returns one independently validated brief per place from a single call', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({
+      'place-castle': { evidenceRevision: 'rev-castle', sentences: [castleSentence] },
+      'place-shrine': {
+        evidenceRevision: 'rev-shrine',
+        sentences: [{ text: 'A January festival draws crowds.', sourceUrl: SHRINE, excerpt: 'January festival that draws large crowds' }],
+      },
+    }) as never);
+
+    const result = await requestPlaceBriefBatch(items, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+
+    // The whole point: two places, one provider request.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.briefs.get('place-castle')?.sentences).toHaveLength(1);
+    expect(result.briefs.get('place-shrine')?.sentences).toHaveLength(1);
+  });
+
+  /**
+   * The expensive mistake this design exists to prevent. Both texts were in
+   * the same request, so nothing but per-place source scoping stops a sentence
+   * about the castle being cached against the shrine — where it would then be
+   * served as a cache hit for as long as the evidence is unchanged.
+   */
+  it('refuses a sentence grounded in another place from the same batch', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({
+      'place-shrine': { evidenceRevision: 'rev-shrine', sentences: [castleSentence] },
+    }) as never);
+
+    const result = await requestPlaceBriefBatch(items, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+
+    expect(result.briefs.get('place-shrine')).toBeNull();
+    // Sentence-level rejections carry the offending text alongside the reason.
+    expect(result.rejections).toContainEqual(expect.objectContaining({ reason: 'unknown-source' }));
+  });
+
+  it('keeps the good entries when one place in the batch is invalid', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({
+      'place-castle': { evidenceRevision: 'rev-castle', sentences: [castleSentence] },
+      'place-shrine': {
+        evidenceRevision: 'rev-shrine',
+        sentences: [{ text: 'A wholly invented claim.', sourceUrl: SHRINE, excerpt: 'no such text appears here at all' }],
+      },
+    }) as never);
+
+    const result = await requestPlaceBriefBatch(items, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+
+    expect(result.briefs.get('place-castle')?.sentences).toHaveLength(1);
+    expect(result.briefs.get('place-shrine')).toBeNull();
+  });
+
+  /**
+   * A revision that does not match is an answer about evidence other than what
+   * it would be filed under — a stale cache entry created at write time rather
+   * than drifting into one.
+   */
+  it('discards an answer whose evidenceRevision does not match', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({
+      'place-castle': { evidenceRevision: 'some-other-revision', sentences: [castleSentence] },
+    }) as never);
+
+    const result = await requestPlaceBriefBatch(items, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+
+    expect(result.briefs.get('place-castle')).toBeNull();
+    expect(result.rejections).toContainEqual({ reason: 'revision-mismatch' });
+  });
+
+  it('ignores a place nobody asked about', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({
+      'place-invented': { evidenceRevision: 'x', sentences: [] },
+    }) as never);
+
+    const result = await requestPlaceBriefBatch(items, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+
+    expect(result.briefs.has('place-invented')).toBe(false);
+    expect(result.rejections).toContainEqual({ reason: 'unknown-candidate' });
+  });
+
+  /**
+   * We paid for the call, so an unanswered place is an answer: nothing
+   * survived, from this exact evidence. Caching it stops the place being
+   * re-asked every day forever — the reasoning the single-place path already
+   * uses for its own null.
+   */
+  it('records an omitted place as a cacheable empty answer', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({
+      'place-castle': { evidenceRevision: 'rev-castle', sentences: [castleSentence] },
+    }) as never);
+
+    const result = await requestPlaceBriefBatch(items, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+
+    expect(result.briefs.has('place-shrine')).toBe(true);
+    expect(result.briefs.get('place-shrine')).toBeNull();
+  });
+
+  it('never sends more than the batch ceiling in one request', async () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({
+      ...items[0], candidateId: `place-${index}`, evidenceRevision: `rev-${index}`,
+    }));
+    const fetchImpl = vi.fn().mockResolvedValue(reply({}) as never);
+
+    await requestPlaceBriefBatch(many, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+
+    const sent = JSON.parse(fetchImpl.mock.calls[0][1].body as string);
+    const payload = JSON.parse(sent.messages[1].content.split('Source-backed input:\n')[1]);
+    expect(payload.places).toHaveLength(MAX_BRIEF_BATCH);
+  });
+
+  it('spends nothing when no place in the batch has sources to quote', async () => {
+    const fetchImpl = vi.fn();
+    const result = await requestPlaceBriefBatch(
+      [{ ...items[0], sources: [] }],
+      { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never },
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.briefs.size).toBe(0);
+  });
+
+  it('loses the batch, not the cache, when the reply is unparseable', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ choices: [{ message: { content: 'not json' } }] }),
+    } as never);
+    const result = await requestPlaceBriefBatch(items, { apiKey: 'k', provider: 'openai', fetchImpl: fetchImpl as never });
+    // Every place recorded as empty rather than left ambiguous.
+    expect(result.briefs.get('place-castle')).toBeNull();
+    expect(result.briefs.get('place-shrine')).toBeNull();
+  });
+
+  /** The validator is reachable without the network, and judged on its own. */
+  it('validates a batch payload directly', () => {
+    const result = validateBriefBatch(
+      { places: { 'place-castle': { evidenceRevision: 'rev-castle', sentences: [castleSentence] } } },
+      items,
+    );
+    expect(result.briefs.get('place-castle')?.sourceCount).toBe(1);
+    expect(result.briefs.get('place-shrine')).toBeNull();
   });
 });

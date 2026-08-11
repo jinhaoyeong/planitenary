@@ -99,9 +99,27 @@ Grants are always written explicitly. A silent write failure looks exactly like
 | Amap / Baidu | Paid | `AMAP_API_KEY` / `BAIDU_API_KEY` | Mainland China |
 | Reddit | Free tier | `REDDIT_CLIENT_ID/SECRET` | Built; dropped — access needs approval |
 | TripAdvisor | Free tier | `TRIPADVISOR_API_KEY` | Seam exists, unimplemented |
-| Gemini | Paid | `GEMINI_API_KEY` | `travel-reasoning` deployed, not configured |
+| **OpenAI** | **Paid** | `OPENAI_API_KEY` | Default reasoning provider. `gpt-5-nano`, effort `minimal` |
+| Gemini | Paid | `GEMINI_API_KEY` | Adapter retained; inactive unless explicitly selected |
 
-Other env: `YOUTUBE_DAILY_SEARCH_LIMIT` (default 90), `TRAVEL_REFRESH_SECRET`.
+Other env: `YOUTUBE_DAILY_SEARCH_LIMIT` (default 90), `TRAVEL_REFRESH_SECRET`,
+`TRAVEL_REASONING_PROVIDER` (default `openai`), `OPENAI_MODEL`,
+`OPENAI_REASONING_EFFORT` (default `minimal`), `AI_DAILY_CALL_LIMIT`
+(default 50).
+
+### The reasoning provider is selected, never inferred
+
+`reasoningProvider()` reads one env var; `reasoningKey()` reads only that
+provider's credential. There is no `'auto'` and `callModel` has no failover
+branch, because a provider chosen by which key happens to exist means an
+outage — or an exhausted budget — silently starts billing the other vendor.
+That is the same invisible-spend shape as the original RM 31.69 incident,
+one layer up. Switching providers is a config change a person makes, not
+something a `catch` block decides.
+
+Both providers share one `ai-reasoning` quota counter, because the cap exists
+because *a model bills* and that is true whichever one is selected. Two
+counters would let a provider switch quietly reset the day's spend to zero.
 
 **No source in the active set can generate a bill.** Overpass, Wikivoyage,
 Nominatim, Open-Meteo and official websites have no payment path at all;

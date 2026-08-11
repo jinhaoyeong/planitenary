@@ -692,3 +692,182 @@ export async function writeEvidenceCache(
     // Best-effort: a failed write means the next request re-fetches.
   }
 }
+
+/**
+ * Append spending records.
+ *
+ * Best-effort like every other cache write here — but the failure means
+ * something different, and the difference matters. A lost evidence row costs a
+ * re-fetch; a lost ledger row means money was spent that the ceiling will
+ * never see. `readSpendToDate` is what closes that gap: it fails closed, so an
+ * unwritable or unreadable ledger stops the tier rather than letting it run
+ * uncounted.
+ */
+/**
+ * Append one spending record, reporting whether it landed.
+ *
+ * Unlike every other write here this one is **not** best-effort from the
+ * caller's point of view. A lost evidence row costs a re-fetch; a lost ledger
+ * row means money was spent that the ceiling will never see, so the caller
+ * stops making paid calls when this returns false.
+ */
+export async function writeSpendEvent(
+  client: SupabaseClient | null,
+  row: Record<string, unknown>,
+): Promise<boolean> {
+  if (!client) return false;
+  try {
+    const { error } = await client.from('ai_spend_ledger').insert(row);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function writeSpendEvents(
+  client: SupabaseClient | null,
+  events: Array<Record<string, unknown>>,
+): Promise<void> {
+  if (!client || events.length === 0) return;
+  try {
+    await client.from('ai_spend_ledger').insert(events);
+  } catch {
+    // Best-effort. The guard reads the ledger and refuses when it cannot.
+  }
+}
+
+/**
+ * Known spending inside a rolling window, in USD.
+ *
+ * Returns `null` for "could not be read", which callers must treat as a
+ * refusal rather than as zero — the same distinction `usageToday` draws
+ * between an unused counter and an unreachable one.
+ *
+ * **Only `cost_status = 'known'` rows are summed, and that is a real
+ * limitation rather than an oversight.** A call whose cost could not be
+ * determined is genuinely absent from this total, so the figure is a floor and
+ * not the truth. The caller compensates by treating the *existence* of unknown
+ * events as its own reason to stop, instead of pretending they cost nothing
+ * and letting them accumulate invisibly beneath the ceiling.
+ */
+export async function readSpendToDate(
+  client: SupabaseClient | null,
+  sinceIso?: string,
+): Promise<{ knownUsd: number; unknownEvents: number } | null> {
+  if (!client) return null;
+  try {
+    /**
+     * No epoch means count everything ever recorded, which is the correct
+     * default for a prepaid budget: money already spent does not become
+     * unspent because time passed. An epoch narrows the window only when
+     * somebody has deliberately declared a new budget after topping up.
+     */
+    const base = client
+      .from('ai_spend_ledger')
+      .select('estimated_cost_usd, cost_status');
+    const { data, error } = await (sinceIso ? base.gte('created_at', sinceIso) : base);
+    if (error || !data) return null;
+    let knownUsd = 0;
+    let unknownEvents = 0;
+    for (const row of data as Array<{ estimated_cost_usd: string | number | null; cost_status: string }>) {
+      if (row.cost_status === 'known') knownUsd += Number(row.estimated_cost_usd) || 0;
+      else unknownEvents += 1;
+    }
+    return { knownUsd, unknownEvents };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cached candidate intelligence, by material cache key.
+ *
+ * The returned map distinguishes three states and callers must branch on
+ * presence, not truthiness:
+ *
+ *   absent    → never asked about these exact facts
+ *   `null`    → asked, and nothing survived validation
+ *   an object → asked, and this is what survived
+ *
+ * The middle one is the reason this cache is worth having at all: without it, a
+ * candidate the model had nothing useful to say about is paid for again every
+ * single time the deck is opened.
+ */
+export async function readCandidateIntelligence(
+  client: SupabaseClient | null,
+  cacheKeys: string[],
+): Promise<Map<string, unknown | null | undefined>> {
+  const found = new Map<string, unknown | null | undefined>();
+  if (!client || cacheKeys.length === 0) return found;
+  try {
+    const { data, error } = await client
+      .from('ai_candidate_intelligence')
+      .select('cache_key, intelligence, expires_at')
+      .in('cache_key', cacheKeys);
+    if (error || !data) return found;
+    const now = Date.now();
+    for (const row of data as Array<{ cache_key: string; intelligence: unknown; expires_at: string }>) {
+      // Expiry here is garbage collection, not freshness — correctness is
+      // governed by the material key — but an expired row is still skipped
+      // rather than served, so a sweep and a read cannot disagree.
+      if (new Date(row.expires_at).getTime() <= now) continue;
+      found.set(row.cache_key, row.intelligence ?? null);
+    }
+    return found;
+  } catch {
+    // A cache failure falls through to the provider, never to an error.
+    return found;
+  }
+}
+
+/**
+ * Persist candidate intelligence, one row per candidate.
+ *
+ * Per candidate even when fifteen of them shared a single provider request:
+ * batching is a transport optimisation, and filing them together would mean one
+ * candidate's data changing invalidates fourteen neighbours whose answers were
+ * still correct.
+ *
+ * **Only ever called with answers the model actually produced.** A refusal — a
+ * spent budget, an exhausted quota, a provider failure — must never reach this
+ * function, because a row here is indistinguishable from a genuine empty answer
+ * once written, and one bad afternoon would permanently mark those cards as
+ * having no personalisation. `IntelligenceOutcome` carries that distinction in
+ * its type so the wrong thing cannot be passed in.
+ */
+export async function writeCandidateIntelligence(
+  client: SupabaseClient | null,
+  entries: Array<{
+    cacheKey: string;
+    candidateId: string;
+    candidateRevision: string;
+    profileRevision: string;
+    plannerContextRevision?: string;
+    schemaVersion: string;
+    model: string;
+    intelligence: unknown | null;
+  }>,
+  expiresAt: string,
+): Promise<void> {
+  if (!client || entries.length === 0) return;
+  try {
+    await client
+      .from('ai_candidate_intelligence')
+      .upsert(
+        entries.map((entry) => ({
+          cache_key: entry.cacheKey,
+          candidate_id: entry.candidateId,
+          candidate_revision: entry.candidateRevision,
+          profile_revision: entry.profileRevision,
+          planner_context_revision: entry.plannerContextRevision ?? null,
+          schema_version: entry.schemaVersion,
+          model: entry.model,
+          intelligence: entry.intelligence ?? null,
+          expires_at: expiresAt,
+        })),
+        { onConflict: 'cache_key' },
+      );
+  } catch {
+    // Best-effort: a failed write costs a re-ask, never an error.
+  }
+}

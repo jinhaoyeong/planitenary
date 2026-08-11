@@ -27,7 +27,92 @@
  */
 
 import type { AdmissionFare } from './placeCost.ts';
+import { parseOpenAiUsage, type ModelUsage } from './aiCost.ts';
 import { COUNTRY_CURRENCY, parseAdmissionText } from './placeCost.ts';
+
+/**
+ * ---------------------------------------------------------------------------
+ * Model policy
+ *
+ * Which operations exist, which models each may use, and how much each may
+ * say. It lives here rather than in `providers.ts` for one reason: that module
+ * reads `Deno.env` and so cannot be loaded by vitest, and a spending guard
+ * nothing can test is a spending guard nobody knows has stopped working. The
+ * env lookups stay there; the *rules* are here, pure and exercised directly.
+ * Same precedent as `parseAppliesTo` moving into `cacheKeys.ts`.
+ * ---------------------------------------------------------------------------
+ */
+
+export const DEFAULT_OPENAI_MODEL = 'gpt-5-nano';
+
+/** Every operation the reasoning tier will answer. Anything else is refused. */
+export const REASONING_OPERATIONS = [
+  'place-brief',
+  'admission-read',
+  'candidate-intelligence',
+  'follow-up-questions',
+] as const;
+
+export type ReasoningOperation = typeof REASONING_OPERATIONS[number];
+
+export const isReasoningOperation = (value: unknown): value is ReasoningOperation =>
+  typeof value === 'string' && (REASONING_OPERATIONS as readonly string[]).includes(value);
+
+/**
+ * Which models each operation may use.
+ *
+ * Per-operation rather than global, because that is the axis along which this
+ * will actually be relaxed: a conversational feature may one day justify a
+ * stronger model while candidate ranking never will, and a single global list
+ * would have to be widened for every operation at once to permit it for one.
+ *
+ * All four are extraction and short structured judgement, and `gpt-5-nano` is
+ * the cheapest model OpenAI publishes. Nothing else is approved yet; widening
+ * this is a deliberate edit, reviewed on its own.
+ */
+export const OPENAI_MODELS_BY_OPERATION: Record<ReasoningOperation, readonly string[]> = {
+  'place-brief': [DEFAULT_OPENAI_MODEL],
+  'admission-read': [DEFAULT_OPENAI_MODEL],
+  'candidate-intelligence': [DEFAULT_OPENAI_MODEL],
+  'follow-up-questions': [DEFAULT_OPENAI_MODEL],
+};
+
+/**
+ * Whether a configured model may run an operation.
+ *
+ * **Never corrects to the default.** A deployment that set
+ * `OPENAI_MODEL=gpt-5.6-sol` and was quietly downgraded to nano would look
+ * identical to one that chose nano deliberately — and the same mistake in the
+ * other direction, at a model costing far more per token, is the one genuinely
+ * expensive error available here. A misconfiguration turns the tier off and
+ * says why.
+ *
+ * Returns `undefined` for "allowed", or the sentence to report.
+ */
+export function openaiModelRefusal(
+  operation: ReasoningOperation,
+  configuredModel: string,
+): string | undefined {
+  const allowed = OPENAI_MODELS_BY_OPERATION[operation];
+  if (allowed.includes(configuredModel)) return undefined;
+  return `OPENAI_MODEL "${configuredModel}" is not approved for ${operation}. Allowed: ${allowed.join(', ')}.`;
+}
+
+/**
+ * The ceiling on what one answer may cost in output tokens.
+ *
+ * Output is eight times the price of input on every model here, so this is the
+ * side worth bounding — and an unbounded reply is also the one that breaks
+ * JSON parsing, by running until some other limit stops it mid-structure. Per
+ * operation, because a ten-place batch legitimately needs more room than a
+ * single fare reading, and one number would be wrong for both.
+ */
+export const OPENAI_MAX_OUTPUT_TOKENS: Record<ReasoningOperation, number> = {
+  'place-brief': 1_200,
+  'admission-read': 500,
+  'candidate-intelligence': 1_500,
+  'follow-up-questions': 500,
+};
 
 /** One source we handed the model, and the exact text we handed it. */
 export interface BriefSource {
@@ -339,13 +424,50 @@ export const MAX_SOURCE_CHARS = 6_000;
 export const MAX_SOURCES = 8;
 export const REQUEST_TIMEOUT_MS = 8_000;
 
-export interface GeminiOptions {
+/**
+ * Which vendor to call. There is no `'auto'`, and that is the point: a
+ * provider chosen by which key happens to exist means an outage or an
+ * exhausted budget on one silently starts billing the other.
+ */
+export type ModelProvider = 'openai' | 'gemini';
+
+export interface ModelOptions {
   apiKey: string;
+  /** Defaults to `'gemini'` so existing callers keep their behaviour. */
+  provider?: ModelProvider;
   model?: string;
+  /**
+   * OpenAI only. Not defaulted here, because the valid set differs per model —
+   * `gpt-5-nano` rejects `none`, `gpt-5.4-nano` accepts and defaults to it —
+   * and a wrong value returns an opaque 400. `providers.ts` owns the choice.
+   */
+  reasoningEffort?: string;
+  /**
+   * Hard ceiling on the reply. Output costs eight times what input does on
+   * every model used here, so this is the side worth bounding — and an
+   * unbounded reply is also the one that breaks JSON parsing, by running until
+   * some other limit stops it mid-structure.
+   */
+  maxOutputTokens?: number;
   /** Injected so tests never reach the network. */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Called once per provider response that reported usage.
+   *
+   * A callback rather than a return value because usage is an observability
+   * concern orthogonal to the answer: threading it through every operation's
+   * return type would change four signatures to carry something none of them
+   * uses. The ledger writer supplies this; nothing else needs to know.
+   *
+   * Not called at all when the provider reported no usage — which the caller
+   * must read as "cost unknown", never as "cost nothing".
+   */
+  onUsage?: (usage: ModelUsage) => void;
 }
+
+/** @deprecated Use `ModelOptions`. Kept so existing call sites still compile. */
+export type GeminiOptions = ModelOptions;
 
 const SYSTEM = `You are a travel evidence interpreter. You may summarise, classify, translate, and explain only the source-backed input you receive. Never invent a place, opening hour, price, route, queue, review, closure, or availability. Every sentence you return must quote a verbatim excerpt from the supplied text for the source URL you cite. Return valid JSON only.`;
 
@@ -353,59 +475,171 @@ interface GeminiPayload {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
 }
 
+interface OpenAiPayload {
+  choices?: Array<{ message?: { content?: string } }>;
+}
+
 /**
- * One request, one attempt, one timeout.
+ * Parse a model's text output as JSON.
  *
- * No retry: this is the only metered provider in the system, and a failed
- * brief is a missing brief — a card is decidable without one. Retrying would
- * convert a provider wobble into a bill.
+ * Both providers are asked for JSON and both mostly comply, but a model that
+ * has been told to return JSON still occasionally wraps it in a markdown
+ * fence. Stripping the fence is cheaper than a retry, and a retry is
+ * forbidden here anyway — see `callModel`.
+ *
+ * Returns `undefined` rather than throwing: an unparseable answer is a missing
+ * answer, and every caller already handles that.
  */
-export async function callGemini(
+const parseModelJson = (text: string): unknown => {
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  if (!cleaned) return undefined;
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * OpenAI, via Chat Completions.
+ *
+ * Chat Completions rather than the Responses API because nothing here needs
+ * conversation state: every operation is one self-contained request whose
+ * whole context is assembled server-side and thrown away afterwards. Holding
+ * state on the provider's side would add a second place where a traveller's
+ * trip lives, for no gain.
+ *
+ * `response_format: json_object` is requested but not trusted —
+ * `parseModelJson` still handles a fenced reply, because a format hint is a
+ * request in the same way a system prompt is.
+ */
+async function callOpenAi(
   operation: string,
   input: unknown,
-  options: GeminiOptions,
+  options: ModelOptions,
+  signal: AbortSignal,
 ): Promise<unknown> {
   const doFetch = options.fetchImpl || fetch;
+  const body: Record<string, unknown> = {
+    model: options.model || 'gpt-5-nano',
+    messages: [
+      { role: 'system', content: SYSTEM },
+      {
+        role: 'user',
+        content: `Operation: ${operation}\nSource-backed input:\n${JSON.stringify(input)}`,
+      },
+    ],
+    response_format: { type: 'json_object' },
+  };
+  // Omitted entirely when unset, rather than defaulted to a guess: the
+  // accepted values differ per model and a wrong one is a hard 400.
+  if (options.reasoningEffort) body.reasoning_effort = options.reasoningEffort;
+  // `max_completion_tokens`, not `max_tokens`: the latter is rejected by the
+  // GPT-5 generation, which counts reasoning tokens against the reply too.
+  if (options.maxOutputTokens) body.max_completion_tokens = options.maxOutputTokens;
+
+  const response = await doFetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${options.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) return undefined;
+  const payload = await response.json() as OpenAiPayload;
+
+  /**
+   * Reported before the answer is parsed, and independently of whether it
+   * parses. A reply we could not read still consumed tokens and still costs
+   * money; skipping the ledger on a parse failure would hide precisely the
+   * calls that produced nothing for their price.
+   */
+  const usage = parseOpenAiUsage(payload);
+  if (usage) options.onUsage?.(usage);
+
+  const text = (payload.choices || [])
+    .map((choice) => choice.message?.content?.trim() || '')
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  return text ? parseModelJson(text) : undefined;
+}
+
+/** Gemini, via generateContent. Retained as an adapter; not the default. */
+async function callGeminiApi(
+  operation: string,
+  input: unknown,
+  options: ModelOptions,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const doFetch = options.fetchImpl || fetch;
+  const model = options.model || 'gemini-2.5-flash';
+  const response = await doFetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'x-goog-api-key': options.apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [{
+          role: 'user',
+          parts: [{ text: `Operation: ${operation}\nSource-backed input:\n${JSON.stringify(input)}` }],
+        }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+      signal,
+    },
+  );
+  if (!response.ok) return undefined;
+  const payload = await response.json() as GeminiPayload;
+  const text = (payload.candidates || [])
+    .flatMap((candidate) => candidate.content?.parts || [])
+    .map((part) => part.text?.trim() || '')
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  return text ? parseModelJson(text) : undefined;
+}
+
+/**
+ * One request, one attempt, one timeout — to whichever provider was selected.
+ *
+ * No retry: a model is the only metered thing in this system, and a failed
+ * brief is a missing brief — a card is decidable without one. Retrying would
+ * convert a provider wobble into a bill.
+ *
+ * **And no failover.** If the selected provider fails, the answer is absent.
+ * Reaching for the other vendor here would mean an OpenAI outage silently
+ * starts spending on Gemini, which is precisely the invisible-spend shape this
+ * project already paid for once. Switching providers is a config change a
+ * person makes, not something a `catch` block decides.
+ */
+export async function callModel(
+  operation: string,
+  input: unknown,
+  options: ModelOptions,
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? REQUEST_TIMEOUT_MS);
   try {
-    const model = options.model || 'gemini-2.5-flash';
-    const response = await doFetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'x-goog-api-key': options.apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM }] },
-          contents: [{
-            role: 'user',
-            parts: [{ text: `Operation: ${operation}\nSource-backed input:\n${JSON.stringify(input)}` }],
-          }],
-          generationConfig: { responseMimeType: 'application/json' },
-        }),
-        signal: controller.signal,
-      },
-    );
-    if (!response.ok) return undefined;
-    const payload = await response.json() as GeminiPayload;
-    const text = (payload.candidates || [])
-      .flatMap((candidate) => candidate.content?.parts || [])
-      .map((part) => part.text?.trim() || '')
-      .filter(Boolean)
-      .join('\n')
-      .trim();
-    if (!text) return undefined;
-    try {
-      return JSON.parse(text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''));
-    } catch {
-      return undefined;
-    }
+    return options.provider === 'openai'
+      ? await callOpenAi(operation, input, options, controller.signal)
+      : await callGeminiApi(operation, input, options, controller.signal);
   } catch {
     return undefined;
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** @deprecated Use `callModel`. Kept so existing call sites still compile. */
+export const callGemini = (
+  operation: string,
+  input: unknown,
+  options: ModelOptions,
+): Promise<unknown> => callModel(operation, input, { ...options, provider: 'gemini' });
 
 /**
  * A stable fingerprint of the material a brief was derived from.
@@ -491,7 +725,7 @@ export async function requestAdmissionRead(
   const pageText = input.pageText.slice(0, MAX_SOURCE_CHARS);
   if (!pageText.trim()) return { fares: null, rejections: [] };
 
-  const raw = await callGemini('admission-read', {
+  const raw = await callModel('admission-read', {
     instruction: 'Read admission prices from this page text. For each fare give audience, amount as a number, currency as an ISO code, and a verbatim excerpt from the text. Return no fare you cannot quote.',
     pageText,
     countryCode: input.countryCode,
@@ -576,6 +810,151 @@ export interface PlaceBrief {
 }
 
 /**
+ * How many places one `place-brief` request may carry.
+ *
+ * Ten is a transport decision, not a correctness one — every place in the
+ * batch is still validated against its own sources and cached under its own
+ * revision. The ceiling exists because a batch is also a blast radius: a
+ * truncated or malformed reply costs everything in it, and the serialised
+ * input has to stay inside the request bound with room for the sources.
+ */
+export const MAX_BRIEF_BATCH = 10;
+
+/** One place's slot in a batch: what to describe, and what may be quoted. */
+export interface BriefBatchItem {
+  /** The caller's own identifier. Echoed back and matched, never positional. */
+  candidateId: string;
+  /** The revision this answer will be cached under. Must come back unchanged. */
+  evidenceRevision: string;
+  place: { name: string; city: string; categories: string[] };
+  sources: BriefSource[];
+}
+
+/**
+ * What a batch produced, per place.
+ *
+ * `null` is a real answer and distinct from absence: it records that we asked
+ * about this exact evidence and nothing survived validation, which the caller
+ * caches so the place is not re-asked tomorrow. A place missing from the map
+ * entirely was never successfully asked about.
+ */
+export interface BriefBatchResult {
+  briefs: Map<string, PlaceBrief | null>;
+  rejections: Array<{ reason: string }>;
+}
+
+/**
+ * Split a batched reply and validate each place against its *own* sources.
+ *
+ * Two properties matter more than anything else here, and both are about a
+ * batch not being allowed to become a shared fate:
+ *
+ * 1. **Identity is carried, never positional.** The reply is keyed by
+ *    `candidateId` and must echo the `evidenceRevision` it was asked about. An
+ *    array read by index is one dropped element away from caching Ebisu
+ *    Shrine's description against the Currency Museum — silently, and
+ *    permanently, because the wrong answer would then be a cache hit.
+ * 2. **A bad entry costs only itself.** One place inventing a quotation must
+ *    not discard nine valid neighbours, exactly as one malformed fare does not
+ *    discard the adult ticket beside it.
+ *
+ * Cross-contamination is structurally impossible rather than merely unlikely:
+ * each place's sentences are checked against the source list submitted for
+ * that place, so a sentence quoting a *different* place's page fails the
+ * substring rule even though that text was in the same request.
+ */
+export function validateBriefBatch(
+  raw: unknown,
+  items: BriefBatchItem[],
+): BriefBatchResult {
+  const briefs = new Map<string, PlaceBrief | null>();
+  const rejections: Array<{ reason: string }> = [];
+  const byId = new Map(items.map((item) => [item.candidateId, item]));
+
+  const places = (raw as { places?: unknown })?.places;
+  const entries: Array<[string, unknown]> = places && typeof places === 'object' && !Array.isArray(places)
+    ? Object.entries(places as Record<string, unknown>)
+    : [];
+
+  for (const [candidateId, entry] of entries) {
+    const item = byId.get(candidateId);
+    // A place we never asked about. Answering one is not merely useless — it
+    // has no source list to be validated against, so nothing could ground it.
+    if (!item) { rejections.push({ reason: 'unknown-candidate' }); continue; }
+
+    const revision = (entry as { evidenceRevision?: unknown })?.evidenceRevision;
+    if (revision !== item.evidenceRevision) {
+      // The answer is about evidence other than what we would cache it under.
+      rejections.push({ reason: 'revision-mismatch' });
+      continue;
+    }
+
+    const { sentences, rejected } = validateBriefSentences(entry, item.sources);
+    rejections.push(...rejected);
+    briefs.set(
+      candidateId,
+      sentences.length > 0
+        ? { sentences, sourceCount: new Set(sentences.map((s) => s.sourceUrl)).size }
+        : null,
+    );
+  }
+
+  /**
+   * Everything asked about and not answered is recorded as an empty answer.
+   * We spent the call; a place the model declined to describe from this
+   * evidence will decline again tomorrow, and re-asking would pay twice to
+   * learn the same thing. This is the same reasoning that makes the single
+   * place-brief cache its own null.
+   */
+  for (const item of items) {
+    if (!briefs.has(item.candidateId)) briefs.set(item.candidateId, null);
+  }
+
+  return { briefs, rejections };
+}
+
+/**
+ * Ask for up to `MAX_BRIEF_BATCH` descriptions in one request.
+ *
+ * One HTTP request, one quota call, one output ceiling — and still one
+ * independently validated, independently cached answer per place. Batching is
+ * a transport optimisation here and is deliberately not allowed to become a
+ * correctness change: nothing about how an answer is judged or stored differs
+ * from the single-place path.
+ */
+export async function requestPlaceBriefBatch(
+  items: BriefBatchItem[],
+  options: ModelOptions,
+): Promise<BriefBatchResult> {
+  const usable = items
+    .map((item) => ({ ...item, sources: boundSources(item.sources) }))
+    .filter((item) => item.sources.length > 0)
+    .slice(0, MAX_BRIEF_BATCH);
+
+  if (usable.length === 0) return { briefs: new Map(), rejections: [] };
+
+  const raw = await callModel('place-brief', {
+    instruction:
+      'For each place, write at most three sentences a traveller would find useful. '
+      + 'Every sentence must cite one sourceUrl from that place\'s own sources and quote a '
+      + 'verbatim excerpt from it. Do not mention opening hours, closures or prices. '
+      + 'Return {"places": {"<candidateId>": {"evidenceRevision": "<echoed unchanged>", '
+      + '"sentences": [{"text","sourceUrl","excerpt"}]}}}. Echo every candidateId and '
+      + 'evidenceRevision exactly as supplied. Omit a place you cannot ground.',
+    places: usable.map((item) => ({
+      candidateId: item.candidateId,
+      evidenceRevision: item.evidenceRevision,
+      name: item.place.name,
+      city: item.place.city,
+      categories: item.place.categories,
+      sources: item.sources,
+    })),
+  }, options);
+
+  return validateBriefBatch(raw, usable);
+}
+
+/**
  * Ask for a description, and return one only if it survives validation.
  *
  * Zero surviving sentences means no brief at all — the same outcome as having
@@ -590,7 +969,7 @@ export async function requestPlaceBrief(
   const bounded = boundSources(sources);
   if (bounded.length === 0) return { rejections: [] };
 
-  const raw = await callGemini('place-brief', {
+  const raw = await callModel('place-brief', {
     place,
     instruction: 'Describe this place in at most three sentences a traveller would find useful. Every sentence must cite one sourceUrl and quote a verbatim excerpt from that source. Do not mention opening hours, closures or prices.',
     sources: bounded,

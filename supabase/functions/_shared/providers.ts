@@ -6,6 +6,20 @@
  * credentials — via `travel-capabilities`.
  */
 
+import { DEFAULT_SPEND_CEILING_USD } from './aiCost.ts';
+import {
+  DEFAULT_OPENAI_MODEL,
+  OPENAI_MAX_OUTPUT_TOKENS,
+  openaiModelRefusal,
+  type ReasoningOperation,
+} from './reasoning.ts';
+
+export {
+  isReasoningOperation,
+  REASONING_OPERATIONS,
+  type ReasoningOperation,
+} from './reasoning.ts';
+
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -90,7 +104,181 @@ export const secrets = {
   douyinPartner: () => env('DOUYIN_PARTNER_TOKEN'),
   rednotePartner: () => env('REDNOTE_PARTNER_TOKEN'),
   gemini: () => env('GEMINI_API_KEY'),
+  openai: () => env('OPENAI_API_KEY'),
 };
+
+/**
+ * Which model provider the reasoning tier calls. Chosen explicitly, never
+ * inferred from which key happens to be present.
+ *
+ * The inference version is the dangerous one. Two keys configured and a
+ * provider picked by availability means an OpenAI outage — or an exhausted
+ * OpenAI budget — silently starts spending on Gemini instead, which is the
+ * *invisible spend* failure this project already paid for once. A provider
+ * that is not selected is off, whatever credentials exist beside it.
+ *
+ * So there is deliberately no fallback path. `travel-reasoning` fails closed
+ * and the card keeps its deterministic rationale.
+ */
+export type ReasoningProvider = 'openai' | 'gemini';
+
+export const reasoningProvider = (): ReasoningProvider =>
+  env('TRAVEL_REASONING_PROVIDER')?.toLowerCase() === 'gemini' ? 'gemini' : 'openai';
+
+/**
+ * The model, pinned by env so a rollout is a config change.
+ *
+ * Default `gpt-5-nano`: the cheapest model OpenAI publishes ($0.05/1M input,
+ * $0.40/1M output) and comfortably capable of the two jobs asked of it here —
+ * quoting a sentence out of supplied text, and reading a fare off a page.
+ * Neither benefits from a stronger model; both are extraction, not judgement.
+ */
+export const openaiModel = (): string => env('OPENAI_MODEL') || DEFAULT_OPENAI_MODEL;
+
+
+
+/**
+ * Reasoning effort, and why the default is not `none`.
+ *
+ * `none` is the cheapest setting and the obvious choice, but it is **not
+ * accepted by every model**: `gpt-5-nano` takes `minimal | low | medium |
+ * high` and rejects `none` outright, while `gpt-5.4-nano` takes `none` and
+ * defaults to it. Hardcoding either one breaks the moment `OPENAI_MODEL`
+ * changes, and the failure arrives as an opaque 400 from the provider rather
+ * than as anything this code could explain.
+ *
+ * `minimal` is therefore the default: valid on the default model, and the
+ * cheapest setting that is. Override with `OPENAI_REASONING_EFFORT` when
+ * pinning a model that accepts `none`.
+ */
+export const openaiReasoningEffort = (): string => env('OPENAI_REASONING_EFFORT') || 'minimal';
+
+/**
+ * The day's allowance for the reasoning tier, shared by whichever provider is
+ * selected — the cap is on *spending*, and both of them bill.
+ *
+ * Kept separate from the discovery counters on purpose: a busy day of
+ * searching must not be able to exhaust the model budget, and a runaway model
+ * loop must not be able to starve discovery. The default is low enough that a
+ * misconfiguration is cheap to discover rather than expensive.
+ */
+export const reasoningCallLimit = (): number => {
+  const configured = Number(env('AI_DAILY_CALL_LIMIT') || env('GEMINI_DAILY_CALL_LIMIT'));
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 50;
+};
+
+/**
+ * The credential for the *selected* provider, or undefined.
+ *
+ * Reads only the one provider's key on purpose. Asking "is any model key
+ * present" is how a deployment ends up calling the provider it did not choose.
+ */
+export const reasoningKey = (): string | undefined =>
+  reasoningProvider() === 'gemini' ? secrets.gemini() : secrets.openai();
+
+/**
+ * The counter both providers share.
+ *
+ * Named for the tier rather than for Gemini, which the previous name tied it
+ * to: the cap exists because *a model bills*, and that is true whichever one
+ * is selected. Two counters would also let a provider switch quietly reset the
+ * day's spending to zero.
+ */
+export const REASONING_QUOTA_PROVIDER = 'ai-reasoning';
+
+/** Billing is accounted in UTC, and nothing here needs to match a reset. */
+export const REASONING_QUOTA_TIMEZONE = 'UTC';
+
+/**
+ * The spending ceiling for the current prepaid budget, in USD.
+ *
+ * Deliberately below the balance actually loaded: a provider's prepaid cutoff
+ * is not instantaneous, and the gap is what separates "the AI stopped" from
+ * "the account is empty and everything else paid stopped too".
+ */
+export const aiBudgetUsd = (): number => {
+  const configured = Number(env('AI_BUDGET_USD'));
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_SPEND_CEILING_USD;
+};
+
+/**
+ * When the current budget started counting. Unset means "everything ever".
+ *
+ * Explicitly *not* a rolling window. Summing only the last N days lets old
+ * spending age out, so the ceiling refills itself and a prepaid $5 can be
+ * spent more than once. Starting a new budget is a deliberate act taken after
+ * topping the balance up — never something the calendar does unattended.
+ */
+export const aiBudgetEpoch = (): string | undefined => env('AI_BUDGET_STARTED_AT');
+
+/**
+ * Everything the reasoning tier needs to make one call, resolved in one place.
+ *
+ * Assembled here rather than at each call site because the provider, its key,
+ * its model and its effort setting have to agree with each other — an OpenAI
+ * key sent with a Gemini model name is a 400, and picking the three
+ * separately at three call sites is how they drift apart.
+ *
+ * Returns `undefined` when the selected provider has no key, so a caller
+ * cannot accidentally call with an empty credential.
+ */
+export interface ResolvedReasoning {
+  apiKey: string;
+  provider: ReasoningProvider;
+  model: string;
+  reasoningEffort?: string;
+  maxOutputTokens: number;
+}
+
+/**
+ * Three outcomes, deliberately not two.
+ *
+ * "No model configured" and "a model is configured wrongly" are different
+ * facts and must not share a value: the first is an ordinary deployment where
+ * cards keep their deterministic copy, the second is somebody's mistake that
+ * nobody will find if it renders identically. This is the same distinction
+ * `usageToday` draws between an unused counter and an unreachable one, and it
+ * exists for the same reason.
+ */
+export type ReasoningResolution =
+  | { status: 'ready'; options: ResolvedReasoning }
+  | { status: 'unconfigured' }
+  | { status: 'misconfigured'; error: string };
+
+export function resolveReasoning(operation: ReasoningOperation): ReasoningResolution {
+  const apiKey = reasoningKey();
+  if (!apiKey) return { status: 'unconfigured' };
+
+  const provider = reasoningProvider();
+  const maxOutputTokens = OPENAI_MAX_OUTPUT_TOKENS[operation];
+
+  if (provider === 'gemini') {
+    // The OpenAI allowlist governs OPENAI_MODEL and nothing else; selecting
+    // Gemini must not be blocked by a setting that does not apply to it.
+    return { status: 'ready', options: { apiKey, provider, model: geminiModel(), maxOutputTokens } };
+  }
+
+  const refusal = openaiModelRefusal(operation, openaiModel());
+  if (refusal) return { status: 'misconfigured', error: refusal };
+
+  return {
+    status: 'ready',
+    options: {
+      apiKey,
+      provider,
+      model: openaiModel(),
+      reasoningEffort: openaiReasoningEffort(),
+      maxOutputTokens,
+    },
+  };
+}
+
+/** The options, or undefined for either "off" reason. Callers wanting to
+ *  report *why* should use `resolveReasoning` directly. */
+export function reasoningOptions(operation: ReasoningOperation): ResolvedReasoning | undefined {
+  const resolution = resolveReasoning(operation);
+  return resolution.status === 'ready' ? resolution.options : undefined;
+}
 
 /**
  * What the client is allowed to know. Booleans only — this response is the
@@ -122,7 +310,10 @@ export function capabilitySnapshot() {
     tiktokPartner: Boolean(secrets.tiktokPartner()),
     douyinPartner: Boolean(secrets.douyinPartner()),
     rednotePartner: Boolean(secrets.rednotePartner()),
-    aiReasoning: Boolean(secrets.gemini()),
+    // The selected provider's key, not "any model key". A deployment that set
+    // GEMINI_API_KEY but selected OpenAI has no reasoning tier, and saying it
+    // does would leave every empty brief looking like a model failure.
+    aiReasoning: Boolean(reasoningKey()),
   };
 }
 
