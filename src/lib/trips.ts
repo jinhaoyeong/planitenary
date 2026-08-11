@@ -218,7 +218,15 @@ export function syncDurationDependentFields(
   const identity = buildTripIdentity(profile, { plannedDays: synced.days.length });
   const sources: FieldSourceMap = { ...(itinerary.fieldSources ?? {}) };
 
-  let next: Itinerary = { ...itinerary, tripProfile: profile, days: synced.days };
+  // The structured profile owns the destination list. Keeping the denormalised
+  // `cities` field in step here means the cover, marquee, and every legacy
+  // surface see a city added in Settings immediately, before copy is refreshed.
+  let next: Itinerary = {
+    ...itinerary,
+    tripProfile: profile,
+    cities: destinationCities(profile),
+    days: synced.days,
+  };
 
   if (days <= 0) {
     // A badge that still shows an old count contradicts the profile.

@@ -179,6 +179,18 @@ describe('duration-dependent badge sync', () => {
     });
   });
 
+  it('keeps the denormalised city list in step with Settings', () => {
+    const itinerary = dated();
+    const changedProfile = {
+      ...(itinerary.tripProfile as TripProfile),
+      destinations: [manualDestination('Osaka', 'Japan')],
+    };
+
+    const synced = syncDurationDependentFields(itinerary, changedProfile);
+
+    expect(synced.cities).toEqual(['Osaka']);
+  });
+
   it('never shows a stale badge for an invalid date range', () => {
     const itinerary = dated();
     const invalidProfile = {

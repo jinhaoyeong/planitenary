@@ -54,12 +54,25 @@ const savedProfile = (onItineraryChange: ReturnType<typeof vi.fn>): TripProfile 
   return saved ? sanitizeTripProfile(saved.tripProfile) : null;
 };
 
+/**
+ * Edits are a draft until the traveller commits them.
+ *
+ * The panel holds changes in local state and only calls `onItineraryChange`
+ * from its save handler, so a test that asserts straight after a `change`
+ * event is asking what was saved before anything was. Worth noting that
+ * omitting this does not always fail loudly: `savedProfile` returns `null`
+ * when nothing was saved, and `null?.field` is `undefined` — so any assertion
+ * expecting `undefined` passes whether or not the component works at all.
+ */
+const save = () => fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
 describe('flight times reach the profile the planner reads', () => {
   it('stores a typed arrival time as HH:MM', () => {
     const onItineraryChange = vi.fn();
     renderPanel(melbourneTrip(), onItineraryChange);
 
     fireEvent.change(screen.getByLabelText(/arrival time/i), { target: { value: '19:27' } });
+    save();
 
     expect(savedProfile(onItineraryChange)?.arrivalTime).toBe('19:27');
   });
@@ -71,6 +84,7 @@ describe('flight times reach the profile the planner reads', () => {
     renderPanel(melbourneTrip(), onItineraryChange);
 
     fireEvent.change(screen.getByLabelText(/departure time/i), { target: { value: '12:33:00' } });
+    save();
 
     expect(savedProfile(onItineraryChange)?.departureTime).toBe('12:33');
   });
@@ -80,7 +94,11 @@ describe('flight times reach the profile the planner reads', () => {
     renderPanel(melbourneTrip(melbourneProfile({ arrivalTime: '19:27' })), onItineraryChange);
 
     fireEvent.change(screen.getByLabelText(/arrival time/i), { target: { value: '' } });
+    save();
 
+    // Asserted against a save that actually happened, so this cannot pass by
+    // reading `undefined` off a null profile that was never written.
+    expect(onItineraryChange).toHaveBeenCalled();
     expect(savedProfile(onItineraryChange)?.arrivalTime).toBeUndefined();
   });
 
@@ -95,12 +113,13 @@ describe('flight times reach the profile the planner reads', () => {
   });
 
   it('leaves the dates alone when only a flight time changes', () => {
-    // update() routes duration fields through validation and everything else
-    // straight to save; a time must not be able to disturb the date range.
+    // Duration fields route through validation and everything else into the
+    // draft; a time must not be able to disturb the date range on save.
     const onItineraryChange = vi.fn();
     renderPanel(melbourneTrip(), onItineraryChange);
 
     fireEvent.change(screen.getByLabelText(/arrival time/i), { target: { value: '19:27' } });
+    save();
 
     const profile = savedProfile(onItineraryChange);
     expect(profile?.startDate).toBe('2027-01-21');

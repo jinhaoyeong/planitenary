@@ -13,7 +13,7 @@ import {
 } from '../lib/identityFields';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { regenerateItinerary } from '../lib/trips';
-import type { TripProfile } from '../lib/tripProfile';
+import { resolveDuration, type TripProfile } from '../lib/tripProfile';
 
 interface RegenerationPreviewProps {
   itinerary: Itinerary;
@@ -105,12 +105,14 @@ export function RegenerationPreview({ itinerary, profile, onItineraryChange }: R
 
   const revision = profileRevision(profile);
 
-  const buildProposal = () =>
-    buildIdentityProposal(
+  const buildProposal = () => {
+    const duration = resolveDuration(profile);
+    return buildIdentityProposal(
       itinerary,
       profile,
-      buildTripIdentity(profile, { plannedDays: itinerary.days.length }),
+      buildTripIdentity(profile, { plannedDays: duration.days > 0 ? duration.days : itinerary.days.length }),
     );
+  };
 
   const diffs = useMemo(
     () => (proposal ? diffIdentityProposal(itinerary, proposal) : []),
@@ -171,13 +173,12 @@ export function RegenerationPreview({ itinerary, profile, onItineraryChange }: R
   if (!proposal) {
     return (
       <div className="space-y-3">
-        <button type="button" className="pill-btn pill-primary" onClick={openPreview}>
+        <button type="button" className="pill-btn pill-soft" onClick={openPreview}>
           <Sparkles className="w-4 h-4" />
           Review generated copy
         </button>
         <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-          You will see every proposed change before anything is written. Text you typed yourself is preserved unless
-          you tick it.
+          Saving trip details refreshes generated copy automatically. Use this review when you want to inspect or deliberately replace protected wording.
         </p>
         {status && <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{status}</p>}
       </div>

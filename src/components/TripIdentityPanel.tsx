@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { ChevronDown, MapPin, Wand2, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, MapPin, Save, Wand2, X } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { findCountry, type PlaceSuggestion } from '../lib/destinations';
 import { CitySearchInput } from './ui/CitySearchInput';
@@ -8,7 +8,9 @@ import { CityStayPlanner } from './ui/CityStayPlanner';
 import { ToggleRow } from './ui/ToggleRow';
 import { buildTripIdentity } from '../lib/tripIdentity';
 import { RegenerationPreview } from './RegenerationPreview';
-import { syncDurationDependentFields } from '../lib/trips';
+import { buildIdentityProposal, defaultProposalSelection, diffIdentityProposal } from '../lib/identityFields';
+import { regenerateItinerary } from '../lib/trips';
+import { cityStayStatus, reconcileCityStays } from '../lib/cityStays';
 import {
   MAX_GENERATED_DAYS,
   longTripPartialGenerationMessage,
@@ -40,9 +42,14 @@ interface TripIdentityPanelProps {
   onItineraryChange: (itinerary: Itinerary) => void;
 }
 
+type SaveStatus = {
+  tone: 'success' | 'error' | 'neutral';
+  message: string;
+};
+
 export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentityPanelProps) {
   const storedProfile = useMemo(() => sanitizeTripProfile(itinerary.tripProfile), [itinerary.tripProfile]);
-  const profile = useMemo(
+  const savedProfile = useMemo<TripProfile>(
     () =>
       storedProfile ?? {
         ...createEmptyProfile(),
@@ -52,12 +59,22 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
       },
     [storedProfile, itinerary.cities, itinerary.days.length],
   );
+  const [draftProfile, setDraftProfile] = useState<TripProfile>(savedProfile);
   const [durationError, setDurationError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus | null>(null);
 
-  const save = (next: TripProfile) => {
-    // Profile is the source of truth for duration: clearing dates must clear
-    // the badge in the same write, so a reload cannot resurrect a stale "8".
-    onItineraryChange(syncDurationDependentFields({ ...itinerary, tripProfile: next }, next));
+  useEffect(() => {
+    setDraftProfile(savedProfile);
+    setDurationError(null);
+  }, [savedProfile]);
+
+  const profile = draftProfile;
+  const isDirty = JSON.stringify(profile) !== JSON.stringify(savedProfile);
+
+  const updateDraft = (next: TripProfile) => {
+    setDraftProfile(next);
+    setDurationError(null);
+    setSaveStatus(null);
   };
 
   const update = (patch: Partial<TripProfile>) => {
@@ -71,23 +88,23 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         return;
       }
       setDurationError(null);
-      save(committed.profile);
+      updateDraft(committed.profile);
       return;
     }
     setDurationError(null);
-    save(next);
+    updateDraft(next);
   };
 
   const toggle = <T extends string>(key: 'tripTypes' | 'styles' | 'moods' | 'transport' | 'stays', id: T) => {
     const list = profile[key] as unknown as T[];
     const next = list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
-    save({ ...profile, [key]: next } as TripProfile);
+    updateDraft({ ...profile, [key]: next } as TripProfile);
   };
 
   const addPlace = (place: PlaceSuggestion) => {
     const destination = destinationFromPlace(place, profile.destinations[0]?.country);
     if (profile.destinations.some((existing) => existing.id === destination.id)) return;
-    save({ ...profile, destinations: [...profile.destinations, destination] });
+    updateDraft({ ...profile, destinations: [...profile.destinations, destination] });
   };
 
   const removeCity = (index: number) =>
@@ -95,11 +112,59 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
 
   const countryCode = findCountry(primaryCountry(profile))?.code;
   const duration = resolveDuration(profile);
+  const plannedDays = duration.days > 0 ? duration.days : itinerary.days.length;
+  const cityStaySummary = profile.destinations.length > 1 && duration.days > 0
+    ? cityStayStatus(
+        reconcileCityStays(
+          profile.cityStays,
+          profile.destinations.map((destination) => destination.city),
+        ),
+        duration.days,
+      )
+    : null;
+  const cityStayNeedsAttention = cityStaySummary && (!cityStaySummary.complete || cityStaySummary.unplaced.length > 0);
   const durationValidation = validateTripDuration(profile);
   const identity = useMemo(
-    () => buildTripIdentity(profile, { plannedDays: itinerary.days.length }),
-    [profile, itinerary.days.length],
+    () => buildTripIdentity(profile, { plannedDays }),
+    [profile, plannedDays],
   );
+
+  const handleSave = () => {
+    if (!isDirty) return;
+
+    // Saving trip details also refreshes generated/empty copy in one write.
+    // Fields the traveller previously edited remain protected by provenance.
+    const proposal = buildIdentityProposal(
+      itinerary,
+      profile,
+      buildTripIdentity(profile, { plannedDays }),
+    );
+    const diffs = diffIdentityProposal(itinerary, proposal);
+    const result = regenerateItinerary(itinerary, profile, proposal, defaultProposalSelection(diffs));
+
+    if (!result.ok) {
+      setSaveStatus({
+        tone: 'error',
+        message: 'These details changed elsewhere. Refresh the page and try saving again.',
+      });
+      return;
+    }
+
+    onItineraryChange(result.itinerary);
+    setDraftProfile(sanitizeTripProfile(result.itinerary.tripProfile) ?? profile);
+    setSaveStatus({
+      tone: 'success',
+      message: result.applied.length > 0
+        ? `Refreshed ${result.applied.length} generated ${result.applied.length === 1 ? 'field' : 'fields'}.`
+        : 'Your written copy was preserved.',
+    });
+  };
+
+  const handleCancel = () => {
+    setDraftProfile(savedProfile);
+    setDurationError(null);
+    setSaveStatus({ tone: 'neutral', message: 'Unsaved trip detail changes were discarded.' });
+  };
 
   /**
    * Read from the handbook as it stands, not from the edit that produced it,
@@ -127,6 +192,84 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
 
   return (
     <div className="space-y-6">
+      <div
+        className="flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between"
+        style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
+      >
+        <div>
+          <div className="eyebrow m-0">Trip details</div>
+          <p className="mt-1 text-sm" style={{ color: 'var(--ink-muted)' }}>
+            Changes stay here until you save. Saving also refreshes generated banner copy.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          {isDirty && (
+            <button type="button" className="pill-btn pill-ghost" onClick={handleCancel}>
+              Cancel
+            </button>
+          )}
+          <button type="button" className="pill-btn pill-primary" onClick={handleSave} disabled={!isDirty}>
+            <Save className="w-4 h-4" />
+            Save changes
+          </button>
+        </div>
+      </div>
+      {saveStatus && (
+        <div
+          className="flex items-start gap-3 rounded-2xl border px-4 py-3"
+          style={{
+            backgroundColor: saveStatus.tone === 'success'
+              ? 'color-mix(in srgb, #16a34a 12%, var(--surface))'
+              : saveStatus.tone === 'error'
+                ? 'color-mix(in srgb, #dc2626 12%, var(--surface))'
+                : 'color-mix(in srgb, var(--ink-muted) 10%, var(--surface))',
+            borderColor: saveStatus.tone === 'success'
+              ? 'color-mix(in srgb, #16a34a 42%, var(--border))'
+              : saveStatus.tone === 'error'
+                ? 'color-mix(in srgb, #dc2626 42%, var(--border))'
+                : 'var(--border)',
+            color: 'var(--ink)',
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          {saveStatus.tone === 'success' ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#15803d' }} aria-hidden="true" />
+          ) : (
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: saveStatus.tone === 'error' ? '#b91c1c' : 'var(--ink-muted)' }} aria-hidden="true" />
+          )}
+          <div className="min-w-0 text-xs">
+            <p className="font-semibold">
+              {saveStatus.tone === 'success' ? 'Saved successfully' : saveStatus.tone === 'error' ? 'Could not save changes' : 'Changes discarded'}
+            </p>
+            <p className="mt-0.5" style={{ color: 'var(--ink-muted)' }}>{saveStatus.message}</p>
+          </div>
+        </div>
+      )}
+      {cityStayNeedsAttention && (
+        <div
+          className="flex items-start gap-3 rounded-2xl border px-4 py-3"
+          style={{
+            backgroundColor: 'color-mix(in srgb, #d97706 13%, var(--surface))',
+            borderColor: 'color-mix(in srgb, #d97706 45%, var(--border))',
+            color: 'var(--ink)',
+          }}
+          role="status"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#b45309' }} aria-hidden="true" />
+          <div className="min-w-0 text-xs">
+            <p className="font-semibold">City split still needs attention</p>
+            <p className="mt-0.5" style={{ color: 'var(--ink-muted)' }}>
+              {cityStaySummary.remaining > 0
+                ? `${cityStaySummary.remaining} of ${cityStaySummary.dayCount} ${cityStaySummary.remaining === 1 ? 'day is' : 'days are'} still unassigned.`
+                : cityStaySummary.remaining < 0
+                  ? `${Math.abs(cityStaySummary.remaining)} ${Math.abs(cityStaySummary.remaining) === 1 ? 'day is' : 'days are'} assigned beyond the ${cityStaySummary.dayCount}-day trip.`
+                  : `${cityStaySummary.unplaced.join(' and ')} ${cityStaySummary.unplaced.length === 1 ? 'has' : 'have'} no days yet.`}
+              {' '}You can save while you decide; use <span className="font-semibold" style={{ color: 'var(--ink)' }}>Split evenly</span> or adjust the city rows before building the itinerary.
+            </p>
+          </div>
+        </div>
+      )}
       {/*
         * The same calendar the wizard uses, so changing dates afterwards is the
         * same gesture as choosing them — and the days between the two ends stay
@@ -342,7 +485,7 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         />
       </div>
 
-      <VisualDesignControls profile={profile} onChange={save} />
+      <VisualDesignControls profile={profile} onChange={updateDraft} />
 
       <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
@@ -355,7 +498,13 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
           Overview: “{identity.overviewEyebrow}” · Button: “{identity.primaryButtonLabel}” · Search: “{identity.searchPlaceholder}”
         </p>
-        <RegenerationPreview itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
+        {isDirty ? (
+          <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+            Save your trip details first, then you can review any protected copy before replacing it.
+          </p>
+        ) : (
+          <RegenerationPreview itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
+        )}
       </div>
     </div>
   );
