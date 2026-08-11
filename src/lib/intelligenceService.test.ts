@@ -36,10 +36,8 @@ const candidate = (index: number, revision = 'r1'): IntelligenceCandidate => ({
   name: `Place ${index}`,
   category: 'sight',
   clusterId: 'north',
-  deterministicScore: 60,
   matchedStyleTags: [],
   matchedInterestTags: ['food'],
-  costKnown: false,
   pairableCandidateIds: [],
 });
 

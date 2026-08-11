@@ -49,8 +49,6 @@ export interface IntelligenceCandidate {
   area?: string;
   /** The planner's own cluster. Two places pair only if these agree. */
   clusterId?: string;
-  /** The deterministic ranking. Advisory input; never overwritten. */
-  deterministicScore: number;
   /**
    * Tags already promoted to exact matches by `matchedStyleTags`.
    *
@@ -64,9 +62,6 @@ export interface IntelligenceCandidate {
   /** Evidence-backed or deterministic. Absent means no duration may be given. */
   durationRangeMinutes?: [number, number];
   indoorOutdoor?: 'indoor' | 'outdoor' | 'both';
-  /** Whether admission is actually known. Unknown forbids a budget claim. */
-  costKnown: boolean;
-  budgetFits?: boolean;
   /** Computed travel time. Absent forbids any detour claim. */
   travelMinutesFromCluster?: number;
   /** Candidates the planner considers genuinely pairable with this one. */
@@ -121,8 +116,6 @@ export type AtomRejection =
   | 'style-not-selected'
   | 'style-not-matched'
   | 'pace-mismatch'
-  | 'cost-unknown'
-  | 'budget-unknown'
   | 'not-same-cluster'
   | 'unknown-candidate-reference'
   | 'no-computed-travel'
@@ -130,7 +123,7 @@ export type AtomRejection =
   | 'indoor-unknown'
   | 'unsupported-weak-claim'
   /** The fact is known and says the opposite of what the atom claims. */
-  | 'budget-contradiction'
+  | 'budget-policy-unavailable'
   /**
    * The app owns no deterministic definition of the band this atom asserts.
    * A number existing is not a threshold.
@@ -208,15 +201,29 @@ export function atomRejection(
      * your budget". The precondition genuinely is shared; the verdict never
      * was, and grouping them is what hid that for both directions at once.
      */
+    /**
+     * Fail closed: the two sides of this claim are not comparable yet.
+     *
+     * `budgetFits` was a precomputed boolean supplied by the caller, which
+     * made a fact about the *traveller's budget* look like a fact about the
+     * *place* — so changing only the budget would have made the place appear
+     * to change. Removing it exposed that nothing else can answer the question.
+     *
+     * The traveller picks `budget | mid-range | luxury`; a place carries a
+     * numeric `priceLevel` that is absent for most OSM results. The one
+     * existing comparator, `budgetFit` in `destinationPlanner.ts`, returns a
+     * 0–1 ranking score on a gradient with no point at which it says
+     * "exceeds", and scores unknown prices at a neutral 0.75.
+     *
+     * That is correct for a ranking and wrong for a sentence. Promoting it
+     * would repeat the `STYLE_TAGS` mistake this project already shipped once:
+     * fuzzy is fine inside a number, and not fine said out loud. Re-enable
+     * when an explicit affordability policy exists — a product decision, not
+     * a type conversion.
+     */
     case 'budget-fit':
-      if (!candidate.costKnown) return 'cost-unknown';
-      if (!trip.budgetTier || candidate.budgetFits === undefined) return 'budget-unknown';
-      return candidate.budgetFits ? undefined : 'budget-contradiction';
-
     case 'budget-mismatch':
-      if (!candidate.costKnown) return 'cost-unknown';
-      if (!trip.budgetTier || candidate.budgetFits === undefined) return 'budget-unknown';
-      return candidate.budgetFits ? 'budget-contradiction' : undefined;
+      return 'budget-policy-unavailable';
 
     case 'cluster-fit': {
       const missing = needsReference();
@@ -579,7 +586,15 @@ export const MAX_INTELLIGENCE_BATCH = 15;
  */
 
 /** Bumped when the atom set, a validation rule or the rendered copy changes. */
-export const INTELLIGENCE_SCHEMA_VERSION = 'v1';
+/**
+ * Bumped whenever the material the model sees changes.
+ *
+ * v2 removed `deterministicScore`, `costKnown` and `budgetFits` from the
+ * candidate contract. Any answer produced under v1 was derived from different
+ * inputs, so it must not be served as current — the version is part of the
+ * cache key precisely so that cannot happen.
+ */
+export const INTELLIGENCE_SCHEMA_VERSION = 'v2';
 
 /**
  * The key a candidate's intelligence is filed under.
@@ -700,13 +715,10 @@ export const intelligenceSnapshot = (candidate: IntelligenceCandidate) => ({
   category: candidate.category,
   area: candidate.area,
   clusterId: candidate.clusterId,
-  deterministicScore: candidate.deterministicScore,
   matchedStyleTags: candidate.matchedStyleTags,
   matchedInterestTags: candidate.matchedInterestTags,
   durationRangeMinutes: candidate.durationRangeMinutes,
   indoorOutdoor: candidate.indoorOutdoor,
-  costKnown: candidate.costKnown,
-  budgetFits: candidate.budgetFits,
   travelMinutesFromCluster: candidate.travelMinutesFromCluster,
   pairableCandidateIds: candidate.pairableCandidateIds,
   underrepresentedCategories: candidate.underrepresentedCategories,

@@ -23,13 +23,10 @@ export interface IntelligenceRequestCandidate {
   category: string;
   area?: string;
   clusterId?: string;
-  deterministicScore: number;
   matchedStyleTags: string[];
   matchedInterestTags: string[];
   durationRangeMinutes?: [number, number];
   indoorOutdoor?: 'indoor' | 'outdoor' | 'both';
-  costKnown: boolean;
-  budgetFits?: boolean;
   travelMinutesFromCluster?: number;
   pairableCandidateIds: string[];
   underrepresentedCategories?: string[];

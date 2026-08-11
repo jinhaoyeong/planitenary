@@ -55,13 +55,10 @@ const base: IntelligenceCandidate = {
   category: 'street',
   area: 'Yanaka',
   clusterId: 'cluster-north',
-  deterministicScore: 78,
   matchedStyleTags: ['local-neighbourhoods'],
   matchedInterestTags: ['food'],
   durationRangeMinutes: [45, 90],
   indoorOutdoor: 'outdoor',
-  costKnown: true,
-  budgetFits: true,
   travelMinutesFromCluster: 8,
   pairableCandidateIds: ['place-b'],
 };
@@ -118,15 +115,16 @@ describe('an atom must rest on something the app owns', () => {
     expect(reject('pace-fit', ['fast-paced'])).toBe('pace-mismatch');
   });
 
-  /** A category is not a price — the rule `placeCost.ts` already enforces. */
-  it('refuses a budget claim when the place has no known cost', () => {
-    expect(reject('budget-fit', [], { ...base, costKnown: false })).toBe('cost-unknown');
-    expect(reject('budget-mismatch', [], { ...base, costKnown: false })).toBe('cost-unknown');
-  });
-
-  it('refuses a budget claim when the trip has no budget tier', () => {
-    expect(atomRejection({ type: 'budget-fit', references: [] }, { ...trip, budgetTier: undefined }, base, pool))
-      .toBe('budget-unknown');
+  /**
+   * Fails closed because the two sides are not comparable. The traveller picks
+   * a tier; a place carries a numeric band that is absent for most results,
+   * and the only existing comparator is a ranking gradient with no "exceeds"
+   * point. Correct for a score, wrong for a sentence.
+   */
+  it.each(['budget-fit', 'budget-mismatch'])('refuses %s while no affordability policy exists', (type) => {
+    expect(reject(type)).toBe('budget-policy-unavailable');
+    expect(atomRejection({ type, references: [] }, { ...trip, budgetTier: 'luxury' }, base, pool))
+      .toBe('budget-policy-unavailable');
   });
 
   /** Geography is the planner's arithmetic, never inferred from place names. */
@@ -324,10 +322,15 @@ describe('validating a batch', () => {
    * The deterministic ranking is the planner's source of truth. The model's
    * score is advisory and sits beside it; nothing here may overwrite it.
    */
-  it('never alters the deterministic score', () => {
-    const before = base.deterministicScore;
-    validate(response({ personalFitScore: 5 }));
-    expect(base.deterministicScore).toBe(before);
+  /**
+   * The model no longer sees the ranking number at all. It could otherwise
+   * let it steer which atoms it chose, and no validator rule can check an
+   * influence that leaves no trace in the output.
+   */
+  it('does not expose the deterministic ranking to the model', () => {
+    const body = intelligenceRequestBody(trip, [base]);
+    expect(JSON.stringify(body)).not.toContain('deterministicScore');
+    expect(Object.keys(body.candidates[0])).not.toContain('deterministicScore');
   });
 });
 
@@ -470,13 +473,10 @@ describe('an atom may not imply more than it proves', () => {
     }
   });
 
-  /** Where the price sits, not whether it is worth paying. */
-  it('never turns budget-fit into a judgement about value', () => {
-    const copy = render([{ type: 'budget-fit' }]);
-    expect(copy).toContain('budget');
-    for (const overreach of ['good value', 'worth', 'bargain', 'cheap']) {
-      expect(copy, overreach).not.toContain(overreach);
-    }
+  /** With budget failing closed there is no route to the sentence at all. */
+  it('cannot render a budget claim while affordability is undefined', () => {
+    expect(render([{ type: 'budget-fit' }])).toBe('');
+    expect(render([{ type: 'budget-mismatch' }])).toBe('');
   });
 
   /**
@@ -514,8 +514,6 @@ describe('an atom may not imply more than it proves', () => {
       { type: 'pace-fit', references: ['relaxed'] },
       { type: 'cluster-fit', references: ['place-b'] },
       { type: 'low-detour' },
-      { type: 'short-stop' },
-      { type: 'budget-fit' },
     ]);
 
     for (const worldFact of [
@@ -737,6 +735,18 @@ describe('the cache key', () => {
     expect(key()).toContain(INTELLIGENCE_SCHEMA_VERSION);
   });
 
+  /**
+   * Pinned to a literal rather than compared against the constant, which would
+   * be tautological. Changing what the model sees must therefore change this
+   * test too — the version is part of the cache key precisely so answers
+   * derived from a different contract cannot be served as current.
+   *
+   * v2: deterministicScore, costKnown and budgetFits left the contract.
+   */
+  it('has been bumped for the current material contract', () => {
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v2');
+  });
+
   /** One candidate changing must not disturb its neighbours. */
   it('isolates candidates from one another', () => {
     expect(key({ candidateId: 'place-b' })).not.toBe(key());
@@ -758,37 +768,257 @@ describe('the cache key', () => {
  * Every directional atom therefore needs three cases: the fact supports it,
  * the fact contradicts it, the fact is unknown.
  */
-describe('budget claims must match the fact, not merely have one', () => {
-  const priced = (budgetFits: boolean | undefined) => ({ ...base, costKnown: true, budgetFits });
+/**
+ * The polarity rule that Commit 1 established still stands for every atom
+ * that has a truth condition; budget no longer has one, so its truth-table
+ * tests moved out with `budgetFits` rather than being weakened to match.
+ * What replaces them is the ownership suite below.
+ */
 
-  it('accepts budget-fit only when the place is actually within budget', () => {
-    expect(reject('budget-fit', [], priced(true))).toBeUndefined();
-    expect(reject('budget-fit', [], priced(false))).toBe('budget-contradiction');
-  });
-
-  it('accepts budget-mismatch only when the place is actually over budget', () => {
-    expect(reject('budget-mismatch', [], priced(false))).toBeUndefined();
-    expect(reject('budget-mismatch', [], priced(true))).toBe('budget-contradiction');
-  });
-
-  it('refuses both when either half is unknown', () => {
-    for (const type of ['budget-fit', 'budget-mismatch']) {
-      expect(reject(type, [], { ...base, costKnown: false })).toBe('cost-unknown');
-      expect(reject(type, [], priced(undefined))).toBe('budget-unknown');
-      expect(atomRejection({ type, references: [] }, { ...trip, budgetTier: undefined }, priced(true), pool))
-        .toBe('budget-unknown');
+describe('candidate material describes the place, not the traveller', () => {
+  it('carries no precomputed relationship to the traveller', () => {
+    const sent = JSON.stringify(intelligenceRequestBody(trip, [base]).candidates[0]);
+    for (const leaked of ['budgetFits', 'costKnown', 'deterministicScore']) {
+      expect(sent, leaked).not.toContain(leaked);
     }
   });
 
-  /** The two can never both stand for the same place. */
-  it('never accepts both directions at once', () => {
-    for (const fits of [true, false]) {
-      const accepted = ['budget-fit', 'budget-mismatch']
-        .filter((type) => reject(type, [], priced(fits)) === undefined);
-      expect(accepted).toHaveLength(1);
+  /** The same place, two travellers: the candidate half is byte-identical. */
+  it('is unchanged when only the traveller budget differs', () => {
+    const forBudget = (budgetTier: string) => JSON.stringify(
+      intelligenceRequestBody({ ...trip, budgetTier }, [base]).candidates,
+    );
+    expect(forBudget('budget')).toBe(forBudget('luxury'));
+  });
+
+  it('changes when the place itself changes', () => {
+    const a = JSON.stringify(intelligenceRequestBody(trip, [base]).candidates);
+    const b = JSON.stringify(intelligenceRequestBody(trip, [{ ...base, indoorOutdoor: 'indoor' }]).candidates);
+    expect(a).not.toBe(b);
+  });
+
+  /** No prompt wording may assume a field the contract no longer sends. */
+  it('mentions no ranking score in the instruction it sends', () => {
+    const instruction = intelligenceRequestBody(trip, [base]).instruction.toLowerCase();
+    // `personalFitScore` is an output field the model returns, so "score"
+    // alone is not the signal — what must be absent is any reference to the
+    // ranking number it no longer receives.
+    for (const stale of ['deterministicscore', 'ranking', 'rank ']) {
+      expect(instruction, stale).not.toContain(stale);
     }
   });
 });
+
+describe('batching candidates into requests', () => {
+  const many = (count: number) => Array.from({ length: count }, (_, index) => ({
+    ...base, candidateId: `place-${index}`, candidateRevision: `rev-${index}`,
+  }));
+
+  it('fits fifteen candidates into one request when they are small enough', () => {
+    const batches = buildIntelligenceBatches(many(15), 30_000);
+    expect(batches).toHaveLength(1);
+    expect(batches[0]).toHaveLength(15);
+  });
+
+  /**
+   * The input bound is authoritative over the count, because it is the one
+   * that maps to tokens and therefore to money. Ten candidates carrying long
+   * tag lists is a different request from ten carrying short ones, and a count
+   * alone cannot tell them apart.
+   */
+  it('splits deterministically when the serialised bound is reached first', () => {
+    const size = JSON.stringify(base).length;
+    const batches = buildIntelligenceBatches(many(15), size * 4);
+    expect(batches.length).toBeGreaterThan(1);
+    // Deterministic: the same input must always split the same way, or a cache
+    // key computed from a batch would be unstable.
+    expect(buildIntelligenceBatches(many(15), size * 4).map((b) => b.length))
+      .toEqual(batches.map((b) => b.length));
+    expect(batches.flat()).toHaveLength(15);
+  });
+
+  it('never exceeds the count ceiling', () => {
+    for (const batch of buildIntelligenceBatches(many(40), 1_000_000)) {
+      expect(batch.length).toBeLessThanOrEqual(MAX_INTELLIGENCE_BATCH);
+    }
+  });
+
+  /**
+   * A candidate too large to fit alone still gets its own batch. Dropping it
+   * would make that place permanently invisible to the feature with nothing
+   * recording why.
+   */
+  it('emits an oversized candidate alone rather than dropping it', () => {
+    const batches = buildIntelligenceBatches(many(3), 1);
+    expect(batches).toHaveLength(3);
+    expect(batches.flat()).toHaveLength(3);
+  });
+
+  it('sends only snapshot fields, never the whole candidate object', () => {
+    const body = intelligenceRequestBody(trip, [base]);
+    const serialised = JSON.stringify(body);
+    expect(serialised).toContain('matchedStyleTags');
+    // The instruction forbids prose; there is no field for a sentence at all.
+    expect(Object.keys(body.candidates[0])).not.toContain('description');
+  });
+});
+
+describe('one batch is one metered request', () => {
+  const reply = (candidates: Record<string, unknown>) => ({ ok: true as const, result: { candidates } });
+
+  const goodAnswer = {
+    'place-a': {
+      profileRevision: 'profile-v1',
+      candidateRevision: 'cand-a-v1',
+      reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+      cautionAtoms: [],
+    },
+    'place-b': {
+      profileRevision: 'profile-v1',
+      candidateRevision: 'cand-b-v1',
+      reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+      cautionAtoms: [],
+    },
+  };
+
+  it('asks once for a whole batch', async () => {
+    const callMetered = vi.fn().mockResolvedValue(reply(goodAnswer));
+    const outcomes = await requestCandidateIntelligence(trip, [base, neighbour], callMetered);
+
+    expect(callMetered).toHaveBeenCalledTimes(1);
+    expect(outcomes.get('place-a')).toMatchObject({ kind: 'answered', cacheable: true });
+    expect(outcomes.get('place-b')).toMatchObject({ kind: 'answered', cacheable: true });
+  });
+
+  /**
+   * There is no fetch and no model client in this module. A feature able to
+   * call the provider directly would inherit none of the allowlist, ceilings,
+   * quota, spend guard or ledger — and would work perfectly while doing so.
+   */
+  it('cannot reach a provider except through the injected metered call', async () => {
+    const source = intelligenceModuleSource;
+    expect(source).not.toContain('fetch(');
+    expect(source).not.toContain('api.openai.com');
+    expect(source).not.toContain('generativelanguage');
+  });
+
+  it('keeps valid neighbours when one candidate in the batch is invalid', async () => {
+    const callMetered = vi.fn().mockResolvedValue(reply({
+      ...goodAnswer,
+      'place-b': {
+        profileRevision: 'profile-v1',
+        candidateRevision: 'cand-b-v1',
+        reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
+        cautionAtoms: [],
+      },
+    }));
+    const outcomes = await requestCandidateIntelligence(trip, [base, neighbour], callMetered);
+
+    expect((outcomes.get('place-a') as { intelligence: unknown }).intelligence).not.toBeNull();
+    // Answered, but nothing survived — a real finding, and cacheable.
+    expect(outcomes.get('place-b')).toMatchObject({ kind: 'answered', intelligence: null, cacheable: true });
+  });
+});
+
+/**
+ * The distinction this whole outcome type exists to protect.
+ *
+ * "The model ran and nothing survived" is knowledge worth storing. "The model
+ * never ran" is not. Caching the second as the first would let one budget
+ * ceiling or one timeout permanently mark a card as having no personalisation
+ * — and it would look identical to a genuine empty answer forever after.
+ */
+describe('a non-answer is never cached as an answer', () => {
+  it.each(['budget-reached', 'quota-exhausted', 'spend-unknown', 'accounting-failed', 'provider-failed', 'model-not-approved'])(
+    'refuses to cache when the call was refused with %s',
+    async (refusal) => {
+      const callMetered = vi.fn().mockResolvedValue({ ok: false as const, refusal });
+      const outcomes = await requestCandidateIntelligence(trip, [base, neighbour], callMetered);
+
+      for (const id of ['place-a', 'place-b']) {
+        expect(outcomes.get(id)).toMatchObject({ kind: 'not-run', cacheable: false });
+      }
+    },
+  );
+
+  it('does cache the genuine empty answer', async () => {
+    const callMetered = vi.fn().mockResolvedValue({ ok: true as const, result: { candidates: {} } });
+    const outcomes = await requestCandidateIntelligence(trip, [base], callMetered);
+    expect(outcomes.get('place-a')).toMatchObject({ kind: 'answered', intelligence: null, cacheable: true });
+  });
+
+  it('spends nothing when there is nothing to ask about', async () => {
+    const callMetered = vi.fn();
+    expect((await requestCandidateIntelligence(trip, [], callMetered)).size).toBe(0);
+    expect(callMetered).not.toHaveBeenCalled();
+  });
+});
+
+describe('the cache key', () => {
+  const key = (over: Record<string, string> = {}) => intelligenceCacheKey({
+    candidateId: 'place-a',
+    candidateRevision: 'cand-a-v1',
+    profileRevision: 'profile-v1',
+    plannerContextRevision: 'ctx-1',
+    model: 'gpt-5-nano',
+    ...over,
+  });
+
+  it('is stable for unchanged material facts', () => {
+    expect(key()).toBe(key());
+  });
+
+  it.each([
+    ['candidateRevision', 'cand-a-v2'],
+    ['profileRevision', 'profile-v2'],
+    ['plannerContextRevision', 'ctx-2'],
+    ['model', 'gpt-5-nano-2025-08-07'],
+  ])('changes when %s changes', (field, value) => {
+    expect(key({ [field]: value })).not.toBe(key());
+  });
+
+  /**
+   * Part of the key, not merely stored beside it. A rule or wording change has
+   * to invalidate the answers it produced — including the wrongly-empty ones —
+   * or a fix cannot reach anybody until the TTL happens to lapse.
+   */
+  it('carries the schema version', () => {
+    expect(key()).toContain(INTELLIGENCE_SCHEMA_VERSION);
+  });
+
+  /**
+   * Pinned to a literal rather than compared against the constant, which would
+   * be tautological. Changing what the model sees must therefore change this
+   * test too — the version is part of the cache key precisely so answers
+   * derived from a different contract cannot be served as current.
+   *
+   * v2: deterministicScore, costKnown and budgetFits left the contract.
+   */
+  it('has been bumped for the current material contract', () => {
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v2');
+  });
+
+  /** One candidate changing must not disturb its neighbours. */
+  it('isolates candidates from one another', () => {
+    expect(key({ candidateId: 'place-b' })).not.toBe(key());
+    const before = key();
+    key({ candidateId: 'place-b', candidateRevision: 'cand-b-v9' });
+    expect(key()).toBe(before);
+  });
+});
+
+/**
+ * A known value is not a supporting value.
+ *
+ * The whole suite previously asserted only the *rejection* paths for these
+ * atoms — cost unknown, budget unknown — and never that a true claim requires
+ * a fact pointing the right way. So a place the app knew to be over budget
+ * could carry a `budget-fit` atom and render "its published price sits inside
+ * your budget", and every test stayed green.
+ *
+ * Every directional atom therefore needs three cases: the fact supports it,
+ * the fact contradicts it, the fact is unknown.
+ */
 
 /**
  * The same check one layer later. A validator can be right while the renderer
@@ -811,15 +1041,16 @@ describe('contradictory copy is unreachable', () => {
     return validated ? renderIntelligenceCopy(validated, candidate, pool).join(' ').toLowerCase() : '';
   };
 
-  it('cannot say a place is within budget when the app says it is not', () => {
-    expect(copyFor('budget-fit', true)).toContain('inside your budget');
-    // The atom is refused, so there is no sentence at all.
-    expect(copyFor('budget-fit', false)).not.toContain('inside your budget');
-  });
-
-  it('cannot say a place is over budget when the app says it fits', () => {
-    expect(copyFor('budget-mismatch', false)).toContain('above the budget');
-    expect(copyFor('budget-mismatch', true)).not.toContain('above the budget');
+  /**
+   * Neither budget sentence is reachable now, in either direction. The atom
+   * that could have produced them fails closed, so the copy has no route to
+   * the screen regardless of what the model asks for.
+   */
+  it('cannot say anything about budget while affordability is undefined', () => {
+    for (const fits of [true, false]) {
+      expect(copyFor('budget-fit', fits)).not.toContain('budget');
+      expect(copyFor('budget-mismatch', fits)).not.toContain('budget');
+    }
   });
 
   /**
