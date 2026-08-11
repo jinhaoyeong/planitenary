@@ -44,7 +44,6 @@ export interface IntelligenceTripContext {
    */
   tripMaterialRevision: string;
   /** Exactly what the traveller selected. Never an expanded or fuzzy set. */
-  interests: string[];
   styles: string[];
   pace: string;
   budgetTier?: string;
@@ -83,7 +82,6 @@ export interface IntelligenceCandidate {
    * traveller's own input, and this project has already shipped that bug once.
    */
   matchedStyleTags: string[];
-  matchedInterestTags: string[];
   /** Evidence-backed or deterministic. Absent means no duration may be given. */
   durationRangeMinutes?: [number, number];
   indoorOutdoor?: 'indoor' | 'outdoor' | 'both';
@@ -101,13 +99,13 @@ export interface IntelligenceCandidate {
 }
 
 export const REASON_ATOM_TYPES = [
-  'interest-match', 'style-match', 'pace-fit', 'budget-fit', 'cluster-fit',
+  'style-match', 'pace-fit', 'budget-fit', 'cluster-fit',
   'low-detour', 'short-stop', 'indoor-option', 'portfolio-variety',
-  'weak-profile-match',
+  'weak-style-match',
 ] as const;
 
 export const CAUTION_ATOM_TYPES = [
-  'weak-interest-match', 'detour', 'high-walking', 'duration-pressure',
+  'weak-style-match', 'detour', 'high-walking', 'duration-pressure',
   'portfolio-duplication', 'budget-mismatch',
 ] as const;
 
@@ -116,7 +114,7 @@ export type CautionAtomType = typeof CAUTION_ATOM_TYPES[number];
 
 export interface Atom {
   type: string;
-  /** What the atom rests on: an interest, a style, a candidate id, a cluster. */
+  /** What the atom rests on: a style, a candidate id, a cluster, or a pace. */
   references: string[];
 }
 
@@ -137,8 +135,6 @@ export interface ValidatedIntelligence {
 
 export type AtomRejection =
   | 'unknown-atom-type'
-  | 'interest-not-selected'
-  | 'interest-not-matched'
   | 'style-not-selected'
   | 'style-not-matched'
   | 'pace-mismatch'
@@ -148,6 +144,7 @@ export type AtomRejection =
   | 'no-known-duration'
   | 'indoor-unknown'
   | 'unsupported-weak-claim'
+  | 'no-styles-selected'
   /** The fact is known and says the opposite of what the atom claims. */
   | 'budget-policy-unavailable'
   /**
@@ -191,21 +188,6 @@ export function atomRejection(
   const needsReference = () => (reference ? undefined : 'missing-reference' as const);
 
   switch (atom.type) {
-    case 'interest-match': {
-      const missing = needsReference();
-      if (missing) return missing;
-      // The traveller's literal selection, not an expansion of it.
-      if (!trip.interests.includes(reference)) return 'interest-not-selected';
-      /**
-       * And the place must actually carry it. This half was missing while
-       * `style-match` beside it had always required both, so the rendered
-       * sentence — "You asked for food, and this is tagged for it" — asserted
-       * a tag nothing had checked. Half of it was verified and the half
-       * claiming something about the *place* was not.
-       */
-      return candidate.matchedInterestTags.includes(reference) ? undefined : 'interest-not-matched';
-    }
-
     case 'style-match': {
       const missing = needsReference();
       if (missing) return missing;
@@ -215,15 +197,22 @@ export function atomRejection(
       return candidate.matchedStyleTags.includes(reference) ? undefined : 'style-not-matched';
     }
 
-    case 'weak-interest-match':
-    case 'weak-profile-match':
-      /**
-       * An honest weak match still has to be true. The claim is only supported
-       * when the candidate really does match none of the traveller's stated
-       * interests — otherwise it is a different kind of false statement about
-       * their input, and an unearned apology reads as badly as unearned praise.
-       */
-      return candidate.matchedInterestTags.length === 0 ? undefined : 'unsupported-weak-claim';
+    /**
+     * Narrow on purpose: this says a place misses the styles that were chosen,
+     * not that it suits the trip badly.
+     *
+     * The atom it replaces claimed the second. A place matching no style may
+     * still fit the pace, work indoors on a wet afternoon, or sit in the
+     * cluster the traveller is already visiting — "weak match for your trip"
+     * asserted a verdict over dimensions this evidence never touched.
+     *
+     * It also requires that styles were actually selected. With none chosen
+     * there is nothing to miss, and reporting a mismatch would be a claim
+     * about an input the traveller never gave.
+     */
+    case 'weak-style-match':
+      if (trip.styles.length === 0) return 'no-styles-selected';
+      return candidate.matchedStyleTags.length === 0 ? undefined : 'unsupported-weak-claim';
 
     case 'pace-fit':
       return needsReference() || (reference === trip.pace ? undefined : 'pace-mismatch');
@@ -523,7 +512,7 @@ export function validateCandidateIntelligence(
  * - `budget-fit`       → price sits inside the budget. Nothing about value.
  * - `indoor-option`    → it is indoors. Never "good for rain", which asserts
  *                        weather this layer was never given.
- * - `interest-match`   → the traveller asked for this tag and it carries it.
+ * - `style-match`       → the traveller asked for this style and it carries it.
  *
  * Tested against the *rendered prose*, not only against atom acceptance —
  * because this bug lived entirely downstream of a validator that was working.
@@ -539,9 +528,6 @@ export function renderIntelligenceCopy(
   for (const reason of intelligence.reasons) {
     const reference = reason.references[0];
     switch (reason.type) {
-      case 'interest-match':
-        lines.push(`You asked for ${reference}, and this is tagged for it.`);
-        break;
       case 'style-match':
         lines.push(`It matches the ${reference} you chose for this trip.`);
         break;
@@ -574,21 +560,19 @@ export function renderIntelligenceCopy(
       case 'portfolio-variety':
         lines.push('It adds a kind of place your list is currently short of.');
         break;
-      case 'weak-profile-match':
-        /**
-         * The honest version of the line this feature exists to replace.
-         * "Nothing stands out on paper" told the traveller nothing they could
-         * act on; naming *why* it is weak and why it was kept anyway does.
-         */
-        lines.push('A weaker match for the interests you selected.');
+      case 'weak-style-match':
+        // Names the dimension it actually measured. "A weaker match for your
+        // trip" would generalise style evidence into a verdict about
+        // everything else.
+        lines.push('This does not match the styles you selected.');
         break;
     }
   }
 
   for (const caution of intelligence.cautions) {
     switch (caution.type) {
-      case 'weak-interest-match':
-        lines.push('It does not match the interests you named, so treat it as optional.');
+      case 'weak-style-match':
+        lines.push('It matches none of the styles you chose, so it may be more optional.');
         break;
       case 'detour':
         lines.push(`It is out of the way — about ${candidate.travelMinutesFromCluster} minutes of travel to reach.`);
@@ -644,7 +628,7 @@ export const MAX_INTELLIGENCE_BATCH = 15;
  * served as current; the version is part of the cache key precisely so that
  * cannot happen.
  */
-export const INTELLIGENCE_SCHEMA_VERSION = 'v4';
+export const INTELLIGENCE_SCHEMA_VERSION = 'v5';
 
 /**
  * The key a candidate's intelligence is filed under.
@@ -753,7 +737,7 @@ export const INTELLIGENCE_INSTRUCTION = [
   'profile would genuinely find useful, ordered by how much they distinguish this place.',
   'Return ONLY atoms from the supplied types. Do not write sentences or descriptions.',
   'Every atom must reference a fact present in the candidate or trip snapshot:',
-  'an interest or style the traveller literally selected, a cluster the planner computed,',
+  'a style the traveller literally selected, a cluster the planner computed,',
   'a duration or travel figure supplied. Omit any atom you cannot support that way.',
   'Never state opening hours, prices, queues, crowds, weather, ratings or best times —',
   'there is no atom for them and they will be discarded.',

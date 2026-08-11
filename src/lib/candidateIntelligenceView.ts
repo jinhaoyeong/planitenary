@@ -7,8 +7,8 @@
  * anything further belongs behind Details. An honest card nobody can act on
  * because the buttons were pushed below a paragraph is not an improvement.
  *
- * Atom names never reach the screen. `interest-match(food)` is an internal
- * identifier; the traveller reads "Food".
+ * Atom names never reach the screen. `style-match(local-neighbourhoods)` is an
+ * internal identifier; the traveller reads "Local neighbourhoods".
  */
 
 import type {
@@ -63,7 +63,6 @@ const humanise = (value: string): string => {
  */
 export function matchLabel(type: string, reference?: string): string | undefined {
   switch (type) {
-    case 'interest-match':
     case 'style-match':
       return reference ? humanise(reference) : undefined;
     case 'pace-fit':
@@ -137,7 +136,12 @@ export function buildIntelligenceView(
  */
 function lineIsAbout(line: string, type: string, reference?: string): boolean {
   const lower = line.toLowerCase();
-  if (reference && lower.includes(reference.toLowerCase().replace(/[-_]+/g, ' '))) return true;
+  if (reference) {
+    const rawReference = reference.toLowerCase();
+    const normalisedLine = lower.replace(/[-_]+/g, ' ');
+    const normalisedReference = rawReference.replace(/[-_]+/g, ' ');
+    if (lower.includes(rawReference) || normalisedLine.includes(normalisedReference)) return true;
+  }
   if (type === 'short-stop') return lower.includes('shorter stop');
   if (type === 'indoor-option') return lower.includes('indoor option');
   if (type === 'budget-fit') return lower.includes('inside your budget');

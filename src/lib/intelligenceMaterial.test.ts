@@ -35,8 +35,7 @@ const candidate = (over: Partial<IntelligenceCandidate> = {}): IntelligenceCandi
   category: 'street',
   area: 'Yanaka',
   clusterId: 'north',
-  matchedStyleTags: ['local-neighbourhoods'],
-  matchedInterestTags: ['food'],
+  matchedStyleTags: ['culture', 'local-neighbourhoods'],
   durationRangeMinutes: [45, 90],
   indoorOutdoor: 'outdoor',
   travelMinutesFromCluster: 8,
@@ -47,7 +46,6 @@ const candidate = (over: Partial<IntelligenceCandidate> = {}): IntelligenceCandi
 
 const trip = (over: Partial<IntelligenceTripContext> = {}): IntelligenceTripContext => ({
   tripMaterialRevision: 'p1',
-  interests: ['food', 'nightlife'],
   styles: ['local-neighbourhoods'],
   pace: 'relaxed',
   budgetTier: 'mid-range',
@@ -63,8 +61,8 @@ const tripRev = (over: Partial<IntelligenceTripContext> = {}) =>
 
 describe('the place', () => {
   it.each([
-    ['tag order', { matchedInterestTags: ['food'], matchedStyleTags: ['local-neighbourhoods'] }],
-    ['duplicate tags', { matchedInterestTags: ['food', 'food'] }],
+    ['tag order', { matchedStyleTags: ['local-neighbourhoods', 'culture'] }],
+    ['duplicate tags', { matchedStyleTags: ['culture', 'local-neighbourhoods', 'culture'] }],
     ['a corrected display name', { name: 'Yanaka Ginza Shopping Street' }],
     ['a different area label', { area: 'Nezu' }],
     ['a recategorisation', { category: 'market' }],
@@ -75,7 +73,6 @@ describe('the place', () => {
   });
 
   it.each([
-    ['its interest tags', { matchedInterestTags: ['food', 'shopping'] }],
     ['its style tags', { matchedStyleTags: [] }],
     ['whether it is indoors', { indoorOutdoor: 'indoor' as const }],
     ['how long a visit takes', { durationRangeMinutes: [30, 60] as [number, number] }],
@@ -130,8 +127,6 @@ describe('the place in relation to the trip', () => {
 
 describe('the traveller', () => {
   it.each([
-    ['interest order', { interests: ['nightlife', 'food'] }],
-    ['duplicate interests', { interests: ['food', 'nightlife', 'food'] }],
     ['their budget tier', { budgetTier: 'luxury' }],
     ['an unrelated profile field', { tripMaterialRevision: 'p2' }],
   ])('is unchanged by %s', (_label, over) => {
@@ -139,7 +134,6 @@ describe('the traveller', () => {
   });
 
   it.each([
-    ['their interests', { interests: ['food'] }],
     ['their styles', { styles: ['culture'] }],
     ['their pace', { pace: 'fast-paced' }],
   ])('changes when %s changes', (_label, over) => {
@@ -174,14 +168,15 @@ describe('what actually reaches the provider', () => {
   it.each([
     'name', 'area', 'category', 'deterministicScore', 'travelMinutesFromCluster',
     'underrepresentedCategories', 'costKnown', 'budgetFits', 'budgetTier',
+    'matchedInterestTags', 'interests',
   ])('carries no %s', (field) => {
     expect(serialised()).not.toContain(field);
   });
 
   it('carries every field that does have a live consumer', () => {
-    for (const field of ['matchedStyleTags', 'matchedInterestTags', 'indoorOutdoor',
+    for (const field of ['matchedStyleTags', 'indoorOutdoor',
       'durationRangeMinutes', 'clusterId', 'pairableCandidateIds',
-      'interests', 'styles', 'pace']) {
+      'styles', 'pace']) {
       expect(serialised(), field).toContain(field);
     }
   });

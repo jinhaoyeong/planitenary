@@ -27,15 +27,15 @@ const intelligence = (over: Partial<ValidatedIntelligence> = {}): ValidatedIntel
 });
 
 describe('match labels', () => {
-  it('reads an interest or style back in the traveller own words', () => {
-    expect(matchLabel('interest-match', 'food')).toBe('Food');
+  it('reads a style back in the traveller own words', () => {
+    expect(matchLabel('style-match', 'food')).toBe('Food');
     expect(matchLabel('style-match', 'local-neighbourhoods')).toBe('Local neighbourhoods');
     expect(matchLabel('pace-fit', 'relaxed')).toBe('Relaxed pace');
   });
 
   /** Internal identifiers must never reach a screen. */
   it('never exposes an atom name', () => {
-    for (const type of ['interest-match', 'style-match', 'pace-fit', 'short-stop', 'indoor-option']) {
+    for (const type of ['style-match', 'pace-fit', 'short-stop', 'indoor-option']) {
       const label = matchLabel(type, 'food');
       expect(label).toBeDefined();
       expect(label).not.toContain('-match');
@@ -50,18 +50,19 @@ describe('match labels', () => {
   it('gives no chip to atoms that need a sentence to make sense', () => {
     expect(matchLabel('cluster-fit', 'place-b')).toBeUndefined();
     expect(matchLabel('low-detour')).toBeUndefined();
-    expect(matchLabel('weak-profile-match')).toBeUndefined();
+    expect(matchLabel('weak-style-match')).toBeUndefined();
   });
 
   it('gives no chip to an atom whose reference is missing', () => {
-    expect(matchLabel('interest-match', undefined)).toBeUndefined();
+    expect(matchLabel('style-match', undefined)).toBeUndefined();
   });
 });
 
 describe('what reaches the main card face', () => {
   const fiveMatches = intelligence({
     reasons: [
-      { type: 'interest-match', references: ['food'] },
+      { type: 'budget-fit', references: [] },
+      { type: 'style-match', references: ['local-neighbourhoods'] },
       { type: 'style-match', references: ['local-neighbourhoods'] },
       { type: 'pace-fit', references: ['relaxed'] },
       { type: 'short-stop', references: [] },
@@ -76,7 +77,7 @@ describe('what reaches the main card face', () => {
   it('caps the visible chips and keeps the rest for Details', () => {
     const view = buildIntelligenceView(fiveMatches, [], []);
     expect(view.matches).toHaveLength(MAX_VISIBLE_MATCHES);
-    expect(view.matches).toEqual(['Food', 'Local neighbourhoods', 'Relaxed pace']);
+    expect(view.matches).toEqual(['In budget', 'Local neighbourhoods', 'Relaxed pace']);
     // Nothing is lost, only moved.
     expect(view.overflowMatches).toEqual(['Short stop', 'Indoor option']);
   });
@@ -85,7 +86,7 @@ describe('what reaches the main card face', () => {
     const view = buildIntelligenceView(intelligence({
       reasons: [
         { type: 'pace-fit', references: ['relaxed'] },
-        { type: 'interest-match', references: ['food'] },
+        { type: 'style-match', references: ['local-neighbourhoods'] },
       ],
     }), [], []);
     expect(view.matches[0]).toBe('Relaxed pace');
@@ -94,11 +95,11 @@ describe('what reaches the main card face', () => {
   it('does not repeat an identical label', () => {
     const view = buildIntelligenceView(intelligence({
       reasons: [
-        { type: 'interest-match', references: ['food'] },
-        { type: 'interest-match', references: ['food'] },
+        { type: 'style-match', references: ['local-neighbourhoods'] },
+        { type: 'style-match', references: ['local-neighbourhoods'] },
       ],
     }), [], []);
-    expect(view.matches).toEqual(['Food']);
+    expect(view.matches).toEqual(['Local neighbourhoods']);
   });
 
   it('names the fit in words, never a score', () => {
@@ -135,18 +136,18 @@ describe('the same fact is never shown twice', () => {
     const view = buildIntelligenceView(
       intelligence({
         reasons: [
-          { type: 'interest-match', references: ['food'] },
+          { type: 'style-match', references: ['local-neighbourhoods'] },
           { type: 'cluster-fit', references: ['place-b'] },
         ],
       }),
       [
-        'You asked for food, and this is tagged for it.',
+        'It matches the local-neighbourhoods you chose for this trip.',
         'It sits in the same planning area as Nezu Shrine.',
       ],
       [],
     );
 
-    expect(view.matches).toEqual(['Food']);
+    expect(view.matches).toEqual(['Local neighbourhoods']);
     // The chip covers the first line; the second has no chip and survives.
     expect(view.explanation).toEqual(['It sits in the same planning area as Nezu Shrine.']);
   });

@@ -35,14 +35,12 @@ import type {
  *
  * Four fields, each with a live consumer:
  *
- * - `matchedStyleTags`    → `style-match`
- * - `matchedInterestTags` → `interest-match`, `weak-profile-match`
+ * - `matchedStyleTags`    → `style-match`, `weak-style-match`
  * - `indoorOutdoor`       → `indoor-option`
  * - `durationRangeMinutes` → see the note below
  */
 export interface CandidateMaterial {
   matchedStyleTags: string[];
-  matchedInterestTags: string[];
   indoorOutdoor: 'indoor' | 'outdoor' | 'both' | null;
   /**
    * **Kept deliberately, and not for the reason it looks like.**
@@ -84,7 +82,6 @@ export interface PlannerMaterial {
  * regenerated intelligence that could not possibly differ.
  */
 export interface TripMaterial {
-  interests: string[];
   styles: string[];
   pace: string;
 }
@@ -119,7 +116,6 @@ function canonicalJson(value: unknown): string {
 export function toCandidateIntelligenceMaterial(candidate: IntelligenceCandidate): CandidateMaterial {
   return {
     matchedStyleTags: canonicalSet(candidate.matchedStyleTags),
-    matchedInterestTags: canonicalSet(candidate.matchedInterestTags),
     indoorOutdoor: candidate.indoorOutdoor ?? null,
     durationRangeMinutes: candidate.durationRangeMinutes
       ? [candidate.durationRangeMinutes[0], candidate.durationRangeMinutes[1]]
@@ -139,7 +135,6 @@ export function toPlannerIntelligenceMaterial(candidate: IntelligenceCandidate):
 /** The traveller, as the model may see them. */
 export function toCandidateIntelligenceTripMaterial(trip: IntelligenceTripContext): TripMaterial {
   return {
-    interests: canonicalSet(trip.interests),
     styles: canonicalSet(trip.styles),
     pace: trip.pace,
   };

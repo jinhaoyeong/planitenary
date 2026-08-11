@@ -42,7 +42,6 @@ const intelligenceModuleSource = readFileSync(
 
 const trip: IntelligenceTripContext = {
   tripMaterialRevision: 'profile-v1',
-  interests: ['food', 'nightlife'],
   styles: ['local-neighbourhoods'],
   pace: 'relaxed',
   budgetTier: 'mid',
@@ -57,7 +56,6 @@ const base: IntelligenceCandidate = {
   area: 'Yanaka',
   clusterId: 'cluster-north',
   matchedStyleTags: ['local-neighbourhoods'],
-  matchedInterestTags: ['food'],
   durationRangeMinutes: [45, 90],
   indoorOutdoor: 'outdoor',
   travelMinutesFromCluster: 8,
@@ -80,7 +78,6 @@ const stranger: IntelligenceCandidate = {
   name: 'Bank of Japan Currency Museum',
   clusterId: 'cluster-south',
   matchedStyleTags: [],
-  matchedInterestTags: [],
   pairableCandidateIds: [],
 };
 
@@ -89,29 +86,8 @@ const reject = (type: string, references: string[] = [], candidate = base) =>
   atomRejection({ type, references }, trip, candidate, pool);
 
 describe('an atom must rest on something the app owns', () => {
-  it('accepts an interest the traveller actually selected', () => {
-    expect(reject('interest-match', ['food'])).toBeUndefined();
-  });
-
-  /** The claim is about their own input, so getting it wrong is not a nuance. */
-  it('refuses an interest the traveller never selected', () => {
-    expect(reject('interest-match', ['museums'])).toBe('interest-not-selected');
-  });
-
-  /**
-   * Both halves, like `style-match` beside it. The rendered sentence is "You
-   * asked for food, and this is tagged for it" — two claims, and only the
-   * first was ever checked. A traveller selecting food does not make a
-   * currency museum a food place.
-   *
-   * Every fixture happened to carry the tag it referenced, so the whole suite
-   * stayed green while the check was absent.
-   */
-  it('refuses an interest the candidate does not actually carry', () => {
-    // Selected by the traveller, absent from this place.
-    expect(trip.interests).toContain('nightlife');
-    expect(base.matchedInterestTags).not.toContain('nightlife');
-    expect(reject('interest-match', ['nightlife'])).toBe('interest-not-matched');
+  it('accepts a style the traveller selected and the place carries', () => {
+    expect(reject('style-match', ['local-neighbourhoods'])).toBeUndefined();
   });
 
   /**
@@ -206,11 +182,11 @@ describe('an atom must rest on something the app owns', () => {
 
   /**
    * An unearned apology is as false as unearned praise. A place that *does*
-   * match the traveller's interests may not be described as a weak match.
+   * match the traveller's styles may not be described as a weak match.
    */
   it('refuses a weak-match claim about a place that genuinely matches', () => {
-    expect(reject('weak-profile-match')).toBe('unsupported-weak-claim');
-    expect(reject('weak-profile-match', [], stranger)).toBeUndefined();
+    expect(reject('weak-style-match')).toBe('unsupported-weak-claim');
+    expect(reject('weak-style-match', [], stranger)).toBeUndefined();
   });
 
   it('refuses an atom type it has never heard of', () => {
@@ -238,7 +214,7 @@ const response = (over: Record<string, unknown> = {}) => ({
   plannerRevision: 'plan-a-v1',
       personalFitScore: 82,
       recommendation: 'interested',
-      reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+      reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
       cautionAtoms: [],
       pairWithCandidateIds: [],
       suggestedDurationMinutes: 60,
@@ -280,19 +256,19 @@ describe('validating a batch', () => {
   it('drops one bad atom and keeps the valid ones', () => {
     const result = validate(response({
       reasonAtoms: [
-        { type: 'interest-match', references: ['food'] },
-        { type: 'interest-match', references: ['museums'] },
+        { type: 'style-match', references: ['local-neighbourhoods'] },
+        { type: 'style-match', references: ['temples'] },
         { type: 'pace-fit', references: ['relaxed'] },
       ],
     }));
     const kept = result.byCandidate.get('place-a');
     expect(kept?.reasons).toHaveLength(2);
-    expect(result.rejections).toContainEqual({ candidateId: 'place-a', reason: 'interest-not-selected' });
+    expect(result.rejections).toContainEqual({ candidateId: 'place-a', reason: 'style-not-selected' });
   });
 
   it('falls back to no intelligence when every atom fails', () => {
     const result = validate(response({
-      reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
+      reasonAtoms: [{ type: 'style-match', references: ['museums'] }],
       cautionAtoms: [],
     }));
     // Null, not a half-supported object: the card keeps its deterministic copy.
@@ -357,7 +333,7 @@ describe('the copy the traveller reads', () => {
   it('renders only what the validated atoms support', () => {
     const validated = validate(response({
       reasonAtoms: [
-        { type: 'interest-match', references: ['food'] },
+        { type: 'style-match', references: ['local-neighbourhoods'] },
         { type: 'pace-fit', references: ['relaxed'] },
         { type: 'cluster-fit', references: ['place-b'] },
       ],
@@ -365,7 +341,7 @@ describe('the copy the traveller reads', () => {
     })).byCandidate.get('place-a')!;
 
     const lines = renderIntelligenceCopy(validated, base, pool).join(' ');
-    expect(lines).toContain('food');
+    expect(lines).toContain('local-neighbourhoods');
     expect(lines).toContain('relaxed');
     expect(lines).toContain('Nezu Shrine');
     // Nothing about hours, price, queues or crowds can reach the copy.
@@ -375,9 +351,8 @@ describe('the copy the traveller reads', () => {
   });
 
   /**
-   * The line this whole feature exists to replace. "Nothing stands out on
-   * paper — it is here for variety" told the traveller nothing actionable;
-   * naming why it is weak, and why it was kept, does.
+   * A weak-style-match is specific about the dimension it measured; it must not
+   * become a generic verdict about the whole trip.
    */
   it('says a weak match is weak, without inventing a reason to like it', () => {
     const validated = validate({
@@ -385,14 +360,15 @@ describe('the copy the traveller reads', () => {
         'place-c': {
           tripMaterialRevision: 'profile-v1',
           candidateRevision: 'cand-c-v1',
-          reasonAtoms: [{ type: 'weak-profile-match', references: [] }],
+          reasonAtoms: [{ type: 'weak-style-match', references: [] }],
           cautionAtoms: [],
         },
       },
     }).byCandidate.get('place-c')!;
 
     const lines = renderIntelligenceCopy(validated, stranger, pool).join(' ');
-    expect(lines).toContain('weaker match');
+    expect(lines).toContain('does not match the styles you selected');
+    expect(lines).not.toContain('weaker match for your trip');
     expect(lines).not.toContain('variety');
   });
 
@@ -503,7 +479,7 @@ describe('an atom may not imply more than it proves', () => {
         'place-a': {
           tripMaterialRevision: trip.tripMaterialRevision,
           candidateRevision: base.candidateRevision,
-          reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+          reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
           cautionAtoms: [],
           pairWithCandidateIds: ['place-b'],
         },
@@ -523,7 +499,7 @@ describe('an atom may not imply more than it proves', () => {
    */
   it('states no world fact whatever combination of atoms is validated', () => {
     const copy = render([
-      { type: 'interest-match', references: ['food'] },
+      { type: 'style-match', references: ['local-neighbourhoods'] },
       { type: 'style-match', references: ['local-neighbourhoods'] },
       { type: 'pace-fit', references: ['relaxed'] },
       { type: 'cluster-fit', references: ['place-b'] },
@@ -634,13 +610,13 @@ describe('one batch is one metered request', () => {
       tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-a-v1',
   plannerRevision: 'plan-a-v1',
-      reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+      reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
       cautionAtoms: [],
     },
     'place-b': {
       tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-b-v1',
-      reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+      reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
       cautionAtoms: [],
     },
   };
@@ -672,7 +648,7 @@ describe('one batch is one metered request', () => {
       'place-b': {
         tripMaterialRevision: 'profile-v1',
         candidateRevision: 'cand-b-v1',
-        reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
+        reasonAtoms: [{ type: 'style-match', references: ['museums'] }],
         cautionAtoms: [],
       },
     }));
@@ -761,7 +737,7 @@ describe('the cache key', () => {
    * own plannerRevision. The echo contract narrowed to two fields.
    */
   it('has been bumped for the current material contract', () => {
-    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v4');
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v5');
   });
 
   /** One candidate changing must not disturb its neighbours. */
@@ -888,13 +864,13 @@ describe('one batch is one metered request', () => {
       tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-a-v1',
   plannerRevision: 'plan-a-v1',
-      reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+      reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
       cautionAtoms: [],
     },
     'place-b': {
       tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-b-v1',
-      reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+      reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
       cautionAtoms: [],
     },
   };
@@ -926,7 +902,7 @@ describe('one batch is one metered request', () => {
       'place-b': {
         tripMaterialRevision: 'profile-v1',
         candidateRevision: 'cand-b-v1',
-        reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
+        reasonAtoms: [{ type: 'style-match', references: ['museums'] }],
         cautionAtoms: [],
       },
     }));
@@ -1015,7 +991,7 @@ describe('the cache key', () => {
    * own plannerRevision. The echo contract narrowed to two fields.
    */
   it('has been bumped for the current material contract', () => {
-    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v4');
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v5');
   });
 
   /** One candidate changing must not disturb its neighbours. */

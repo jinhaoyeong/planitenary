@@ -19,12 +19,12 @@ import type { IntelligenceStatus } from './candidateIntelligenceRequest';
 export interface IntelligenceRequestCandidate {
   candidateId: string;
   candidateRevision: string;
+  plannerRevision: string;
   name: string;
   category: string;
   area?: string;
   clusterId?: string;
   matchedStyleTags: string[];
-  matchedInterestTags: string[];
   durationRangeMinutes?: [number, number];
   indoorOutdoor?: 'indoor' | 'outdoor' | 'both';
   travelMinutesFromCluster?: number;
@@ -33,8 +33,7 @@ export interface IntelligenceRequestCandidate {
 }
 
 export interface IntelligenceRequestTrip {
-  profileRevision: string;
-  interests: string[];
+  tripMaterialRevision: string;
   styles: string[];
   pace: string;
   budgetTier?: string;

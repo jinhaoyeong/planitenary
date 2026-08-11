@@ -12,11 +12,10 @@ import {
   parseIntelligenceResponse,
 } from './candidateIntelligenceTransport';
 
-const trip = { profileRevision: 'p1', interests: ['food'], styles: [], pace: 'relaxed' };
+const trip = { tripMaterialRevision: 'p1', styles: ['local-neighbourhoods'], pace: 'relaxed' };
 const candidates = [{
-  candidateId: 'a', candidateRevision: 'r1', name: 'A', category: 'sight',
-  deterministicScore: 60, matchedStyleTags: [], matchedInterestTags: ['food'],
-  costKnown: false, pairableCandidateIds: [],
+  candidateId: 'a', candidateRevision: 'r1', plannerRevision: 'plan-a-v1', name: 'A', category: 'sight',
+  matchedStyleTags: ['local-neighbourhoods'], pairableCandidateIds: [],
 }];
 
 describe('reading the response', () => {

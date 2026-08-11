@@ -25,8 +25,7 @@ import {
 
 const trip: IntelligenceTripContext = {
   tripMaterialRevision: 'p1',
-  interests: ['food'],
-  styles: [],
+  styles: ['local-neighbourhoods'],
   pace: 'relaxed',
 };
 
@@ -37,8 +36,7 @@ const candidate = (index: number, revision = 'r1'): IntelligenceCandidate => ({
   name: `Place ${index}`,
   category: 'sight',
   clusterId: 'north',
-  matchedStyleTags: [],
-  matchedInterestTags: ['food'],
+  matchedStyleTags: ['local-neighbourhoods'],
   pairableCandidateIds: [],
 });
 
@@ -49,7 +47,7 @@ const answerFor = (candidates: IntelligenceCandidate[]) => ({
   candidates: Object.fromEntries(candidates.map((entry) => [entry.candidateId, {
     tripMaterialRevision: trip.tripMaterialRevision,
     candidateRevision: entry.candidateRevision,
-    reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+    reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
     cautionAtoms: [],
   }])),
 });
@@ -228,7 +226,7 @@ describe('validation still applies at the service boundary', () => {
         candidates: {
           'place-0': {
             tripMaterialRevision: 'p1', candidateRevision: 'r-old',
-            reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+            reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
             cautionAtoms: [],
           },
         },
@@ -248,12 +246,12 @@ describe('validation still applies at the service boundary', () => {
         candidates: {
           'place-0': {
             tripMaterialRevision: 'p1', candidateRevision: 'r1',
-            reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
+            reasonAtoms: [{ type: 'style-match', references: ['local-neighbourhoods'] }],
             cautionAtoms: [],
           },
           'place-1': {
             tripMaterialRevision: 'p1', candidateRevision: 'r1',
-            reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
+            reasonAtoms: [{ type: 'style-match', references: ['temples'] }],
             cautionAtoms: [],
           },
         },
