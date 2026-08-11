@@ -98,6 +98,22 @@ describe('an atom must rest on something the app owns', () => {
   });
 
   /**
+   * Both halves, like `style-match` beside it. The rendered sentence is "You
+   * asked for food, and this is tagged for it" — two claims, and only the
+   * first was ever checked. A traveller selecting food does not make a
+   * currency museum a food place.
+   *
+   * Every fixture happened to carry the tag it referenced, so the whole suite
+   * stayed green while the check was absent.
+   */
+  it('refuses an interest the candidate does not actually carry', () => {
+    // Selected by the traveller, absent from this place.
+    expect(trip.interests).toContain('nightlife');
+    expect(base.matchedInterestTags).not.toContain('nightlife');
+    expect(reject('interest-match', ['nightlife'])).toBe('interest-not-matched');
+  });
+
+  /**
    * The bug this project already shipped once, in the deterministic layer:
    * `STYLE_TAGS.temples` includes `history`, which is fine inside a score and
    * false in a sentence. Only tags promoted to exact matches may be named.

@@ -113,6 +113,7 @@ export interface ValidatedIntelligence {
 export type AtomRejection =
   | 'unknown-atom-type'
   | 'interest-not-selected'
+  | 'interest-not-matched'
   | 'style-not-selected'
   | 'style-not-matched'
   | 'pace-mismatch'
@@ -165,10 +166,20 @@ export function atomRejection(
   const needsReference = () => (reference ? undefined : 'missing-reference' as const);
 
   switch (atom.type) {
-    case 'interest-match':
-      return needsReference()
-        // The traveller's literal selection, not an expansion of it.
-        || (trip.interests.includes(reference) ? undefined : 'interest-not-selected');
+    case 'interest-match': {
+      const missing = needsReference();
+      if (missing) return missing;
+      // The traveller's literal selection, not an expansion of it.
+      if (!trip.interests.includes(reference)) return 'interest-not-selected';
+      /**
+       * And the place must actually carry it. This half was missing while
+       * `style-match` beside it had always required both, so the rendered
+       * sentence — "You asked for food, and this is tagged for it" — asserted
+       * a tag nothing had checked. Half of it was verified and the half
+       * claiming something about the *place* was not.
+       */
+      return candidate.matchedInterestTags.includes(reference) ? undefined : 'interest-not-matched';
+    }
 
     case 'style-match': {
       const missing = needsReference();
