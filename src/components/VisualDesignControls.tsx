@@ -120,6 +120,7 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
     '--accent': theme === 'dark' ? '#FF6B9A' : '#EE4D87',
     '--accent-soft': theme === 'dark' ? '#3A1F2A' : '#FFE4EE',
     '--accent-ink': '#0F0E0D',
+    '--accent-soft-ink': theme === 'dark' ? '#FFFFFF' : '#0F0E0D',
     '--card-radius': '1rem',
     '--card-shadow': theme === 'dark'
       ? '0 1px 0 rgba(255,255,255,0.04), 0 14px 30px -18px rgba(0,0,0,0.6)'

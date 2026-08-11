@@ -6,6 +6,7 @@
  * reading order and form behaviour stay stable.
  */
 
+import { readableInkOn } from './colorContrast';
 import type { DestinationPalette } from './destinations';
 import {
   countryOrFallback,
@@ -462,17 +463,6 @@ function imageOverlay(treatment: ImageTreatmentToken, intensity: VisualIdentityI
   }
 }
 
-function readableInk(hex: string): string {
-  const value = hex.replace('#', '');
-  if (value.length !== 6) return '#0F0E0D';
-  const channels = [0, 2, 4].map((offset) => {
-    const channel = parseInt(value.slice(offset, offset + 2), 16) / 255;
-    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-  });
-  const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-  return luminance > 0.45 ? '#0F0E0D' : '#FFFFFF';
-}
-
 function darkCardShadow(recipe: DesignRecipe): string {
   if (recipe.id === 'modern-metropolitan') {
     return '0 0 0 1px rgba(255,255,255,0.06), 0 10px 24px -16px rgba(0,0,0,0.55)';
@@ -506,7 +496,8 @@ function buildCssVars(
   const vars: Record<string, string> = {
     '--accent': accent,
     '--accent-soft': accentSoft,
-    '--accent-ink': readableInk(accent),
+    '--accent-ink': readableInkOn(accent),
+    '--accent-soft-ink': readableInkOn(accentSoft),
     '--accent-button': accent,
     '--accent-fill': accent,
     '--motif-opacity': String(coverMotif * themeMotifScale),
@@ -665,6 +656,7 @@ export const VISUAL_IDENTITY_CSS_VARS = [
   '--accent',
   '--accent-soft',
   '--accent-ink',
+  '--accent-soft-ink',
   '--accent-button',
   '--accent-fill',
   '--heading-tracking',

@@ -19,13 +19,23 @@ export function ToggleRow({ label, description, checked, onChange }: ToggleRowPr
       style={{
         backgroundColor: checked ? 'var(--accent-soft)' : 'var(--bg)',
         border: `1px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
-        color: 'var(--ink)',
+        // Soft fills can be pastel even in dark shells; ink follows the fill.
+        color: checked ? 'var(--accent-soft-ink)' : 'var(--ink)',
       }}
     >
       <span className="min-w-0">
         <span className="block text-sm font-semibold">{label}</span>
         {description && (
-          <span className="block text-xs mt-0.5" style={{ color: 'var(--ink-muted)' }}>{description}</span>
+          <span
+            className="block text-xs mt-0.5"
+            style={{
+              color: checked
+                ? 'color-mix(in srgb, var(--accent-soft-ink) 72%, transparent)'
+                : 'var(--ink-muted)',
+            }}
+          >
+            {description}
+          </span>
         )}
       </span>
       <span
