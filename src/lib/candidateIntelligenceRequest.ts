@@ -30,6 +30,7 @@ export interface CandidateIntelligenceEntry {
 export interface RequestableCandidate {
   candidateId: string;
   candidateRevision: string;
+  plannerRevision: string;
 }
 
 /**
@@ -60,8 +61,7 @@ export function materialRequestKey(input: {
    *   canonical candidates + decisions → visible, reordered deck
    */
   candidates: RequestableCandidate[];
-  profileRevision: string;
-  plannerContextRevision?: string;
+  tripMaterialRevision: string;
 }): string {
   /**
    * Structured serialisation rather than delimiter-joined strings.
@@ -76,10 +76,9 @@ export function materialRequestKey(input: {
    * boundary.
    */
   return JSON.stringify([
-    input.profileRevision,
-    input.plannerContextRevision ?? null,
+    input.tripMaterialRevision,
     input.candidates
-      .map((candidate) => [candidate.candidateId, candidate.candidateRevision])
+      .map((candidate) => [candidate.candidateId, candidate.candidateRevision, candidate.plannerRevision])
       // Sorted because the deck reorders as decisions are made, and a reorder
       // changes nothing about whether a place suits the traveller.
       .sort(([a], [b]) => a.localeCompare(b)),

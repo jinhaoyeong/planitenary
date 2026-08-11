@@ -18,6 +18,25 @@ import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
 import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
 import { capabilityFor, discoverPlaces, fetchPlaceEvidence, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
+import {
+  IntelligenceRequestController,
+  foldIntelligenceResults,
+  materialRequestKey,
+  type CandidateIntelligenceEntry,
+} from '../lib/candidateIntelligenceRequest';
+import { buildIntelligenceView, type IntelligenceView } from '../lib/candidateIntelligenceView';
+import { fetchCandidateIntelligence } from '../lib/candidateIntelligenceTransport';
+import {
+  toCandidateIntelligenceMaterial,
+  toCandidateIntelligenceTripMaterial,
+  toPlannerIntelligenceMaterial,
+  candidateMaterialRevision,
+  plannerMaterialRevision,
+  tripMaterialRevision,
+} from '../../supabase/functions/_shared/intelligenceMaterial';
+import { renderIntelligenceCopy } from '../../supabase/functions/_shared/candidateIntelligence';
+import { matchedStyleTags } from '../lib/placeIntelligence';
+import { inferPace } from '../lib/travelBehaviour';
 import type { PlaceEvidenceSummary } from '../lib/travelEvidence';
 import { hapticMedium, hapticSuccess, hapticTap } from '../lib/haptics';
 import { timezoneShiftHours } from '../lib/timezones';
@@ -166,6 +185,15 @@ interface UndoState {
 
 /** Extra, honestly-sourced context a card can show when there is room for it. */
 export interface CandidateContext {
+  /**
+   * Personalised advice, already turned into what a card may show.
+   *
+   * Prepared upstream rather than assembled here, so the card interprets no
+   * atoms of its own — `buildIntelligenceView` stays the single place that
+   * decides what earns space. Null whenever the server had nothing to say or
+   * could not be asked; the deterministic rationale covers both.
+   */
+  intelligenceView?: IntelligenceView | null;
   evidence?: PlaceEvidenceSummary;
   queueMinutes?: number;
   /**
@@ -280,6 +308,9 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
 
   const points = rationale?.length ? rationale.map((point) => ({ key: point.id, text: point.text })) : reasons.map((reason) => ({ key: reason, text: reason }));
 
+  /** Prepared upstream; the card only renders it. */
+  const intelligenceView = context?.intelligenceView ?? null;
+
   /**
    * Whether the ranking can actually be explained for this place.
    *
@@ -356,7 +387,39 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
         </div>
       )}
 
-      {points.length > 0 && (
+      {intelligenceView ? (
+        /**
+         * Every line here rests on an atom checked against the traveller's own
+         * selections and this app's own numbers. The wording is ours, so no
+         * phrasing the model produced reaches the screen.
+         */
+        <div className="destination-detail-section">
+          <h6>{intelligenceView.fitLabel || 'Why it is on your list'}</h6>
+          {intelligenceView.matches.length > 0 && (
+            <div className="destination-tag-row">
+              {intelligenceView.matches.map((match) => (
+                <span key={match} className="destination-tag">{match}</span>
+              ))}
+            </div>
+          )}
+          {intelligenceView.explanation.length > 0 && (
+            <ul className="destination-detail-list">
+              {intelligenceView.explanation.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          )}
+          {intelligenceView.pairings.length > 0 && (
+            <p className="destination-detail-note">
+              Worth considering alongside {intelligenceView.pairings.join(' and ')}.
+            </p>
+          )}
+        </div>
+      ) : points.length > 0 && (
+        /**
+         * The deterministic rationale — what every card shows until advice
+         * arrives, and what it keeps if none ever does. Pending, refused and
+         * "nothing worth saying" all land here, because a card must stay
+         * decidable without the model.
+         */
         <div className="destination-detail-section">
           {/* The heading names the position, because that is the actual question
               — but only when there is an answer to give. */}
@@ -1006,6 +1069,112 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
    * deck — including the one that buys evidence.
    */
   const candidates = useMemo(() => candidatesByCity[cityLabel] ?? [], [candidatesByCity, cityLabel]);
+  /**
+   * Personalised advice, keyed by candidate id and held apart from the ranked
+   * candidates themselves. Separate on purpose: an answer arriving late must
+   * not recreate the ranking data and move the deck under the traveller.
+   */
+  const [intelligence, setIntelligence] = useState<Record<string, CandidateIntelligenceEntry>>({});
+  /** One controller for the component's life; it owns dedup and staleness. */
+  const intelligenceController = useRef(new IntelligenceRequestController());
+
+  /**
+   * The candidate-intelligence request, built from the **canonical pool**.
+   *
+   * `candidates` rather than `pendingDeck`, and that distinction is the whole
+   * guarantee: `pendingDeck` is decision-filtered, so building the key from it
+   * would make Skip remove a candidate, change the fingerprint, and buy fresh
+   * answers about the places the traveller did *not* skip.
+   */
+  const intelligenceRequest = useMemo(() => {
+    const tripMaterial = toCandidateIntelligenceTripMaterial({
+      tripMaterialRevision: '',
+      styles: profile.styles || [],
+      pace: inferPace(profile),
+    });
+    const tripRevision = tripMaterialRevision(tripMaterial);
+
+    const entries = candidates.map((candidate) => {
+      const base = {
+        candidateId: candidate.id,
+        candidateRevision: '',
+        plannerRevision: '',
+        name: candidate.name,
+        category: '',
+        matchedStyleTags: matchedStyleTags(candidate, profile),
+        durationRangeMinutes: undefined,
+        indoorOutdoor: candidate.indoorOutdoor === 'indoor' || candidate.indoorOutdoor === 'outdoor'
+          ? candidate.indoorOutdoor
+          : undefined,
+        pairableCandidateIds: [],
+      };
+      const material = toCandidateIntelligenceMaterial(base as never);
+      const planner = toPlannerIntelligenceMaterial(base as never);
+      return {
+        ...base,
+        ...material,
+        ...planner,
+        // The transport contract omits unavailable planner fields rather than
+        // serialising its internal null sentinel.
+        clusterId: planner.clusterId ?? undefined,
+        durationRangeMinutes: material.durationRangeMinutes ?? undefined,
+        indoorOutdoor: material.indoorOutdoor ?? undefined,
+        candidateRevision: candidateMaterialRevision(material),
+        plannerRevision: plannerMaterialRevision(planner),
+      };
+    });
+
+    return { tripMaterial, tripRevision, entries };
+  }, [candidates, profile]);
+
+  /** The latest payload is available without making payload identity a trigger. */
+  const latestIntelligenceRequestRef = useRef(intelligenceRequest);
+  latestIntelligenceRequestRef.current = intelligenceRequest;
+
+  /**
+   * One primitive the effect can depend on.
+   *
+   * Everything a traveller does while browsing — deck index, flip, scroll,
+   * decisions, viewport — is absent by construction, because none of it is an
+   * input here. A key that cannot see UI state cannot be moved by it.
+   */
+  const materialKey = useMemo(
+    () => materialRequestKey({
+      tripMaterialRevision: intelligenceRequest.tripRevision,
+      candidates: intelligenceRequest.entries,
+    }),
+    [intelligenceRequest],
+  );
+  const latestMaterialKeyRef = useRef(materialKey);
+  latestMaterialKeyRef.current = materialKey;
+
+  useEffect(() => {
+    const request = latestIntelligenceRequestRef.current;
+    if (!isSupabaseConfigured() || request.entries.length === 0) return;
+    const controller = intelligenceController.current;
+    const issuedKey = materialKey;
+
+    const held = controller.cached(issuedKey);
+    if (held) { setIntelligence(Object.fromEntries(held)); return; }
+    if (!controller.shouldRequest(issuedKey)) return;
+
+    controller.begin(issuedKey);
+    let active = true;
+    void fetchCandidateIntelligence(
+      { ...request.tripMaterial, tripMaterialRevision: request.tripRevision },
+      request.entries,
+    ).then((rows) => {
+      // The key comparison, not the unmount flag, is what makes a late answer
+      // safe: an in-flight request whose material has moved on must not land.
+      if (!active || !controller.accepts(issuedKey, latestMaterialKeyRef.current)) return;
+      if (!rows) { controller.settle(issuedKey, undefined); return; }
+      const entries = foldIntelligenceResults(rows);
+      controller.settle(issuedKey, entries);
+      setIntelligence(Object.fromEntries(entries));
+    });
+    return () => { active = false; };
+  }, [materialKey]);
+
   const setCandidates = useCallback(
     (update: PlaceCandidate[] | ((previous: PlaceCandidate[]) => PlaceCandidate[])) => {
       setCandidatesByCity((previous) => ({
@@ -1248,6 +1417,36 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     },
   }), [profile.startDate, profile.endDate, homeCurrency, rates]);
 
+  /**
+   * Prepared view data for one candidate, or null.
+   *
+   * Only a `ready` entry produces a view. `deterministic-only` means the model
+   * was asked and had nothing to add; `unavailable` means it never ran. Both
+   * keep the deterministic rationale, because a card that swapped useful text
+   * for an apology would be worse than one that never tried.
+   *
+   * Pairings resolve against the *current* canonical pool, which is why the
+   * display name is deliberately not model material: a corrected spelling
+   * shows immediately and costs no new request.
+   */
+  const intelligenceViewFor = useCallback((candidateId: string): IntelligenceView | null => {
+    const entry = intelligence[candidateId];
+    if (!entry || entry.status !== 'ready' || !entry.intelligence) return null;
+    const pool = new Map(intelligenceRequest.entries.map((item) => [item.candidateId, item]));
+    const self = pool.get(candidateId);
+    if (!self) return null;
+    const names = entry.intelligence.pairWithCandidateIds
+      .map((id) => candidates.find((candidate) => candidate.id === id)?.name)
+      .filter(Boolean) as string[];
+    return buildIntelligenceView(
+      entry.intelligence,
+      // The renderer owns the words; this only chooses which of them survive
+      // as chips rather than sentences.
+      renderIntelligenceCopy(entry.intelligence, self as never, pool as never),
+      names,
+    );
+  }, [intelligence, intelligenceRequest, candidates]);
+
   /** Rank position by candidate id, so a card can say what it is ranked. */
   const rankPositions = useMemo(() => {
     const positions = new Map<string, number>();
@@ -1263,8 +1462,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       evidence: evidenceSummaries[id],
       queueMinutes: queueEvidence[id],
       position: rankPositions.get(id),
+      intelligenceView: intelligenceViewFor(id),
     };
-  }, [currentDeckCard, evidenceSummaries, queueEvidence, sharedContext, rankPositions]);
+  }, [currentDeckCard, evidenceSummaries, queueEvidence, sharedContext, rankPositions, intelligenceViewFor]);
   /** Decided places, most recent first — the desktop rail's running record. */
   const recentDecisions = useMemo(
     () => [...decisionHistory].reverse().slice(0, 8),
@@ -2142,6 +2342,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
                         evidence: evidenceSummaries[item.candidate.id],
                         queueMinutes: queueEvidence[item.candidate.id],
                         position: rankPositions.get(item.candidate.id),
+                        intelligenceView: intelligenceViewFor(item.candidate.id),
                       }}
                       onDecision={(decision) => updateDecision(item.candidate.id, decision, { name: item.candidate.name })}
                     />

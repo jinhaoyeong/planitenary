@@ -19,12 +19,12 @@ import {
 } from './candidateIntelligenceRequest';
 
 const candidates = [
-  { candidateId: 'a', candidateRevision: 'r1' },
-  { candidateId: 'b', candidateRevision: 'r1' },
+  { candidateId: 'a', candidateRevision: 'r1', plannerRevision: 'p1' },
+  { candidateId: 'b', candidateRevision: 'r1', plannerRevision: 'p1' },
 ];
 
 const key = (over: Partial<Parameters<typeof materialRequestKey>[0]> = {}) =>
-  materialRequestKey({ profileRevision: 'p1', plannerContextRevision: 'ctx1', candidates, ...over });
+  materialRequestKey({ tripMaterialRevision: 'p1', candidates, ...over });
 
 describe('the material fingerprint', () => {
   it('is stable across renders with equivalent data', () => {
@@ -42,10 +42,10 @@ describe('the material fingerprint', () => {
   });
 
   it.each([
-    ['profile revision', { profileRevision: 'p2' }],
-    ['planner context revision', { plannerContextRevision: 'ctx2' }],
-    ['a candidate revision', { candidates: [{ candidateId: 'a', candidateRevision: 'r2' }, candidates[1]] }],
-    ['the candidate set', { candidates: [...candidates, { candidateId: 'c', candidateRevision: 'r1' }] }],
+    ['trip material revision', { tripMaterialRevision: 'p2' }],
+    ['a candidate revision', { candidates: [{ candidateId: 'a', candidateRevision: 'r2', plannerRevision: 'p1' }, candidates[1]] }],
+    ['a planner revision', { candidates: [{ ...candidates[0], plannerRevision: 'p2' }, candidates[1]] }],
+    ['the candidate set', { candidates: [...candidates, { candidateId: 'c', candidateRevision: 'r1', plannerRevision: 'p1' }] }],
   ])('changes when %s changes', (_label, over) => {
     expect(key(over)).not.toBe(key());
   });
@@ -132,8 +132,8 @@ describe('an answer that arrived too late', () => {
    */
   it('is discarded when the material key has moved on', () => {
     const controller = new IntelligenceRequestController();
-    const first = key({ profileRevision: 'p1' });
-    const second = key({ profileRevision: 'p2' });
+    const first = key({ tripMaterialRevision: 'p1' });
+    const second = key({ tripMaterialRevision: 'p2' });
 
     expect(controller.accepts(second, second)).toBe(true);
     // p1 finishing after p2 must not be applied.
@@ -187,23 +187,23 @@ describe('ids cannot impersonate a delimiter', () => {
    */
   it('keeps colon-bearing ids and revisions distinct', () => {
     const a = materialRequestKey({
-      profileRevision: 'p1',
-      candidates: [{ candidateId: 'osm:node:123', candidateRevision: 'r1' }],
+      tripMaterialRevision: 'p1',
+      candidates: [{ candidateId: 'osm:node:123', candidateRevision: 'r1', plannerRevision: 'p1' }],
     });
     const b = materialRequestKey({
-      profileRevision: 'p1',
-      candidates: [{ candidateId: 'osm:node', candidateRevision: '123:r1' }],
+      tripMaterialRevision: 'p1',
+      candidates: [{ candidateId: 'osm:node', candidateRevision: '123:r1', plannerRevision: 'p1' }],
     });
     expect(a).not.toBe(b);
   });
 
   it('is not confused by commas, pipes or quotes inside an id', () => {
     const keys = [
-      [{ candidateId: 'a,b', candidateRevision: 'r1' }],
-      [{ candidateId: 'a', candidateRevision: 'b,r1' }],
-      [{ candidateId: 'a|b', candidateRevision: 'r1' }],
-      [{ candidateId: 'a"b', candidateRevision: 'r1' }],
-    ].map((candidates) => materialRequestKey({ profileRevision: 'p1', candidates }));
+      [{ candidateId: 'a,b', candidateRevision: 'r1', plannerRevision: 'p1' }],
+      [{ candidateId: 'a', candidateRevision: 'b,r1', plannerRevision: 'p1' }],
+      [{ candidateId: 'a|b', candidateRevision: 'r1', plannerRevision: 'p1' }],
+      [{ candidateId: 'a"b', candidateRevision: 'r1', plannerRevision: 'p1' }],
+    ].map((candidates) => materialRequestKey({ tripMaterialRevision: 'p1', candidates }));
 
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -218,11 +218,11 @@ describe('ids cannot impersonate a delimiter', () => {
  */
 describe('decisions cannot change the key through the back door', () => {
   const pool = [
-    { candidateId: 'a', candidateRevision: 'r1' },
-    { candidateId: 'b', candidateRevision: 'r1' },
-    { candidateId: 'c', candidateRevision: 'r1' },
+    { candidateId: 'a', candidateRevision: 'r1', plannerRevision: 'p1' },
+    { candidateId: 'b', candidateRevision: 'r1', plannerRevision: 'p1' },
+    { candidateId: 'c', candidateRevision: 'r1', plannerRevision: 'p1' },
   ];
-  const poolKey = () => materialRequestKey({ profileRevision: 'p1', candidates: pool });
+  const poolKey = () => materialRequestKey({ tripMaterialRevision: 'p1', candidates: pool });
 
   /**
    * Stated as a contrast, because a pure function cannot prove which array a
@@ -233,12 +233,12 @@ describe('decisions cannot change the key through the back door', () => {
    */
   it('is identical for the pool however decisions reorder the deck', () => {
     const reordered = [...pool].reverse();
-    expect(materialRequestKey({ profileRevision: 'p1', candidates: reordered })).toBe(poolKey());
+    expect(materialRequestKey({ tripMaterialRevision: 'p1', candidates: reordered })).toBe(poolKey());
   });
 
   it('would change if the visible deck were used instead — the mistake this guards', () => {
     const visible = pool.filter((candidate) => candidate.candidateId !== 'b');
-    expect(materialRequestKey({ profileRevision: 'p1', candidates: visible })).not.toBe(poolKey());
+    expect(materialRequestKey({ tripMaterialRevision: 'p1', candidates: visible })).not.toBe(poolKey());
   });
 });
 
