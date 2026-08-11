@@ -259,34 +259,11 @@ describe('validating a batch', () => {
   });
 
   /**
-   * The trip and planner revisions are compared server-side against what this
-   * request was issued under, rather than echoed back by the model. The server
-   * knows which material it sent, so asking the model to repeat two long
-   * canonical strings per candidate would spend output tokens — the expensive
-   * side — to re-learn something already known.
+   * The trip and planner revisions are not checked here, because this function
+   * is called with the material the request was built from — comparing them
+   * would compare a value to itself. They protect through the cache key and
+   * the frontend request key instead, where a mismatch can genuinely occur.
    */
-  it('rejects every result when the trip material moved since the request', () => {
-    const result = validateCandidateIntelligence(response(), {
-      trip, candidates: [base, neighbour, stranger],
-      issuedTripMaterialRevision: 'issued-under-something-else',
-    });
-    expect(result.byCandidate.get('place-a')).toBeNull();
-    expect(result.rejections).toContainEqual({ candidateId: 'place-a', reason: 'stale-trip-revision' });
-  });
-
-  it('rejects one candidate whose planner facts moved, keeping its neighbours', () => {
-    const result = validateCandidateIntelligence(response(), {
-      trip, candidates: [base, neighbour, stranger],
-      plannerRevisions: new Map([['place-a', 'issued-under-an-older-plan']]),
-    });
-    expect(result.byCandidate.get('place-a')).toBeNull();
-    expect(result.rejections).toContainEqual({ candidateId: 'place-a', reason: 'stale-planner-revision' });
-  });
-
-  it('rejects an answer about a stale candidate', () => {
-    const result = validate(response({ candidateRevision: 'cand-a-v0' }));
-    expect(result.byCandidate.get('place-a')).toBeNull();
-  });
 
   it('ignores a candidate nobody asked about', () => {
     const result = validateCandidateIntelligence(

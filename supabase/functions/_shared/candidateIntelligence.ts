@@ -369,9 +369,6 @@ export function validateCandidateIntelligence(
   request: {
     trip: IntelligenceTripContext;
     candidates: IntelligenceCandidate[];
-    /** What this request was issued under, for the server-side comparison. */
-    issuedTripMaterialRevision?: string;
-    plannerRevisions?: Map<string, string>;
   },
 ): IntelligenceValidation {
   const byCandidate = new Map<string, ValidatedIntelligence | null>();
@@ -391,30 +388,23 @@ export function validateCandidateIntelligence(
     // Revisions are what make a cached answer safe to reuse. An answer about
     // other inputs than the ones it will be filed under is stale on arrival.
     /**
-     * Three identities, checked separately so a rejection names its cause.
+     * The one identity the model can get wrong.
      *
-     * Only the first two are echoed by the model; the other two are compared
-     * against what this request actually sent. The server issued the request
-     * and knows which trip and planner material went with it, so asking the
-     * model to repeat them back would cost output tokens — the expensive side
-     * — to re-learn something already known. The echo exists to catch the
-     * model confusing one candidate for another, which `candidateId` and
-     * `candidateRevision` already cover.
+     * `plannerRevision` and `tripMaterialRevision` are not checked here, and
+     * deliberately so. Both are server-owned: this function is called with the
+     * same material the request was built from, so comparing them would be
+     * comparing a value to itself. An earlier version did exactly that behind
+     * optional parameters nothing supplied, which made two rejection paths
+     * look like protection while being unreachable — the same shape as an atom
+     * that always passes.
+     *
+     * Their real protection lives where it can actually fire: they are part of
+     * the per-candidate cache key, and part of the frontend
+     * `materialRequestKey` that discards a response arriving after the
+     * material moved. One guarantee in one place beats two where one is inert.
      */
     if (entry.candidateRevision !== candidate.candidateRevision) {
       rejections.push({ candidateId, reason: 'stale-candidate-revision' });
-      byCandidate.set(candidateId, null);
-      continue;
-    }
-    if (request.plannerRevisions?.get(candidateId) !== undefined
-      && request.plannerRevisions.get(candidateId) !== candidate.plannerRevision) {
-      rejections.push({ candidateId, reason: 'stale-planner-revision' });
-      byCandidate.set(candidateId, null);
-      continue;
-    }
-    if (request.issuedTripMaterialRevision !== undefined
-      && request.issuedTripMaterialRevision !== request.trip.tripMaterialRevision) {
-      rejections.push({ candidateId, reason: 'stale-trip-revision' });
       byCandidate.set(candidateId, null);
       continue;
     }
