@@ -58,7 +58,9 @@ const HandbookCapture = qaEnabled
       })),
     )
   : null;
-import { markManualFieldEdits } from './lib/identityFields';
+import {
+  markManualFieldEdits,
+} from './lib/identityFields';
 import {
   DEFAULT_MARQUEE_ITEMS,
   emptyItinerary,
@@ -74,6 +76,28 @@ import defaultTravelHero from './assets/default-travel-hero.jpg';
 
 const heroImages = {
   'cq-cd': cqCdHero
+};
+
+/**
+ * Short decorative travel marks for the immersive hero. These are visual
+ * signatures only; the editable trip name remains the accessible headline.
+ */
+const immersiveTravelMarks: Record<string, string> = {
+  JP: '旅',
+  KR: '여행',
+  CN: '旅',
+  TW: '旅',
+  TH: 'เที่ยว',
+  VN: 'hành trình',
+  IN: 'यात्रा',
+  AE: 'رحلة',
+  FR: 'voyage',
+  ES: 'viaje',
+  IT: 'viaggio',
+  PT: 'viagem',
+  DE: 'reise',
+  GR: 'ταξίδι',
+  TR: 'yolculuk',
 };
 
 interface CloudBackupSnapshot {
@@ -235,6 +259,11 @@ function App() {
   const dayBadge = resolveDisplayedDayBadge(displayItinerary);
   const dayBadgeValue = dayBadge.value;
   const showDayBadge = dayBadge.visible || isHomeHeroEditing;
+  const isImmersiveHero = visualIdentity?.intensity === 'immersive';
+  const immersiveTravelMark = visualIdentity
+    ? immersiveTravelMarks[visualIdentity.country.code] || visualIdentity.country.name
+    : '';
+  const immersiveMotif = visualIdentity?.country.motifs[0] || displayItinerary.cities[0] || 'new streets';
   const brandWords = (displayItinerary.brandTitle || 'Travel Handbook').trim().split(/\s+/);
   const brandAccent = brandWords[brandWords.length - 1];
   const brandLead = brandWords.slice(0, -1).join(' ');
@@ -1144,7 +1173,10 @@ function App() {
       </header>
 
       {/* Hero — split editorial layout */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-20 pb-8 md:pb-16">
+      <section
+        className="handbook-home-hero max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-20 pb-8 md:pb-16"
+        data-immersive={isImmersiveHero ? 'true' : undefined}
+      >
         {isHomeHeroEditing && (
           <div className="flex justify-end gap-2 mb-5">
             <button type="button" onClick={() => setIsHomeHeroEditing(false)} className="pill-btn pill-ghost">Cancel</button>
@@ -1153,7 +1185,7 @@ function App() {
         )}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 items-center">
           {/* Left copy */}
-          <div className="md:col-span-7">
+          <div className="md:col-span-7 relative">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}>
               <span
                 className="eyebrow cursor-text rounded px-1 outline-none focus:bg-white/10"
@@ -1163,17 +1195,41 @@ function App() {
                 title="Click to edit"
               >{displayItinerary.heroEyebrow || 'A personalized travel starter'}</span>
             </motion.div>
+            {isImmersiveHero && visualIdentity && (
+              <motion.div
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.08, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+                className="handbook-hero-immersive-signature"
+                aria-hidden="true"
+              >
+                <span className="handbook-hero-immersive-index">01</span>
+                <span className="handbook-hero-immersive-rule" />
+                <span className="handbook-hero-immersive-mark">{immersiveTravelMark}</span>
+                <span className="handbook-hero-immersive-meta">
+                  {visualIdentity.country.name}
+                  <span aria-hidden="true"> / </span>
+                  {immersiveMotif}
+                </span>
+              </motion.div>
+            )}
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-6 font-display handbook-display text-5xl sm:text-6xl md:text-[5.5rem] lg:text-[6.5rem] leading-[0.95] tracking-tight"
+              className="handbook-home-hero-title handbook-hero-title mt-6 font-display handbook-display text-5xl sm:text-6xl md:text-[5.5rem] lg:text-[6.5rem] leading-[0.95] tracking-tight"
+              data-immersive={isImmersiveHero ? 'true' : undefined}
+              data-recipe={isImmersiveHero ? visualIdentity?.recipe.id : undefined}
+              data-mark-length={isImmersiveHero ? (immersiveTravelMark.length > 2 ? 'long' : 'short') : undefined}
               style={{ color: 'var(--ink)' }}
             >
+              {isImmersiveHero && (
+                <span className="handbook-hero-title-mark" aria-hidden="true">{immersiveTravelMark}</span>
+              )}
               <span
                 contentEditable={isHomeHeroEditing}
                 suppressContentEditableWarning
-                className="cursor-text rounded px-1 outline-none focus:bg-white/10"
+                className="relative z-[1] cursor-text rounded px-1 outline-none focus:bg-white/10"
                 onBlur={(event) => commitHeroText('name', event.currentTarget.textContent || '')}
                 title="Click to edit"
               >{displayItinerary.name || 'Your next trip'}</span>

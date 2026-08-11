@@ -40,6 +40,7 @@ import { OptionChips } from './ui/OptionChips';
 interface TripIdentityPanelProps {
   itinerary: Itinerary;
   onItineraryChange: (itinerary: Itinerary) => void;
+  isDesignHighlighted?: boolean;
 }
 
 type SaveStatus = {
@@ -47,7 +48,7 @@ type SaveStatus = {
   message: string;
 };
 
-export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentityPanelProps) {
+export function TripIdentityPanel({ itinerary, onItineraryChange, isDesignHighlighted = false }: TripIdentityPanelProps) {
   const storedProfile = useMemo(() => sanitizeTripProfile(itinerary.tripProfile), [itinerary.tripProfile]);
   const savedProfile = useMemo<TripProfile>(
     () =>
@@ -189,6 +190,17 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
     }
     return null;
   }, [durationValidation, itinerary.days]);
+
+  const designSectionStyle = {
+    borderTop: '1px solid var(--border)',
+    borderRadius: '1.5rem',
+    outline: isDesignHighlighted ? '2px solid var(--accent)' : '2px solid transparent',
+    outlineOffset: '0.75rem',
+    boxShadow: isDesignHighlighted
+      ? '0 0 0 0.75rem color-mix(in srgb, var(--accent-soft) 65%, transparent)'
+      : 'none',
+    transition: 'outline-color 450ms ease, box-shadow 450ms ease',
+  };
 
   return (
     <div className="space-y-6">
@@ -476,7 +488,30 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         <OptionChips options={STAY_OPTIONS} selected={profile.stays} onToggle={(id) => toggle('stays', id)} />
       </details>
 
-      <div className="space-y-2">
+      <section
+        id="settings-design"
+        className="scroll-mt-24 mt-8 space-y-5 pt-8"
+        style={designSectionStyle}
+        aria-labelledby="settings-design-heading"
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+            style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            <Wand2 className="w-5 h-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="eyebrow">Handbook design</div>
+            <h3 id="settings-design-heading" className="font-display text-2xl sm:text-3xl mt-2">Give the journey its look.</h3>
+            <p className="mt-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
+              Choose how strongly the handbook adapts to the destination, then review the copy it generates.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          <div className="space-y-2">
         <ToggleRow
           label="Name the handbook after the trip"
           description={`Currently “${identity.brandTitle}”.`}
@@ -505,7 +540,9 @@ export function TripIdentityPanel({ itinerary, onItineraryChange }: TripIdentity
         ) : (
           <RegenerationPreview itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
         )}
-      </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

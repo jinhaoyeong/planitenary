@@ -19,6 +19,7 @@ import { useCurrency } from '../contexts/CurrencyContext';
 import { sanitizeTripProfile } from '../lib/tripProfile';
 import { declaredTripDays, longTripItineraryNotice } from '../lib/tripDuration';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
+import { markManualFieldEdits } from '../lib/identityFields';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -1134,10 +1135,13 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
   const [isEditingMode, setIsEditingMode] = useState(false);
   const [editingActivityIndex, setEditingActivityIndex] = useState<number | null>(null);
   const [isTitleEditing, setIsTitleEditing] = useState(false);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
   const [editedDescription, setEditedDescription] = useState('');
   const [editedCities, setEditedCities] = useState('');
   const [editedMarqueeItems, setEditedMarqueeItems] = useState('');
+  const [editedOverviewEyebrow, setEditedOverviewEyebrow] = useState('');
+  const [editedOverviewDescription, setEditedOverviewDescription] = useState('');
   const [editingDateIndex, setEditingDateIndex] = useState<number | null>(null);
   const [editedDate, setEditedDate] = useState('');
   const [editingCityIndex, setEditingCityIndex] = useState<number | null>(null);
@@ -1178,7 +1182,6 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
     () => longTripItineraryNotice(declaredDays, customItinerary.days.length),
     [declaredDays, customItinerary.days.length],
   );
-
   // Sync internal state when parent prop changes (from Supabase realtime or other sources)
   useEffect(() => {
     setCustomItinerary(initialItinerary);
@@ -1495,7 +1498,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
     // Check if we are editing the plan name (Overview) or a specific day title (Detail)
     if (selectedDay === null) {
       // Editing Plan Name
-      const updatedItinerary = { ...customItinerary, name: newTitle };
+      const updatedItinerary = markManualFieldEdits(customItinerary, { name: newTitle });
       setCustomItinerary(updatedItinerary);
       // Itinerary name is not in the 'itineraries' array in data.ts structure directly as a mutable field for the list, 
       // but here we are editing the 'customItinerary' object which is what's displayed.
@@ -1528,8 +1531,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
         .map((item) => item.trim())
         .filter(Boolean),
     ));
+    const updatedCopy = markManualFieldEdits(customItinerary, {
+      description,
+      marquee: marqueeItems.join('\n'),
+      overviewHeading: editedOverviewEyebrow.trim() || customItinerary.overviewEyebrow || '',
+      overviewDescription: editedOverviewDescription.trim() || customItinerary.overviewDescription || '',
+    });
     const updatedItinerary = {
-      ...customItinerary,
+      ...updatedCopy,
       name,
       description,
       cities,
@@ -1656,13 +1665,33 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
             </h2>
           )}
 
-          <p className="text-base md:text-lg max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-            {customItinerary.overviewDescription ? (
-              customItinerary.overviewDescription
-            ) : (
-              <>
-                A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
-              </>
+          <p className="text-base md:text-lg max-w-2xl mx-auto leading-relaxed flex items-center justify-center gap-2" style={{ color: 'var(--ink-muted)' }}>
+            <span>
+              {customItinerary.overviewDescription ? (
+                customItinerary.overviewDescription
+              ) : (
+                <>
+                  A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
+                </>
+              )}
+            </span>
+            {isEditingMode && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditedDescription(customItinerary.description);
+                  setEditedCities(customItinerary.cities.join(', '));
+                  setEditedMarqueeItems((customItinerary.marqueeItems || ['Travel Handbook', 'Plans', 'Notes', 'Maps', 'Photos']).join(', '));
+                  setEditedOverviewEyebrow(customItinerary.overviewEyebrow || '');
+                  setEditedOverviewDescription(customItinerary.overviewDescription || '');
+                  setIsDetailsModalOpen(true);
+                }}
+                className="shrink-0 p-1 rounded-lg opacity-60 hover:opacity-100 transition-opacity"
+                style={{ color: 'var(--accent)' }}
+                aria-label="Edit trip details"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
             )}
           </p>
 
@@ -1675,50 +1704,105 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
             </p>
           )}
 
-          {isEditingMode && selectedDay === null && (
-            <div className="mx-auto mt-5 max-w-2xl rounded-2xl border p-4 text-left" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }}>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                  Trip description
-                  <textarea
-                    value={editedDescription}
-                    onChange={(event) => setEditedDescription(event.target.value)}
-                    rows={3}
-                    className="editorial-input mt-1 w-full resize-y text-sm normal-case tracking-normal"
-                    placeholder="Describe the feeling or purpose of this trip."
-                  />
-                </label>
-                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                  Cities or regions
-                  <input
-                    value={editedCities}
-                    onChange={(event) => setEditedCities(event.target.value)}
-                    className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
-                    placeholder="Lisbon, Porto, Sintra"
-                  />
-                  <span className="mt-1 block text-xs normal-case tracking-normal" style={{ color: 'var(--ink-muted)' }}>Separate multiple places with commas.</span>
-                </label>
-                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                  Scrolling strip labels
-                  <input
-                    value={editedMarqueeItems}
-                    onChange={(event) => setEditedMarqueeItems(event.target.value)}
-                    className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
-                    placeholder="Travel Handbook, Plans, Notes, Maps, Photos"
-                  />
-                  <span className="mt-1 block text-xs normal-case tracking-normal" style={{ color: 'var(--ink-muted)' }}>Use commas to separate the labels shown in the marquee.</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={handleOverviewDetailsSave}
-                  className="pill-btn pill-primary sm:col-span-2 justify-self-center"
+          <AnimatePresence>
+            {isEditingMode && isDetailsModalOpen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+                onClick={() => setIsDetailsModalOpen(false)}
+              >
+                <motion.div
+                  initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="w-full max-w-lg rounded-2xl border p-4 text-left shadow-xl max-h-[85vh] overflow-y-auto"
+                  style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  Save trip details
-                </button>
-              </div>
-            </div>
-          )}
-          
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Edit trip details</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsDetailsModalOpen(false)}
+                      className="p-1 rounded-lg opacity-60 hover:opacity-100 transition-opacity"
+                      style={{ color: 'var(--ink-muted)' }}
+                      aria-label="Close"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid gap-3">
+                    <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                      Home banner description
+                      <textarea
+                        value={editedDescription}
+                        onChange={(event) => setEditedDescription(event.target.value)}
+                        rows={3}
+                        className="editorial-input mt-1 w-full resize-y text-sm normal-case tracking-normal"
+                        placeholder="Describe the feeling or purpose of this trip."
+                      />
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                        Itinerary eyebrow
+                        <input
+                          value={editedOverviewEyebrow}
+                          onChange={(event) => setEditedOverviewEyebrow(event.target.value)}
+                          className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
+                          placeholder="The itinerary · day by day"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                        Itinerary description
+                        <input
+                          value={editedOverviewDescription}
+                          onChange={(event) => setEditedOverviewDescription(event.target.value)}
+                          className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
+                          placeholder="Sixteen days planned around wandering after dark."
+                        />
+                      </label>
+                    </div>
+                    <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                      Cities or regions
+                      <input
+                        value={editedCities}
+                        onChange={(event) => setEditedCities(event.target.value)}
+                        className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
+                        placeholder="Lisbon, Porto, Sintra"
+                      />
+                      <span className="mt-1 block text-xs normal-case tracking-normal" style={{ color: 'var(--ink-muted)' }}>Separate multiple places with commas.</span>
+                    </label>
+                    <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                      Scrolling strip labels
+                      <input
+                        value={editedMarqueeItems}
+                        onChange={(event) => setEditedMarqueeItems(event.target.value)}
+                        className="editorial-input mt-1 w-full text-sm normal-case tracking-normal"
+                        placeholder="Travel Handbook, Plans, Notes, Maps, Photos"
+                      />
+                      <span className="mt-1 block text-xs normal-case tracking-normal" style={{ color: 'var(--ink-muted)' }}>Use commas to separate the labels shown in the marquee.</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleOverviewDetailsSave();
+                        setIsDetailsModalOpen(false);
+                      }}
+                      className="pill-btn pill-primary justify-self-center"
+                    >
+                      Save trip details
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mt-4">
             <button
               onClick={() => {
@@ -1727,6 +1811,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
                   setEditedDescription(customItinerary.description);
                   setEditedCities(customItinerary.cities.join(', '));
                   setEditedMarqueeItems((customItinerary.marqueeItems || ['Travel Handbook', 'Plans', 'Notes', 'Maps', 'Photos']).join(', '));
+                  setEditedOverviewEyebrow(customItinerary.overviewEyebrow || '');
+                  setEditedOverviewDescription(customItinerary.overviewDescription || '');
+                } else {
+                  setIsDetailsModalOpen(false);
                 }
                 setIsEditingMode(nextEditingMode);
               }}
@@ -2491,8 +2579,4 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
     </div>
   );
 };
-
-
-
-
 

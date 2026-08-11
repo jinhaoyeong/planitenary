@@ -2698,7 +2698,7 @@ body {
 
 .handbook-home-hero-title {
   margin-top: 1rem;
-  font-size: clamp(1.9rem, 2.25vw, 2.7rem);
+  font-size: clamp(2.75rem, 5vw, 6.5rem);
   line-height: 1.05;
 }
 
@@ -2729,7 +2729,7 @@ body {
   }
 
   .handbook-home-hero-title {
-    font-size: clamp(2.1rem, 2.45vw, 3rem);
+    font-size: clamp(3.5rem, 5.2vw, 6.5rem);
   }
 
   .handbook-home-hero-description {
@@ -2749,7 +2749,7 @@ body {
   }
 
   .handbook-home-hero-title {
-    font-size: clamp(1.65rem, 7vw, 2.1rem);
+    font-size: clamp(2.35rem, 11vw, 3.75rem);
   }
 
   .handbook-home-hero-description {
@@ -2758,6 +2758,167 @@ body {
 
   .handbook-home-hero-actions .pill-btn {
     min-height: 2.75rem;
+  }
+}
+
+/*
+ * The immersive hero is a destination signature, not just a larger heading.
+ * It stays opt-in so the standard and balanced layouts keep their quiet rhythm.
+ */
+.handbook-hero-immersive-signature {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.75rem;
+  margin-top: 1.35rem;
+  min-height: 1.5rem;
+  color: var(--ink-muted);
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.handbook-hero-immersive-index {
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.handbook-hero-immersive-rule {
+  width: 2.8rem;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.68;
+}
+
+.handbook-hero-immersive-mark {
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  text-transform: none;
+}
+
+.handbook-hero-immersive-meta {
+  max-width: min(100%, 22rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handbook-hero-title {
+  position: relative;
+  isolation: isolate;
+  text-wrap: balance;
+}
+
+.handbook-hero-title-mark {
+  position: absolute;
+  top: -0.52em;
+  right: -0.04em;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-size: clamp(5rem, 9vw, 10rem);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 0.72;
+  opacity: 0.12;
+  text-orientation: upright;
+  text-transform: none;
+  transform: rotate(7deg);
+  writing-mode: vertical-rl;
+}
+
+/* Longer local words need their own breathing room instead of sitting behind
+ * the editable headline. Short script marks can keep the vertical seal. */
+.handbook-home-hero-title[data-mark-length='long'] .handbook-hero-title-mark {
+  top: -1.1em;
+  right: 0;
+  max-width: 8em;
+  font-size: clamp(2rem, 4vw, 4.5rem);
+  line-height: 0.82;
+  white-space: nowrap;
+  text-orientation: mixed;
+  transform: rotate(-5deg);
+  writing-mode: horizontal-tb;
+}
+
+.handbook-home-hero-title[data-immersive='true'] {
+  font-size: clamp(3.2rem, 5vw, 6.5rem);
+  line-height: 0.94;
+}
+
+.handbook-home-hero-title[data-immersive='true']::after {
+  position: absolute;
+  left: 0;
+  bottom: -0.08em;
+  z-index: 0;
+  width: clamp(4rem, 38%, 15rem);
+  height: 0.1em;
+  min-height: 4px;
+  border-radius: 999px 1px 999px 1px;
+  background: var(--accent);
+  content: '';
+  opacity: 0.9;
+  transform: rotate(-2deg);
+}
+
+/* Let the recipe change the mark's character while the layout remains stable. */
+.handbook-home-hero-title[data-recipe='modern-metropolitan']::after {
+  width: clamp(4.5rem, 30%, 9rem);
+  height: 2px;
+  min-height: 0;
+  border-radius: 0;
+  transform: none;
+}
+
+.handbook-home-hero-title[data-recipe='nature-expedition']::after {
+  height: 2px;
+  min-height: 0;
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 0.5rem, transparent 0.5rem 0.8rem);
+  transform: none;
+}
+
+.handbook-home-hero-title[data-recipe='warm-postcard'] .handbook-hero-title-mark {
+  transform: rotate(-6deg);
+}
+
+@media (max-width: 767px) {
+  .handbook-hero-immersive-signature {
+    margin-top: 1.1rem;
+    gap: 0.45rem 0.6rem;
+  }
+
+  .handbook-hero-immersive-meta {
+    flex-basis: 100%;
+    margin-left: 3.55rem;
+  }
+
+  .handbook-home-hero-title[data-immersive='true'] {
+    font-size: clamp(2.55rem, 12vw, 4.5rem);
+    line-height: 0.98;
+  }
+
+  .handbook-hero-title-mark {
+    right: 0;
+    font-size: clamp(4rem, 19vw, 7rem);
+  }
+
+  .handbook-home-hero-title[data-mark-length='long'] .handbook-hero-title-mark {
+    top: -0.95em;
+    right: 0;
+    font-size: clamp(1.8rem, 9vw, 3rem);
   }
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
-import { Coins, Compass, Download, ImagePlus, Link2, PawPrint, Plus, Trash2, Upload } from 'lucide-react';
+import type { ChangeEvent, MouseEvent } from 'react';
+import { Coins, Compass, Download, ImagePlus, Link2, PawPrint, Plus, Trash2, Upload, Wand2, type LucideIcon } from 'lucide-react';
 import {
   createPetId,
   DEFAULT_PETS,
@@ -23,6 +23,34 @@ interface AppSettingsPanelProps {
   onItineraryChange?: (itinerary: Itinerary) => void;
 }
 
+function SettingsCategoryHeading({
+  icon: Icon,
+  eyebrow,
+  title,
+  description,
+}: {
+  icon: LucideIcon;
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 px-1 pt-2">
+      <div
+        className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+        style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+      >
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </div>
+      <div className="min-w-0">
+        <div className="eyebrow">{eyebrow}</div>
+        <h3 className="font-display text-2xl mt-1" style={{ color: 'var(--ink)' }}>{title}</h3>
+        <p className="mt-1 max-w-2xl text-sm" style={{ color: 'var(--ink-muted)' }}>{description}</p>
+      </div>
+    </div>
+  );
+}
+
 export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItineraryChange }: AppSettingsPanelProps) {
   const [pets, setPets] = useState<PetDefinition[]>(() => loadPetPack());
   const [name, setName] = useState('');
@@ -31,8 +59,48 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
   const [error, setError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
+  const [activeSection, setActiveSection] = useState(
+    itinerary && onItineraryChange ? 'settings-trip' : 'settings-money',
+  );
+  const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
 
   useEffect(() => subscribePetPack(() => setPets(loadPetPack())), []);
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+  }, []);
+
+  const handleSectionNavigate = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    const id = event.currentTarget.getAttribute('href')?.slice(1);
+    if (!id) return;
+    const target = document.getElementById(id);
+    if (!target) return;
+
+    setActiveSection(id);
+    setHighlightedSection(id);
+    window.history.replaceState(null, '', `#${id}`);
+    target.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: 'start',
+    });
+
+    if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedSection((current) => (current === id ? null : current));
+    }, 1100);
+  };
+
+  const sectionTargetStyle = (id: string) => ({
+    borderRadius: '1.5rem',
+    outline: highlightedSection === id ? '2px solid var(--accent)' : '2px solid transparent',
+    outlineOffset: '0.75rem',
+    boxShadow: highlightedSection === id
+      ? '0 0 0 0.75rem color-mix(in srgb, var(--accent-soft) 65%, transparent)'
+      : 'none',
+    transition: 'outline-color 450ms ease, box-shadow 450ms ease',
+  });
 
   const persist = (next: PetDefinition[]) => {
     setPets(next);
@@ -130,58 +198,141 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
   };
 
   return (
-    <section className="w-full space-y-6">
-      <div className="editorial-card p-4 sm:p-5 md:p-8">
-        <div className="eyebrow">Settings</div>
-        <h2 className="font-display text-3xl sm:text-4xl md:text-5xl mt-4 leading-[0.95]" style={{ color: 'var(--ink)' }}>
-          App preferences.
-        </h2>
-        <p className="mt-3 max-w-2xl text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
-          Set wallet currencies and optional extras. Pet packs stay on this device and can be exported anytime.
-        </p>
-      </div>
+    <section className="w-full">
+      <div className="grid grid-cols-1 xl:grid-cols-[14rem_minmax(0,1fr)] items-start gap-6 xl:gap-10 xl:-ml-[16.5rem] xl:w-[calc(100%+16.5rem)]">
+        <aside
+          className="rounded-3xl p-3 xl:sticky xl:top-24"
+          style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div className="px-2">
+            <div className="eyebrow">Settings menu</div>
+            <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+              Jump to a category.
+            </p>
+          </div>
+          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-visible xl:pb-0" aria-label="Settings categories">
+            {itinerary && onItineraryChange && (
+              <a
+                href="#settings-trip"
+                onClick={handleSectionNavigate}
+                className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-trip' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
+                style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-trip' ? 'var(--accent-soft)' : 'transparent' }}
+              >
+                <Compass className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+                <span>Trip planning</span>
+              </a>
+            )}
+            {itinerary && onItineraryChange && (
+              <a
+                href="#settings-design"
+                onClick={handleSectionNavigate}
+                className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-design' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
+                style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-design' ? 'var(--accent-soft)' : 'transparent' }}
+              >
+                <Wand2 className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+                <span>Handbook design</span>
+              </a>
+            )}
+            <a
+              href="#settings-money"
+              onClick={handleSectionNavigate}
+              className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-money' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
+              style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-money' ? 'var(--accent-soft)' : 'transparent' }}
+            >
+              <Coins className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+              <span>Money</span>
+            </a>
+            <a
+              href="#settings-extras"
+              onClick={handleSectionNavigate}
+              className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-extras' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
+              style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-extras' ? 'var(--accent-soft)' : 'transparent' }}
+            >
+              <PawPrint className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
+              <span>Optional extras</span>
+            </a>
+          </nav>
+        </aside>
+
+        <div className="min-w-0 space-y-6">
+          <div className="editorial-card p-4 sm:p-5 md:p-8">
+            <div className="eyebrow">Settings</div>
+            <h2 className="font-display text-3xl sm:text-4xl md:text-5xl mt-4 leading-[0.95]" style={{ color: 'var(--ink)' }}>
+              App preferences.
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm md:text-base" style={{ color: 'var(--ink-muted)' }}>
+              Keep trip planning, handbook design, money, and optional extras in their own place. Pet packs stay on this device and can be exported anytime.
+            </p>
+          </div>
 
       {itinerary && onItineraryChange && (
+        <section id="settings-trip" className="space-y-3 scroll-mt-24" style={sectionTargetStyle('settings-trip')}>
+          <SettingsCategoryHeading
+            icon={Compass}
+            eyebrow="Trip planning"
+            title="Shape the journey"
+            description="Dates, cities, stays, and the trip preferences behind your itinerary."
+          />
+          <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
+            <div className="flex items-start gap-3">
+              <div
+                className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+                style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+              >
+                <Compass className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="eyebrow">Trip details</div>
+                <h3 className="font-display text-2xl sm:text-3xl mt-2">Plan the journey.</h3>
+                <p className="mt-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
+                  Set the dates, places, stays, and preferences that shape the itinerary.
+                </p>
+              </div>
+            </div>
+            <TripIdentityPanel
+              itinerary={itinerary}
+              onItineraryChange={onItineraryChange}
+              isDesignHighlighted={highlightedSection === 'settings-design'}
+            />
+          </div>
+        </section>
+      )}
+
+      <section id="settings-money" className="space-y-3 scroll-mt-24" style={sectionTargetStyle('settings-money')}>
+        <SettingsCategoryHeading
+          icon={Coins}
+          eyebrow="Wallet"
+          title="Keep money clear"
+          description="Choose the currencies and exchange-rate pair used by your trip wallet."
+        />
         <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
           <div className="flex items-start gap-3">
             <div
               className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
               style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
             >
-              <Compass className="w-5 h-5" />
+              <Coins className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="eyebrow">Trip identity</div>
-              <h3 className="font-display text-2xl sm:text-3xl mt-2">What this journey is about.</h3>
+              <div className="eyebrow">Currency</div>
+              <h3 className="font-display text-2xl sm:text-3xl mt-2">Home and trip money.</h3>
               <p className="mt-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
-                Everything the handbook writes, maps, and colours comes from this profile. Change it any time.
+                Choose your local currency and the currency for where you are going. The wallet only toggles between these two.
               </p>
             </div>
           </div>
-          <TripIdentityPanel itinerary={itinerary} onItineraryChange={onItineraryChange} />
+          <CurrencyPairSettings />
         </div>
-      )}
+      </section>
 
-      <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
-        <div className="flex items-start gap-3">
-          <div
-            className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-            style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
-          >
-            <Coins className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="eyebrow">Currency</div>
-            <h3 className="font-display text-2xl sm:text-3xl mt-2">Home and trip money.</h3>
-            <p className="mt-2 text-sm" style={{ color: 'var(--ink-muted)' }}>
-              Choose your local currency and the currency for where you are going. The wallet only toggles between these two.
-            </p>
-          </div>
-        </div>
-        <CurrencyPairSettings />
-      </div>
-
-      <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
+      <section id="settings-extras" className="space-y-3 scroll-mt-24" style={sectionTargetStyle('settings-extras')}>
+        <SettingsCategoryHeading
+          icon={PawPrint}
+          eyebrow="Optional extras"
+          title="Personalise the atmosphere"
+          description="Turn on animated companions and manage the pet pack that stays on this device."
+        />
+        <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
         <div
           className="rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
           style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
@@ -357,6 +508,9 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
               onChange={(event) => void handleImageUpload(event)}
             />
           </div>
+        </div>
+        </div>
+      </section>
         </div>
       </div>
     </section>
