@@ -62,8 +62,8 @@ export interface IntelligenceServiceDeps {
   writeCache: (entries: Array<{
     cacheKey: string;
     candidate: IntelligenceCandidate;
-    profileRevision: string;
-    plannerContextRevision?: string;
+    tripMaterialRevision: string;
+    plannerRevision: string;
     model: string;
     intelligence: ValidatedIntelligence | null;
   }>) => Promise<void>;
@@ -96,8 +96,8 @@ export async function resolveCandidateIntelligence(
   const keyFor = (candidate: IntelligenceCandidate) => intelligenceCacheKey({
     candidateId: candidate.candidateId,
     candidateRevision: candidate.candidateRevision,
-    profileRevision: trip.profileRevision,
-    plannerContextRevision: deps.plannerContextRevision,
+    plannerRevision: candidate.plannerRevision,
+    tripMaterialRevision: trip.tripMaterialRevision,
     model: deps.model,
   });
 
@@ -170,8 +170,8 @@ export async function resolveCandidateIntelligence(
       toWrite.push({
         cacheKey: keyFor(candidate),
         candidate,
-        profileRevision: trip.profileRevision,
-        plannerContextRevision: deps.plannerContextRevision,
+        tripMaterialRevision: trip.tripMaterialRevision,
+        plannerRevision: candidate.plannerRevision,
         model: deps.model,
         intelligence,
       });

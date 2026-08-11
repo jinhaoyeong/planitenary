@@ -30,6 +30,7 @@ import {
 const candidate = (over: Partial<IntelligenceCandidate> = {}): IntelligenceCandidate => ({
   candidateId: 'place-a',
   candidateRevision: 'derived-elsewhere',
+  plannerRevision: 'planner-derived-elsewhere',
   name: 'Yanaka Ginza',
   category: 'street',
   area: 'Yanaka',
@@ -45,7 +46,7 @@ const candidate = (over: Partial<IntelligenceCandidate> = {}): IntelligenceCandi
 });
 
 const trip = (over: Partial<IntelligenceTripContext> = {}): IntelligenceTripContext => ({
-  profileRevision: 'p1',
+  tripMaterialRevision: 'p1',
   interests: ['food', 'nightlife'],
   styles: ['local-neighbourhoods'],
   pace: 'relaxed',
@@ -132,7 +133,7 @@ describe('the traveller', () => {
     ['interest order', { interests: ['nightlife', 'food'] }],
     ['duplicate interests', { interests: ['food', 'nightlife', 'food'] }],
     ['their budget tier', { budgetTier: 'luxury' }],
-    ['an unrelated profile field', { profileRevision: 'p2' }],
+    ['an unrelated profile field', { tripMaterialRevision: 'p2' }],
   ])('is unchanged by %s', (_label, over) => {
     expect(tripRev(over)).toBe(tripRev());
   });
@@ -152,7 +153,7 @@ describe('the traveller', () => {
    * intelligence for edits the model cannot see.
    */
   it('ignores the global profile revision entirely', () => {
-    expect(tripRev({ profileRevision: 'p9' })).toBe(tripRev({ profileRevision: 'p1' }));
+    expect(tripRev({ tripMaterialRevision: 'p9' })).toBe(tripRev({ tripMaterialRevision: 'p1' }));
   });
 
   /** Budget has no validator consumer since the budget atoms fail closed. */

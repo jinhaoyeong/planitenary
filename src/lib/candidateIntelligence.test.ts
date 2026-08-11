@@ -41,7 +41,7 @@ const intelligenceModuleSource = readFileSync(
 );
 
 const trip: IntelligenceTripContext = {
-  profileRevision: 'profile-v1',
+  tripMaterialRevision: 'profile-v1',
   interests: ['food', 'nightlife'],
   styles: ['local-neighbourhoods'],
   pace: 'relaxed',
@@ -51,6 +51,7 @@ const trip: IntelligenceTripContext = {
 const base: IntelligenceCandidate = {
   candidateId: 'place-a',
   candidateRevision: 'cand-a-v1',
+  plannerRevision: 'plan-a-v1',
   name: 'Yanaka Ginza',
   category: 'street',
   area: 'Yanaka',
@@ -232,8 +233,9 @@ describe('claims about the world cannot enter through this door', () => {
 const response = (over: Record<string, unknown> = {}) => ({
   candidates: {
     'place-a': {
-      profileRevision: 'profile-v1',
+      tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-a-v1',
+  plannerRevision: 'plan-a-v1',
       personalFitScore: 82,
       recommendation: 'interested',
       reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
@@ -256,10 +258,29 @@ describe('validating a batch', () => {
     });
   });
 
-  it('rejects an answer about a stale profile', () => {
-    const result = validate(response({ profileRevision: 'profile-v0' }));
+  /**
+   * The trip and planner revisions are compared server-side against what this
+   * request was issued under, rather than echoed back by the model. The server
+   * knows which material it sent, so asking the model to repeat two long
+   * canonical strings per candidate would spend output tokens — the expensive
+   * side — to re-learn something already known.
+   */
+  it('rejects every result when the trip material moved since the request', () => {
+    const result = validateCandidateIntelligence(response(), {
+      trip, candidates: [base, neighbour, stranger],
+      issuedTripMaterialRevision: 'issued-under-something-else',
+    });
     expect(result.byCandidate.get('place-a')).toBeNull();
-    expect(result.rejections).toContainEqual({ candidateId: 'place-a', reason: 'stale-profile-revision' });
+    expect(result.rejections).toContainEqual({ candidateId: 'place-a', reason: 'stale-trip-revision' });
+  });
+
+  it('rejects one candidate whose planner facts moved, keeping its neighbours', () => {
+    const result = validateCandidateIntelligence(response(), {
+      trip, candidates: [base, neighbour, stranger],
+      plannerRevisions: new Map([['place-a', 'issued-under-an-older-plan']]),
+    });
+    expect(result.byCandidate.get('place-a')).toBeNull();
+    expect(result.rejections).toContainEqual({ candidateId: 'place-a', reason: 'stale-planner-revision' });
   });
 
   it('rejects an answer about a stale candidate', () => {
@@ -269,7 +290,7 @@ describe('validating a batch', () => {
 
   it('ignores a candidate nobody asked about', () => {
     const result = validateCandidateIntelligence(
-      { candidates: { 'place-nowhere': { profileRevision: 'profile-v1' } } },
+      { candidates: { 'place-nowhere': { tripMaterialRevision: 'profile-v1' } } },
       { trip, candidates: [base] },
     );
     expect(result.rejections).toContainEqual({ candidateId: 'place-nowhere', reason: 'unknown-candidate' });
@@ -385,7 +406,7 @@ describe('the copy the traveller reads', () => {
     const validated = validate({
       candidates: {
         'place-c': {
-          profileRevision: 'profile-v1',
+          tripMaterialRevision: 'profile-v1',
           candidateRevision: 'cand-c-v1',
           reasonAtoms: [{ type: 'weak-profile-match', references: [] }],
           cautionAtoms: [],
@@ -423,7 +444,7 @@ describe('an atom may not imply more than it proves', () => {
     const validated = validateCandidateIntelligence({
         candidates: {
           [candidate.candidateId]: {
-            profileRevision: trip.profileRevision,
+            tripMaterialRevision: trip.tripMaterialRevision,
             candidateRevision: candidate.candidateRevision,
             reasonAtoms: atoms.map((atom) => ({ references: [], ...atom })),
             cautionAtoms: [],
@@ -503,7 +524,7 @@ describe('an atom may not imply more than it proves', () => {
     const validated = validateCandidateIntelligence({
       candidates: {
         'place-a': {
-          profileRevision: trip.profileRevision,
+          tripMaterialRevision: trip.tripMaterialRevision,
           candidateRevision: base.candidateRevision,
           reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
           cautionAtoms: [],
@@ -633,13 +654,14 @@ describe('one batch is one metered request', () => {
 
   const goodAnswer = {
     'place-a': {
-      profileRevision: 'profile-v1',
+      tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-a-v1',
+  plannerRevision: 'plan-a-v1',
       reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
       cautionAtoms: [],
     },
     'place-b': {
-      profileRevision: 'profile-v1',
+      tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-b-v1',
       reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
       cautionAtoms: [],
@@ -671,7 +693,7 @@ describe('one batch is one metered request', () => {
     const callMetered = vi.fn().mockResolvedValue(reply({
       ...goodAnswer,
       'place-b': {
-        profileRevision: 'profile-v1',
+        tripMaterialRevision: 'profile-v1',
         candidateRevision: 'cand-b-v1',
         reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
         cautionAtoms: [],
@@ -723,8 +745,8 @@ describe('the cache key', () => {
   const key = (over: Record<string, string> = {}) => intelligenceCacheKey({
     candidateId: 'place-a',
     candidateRevision: 'cand-a-v1',
-    profileRevision: 'profile-v1',
-    plannerContextRevision: 'ctx-1',
+    plannerRevision: 'plan-a-v1',
+    tripMaterialRevision: 'profile-v1',
     model: 'gpt-5-nano',
     ...over,
   });
@@ -735,8 +757,8 @@ describe('the cache key', () => {
 
   it.each([
     ['candidateRevision', 'cand-a-v2'],
-    ['profileRevision', 'profile-v2'],
-    ['plannerContextRevision', 'ctx-2'],
+    ['tripMaterialRevision', 'profile-v2'],
+    ['plannerRevision', 'plan-a-v2'],
     ['model', 'gpt-5-nano-2025-08-07'],
   ])('changes when %s changes', (field, value) => {
     expect(key({ [field]: value })).not.toBe(key());
@@ -757,12 +779,12 @@ describe('the cache key', () => {
    * test too — the version is part of the cache key precisely so answers
    * derived from a different contract cannot be served as current.
    *
-   * v3: the payload narrowed to the material mappers, dropping name, area,
-   * category, travelMinutesFromCluster, underrepresentedCategories and
-   * budgetTier alongside the v2 removals.
+   * v4: the global profile revision left the operation entirely, replaced by
+   * an operation-specific tripMaterialRevision, and each candidate gained its
+   * own plannerRevision. The echo contract narrowed to two fields.
    */
   it('has been bumped for the current material contract', () => {
-    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v3');
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v4');
   });
 
   /** One candidate changing must not disturb its neighbours. */
@@ -886,13 +908,14 @@ describe('one batch is one metered request', () => {
 
   const goodAnswer = {
     'place-a': {
-      profileRevision: 'profile-v1',
+      tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-a-v1',
+  plannerRevision: 'plan-a-v1',
       reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
       cautionAtoms: [],
     },
     'place-b': {
-      profileRevision: 'profile-v1',
+      tripMaterialRevision: 'profile-v1',
       candidateRevision: 'cand-b-v1',
       reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
       cautionAtoms: [],
@@ -924,7 +947,7 @@ describe('one batch is one metered request', () => {
     const callMetered = vi.fn().mockResolvedValue(reply({
       ...goodAnswer,
       'place-b': {
-        profileRevision: 'profile-v1',
+        tripMaterialRevision: 'profile-v1',
         candidateRevision: 'cand-b-v1',
         reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
         cautionAtoms: [],
@@ -976,8 +999,8 @@ describe('the cache key', () => {
   const key = (over: Record<string, string> = {}) => intelligenceCacheKey({
     candidateId: 'place-a',
     candidateRevision: 'cand-a-v1',
-    profileRevision: 'profile-v1',
-    plannerContextRevision: 'ctx-1',
+    plannerRevision: 'plan-a-v1',
+    tripMaterialRevision: 'profile-v1',
     model: 'gpt-5-nano',
     ...over,
   });
@@ -988,8 +1011,8 @@ describe('the cache key', () => {
 
   it.each([
     ['candidateRevision', 'cand-a-v2'],
-    ['profileRevision', 'profile-v2'],
-    ['plannerContextRevision', 'ctx-2'],
+    ['tripMaterialRevision', 'profile-v2'],
+    ['plannerRevision', 'plan-a-v2'],
     ['model', 'gpt-5-nano-2025-08-07'],
   ])('changes when %s changes', (field, value) => {
     expect(key({ [field]: value })).not.toBe(key());
@@ -1010,12 +1033,12 @@ describe('the cache key', () => {
    * test too — the version is part of the cache key precisely so answers
    * derived from a different contract cannot be served as current.
    *
-   * v3: the payload narrowed to the material mappers, dropping name, area,
-   * category, travelMinutesFromCluster, underrepresentedCategories and
-   * budgetTier alongside the v2 removals.
+   * v4: the global profile revision left the operation entirely, replaced by
+   * an operation-specific tripMaterialRevision, and each candidate gained its
+   * own plannerRevision. The echo contract narrowed to two fields.
    */
   it('has been bumped for the current material contract', () => {
-    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v3');
+    expect(INTELLIGENCE_SCHEMA_VERSION).toBe('v4');
   });
 
   /** One candidate changing must not disturb its neighbours. */
@@ -1051,7 +1074,7 @@ describe('contradictory copy is unreachable', () => {
     const validated = validateCandidateIntelligence({
       candidates: {
         [candidate.candidateId]: {
-          profileRevision: trip.profileRevision,
+          tripMaterialRevision: trip.tripMaterialRevision,
           candidateRevision: candidate.candidateRevision,
           reasonAtoms: type === 'budget-fit' ? [{ type, references: [] }] : [],
           cautionAtoms: type === 'budget-mismatch' ? [{ type, references: [] }] : [],

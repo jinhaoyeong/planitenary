@@ -24,7 +24,7 @@ import {
 } from '../../supabase/functions/_shared/candidateIntelligence';
 
 const trip: IntelligenceTripContext = {
-  profileRevision: 'p1',
+  tripMaterialRevision: 'p1',
   interests: ['food'],
   styles: [],
   pace: 'relaxed',
@@ -33,6 +33,7 @@ const trip: IntelligenceTripContext = {
 const candidate = (index: number, revision = 'r1'): IntelligenceCandidate => ({
   candidateId: `place-${index}`,
   candidateRevision: revision,
+  plannerRevision: 'plan-r1',
   name: `Place ${index}`,
   category: 'sight',
   clusterId: 'north',
@@ -46,7 +47,7 @@ const fifteen = Array.from({ length: 15 }, (_, index) => candidate(index));
 /** A well-formed reply covering every candidate it was asked about. */
 const answerFor = (candidates: IntelligenceCandidate[]) => ({
   candidates: Object.fromEntries(candidates.map((entry) => [entry.candidateId, {
-    profileRevision: trip.profileRevision,
+    tripMaterialRevision: trip.tripMaterialRevision,
     candidateRevision: entry.candidateRevision,
     reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
     cautionAtoms: [],
@@ -70,7 +71,7 @@ function harness(over: Partial<{
 
   const deps = {
     model: 'gpt-5-nano',
-    plannerContextRevision: 'ctx1',
+    plannerRevision: 'plan-r1',
     maxSerialisedChars: 30_000,
     readCache: vi.fn().mockImplementation(async (keys: string[]) => {
       const found = new Map();
@@ -88,8 +89,8 @@ function harness(over: Partial<{
 const keyFor = (entry: IntelligenceCandidate) => intelligenceCacheKey({
   candidateId: entry.candidateId,
   candidateRevision: entry.candidateRevision,
-  profileRevision: trip.profileRevision,
-  plannerContextRevision: 'ctx1',
+  tripMaterialRevision: trip.tripMaterialRevision,
+  plannerRevision: 'plan-r1',
   model: 'gpt-5-nano',
 });
 
@@ -141,7 +142,7 @@ describe('what a request actually costs', () => {
     const { deps, callMetered } = harness({ cached });
 
     const { diagnostics } = await resolveCandidateIntelligence(
-      { ...trip, profileRevision: 'p2' }, fifteen, deps,
+      { ...trip, tripMaterialRevision: 'p2' }, fifteen, deps,
     );
 
     expect(callMetered).toHaveBeenCalledTimes(1);
@@ -206,7 +207,7 @@ describe('validation still applies at the service boundary', () => {
       reply: {
         candidates: {
           'place-0': {
-            profileRevision: 'p1', candidateRevision: 'r1',
+            tripMaterialRevision: 'p1', candidateRevision: 'r1',
             reasonAtoms: [{ type: 'queue-is-short', references: [] }],
             cautionAtoms: [],
           },
@@ -226,7 +227,7 @@ describe('validation still applies at the service boundary', () => {
       reply: {
         candidates: {
           'place-0': {
-            profileRevision: 'p-old', candidateRevision: 'r1',
+            tripMaterialRevision: 'p1', candidateRevision: 'r-old',
             reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
             cautionAtoms: [],
           },
@@ -246,12 +247,12 @@ describe('validation still applies at the service boundary', () => {
       reply: {
         candidates: {
           'place-0': {
-            profileRevision: 'p1', candidateRevision: 'r1',
+            tripMaterialRevision: 'p1', candidateRevision: 'r1',
             reasonAtoms: [{ type: 'interest-match', references: ['food'] }],
             cautionAtoms: [],
           },
           'place-1': {
-            profileRevision: 'p1', candidateRevision: 'r1',
+            tripMaterialRevision: 'p1', candidateRevision: 'r1',
             reasonAtoms: [{ type: 'interest-match', references: ['museums'] }],
             cautionAtoms: [],
           },

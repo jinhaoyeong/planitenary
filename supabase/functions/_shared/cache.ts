@@ -841,8 +841,8 @@ export async function writeCandidateIntelligence(
     cacheKey: string;
     candidateId: string;
     candidateRevision: string;
-    profileRevision: string;
-    plannerContextRevision?: string;
+    tripMaterialRevision: string;
+    plannerRevision: string;
     schemaVersion: string;
     model: string;
     intelligence: unknown | null;
@@ -858,8 +858,8 @@ export async function writeCandidateIntelligence(
           cache_key: entry.cacheKey,
           candidate_id: entry.candidateId,
           candidate_revision: entry.candidateRevision,
-          profile_revision: entry.profileRevision,
-          planner_context_revision: entry.plannerContextRevision ?? null,
+          profile_revision: entry.tripMaterialRevision,
+          planner_context_revision: entry.plannerRevision,
           schema_version: entry.schemaVersion,
           model: entry.model,
           intelligence: entry.intelligence ?? null,

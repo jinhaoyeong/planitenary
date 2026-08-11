@@ -32,7 +32,17 @@ import {
 
 /** Facts about the trip the model may reason from. Nothing else is sent. */
 export interface IntelligenceTripContext {
-  profileRevision: string;
+  /**
+   * The revision of the traveller facts *this operation* sends, not the global
+   * `TripProfile` revision.
+   *
+   * Named for the material rather than the profile because the old name
+   * invited exactly one bug: the global revision moves when flight times,
+   * stays or companions are edited — none of which the model sees — so keying
+   * off it regenerated every candidate's intelligence for edits that could not
+   * change any answer. Derived from `toCandidateIntelligenceTripMaterial`.
+   */
+  tripMaterialRevision: string;
   /** Exactly what the traveller selected. Never an expanded or fuzzy set. */
   interests: string[];
   styles: string[];
@@ -50,6 +60,15 @@ export interface IntelligenceTripContext {
 export interface IntelligenceCandidate {
   candidateId: string;
   candidateRevision: string;
+  /**
+   * This candidate's planner facts, revised independently of its own.
+   *
+   * Per candidate rather than one shared context revision, because planner
+   * material *is* per candidate — a pairing changing for one place says
+   * nothing about another. One shared value would invalidate the whole pool
+   * for a single candidate's cluster move.
+   */
+  plannerRevision: string;
   name: string;
   category: string;
   area?: string;
@@ -350,6 +369,9 @@ export function validateCandidateIntelligence(
   request: {
     trip: IntelligenceTripContext;
     candidates: IntelligenceCandidate[];
+    /** What this request was issued under, for the server-side comparison. */
+    issuedTripMaterialRevision?: string;
+    plannerRevisions?: Map<string, string>;
   },
 ): IntelligenceValidation {
   const byCandidate = new Map<string, ValidatedIntelligence | null>();
@@ -368,13 +390,31 @@ export function validateCandidateIntelligence(
 
     // Revisions are what make a cached answer safe to reuse. An answer about
     // other inputs than the ones it will be filed under is stale on arrival.
-    if (entry.profileRevision !== request.trip.profileRevision) {
-      rejections.push({ candidateId, reason: 'stale-profile-revision' });
+    /**
+     * Three identities, checked separately so a rejection names its cause.
+     *
+     * Only the first two are echoed by the model; the other two are compared
+     * against what this request actually sent. The server issued the request
+     * and knows which trip and planner material went with it, so asking the
+     * model to repeat them back would cost output tokens — the expensive side
+     * — to re-learn something already known. The echo exists to catch the
+     * model confusing one candidate for another, which `candidateId` and
+     * `candidateRevision` already cover.
+     */
+    if (entry.candidateRevision !== candidate.candidateRevision) {
+      rejections.push({ candidateId, reason: 'stale-candidate-revision' });
       byCandidate.set(candidateId, null);
       continue;
     }
-    if (entry.candidateRevision !== candidate.candidateRevision) {
-      rejections.push({ candidateId, reason: 'stale-candidate-revision' });
+    if (request.plannerRevisions?.get(candidateId) !== undefined
+      && request.plannerRevisions.get(candidateId) !== candidate.plannerRevision) {
+      rejections.push({ candidateId, reason: 'stale-planner-revision' });
+      byCandidate.set(candidateId, null);
+      continue;
+    }
+    if (request.issuedTripMaterialRevision !== undefined
+      && request.issuedTripMaterialRevision !== request.trip.tripMaterialRevision) {
+      rejections.push({ candidateId, reason: 'stale-trip-revision' });
       byCandidate.set(candidateId, null);
       continue;
     }
@@ -614,7 +654,7 @@ export const MAX_INTELLIGENCE_BATCH = 15;
  * served as current; the version is part of the cache key precisely so that
  * cannot happen.
  */
-export const INTELLIGENCE_SCHEMA_VERSION = 'v3';
+export const INTELLIGENCE_SCHEMA_VERSION = 'v4';
 
 /**
  * The key a candidate's intelligence is filed under.
@@ -633,18 +673,24 @@ export const INTELLIGENCE_SCHEMA_VERSION = 'v3';
 export function intelligenceCacheKey(input: {
   candidateId: string;
   candidateRevision: string;
-  profileRevision: string;
-  plannerContextRevision?: string;
+  plannerRevision: string;
+  tripMaterialRevision: string;
   model: string;
 }): string {
-  return [
+  /**
+   * Structured rather than delimiter-joined: candidate ids are OSM-style and
+   * carry colons, and the revisions are canonical JSON carrying every
+   * punctuation character there is. Joining them would let one field
+   * impersonate a boundary, which this project has already fixed once.
+   */
+  return JSON.stringify([
     INTELLIGENCE_SCHEMA_VERSION,
     input.model,
     input.candidateId,
     input.candidateRevision,
-    input.profileRevision,
-    input.plannerContextRevision || 'no-context',
-  ].join('|');
+    input.plannerRevision,
+    input.tripMaterialRevision,
+  ]);
 }
 
 /**
@@ -721,8 +767,8 @@ export const INTELLIGENCE_INSTRUCTION = [
   'a duration or travel figure supplied. Omit any atom you cannot support that way.',
   'Never state opening hours, prices, queues, crowds, weather, ratings or best times —',
   'there is no atom for them and they will be discarded.',
-  'Echo candidateId, profileRevision and candidateRevision exactly as supplied.',
-  'Return {"candidates": {"<candidateId>": {"profileRevision", "candidateRevision",',
+  'Echo candidateId and candidateRevision exactly as supplied.',
+  'Return {"candidates": {"<candidateId>": {"candidateRevision",',
   '"personalFitScore", "recommendation", "reasonAtoms", "cautionAtoms",',
   '"pairWithCandidateIds", "suggestedDurationMinutes"}}}.',
 ].join(' ');
