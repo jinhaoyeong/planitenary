@@ -129,6 +129,18 @@ export type AtomRejection =
   | 'no-known-duration'
   | 'indoor-unknown'
   | 'unsupported-weak-claim'
+  /** The fact is known and says the opposite of what the atom claims. */
+  | 'budget-contradiction'
+  /**
+   * The app owns no deterministic definition of the band this atom asserts.
+   * A number existing is not a threshold.
+   */
+  | 'detour-policy-unavailable'
+  | 'duration-policy-unavailable'
+  /** No walking-specific metric exists; generic travel time cannot stand in. */
+  | 'walking-metric-unavailable'
+  /** Shared geography is not shared substance. */
+  | 'duplication-metric-unavailable'
   | 'composition-unknown'
   | 'category-not-underrepresented'
   | 'missing-reference';
@@ -187,16 +199,26 @@ export function atomRejection(
     case 'pace-fit':
       return needsReference() || (reference === trip.pace ? undefined : 'pace-mismatch');
 
+    /**
+     * Opposing atoms get separate arms, even where their preconditions match.
+     *
+     * They previously shared one, which checked that `budgetFits` was *known*
+     * and never what it said — so a place the app knew to be over budget could
+     * carry a `budget-fit` atom and render "its published price sits inside
+     * your budget". The precondition genuinely is shared; the verdict never
+     * was, and grouping them is what hid that for both directions at once.
+     */
     case 'budget-fit':
-    case 'budget-mismatch':
-      // Both halves must be known. A category is not a price, and an unpriced
-      // place cannot be said to fit or miss a budget.
       if (!candidate.costKnown) return 'cost-unknown';
       if (!trip.budgetTier || candidate.budgetFits === undefined) return 'budget-unknown';
-      return undefined;
+      return candidate.budgetFits ? undefined : 'budget-contradiction';
 
-    case 'cluster-fit':
-    case 'portfolio-duplication': {
+    case 'budget-mismatch':
+      if (!candidate.costKnown) return 'cost-unknown';
+      if (!trip.budgetTier || candidate.budgetFits === undefined) return 'budget-unknown';
+      return candidate.budgetFits ? 'budget-contradiction' : undefined;
+
+    case 'cluster-fit': {
       const missing = needsReference();
       if (missing) return missing;
       const other = pool.get(reference);
@@ -206,16 +228,51 @@ export function atomRejection(
       return undefined;
     }
 
+    /**
+     * Fails closed: shared geography is not shared substance.
+     *
+     * This shared an arm with `cluster-fit`, so being in one cluster was taken
+     * as proof of covering similar ground. A shrine and a ramen counter in the
+     * same neighbourhood are one cluster and nothing alike — telling a
+     * traveller they duplicate each other is a claim about *content* resting
+     * on a fact about *place*. Re-enable when the planner owns a similarity
+     * verdict; until then there is no fact here to check.
+     */
+    case 'portfolio-duplication':
+      return 'duplication-metric-unavailable';
+
+    /**
+     * Fail closed: a computed travel time is not a threshold.
+     *
+     * These three shared one arm that asked only whether a number existed, so
+     * any journey at all satisfied both "adds little travel" and "is out of
+     * the way" simultaneously. The app defines no deterministic band for
+     * either, and borrowing a nearby number — `PACE_DEFAULTS` holds a daily
+     * walking ceiling — would swap an unsupported claim for a more plausible
+     * one, which is worse because it survives review.
+     */
     case 'low-detour':
     case 'detour':
-    case 'high-walking':
-      // A real computed number, or no claim at all. Neighbourhood names are
-      // not distances.
-      return candidate.travelMinutesFromCluster === undefined ? 'no-computed-travel' : undefined;
+      return 'detour-policy-unavailable';
 
+    /**
+     * Fail closed for a stronger reason than the two above: the wrong *fact*,
+     * not merely a missing threshold. `travelMinutesFromCluster` is generic
+     * travel time, so it cannot establish a walking claim at any threshold.
+     * This needs a walking-specific planner metric before it can mean anything.
+     */
+    case 'high-walking':
+      return 'walking-metric-unavailable';
+
+    /**
+     * Fail closed: a known duration is not a verdict about it. These shared an
+     * arm, so any range proved both "works as a shorter stop" and "not a quick
+     * look". Whether 45–90 minutes is short depends on the day it sits in,
+     * which is the scheduler's judgement and not this module's to invent.
+     */
     case 'short-stop':
     case 'duration-pressure':
-      return candidate.durationRangeMinutes ? undefined : 'no-known-duration';
+      return 'duration-policy-unavailable';
 
     case 'indoor-option':
       /**

@@ -139,15 +139,47 @@ describe('an atom must rest on something the app owns', () => {
     expect(reject('cluster-fit', ['place-invented'])).toBe('unknown-candidate-reference');
   });
 
-  it('refuses a detour claim with no computed travel time', () => {
-    expect(reject('low-detour')).toBeUndefined();
-    expect(reject('low-detour', [], { ...base, travelMinutesFromCluster: undefined })).toBe('no-computed-travel');
-    expect(reject('high-walking', [], { ...base, travelMinutesFromCluster: undefined })).toBe('no-computed-travel');
+  /**
+   * A computed number is not a threshold. These atoms previously shared one
+   * arm that asked only whether a travel time existed, so any journey at all
+   * satisfied "adds little travel" and "is out of the way" at the same time.
+   */
+  it.each(['low-detour', 'detour'])('refuses %s while no detour band is defined', (type) => {
+    expect(reject(type)).toBe('detour-policy-unavailable');
+    // Not a missing-value problem: a known travel time changes nothing.
+    expect(reject(type, [], { ...base, travelMinutesFromCluster: 3 })).toBe('detour-policy-unavailable');
   });
 
-  it('refuses a duration claim when no duration is known', () => {
-    expect(reject('short-stop')).toBeUndefined();
-    expect(reject('short-stop', [], { ...base, durationRangeMinutes: undefined })).toBe('no-known-duration');
+  /**
+   * The wrong fact rather than a missing threshold. `travelMinutesFromCluster`
+   * is generic travel time, so it cannot establish a walking claim at any
+   * threshold — a transit journey is not a walk.
+   */
+  it('refuses high-walking because travel time is the wrong metric for it', () => {
+    expect(reject('high-walking')).toBe('walking-metric-unavailable');
+    expect(reject('high-walking', [], { ...base, travelMinutesFromCluster: 90 }))
+      .toBe('walking-metric-unavailable');
+  });
+
+  it.each(['short-stop', 'duration-pressure'])('refuses %s while no duration policy exists', (type) => {
+    expect(reject(type)).toBe('duration-policy-unavailable');
+    expect(reject(type, [], { ...base, durationRangeMinutes: [10, 15] })).toBe('duration-policy-unavailable');
+  });
+
+  /**
+   * Shared geography is not shared substance. This shared an arm with
+   * `cluster-fit`, so one cluster was taken as proof of covering similar
+   * ground — a claim about content resting on a fact about place.
+   */
+  it('refuses portfolio-duplication, which had no similarity fact behind it', () => {
+    expect(reject('portfolio-duplication', ['place-b'])).toBe('duplication-metric-unavailable');
+    // Same cluster, and still refused: proximity was never the right fact.
+    expect(base.clusterId).toBe(neighbour.clusterId);
+  });
+
+  /** The neighbouring atom that *does* rest on cluster membership still works. */
+  it('still accepts cluster-fit, whose claim geography genuinely supports', () => {
+    expect(reject('cluster-fit', ['place-b'])).toBeUndefined();
   });
 
   /** Unknown is not indoor. A rainy-day plan resting on a guess is the worst case. */
@@ -368,9 +400,8 @@ describe('the copy the traveller reads', () => {
  * they are written as *ceilings*: what each atom may not be allowed to imply.
  */
 describe('an atom may not imply more than it proves', () => {
-  const render = (atoms: Array<{ type: string; references?: string[] }>, candidate = base) =>
-    renderIntelligenceCopy(
-      validateCandidateIntelligence({
+  const render = (atoms: Array<{ type: string; references?: string[] }>, candidate = base) => {
+    const validated = validateCandidateIntelligence({
         candidates: {
           [candidate.candidateId]: {
             profileRevision: trip.profileRevision,
@@ -379,13 +410,19 @@ describe('an atom may not imply more than it proves', () => {
             cautionAtoms: [],
           },
         },
-        // The candidate under test replaces its namesake in the pool: a helper
-        // that validated against the original would silently test a different
-        // object from the one it renders.
-      }, { trip, candidates: [candidate, neighbour, stranger] }).byCandidate.get(candidate.candidateId)!,
+      // The candidate under test replaces its namesake in the pool: a helper
+      // that validated against the original would silently test a different
+      // object from the one it renders.
+    }, { trip, candidates: [candidate, neighbour, stranger] }).byCandidate.get(candidate.candidateId);
+    // A fully rejected atom set yields no intelligence at all, which renders
+    // as nothing — the card keeps its deterministic rationale instead.
+    if (!validated) return '';
+    return renderIntelligenceCopy(
+      validated,
       candidate,
       new Map([...pool, [candidate.candidateId, candidate]]),
     ).join(' ').toLowerCase();
+  };
 
   /**
    * The exact regression. `cluster-fit` establishes shared planning geography
@@ -404,8 +441,12 @@ describe('an atom may not imply more than it proves', () => {
     }
   });
 
-  it('allows the travel claim only when low-detour was validated', () => {
-    expect(render([{ type: 'low-detour' }])).toContain('minutes of travel');
+  /**
+   * With `low-detour` failing closed there is no validated route to this
+   * sentence at all, which is the point: the copy cannot outrun the fact.
+   */
+  it('cannot render a travel claim while low-detour is unsupported', () => {
+    expect(render([{ type: 'low-detour' }])).not.toContain('minutes of travel');
   });
 
   /** `pace-fit` says the pace matches. It cannot say what that does to a day. */
@@ -702,5 +743,93 @@ describe('the cache key', () => {
     const before = key();
     key({ candidateId: 'place-b', candidateRevision: 'cand-b-v9' });
     expect(key()).toBe(before);
+  });
+});
+
+/**
+ * A known value is not a supporting value.
+ *
+ * The whole suite previously asserted only the *rejection* paths for these
+ * atoms — cost unknown, budget unknown — and never that a true claim requires
+ * a fact pointing the right way. So a place the app knew to be over budget
+ * could carry a `budget-fit` atom and render "its published price sits inside
+ * your budget", and every test stayed green.
+ *
+ * Every directional atom therefore needs three cases: the fact supports it,
+ * the fact contradicts it, the fact is unknown.
+ */
+describe('budget claims must match the fact, not merely have one', () => {
+  const priced = (budgetFits: boolean | undefined) => ({ ...base, costKnown: true, budgetFits });
+
+  it('accepts budget-fit only when the place is actually within budget', () => {
+    expect(reject('budget-fit', [], priced(true))).toBeUndefined();
+    expect(reject('budget-fit', [], priced(false))).toBe('budget-contradiction');
+  });
+
+  it('accepts budget-mismatch only when the place is actually over budget', () => {
+    expect(reject('budget-mismatch', [], priced(false))).toBeUndefined();
+    expect(reject('budget-mismatch', [], priced(true))).toBe('budget-contradiction');
+  });
+
+  it('refuses both when either half is unknown', () => {
+    for (const type of ['budget-fit', 'budget-mismatch']) {
+      expect(reject(type, [], { ...base, costKnown: false })).toBe('cost-unknown');
+      expect(reject(type, [], priced(undefined))).toBe('budget-unknown');
+      expect(atomRejection({ type, references: [] }, { ...trip, budgetTier: undefined }, priced(true), pool))
+        .toBe('budget-unknown');
+    }
+  });
+
+  /** The two can never both stand for the same place. */
+  it('never accepts both directions at once', () => {
+    for (const fits of [true, false]) {
+      const accepted = ['budget-fit', 'budget-mismatch']
+        .filter((type) => reject(type, [], priced(fits)) === undefined);
+      expect(accepted).toHaveLength(1);
+    }
+  });
+});
+
+/**
+ * The same check one layer later. A validator can be right while the renderer
+ * still prints the opposite, so the contradictory *sentence* is asserted
+ * unreachable rather than merely unvalidated.
+ */
+describe('contradictory copy is unreachable', () => {
+  const copyFor = (type: string, budgetFits: boolean) => {
+    const candidate = { ...base, costKnown: true, budgetFits };
+    const validated = validateCandidateIntelligence({
+      candidates: {
+        [candidate.candidateId]: {
+          profileRevision: trip.profileRevision,
+          candidateRevision: candidate.candidateRevision,
+          reasonAtoms: type === 'budget-fit' ? [{ type, references: [] }] : [],
+          cautionAtoms: type === 'budget-mismatch' ? [{ type, references: [] }] : [],
+        },
+      },
+    }, { trip, candidates: [candidate] }).byCandidate.get(candidate.candidateId);
+    return validated ? renderIntelligenceCopy(validated, candidate, pool).join(' ').toLowerCase() : '';
+  };
+
+  it('cannot say a place is within budget when the app says it is not', () => {
+    expect(copyFor('budget-fit', true)).toContain('inside your budget');
+    // The atom is refused, so there is no sentence at all.
+    expect(copyFor('budget-fit', false)).not.toContain('inside your budget');
+  });
+
+  it('cannot say a place is over budget when the app says it fits', () => {
+    expect(copyFor('budget-mismatch', false)).toContain('above the budget');
+    expect(copyFor('budget-mismatch', true)).not.toContain('above the budget');
+  });
+
+  /**
+   * The atoms failing closed have no route to their copy either. Worth
+   * asserting on the rendered text rather than on the rejection reason,
+   * because the sentence is what a traveller would have read.
+   */
+  it('cannot render detour, walking or duration claims while unsupported', () => {
+    const all = ['low-detour', 'detour', 'high-walking', 'short-stop', 'duration-pressure']
+      .map((type) => reject(type, ['place-b']));
+    expect(all.every(Boolean)).toBe(true);
   });
 });
