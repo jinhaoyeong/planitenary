@@ -103,6 +103,11 @@ const listWords = (words: string[]): string => {
   return `${readable.slice(0, -1).join(', ')} and ${readable[readable.length - 1]}`;
 };
 
+const readableCategory = (candidate: PlaceCandidate): string | undefined => {
+  const category = candidate.categories.find((entry) => !['essential', 'local-character'].includes(entry));
+  return category?.replace(/[-_]+/g, ' ');
+};
+
 /**
  * Where `value` sits among `all`, as a share of the shortlist it is at least as
  * good as. Also reports how many share the exact value, because a three-way tie
@@ -293,12 +298,15 @@ export function buildRationale(input: RationaleInput): RationalePoint[] {
 
   // --- Fallbacks -----------------------------------------------------------
   if (points.length === 0) {
+    const category = readableCategory(candidate);
+    const descriptor = category
+      ? `${/^[aeiou]/i.test(category) ? 'an' : 'a'} ${category} option`
+      : 'another option';
+    const location = candidate.neighbourhood || candidate.city;
     points.push({
       id: 'variety',
       kind: 'evidence',
-      text: candidate.neighbourhood
-        ? `Nothing stands out on paper, but it groups well with the rest of ${candidate.neighbourhood}`
-        : 'Nothing stands out on paper — it is here for variety',
+      text: `It adds ${descriptor} in ${location}; the available evidence does not point to one standout reason.`,
       basis: 'no dimension cleared the notable threshold',
       comparative: false,
     });

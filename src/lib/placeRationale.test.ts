@@ -155,6 +155,19 @@ describe('ordering by what actually carried the score', () => {
 });
 
 describe('suppressing what does not distinguish', () => {
+  it('grounds an unremarkable fallback in the place type and location', () => {
+    const points = buildRationale({
+      candidate: place({ categories: ['temple'], neighbourhood: 'Tennoji' }),
+      dimensions: dimensions(),
+      weights: WEIGHTS,
+      matchedStyles: [],
+      shortlist: backdrop(),
+    });
+
+    expect(points[0].text).toBe('It adds a temple option in Tennoji; the available evidence does not point to one standout reason.');
+    expect(points[0].text).not.toMatch(/nothing stands out|here for variety/i);
+  });
+
   it('drops a dimension that is high across most of the shortlist', () => {
     // If almost everything on the list is significant, saying so about one card
     // tells the traveller nothing about that card.

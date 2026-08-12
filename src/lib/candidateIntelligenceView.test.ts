@@ -178,6 +178,16 @@ describe('the same fact is never shown twice', () => {
     expect(JSON.stringify(view)).not.toContain('place-');
   });
 
+  it('keeps the pairing sentence in the secondary note, not the explanation list', () => {
+    const view = buildIntelligenceView(
+      intelligence(),
+      ['Worth considering alongside Nezu Shrine.'],
+      ['Nezu Shrine'],
+    );
+    expect(view.explanation).toEqual([]);
+    expect(view.pairings).toEqual(['Nezu Shrine']);
+  });
+
   it('produces nothing to render when there is nothing to say', () => {
     const view = buildIntelligenceView(intelligence({ recommendation: null }), [], []);
     expect(view.matches).toEqual([]);

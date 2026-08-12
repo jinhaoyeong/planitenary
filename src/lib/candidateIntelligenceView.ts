@@ -109,6 +109,10 @@ export function buildIntelligenceView(
    * information in two forms.
    */
   const explanation = copy.filter((line) => {
+    // Pairings have their own secondary note below the rationale. The shared
+    // renderer also returns the sentence for direct consumers, so remove it
+    // here rather than making the card print the same advice twice.
+    if (pairingNames.length > 0 && line.startsWith('Worth considering alongside ')) return false;
     const isChipRestated = intelligence.reasons.some((reason) => {
       if (!chipAtomTypes.has(reason.type)) return false;
       const label = matchLabel(reason.type, reason.references[0]);

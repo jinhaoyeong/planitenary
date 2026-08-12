@@ -86,6 +86,10 @@ export async function fetchCandidateIntelligence(
   invoke: (operation: string, input: unknown) => Promise<unknown> = invokeTravelReasoning,
 ): Promise<IntelligenceResponseRow[] | undefined> {
   if (candidates.length === 0) return [];
+  if (import.meta.env.DEV && import.meta.env.VITE_CANDIDATE_INTELLIGENCE_FIXTURE === 'acceptance') {
+    const { createDevCandidateIntelligenceFixture } = await import('./candidateIntelligenceDevFixture');
+    return createDevCandidateIntelligenceFixture(trip, candidates);
+  }
   try {
     const payload = await invoke('candidate-intelligence', {
       trip,
