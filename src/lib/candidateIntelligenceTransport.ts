@@ -33,6 +33,8 @@ export interface IntelligenceRequestCandidate {
 }
 
 export interface IntelligenceRequestTrip {
+  /** The server-owned trip scope used for authorization and cache isolation. */
+  tripId: string;
   tripMaterialRevision: string;
   styles: string[];
   pace: string;

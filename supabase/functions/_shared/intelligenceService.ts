@@ -18,6 +18,7 @@
 
 import {
   buildIntelligenceBatches,
+  intelligenceBatchClaimKey,
   intelligenceCacheKey,
   intelligenceRequestBody,
   validateCandidateIntelligence,
@@ -72,8 +73,14 @@ export interface IntelligenceServiceDeps {
     { ok: true; result: unknown } | { ok: false; refusal: string }
   >;
   model: string;
+  /** The verified trip scope for both cache keys and live claims. */
+  tripId: string;
   plannerContextRevision?: string;
   maxSerialisedChars: number;
+  /** Returns false when another request owns the exact live batch. */
+  claimBatch?: (claimKey: string) => Promise<boolean>;
+  /** Releases a successful or failed live claim. */
+  releaseBatch?: (claimKey: string) => Promise<void>;
 }
 
 export async function resolveCandidateIntelligence(
@@ -94,6 +101,7 @@ export async function resolveCandidateIntelligence(
   if (candidates.length === 0) return { results: [], diagnostics };
 
   const keyFor = (candidate: IntelligenceCandidate) => intelligenceCacheKey({
+    tripId: deps.tripId,
     candidateId: candidate.candidateId,
     candidateRevision: candidate.candidateRevision,
     plannerRevision: candidate.plannerRevision,
@@ -131,53 +139,92 @@ export async function resolveCandidateIntelligence(
   diagnostics.batches = batches.length;
 
   for (const batch of batches) {
-    const answer = await deps.callMetered(intelligenceRequestBody(trip, batch));
-    diagnostics.meteredRequests += 1;
-
-    if (!answer.ok) {
+    const batchClaimKey = intelligenceBatchClaimKey({
+      tripId: deps.tripId,
+      model: deps.model,
+      cacheKeys: batch.map(keyFor),
+    });
+    if (deps.claimBatch && !await deps.claimBatch(batchClaimKey)) {
       /**
-       * Never asked, so nothing is learned and nothing is written. A budget
-       * ceiling reached this afternoon must not permanently mark these cards
-       * as having no personalisation available — which is exactly what caching
-       * this as an empty answer would do.
+       * Another request is already paying for this exact batch. Re-read once so
+       * a fast winner can hand its result to this caller; if it is still live,
+       * return deterministic fallback rather than starting a second provider
+       * attempt. The claim expiry handles a crashed winner later.
        */
-      diagnostics.blockedReason = answer.refusal;
+      const settled = await deps.readCache(batch.map(keyFor));
       for (const candidate of batch) {
-        diagnostics.deterministicFallbacks += 1;
-        results.set(candidate.candidateId, {
-          candidateId: candidate.candidateId, intelligence: null, status: 'unavailable',
-        });
+        const hit = settled.get(keyFor(candidate));
+        if (hit !== undefined) {
+          diagnostics.cacheHits += 1;
+          results.set(candidate.candidateId, {
+            candidateId: candidate.candidateId,
+            intelligence: hit,
+            status: hit ? 'ready' : 'deterministic-only',
+          });
+        } else {
+          diagnostics.deterministicFallbacks += 1;
+          results.set(candidate.candidateId, {
+            candidateId: candidate.candidateId, intelligence: null, status: 'unavailable',
+          });
+        }
       }
-      // Every later batch would be refused for the same reason; asking again
-      // spends a quota unit to be told so.
+      diagnostics.blockedReason = 'duplicate-in-flight';
       continue;
     }
 
-    const { byCandidate } = validateCandidateIntelligence(answer.result, { trip, candidates: batch });
-    const toWrite: Parameters<IntelligenceServiceDeps['writeCache']>[0] = [];
+    try {
+      const answer = await deps.callMetered(intelligenceRequestBody(trip, batch));
+      diagnostics.meteredRequests += 1;
 
-    for (const candidate of batch) {
-      const intelligence = byCandidate.get(candidate.candidateId) ?? null;
-      if (intelligence) diagnostics.candidatesAccepted += 1;
-      else diagnostics.candidatesRejected += 1;
+      if (answer.ok === false) {
+        /**
+         * Never asked, so nothing is learned and nothing is written. A budget
+         * ceiling reached this afternoon must not permanently mark these cards
+         * as having no personalisation available — which is exactly what caching
+         * this as an empty answer would do.
+         */
+        diagnostics.blockedReason = answer.refusal;
+        for (const candidate of batch) {
+          diagnostics.deterministicFallbacks += 1;
+          results.set(candidate.candidateId, {
+            candidateId: candidate.candidateId, intelligence: null, status: 'unavailable',
+          });
+        }
+        // Every later batch would be refused for the same reason; asking again
+        // spends a quota unit to be told so.
+        continue;
+      }
 
-      results.set(candidate.candidateId, {
-        candidateId: candidate.candidateId,
-        intelligence,
-        // Answered, even when empty. Settled, not temporary.
-        status: intelligence ? 'ready' : 'deterministic-only',
-      });
-      toWrite.push({
-        cacheKey: keyFor(candidate),
-        candidate,
-        tripMaterialRevision: trip.tripMaterialRevision,
-        plannerRevision: candidate.plannerRevision,
-        model: deps.model,
-        intelligence,
-      });
+      const { byCandidate } = validateCandidateIntelligence(answer.result, { trip, candidates: batch });
+      const toWrite: Parameters<IntelligenceServiceDeps['writeCache']>[0] = [];
+
+      for (const candidate of batch) {
+        const intelligence = byCandidate.get(candidate.candidateId) ?? null;
+        if (intelligence) diagnostics.candidatesAccepted += 1;
+        else diagnostics.candidatesRejected += 1;
+
+        results.set(candidate.candidateId, {
+          candidateId: candidate.candidateId,
+          intelligence,
+          // Answered, even when empty. Settled, not temporary.
+          status: intelligence ? 'ready' : 'deterministic-only',
+        });
+        toWrite.push({
+          cacheKey: keyFor(candidate),
+          candidate,
+          tripMaterialRevision: trip.tripMaterialRevision,
+          plannerRevision: candidate.plannerRevision,
+          model: deps.model,
+          intelligence,
+        });
+      }
+
+      await deps.writeCache(toWrite);
+    } finally {
+      // A thrown provider/cache error must not strand the durable claim until
+      // its expiry. The metered ledger remains the accounting boundary.
+      await deps.releaseBatch?.(batchClaimKey);
     }
-
-    await deps.writeCache(toWrite);
   }
 
   return {

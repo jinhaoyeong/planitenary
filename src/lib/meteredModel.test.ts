@@ -1,14 +1,3 @@
-/**
- * The single door every paid model call goes through.
- *
- * The rules here are all about what must *not* happen: no provider request
- * once the budget is reached, no second request after a spending record was
- * lost, no reuse of a stale "allowed" across a batch loop. Each of those
- * failures is silent by nature — the feature keeps working, and only the bill
- * knows — which is why they are asserted rather than reasoned about.
- *
- * Dependencies are injected, so nothing here touches a network or a database.
- */
 import { describe, expect, it, vi } from 'vitest';
 import {
   SpendSession,
@@ -24,54 +13,77 @@ const usage = (over: Partial<Record<string, unknown>> = {}) => ({
   ...over,
 });
 
-/** One request of the size these operations actually send: about $0.00065. */
 const CALL_USD = 5_000 * 0.05 / 1e6 + 1_000 * 0.4 / 1e6;
+const RESERVED_USD = 0.01;
 
-function harness(over: Partial<MeteredDeps> = {}, spent = 0) {
+function harness(
+  over: Partial<MeteredDeps> = {},
+  spent = 0,
+  reservedUsd = RESERVED_USD,
+  events: string[] = [],
+) {
   const written: Array<Record<string, unknown>> = [];
-  const call = vi.fn().mockResolvedValue({ result: { ok: true }, usage: usage(), status: 'success' });
+  const reservations: Array<Record<string, unknown>> = [];
+  const call = vi.fn().mockResolvedValue({ result: { ok: true }, usage: usage(), status: 'success' as const });
+  call.mockImplementation(async () => {
+    events.push('provider');
+    return { result: { ok: true }, usage: usage(), status: 'success' as const };
+  });
   const deps: MeteredDeps = {
-    reserveQuota: vi.fn().mockResolvedValue(true),
-    readSpend: vi.fn().mockResolvedValue({ knownUsd: spent, unknownEvents: 0 }),
-    writeLedger: vi.fn().mockImplementation(async (row) => { written.push(row); return true; }),
+    reserveAttempt: vi.fn().mockImplementation(async (row) => {
+      events.push('reserve');
+      reservations.push(row);
+      return { ok: true as const, attemptId: `attempt-${reservations.length}` };
+    }),
+    finalizeAttempt: vi.fn().mockImplementation(async (_attemptId, row) => {
+      events.push('finalize');
+      written.push(row);
+      return true;
+    }),
+    readSpend: vi.fn().mockResolvedValue({ knownUsd: spent, unknownEvents: 0, reservedUsd: 0 }),
     call,
     ...over,
   };
-  const session = new SpendSession(deps, DEFAULT_SPEND_CEILING_USD);
+  const session = new SpendSession({ readSpend: deps.readSpend }, DEFAULT_SPEND_CEILING_USD);
   const run = () => meteredModelCall(
-    { operation: 'candidate-intelligence', provider: 'openai', requestedModel: 'gpt-5-nano' },
+    {
+      operation: 'candidate-intelligence',
+      provider: 'openai',
+      requestedModel: 'gpt-5-nano',
+      accounting: { userId: 'user-1', tripId: 'trip-1', materialKey: 'batch-1', reservedUsd },
+    },
     session,
     deps,
   );
-  // `deps.call`, not the local default — an overridden spy must be the one
-  // the assertions inspect, or a test can watch a spy nothing ever invokes.
-  return { deps, session, run, written, call: deps.call as ReturnType<typeof vi.fn> };
+  return {
+    deps,
+    session,
+    run,
+    written,
+    reservations,
+    call: deps.call as ReturnType<typeof vi.fn>,
+  };
 }
 
-describe('the metered boundary', () => {
-  it('makes the call and records what it cost', async () => {
-    const { run, written, call } = harness();
+describe('the durable metered boundary', () => {
+  it('creates accounting before the provider and finalises the real cost', async () => {
+    const order: string[] = [];
+    const { run, written, reservations, call } = harness({}, 0, RESERVED_USD, order);
     const outcome = await run();
 
     expect(outcome.ok).toBe(true);
     expect(call).toHaveBeenCalledTimes(1);
-    expect(written).toHaveLength(1);
+    expect(reservations[0]).toMatchObject({ user_id: 'user-1', trip_id: 'trip-1', material_key: 'batch-1' });
+    expect(written[0]).toMatchObject({ cost_status: 'known', request_status: 'success' });
     expect(Number(written[0].estimated_cost_usd)).toBeCloseTo(CALL_USD, 12);
-    expect(written[0].cost_status).toBe('known');
+    expect(order).toEqual(['reserve', 'provider', 'finalize']);
   });
 
-  /**
-   * The whole reason this module exists. Any operation reaching the provider
-   * without consulting the ceiling makes the ceiling advisory.
-   */
   it('never reaches the provider once the budget is spent', async () => {
     const { run, call, deps } = harness({}, DEFAULT_SPEND_CEILING_USD);
-    const outcome = await run();
-
-    expect(outcome).toMatchObject({ ok: false, refusal: 'budget-reached' });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'budget-reached' });
     expect(call).not.toHaveBeenCalled();
-    // And no quota unit was burned on a call the budget was going to refuse.
-    expect(deps.reserveQuota).not.toHaveBeenCalled();
+    expect(deps.reserveAttempt).not.toHaveBeenCalled();
   });
 
   it('never reaches the provider when spending cannot be read', async () => {
@@ -80,25 +92,23 @@ describe('the metered boundary', () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  /**
-   * Unknown-cost events are missing from the known total, so it is a floor
-   * rather than the truth. Spending against a number known to be incomplete is
-   * how a ceiling is quietly passed.
-   */
-  it('refuses while any past call remains uncosted', async () => {
+  it('refuses while an unresolved or reserved spend remains', async () => {
     const { run, call } = harness({
-      readSpend: vi.fn().mockResolvedValue({ knownUsd: 0.01, unknownEvents: 1 }),
+      readSpend: vi.fn().mockResolvedValue({ knownUsd: 0.01, unknownEvents: 1, reservedUsd: 0.02 }),
     });
     expect(await run()).toMatchObject({ ok: false, refusal: 'spend-unknown' });
     expect(call).not.toHaveBeenCalled();
   });
 
-  it('refuses a model the allowlist rejected, before anything else', async () => {
+  it('refuses a model the allowlist rejected before accounting', async () => {
     const { deps, session, call } = harness();
     const outcome = await meteredModelCall(
       {
-        operation: 'candidate-intelligence', provider: 'openai',
-        requestedModel: 'gpt-5.6-sol', modelRefusal: 'not approved',
+        operation: 'candidate-intelligence',
+        provider: 'openai',
+        requestedModel: 'gpt-5.6-sol',
+        modelRefusal: 'not approved',
+        accounting: { userId: 'user-1', reservedUsd: RESERVED_USD },
       },
       session,
       deps,
@@ -108,30 +118,43 @@ describe('the metered boundary', () => {
     expect(deps.readSpend).not.toHaveBeenCalled();
   });
 
-  it('refuses when the daily request quota is exhausted', async () => {
-    const { run, call } = harness({ reserveQuota: vi.fn().mockResolvedValue(false) });
+  it('does not call the provider when the atomic reservation rejects quota', async () => {
+    const { run, call } = harness({
+      reserveAttempt: vi.fn().mockResolvedValue({
+        ok: false,
+        refusal: 'quota-exhausted',
+        detail: 'limit',
+      }),
+    });
     expect(await run()).toMatchObject({ ok: false, refusal: 'quota-exhausted' });
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('does not call the provider when creating the reservation fails', async () => {
+    const { run, call } = harness({
+      reserveAttempt: vi.fn().mockResolvedValue({
+        ok: false,
+        refusal: 'accounting-failed',
+        detail: 'database unavailable',
+      }),
+    });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('does not call the provider when the reservation boundary throws', async () => {
+    const { run, call } = harness({
+      reserveAttempt: vi.fn().mockRejectedValue(new Error('database unavailable')),
+    });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
     expect(call).not.toHaveBeenCalled();
   });
 });
 
 describe('spending across several calls in one invocation', () => {
-  /**
-   * The bug this class was written for. Reading the persisted total once and
-   * reusing that verdict means every call in a batch loop consults the same
-   * stale "allowed" and they sail past the ceiling together.
-   */
-  it('counts each call against the next one, not against a stale total', async () => {
-    /**
-     * Poised so that one call crosses the line: the persisted total is still
-     * under the ceiling, and adding this call's own cost puts it over. Only a
-     * session that folds in what it just spent can see that.
-     */
-    const { run, call } = harness({}, DEFAULT_SPEND_CEILING_USD - CALL_USD * 0.5);
-
+  it('counts each finalised call against the next one, not a stale total', async () => {
+    const { run, call } = harness({}, DEFAULT_SPEND_CEILING_USD - CALL_USD * 0.5, CALL_USD);
     expect((await run()).ok).toBe(true);
-    expect(call).toHaveBeenCalledTimes(1);
-
     expect(await run()).toMatchObject({ ok: false, refusal: 'budget-reached' });
     expect(call).toHaveBeenCalledTimes(1);
   });
@@ -143,46 +166,42 @@ describe('spending across several calls in one invocation', () => {
     expect(deps.readSpend).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * A lost ledger row means money was spent that the total will never include.
-   * Continuing would spend against a figure already known to be wrong.
-   */
-  it('stops making paid calls after a spending record fails to write', async () => {
-    const { run, call } = harness({ writeLedger: vi.fn().mockResolvedValue(false) });
-
-    expect((await run()).ok).toBe(true);
+  it('returns no success when finalisation fails and blocks the same session', async () => {
+    const { run, call, deps } = harness({ finalizeAttempt: vi.fn().mockResolvedValue(false) });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
     expect(call).toHaveBeenCalledTimes(1);
+    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(deps.finalizeAttempt).toHaveBeenCalledTimes(1);
+  });
 
+  it('treats a thrown finalisation boundary as an unresolved attempt', async () => {
+    const { run, call } = harness({
+      finalizeAttempt: vi.fn().mockRejectedValue(new Error('database unavailable')),
+    });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
+    expect(call).toHaveBeenCalledTimes(1);
     expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
     expect(call).toHaveBeenCalledTimes(1);
   });
 
-  /** A call that could not be costed poisons the total in the same way. */
-  it('stops making paid calls after one whose cost could not be determined', async () => {
-    const { run, call } = harness({
-      call: vi.fn().mockResolvedValue({
-        result: {}, usage: usage({ model: 'gpt-5-nano-2099-12-31' }), status: 'success',
-      }),
+  it('keeps missing usage unresolved and refuses later paid work', async () => {
+    const { run, call, written, session } = harness({
+      call: vi.fn().mockResolvedValue({ result: { ok: true }, usage: undefined, status: 'success' as const }),
     });
-
-    await run();
-    expect(call).toHaveBeenCalledTimes(1);
+    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
+    expect(written[0]).toMatchObject({ request_status: 'usage_missing', cost_status: 'unknown' });
+    expect((await session.report()).reservedUsd).toBe(RESERVED_USD);
     expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
     expect(call).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('what the ledger records about an attempt', () => {
-  /**
-   * Billed, and useless. Defining success as "usage was reported" would file
-   * this as a success and hide the one pattern most worth seeing: money spent
-   * for a result the app could not use.
-   */
   it('records a real cost for a reply that could not be parsed', async () => {
     const { run, written } = harness({
-      call: vi.fn().mockResolvedValue({ result: undefined, usage: usage(), status: 'invalid_output' }),
+      call: vi.fn().mockResolvedValue({ result: undefined, usage: usage(), status: 'invalid_output' as const }),
     });
-
     const outcome = await run();
     expect(outcome.ok).toBe(false);
     expect(written[0].request_status).toBe('invalid_output');
@@ -190,53 +209,25 @@ describe('what the ledger records about an attempt', () => {
     expect(Number(written[0].estimated_cost_usd)).toBeCloseTo(CALL_USD, 12);
   });
 
-  it('records a provider failure with no invented tokens', async () => {
+  it('records a provider failure with no invented tokens as unresolved', async () => {
     const { run, written } = harness({
-      call: vi.fn().mockResolvedValue({ result: undefined, usage: undefined, status: 'provider_error' }),
+      call: vi.fn().mockResolvedValue({ result: undefined, usage: undefined, status: 'provider_error' as const }),
     });
-
-    await run();
-    expect(written[0].request_status).toBe('provider_error');
-    expect(written[0].input_tokens).toBeNull();
-    expect(written[0].estimated_cost_usd).toBeNull();
-    expect(written[0].cost_status).toBe('unknown');
+    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
+    expect(written[0]).toMatchObject({ request_status: 'provider_error', input_tokens: null, estimated_cost_usd: null, cost_status: 'unknown' });
   });
 
-  it('distinguishes an answer that reported no usage at all', async () => {
+  it('keeps requested and resolved models separate', async () => {
     const { run, written } = harness({
-      call: vi.fn().mockResolvedValue({ result: { ok: true }, usage: undefined, status: 'success' }),
-    });
-    await run();
-    expect(written[0].request_status).toBe('usage_missing');
-  });
-
-  /** Requested and resolved are different facts; cost follows the resolved one. */
-  it('keeps the requested alias and the resolved snapshot apart', async () => {
-    const { run, written } = harness({
-      call: vi.fn().mockResolvedValue({
-        result: {}, usage: usage({ model: 'gpt-5-nano-2025-08-07' }), status: 'success',
-      }),
+      call: vi.fn().mockResolvedValue({ result: {}, usage: usage({ model: 'gpt-5-nano-2025-08-07' }), status: 'success' as const }),
     });
     await run();
     expect(written[0].model_requested).toBe('gpt-5-nano');
     expect(written[0].model_resolved).toBe('gpt-5-nano-2025-08-07');
   });
-
-  it('writes nothing at all for an attempt refused before the provider', async () => {
-    const { run, written } = harness({}, DEFAULT_SPEND_CEILING_USD);
-    await run();
-    // Nothing was spent, so there is nothing to record.
-    expect(written).toHaveLength(0);
-  });
 });
 
 describe('the budget epoch', () => {
-  /**
-   * The failure this replaced: a rolling window lets old spending age out, so
-   * a ceiling refills itself over time and a prepaid $5 can be spent twice.
-   * Resetting the budget must be a deliberate act after topping up, never
-   * something the calendar does unattended.
-   */
   it('counts everything ever recorded when no epoch is declared', () => {
     expect(budgetWindowStart(undefined)).toBeUndefined();
     expect(budgetWindowStart('')).toBeUndefined();
@@ -247,7 +238,6 @@ describe('the budget epoch', () => {
     expect(budgetWindowStart('2026-08-11T00:00:00Z')).toBe('2026-08-11T00:00:00.000Z');
   });
 
-  /** A broken setting must widen the window, never narrow it. */
   it('falls back to counting everything when the epoch is unreadable', () => {
     expect(budgetWindowStart('not-a-date')).toBeUndefined();
   });

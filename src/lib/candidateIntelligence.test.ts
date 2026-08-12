@@ -696,6 +696,7 @@ describe('a non-answer is never cached as an answer', () => {
 
 describe('the cache key', () => {
   const key = (over: Record<string, string> = {}) => intelligenceCacheKey({
+    tripId: 'trip-1',
     candidateId: 'place-a',
     candidateRevision: 'cand-a-v1',
     plannerRevision: 'plan-a-v1',
@@ -706,6 +707,10 @@ describe('the cache key', () => {
 
   it('is stable for unchanged material facts', () => {
     expect(key()).toBe(key());
+  });
+
+  it('separates identical material belonging to different trips', () => {
+    expect(key({ tripId: 'trip-2' })).not.toBe(key());
   });
 
   it.each([
@@ -950,6 +955,7 @@ describe('a non-answer is never cached as an answer', () => {
 
 describe('the cache key', () => {
   const key = (over: Record<string, string> = {}) => intelligenceCacheKey({
+    tripId: 'trip-1',
     candidateId: 'place-a',
     candidateRevision: 'cand-a-v1',
     plannerRevision: 'plan-a-v1',

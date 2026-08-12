@@ -15,6 +15,7 @@ import {
   DEFAULT_SPEND_CEILING_USD,
   MODEL_PRICING,
   estimateCost,
+  maximumReservedCost,
   parseOpenAiUsage,
   spendEvent,
   spendGate,
@@ -246,6 +247,19 @@ describe('the spend ceiling', () => {
   it('honours a ceiling passed explicitly', () => {
     expect(spendGate(0.5, 0.25)).toMatchObject({ allowed: false });
     expect(spendGate(0.1, 0.25)).toEqual({ allowed: true });
+  });
+});
+
+describe('the conservative pre-provider reserve', () => {
+  it('prices the full bounded OpenAI request at uncached input rates', () => {
+    expect(maximumReservedCost({
+      provider: 'openai', model: 'gpt-5-nano', maxOutputTokens: 2_000,
+    })).toBeCloseTo((125_000 * 0.05 + 2_000 * 0.40) / 1_000_000, 12);
+  });
+
+  it('refuses to reserve for an unpriced or non-OpenAI provider', () => {
+    expect(maximumReservedCost({ provider: 'gemini', model: 'gpt-5-nano', maxOutputTokens: 2_000 })).toBeNull();
+    expect(maximumReservedCost({ provider: 'openai', model: 'unknown', maxOutputTokens: 2_000 })).toBeNull();
   });
 });
 

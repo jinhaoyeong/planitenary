@@ -194,7 +194,7 @@ export async function officialEvidence(
    * make the two indistinguishable on the card.
    */
   const admissionWithRead = resolveOfficialAdmission({
-    structured: admission as never,
+    structured: admission,
     readFares,
     sourceUrl: website!,
     retrievedAt,

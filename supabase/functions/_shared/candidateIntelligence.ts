@@ -645,6 +645,7 @@ export const INTELLIGENCE_SCHEMA_VERSION = 'v5';
  * or a fix cannot reach anybody until the TTL happens to lapse.
  */
 export function intelligenceCacheKey(input: {
+  tripId: string;
   candidateId: string;
   candidateRevision: string;
   plannerRevision: string;
@@ -659,11 +660,33 @@ export function intelligenceCacheKey(input: {
    */
   return JSON.stringify([
     INTELLIGENCE_SCHEMA_VERSION,
+    input.tripId,
     input.model,
     input.candidateId,
     input.candidateRevision,
     input.plannerRevision,
     input.tripMaterialRevision,
+  ]);
+}
+
+/**
+ * Claim identity for one exact batch of one trip.
+ *
+ * Candidate rows are cached individually, but the provider request is batched.
+ * This separate identity lets the database suppress the same live batch when
+ * two browser sessions miss the cache at the same time without coupling
+ * unrelated candidates into one cache row.
+ */
+export function intelligenceBatchClaimKey(input: {
+  tripId: string;
+  model: string;
+  cacheKeys: string[];
+}): string {
+  return JSON.stringify([
+    INTELLIGENCE_SCHEMA_VERSION,
+    input.tripId,
+    input.model,
+    [...input.cacheKeys].sort(),
   ]);
 }
 
@@ -803,7 +826,7 @@ export async function requestCandidateIntelligence(
 
   const answer = await callMetered(intelligenceRequestBody(trip, candidates));
 
-  if (!answer.ok) {
+  if (answer.ok === false) {
     // Never asked. Nothing is learned, so nothing may be remembered.
     for (const candidate of candidates) {
       outcomes.set(candidate.candidateId, {

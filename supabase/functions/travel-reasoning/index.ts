@@ -1,189 +1,218 @@
 /**
- * The generic model boundary.
+ * Authenticated reasoning boundary.
  *
- * `travel-evidence` owns the two grounded operations that reach a card
- * (`place-brief`, `admission-read`) and validates their output before anything
- * is shown. This endpoint is the un-opinionated sibling: it forwards an
- * operation to the selected provider and returns the parsed JSON.
- *
- * Because it does no validation of its own, **nothing it returns may be
- * rendered as fact without being validated by the caller.** It exists for
- * interpretation tasks whose output is structured data the app then checks —
- * not for prose destined straight for a screen.
- *
- * Two things it does own, because both are about spending rather than truth:
- * the daily cap, and the refusal to fail over between providers.
+ * Candidate facts are still validated client material for this beta because
+ * discovery is intentionally session-scoped. Spending is not: the handler
+ * establishes the caller, verifies the owned trip, scopes cache/accounting to
+ * that trip, and reaches the provider only after the atomic reservation exists.
  */
 import {
   aiBudgetEpoch,
-  aiBudgetUsd,
-  isReasoningOperation,
+  aiReasoningLimits,
+  aiSafetyBudgetUsd,
+  expiryFor,
   json,
   preflight,
-  expiryFor,
-  reasoningCallLimit,
   resolveReasoning,
   REASONING_OPERATIONS,
-  REASONING_QUOTA_PROVIDER,
-  REASONING_QUOTA_TIMEZONE,
+  type ReasoningOperation,
 } from '../_shared/providers.ts';
 import { callModel } from '../_shared/reasoning.ts';
-import { budgetWindowStart, type ModelUsage } from '../_shared/aiCost.ts';
+import { budgetWindowStart, maximumReservedCost, type ModelUsage } from '../_shared/aiCost.ts';
 import {
   INTELLIGENCE_SCHEMA_VERSION,
+  intelligenceBatchClaimKey,
+  intelligenceCacheKey,
   type IntelligenceCandidate,
-  type IntelligenceTripContext,
   type ValidatedIntelligence,
 } from '../_shared/candidateIntelligence.ts';
 import { resolveCandidateIntelligence } from '../_shared/intelligenceService.ts';
-import { SpendSession, meteredModelCall } from '../_shared/meteredModel.ts';
+import { authenticateRequest } from '../_shared/auth.ts';
+import { authorizeCandidateTrip, type ReasoningTripInput } from '../_shared/reasoningRequest.ts';
+import { readOwnedTrip } from '../_shared/tripOwnership.ts';
 import {
+  claimCandidateIntelligence,
+  finalizeAiSpendAttempt,
   readCandidateIntelligence,
   readSpendToDate,
+  releaseCandidateIntelligence,
   serviceClient,
   writeCandidateIntelligence,
-  writeSpendEvent,
 } from '../_shared/cache.ts';
-import { reserveQuota } from '../_shared/quota.ts';
+import { reserveAiReasoningAttempt } from '../_shared/quota.ts';
+import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/meteredModel.ts';
 
 interface ReasoningBody { operation?: string; input?: unknown; }
 
-/**
- * The ceiling on one request's input, in characters of serialised JSON.
- *
- * A metered endpoint that accepts an arbitrarily large body lets anyone who
- * can reach it decide what a call costs, and input is billed per token. The
- * bound is on the *serialised* payload rather than on a field count because
- * that is the thing that maps to tokens — one enormous string and ten thousand
- * tiny ones cost the same either way.
- *
- * Roughly 30k characters ≈ 8k tokens, comfortably above what any operation
- * here legitimately sends and far below anything worth worrying about.
- */
 const MAX_INPUT_CHARS = 30_000;
+const CLAIM_TTL_MS = 30_000;
+
+const responseStatus = (refusal: string): number => {
+  if (refusal === 'quota-exhausted') return 429;
+  if (refusal === 'provider-failed') return 502;
+  if (refusal === 'budget-reached') return 429;
+  return 503;
+};
+
+const authorizationStatus = (code: string): number => {
+  if (code === 'unauthorized') return 401;
+  if (code === 'invalid-trip') return 400;
+  if (code === 'trip-not-owned') return 403;
+  if (code === 'trip-lookup-failed') return 503;
+  return 409;
+};
+
+/** Fresh usage/request state is created here for every batch invocation. */
+const meteredDependencies = (input: {
+  cache: NonNullable<ReturnType<typeof serviceClient>>;
+  userId: string;
+  limits: NonNullable<ReturnType<typeof aiReasoningLimits>>;
+  budgetUsd: number;
+  operation: string;
+  provider: string;
+  model: string;
+  tripId?: string;
+  materialKey?: string;
+  maxCostUsd: number;
+}, call: MeteredDeps['call']): MeteredDeps => ({
+    reserveAttempt: (row) => reserveAiReasoningAttempt(input.cache, {
+      userId: input.userId,
+      tripId: input.tripId,
+      provider: String(row.provider || input.provider),
+      model: String(row.model_requested || input.model),
+      operation: String(row.operation || input.operation),
+      materialKey: input.materialKey,
+      reservedUsd: input.maxCostUsd,
+      budgetUsd: input.budgetUsd,
+      budgetSince: budgetWindowStart(aiBudgetEpoch()),
+      globalLimit: input.limits.global,
+      userLimit: input.limits.user,
+      tripLimit: input.limits.trip,
+    }),
+    finalizeAttempt: (attemptId, row) => finalizeAiSpendAttempt(input.cache, attemptId, row),
+    readSpend: () => readSpendToDate(input.cache, budgetWindowStart(aiBudgetEpoch())),
+    call,
+  });
+
+/** Build a fresh provider callback for one metered request. */
+const providerCall = (
+  operation: string,
+  options: { apiKey: string; provider: 'openai' | 'gemini'; model: string; reasoningEffort?: string; maxOutputTokens: number },
+  payload: unknown,
+): MeteredDeps['call'] => {
+  let usage: ModelUsage | undefined;
+  let providerRequestId: string | undefined;
+  return async () => {
+    usage = undefined;
+    providerRequestId = undefined;
+    const result = await callModel(operation, payload, {
+      ...options,
+      onUsage: (reported) => { usage = reported; },
+      onProviderResponse: (response) => {
+        providerRequestId = response.providerRequestId;
+        if (response.usage) usage = response.usage;
+      },
+    });
+    return {
+      result,
+      usage,
+      providerRequestId,
+      status: (result !== undefined ? 'success' : usage ? 'invalid_output' : 'provider_error') as
+        'success' | 'invalid_output' | 'provider_error',
+    };
+  };
+};
 
 Deno.serve(async (request) => {
   const early = preflight(request);
   if (early) return early;
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
+  const authentication = await authenticateRequest(request);
+  if (authentication.ok === false) return json({ error: authentication.detail }, authentication.status);
+
   const body = (await request.json().catch(() => ({}))) as ReasoningBody;
   if (!body.operation || body.input === undefined) {
     return json({ error: 'operation and input are required.' }, 400);
   }
-
-  /**
-   * An allowlist, not a free-text field. `operation` reaches the model as part
-   * of the prompt, so an open string is both a prompt-injection surface and a
-   * way for anyone who can reach this endpoint to spend the deployment's
-   * budget on work it never meant to do.
-   */
-  if (!isReasoningOperation(body.operation)) {
-    return json({
-      error: `Unknown operation. Allowed: ${REASONING_OPERATIONS.join(', ')}.`,
-    }, 400);
+  if (!REASONING_OPERATIONS.includes(body.operation as ReasoningOperation)) {
+    return json({ error: `Unknown operation. Allowed: ${REASONING_OPERATIONS.join(', ')}.` }, 400);
   }
+  const operation = body.operation as ReasoningOperation;
 
-  /**
-   * Captured once the allowlist has narrowed it. A property access cannot stay
-   * narrowed across the awaits below, and re-reading `body.operation` later
-   * would hand an unvalidated string to the model.
-   */
-  const operation = body.operation;
-
-  // Bounded before the model is resolved, so an oversized body is refused
-  // without any chance of it reaching a metered provider.
   const serialised = JSON.stringify(body.input);
   if (serialised.length > MAX_INPUT_CHARS) {
-    return json({
-      error: `Input too large: ${serialised.length} characters, limit ${MAX_INPUT_CHARS}.`,
-    }, 413);
+    return json({ error: `Input too large: ${serialised.length} characters, limit ${MAX_INPUT_CHARS}.` }, 413);
   }
 
-  const resolution = resolveReasoning(operation);
-  // A refused model is reported as its own failure. Collapsing it into "not
-  // configured" would hide a misconfiguration behind an ordinary-looking state.
-  if (resolution.status === 'misconfigured') return json({ error: resolution.error }, 500);
-  if (resolution.status === 'unconfigured') return json({ error: 'AI reasoning is not configured.' }, 503);
-  const { options } = resolution;
-
-  /**
-   * The shared metered boundary, identical to the one `travel-evidence` uses.
-   *
-   * This endpoint previously enforced only the daily *request* quota and no
-   * dollar ceiling at all — so every operation routed through here would have
-   * spent against the prepaid balance with nothing watching. Both endpoints
-   * now go through one door, which is the only way a budget stays a budget as
-   * features are added.
-   */
   const cache = serviceClient();
-  const session = new SpendSession(
-    {
-      readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),
-      writeLedger: (row) => writeSpendEvent(cache, row),
-    },
-    aiBudgetUsd(),
-  );
+  if (!cache) return json({ error: 'AI accounting is not configured.' }, 503);
 
-  let usage: ModelUsage | undefined;
-
-  /** One metered call, wired once and reused by every operation below. */
-  const meteredDeps = (operation: string) => ({
-    reserveQuota: () => reserveQuota(cache, {
-      provider: REASONING_QUOTA_PROVIDER,
-      calls: 1,
-      units: 1,
-      callLimit: reasoningCallLimit(),
-      resetTimezone: REASONING_QUOTA_TIMEZONE,
-      failClosed: true,
-    }),
-    readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),
-    writeLedger: (row: Record<string, unknown>) => writeSpendEvent(cache, row),
-    call: async (payload: unknown) => {
-      const result = await callModel(operation, payload, {
-        ...options,
-        onUsage: (reported) => { usage = reported; },
-      });
-      return {
-        result,
-        usage,
-        status: (result !== undefined ? 'success' : usage ? 'invalid_output' : 'provider_error') as
-          'success' | 'invalid_output' | 'provider_error',
-      };
-    },
-  });
-
-  /**
-   * Candidate intelligence has its own shape: it consults a per-candidate cache
-   * first, batches only the misses, and returns validated atoms rather than raw
-   * model output. It reaches the provider exclusively through the same
-   * `meteredModelCall` as everything else, so it inherits the model allowlist,
-   * both ceilings, the daily quota, the spend guard and the ledger without
-   * restating any of them.
-   */
+  let candidateAuthorization: Awaited<ReturnType<typeof authorizeCandidateTrip>> | undefined;
   if (operation === 'candidate-intelligence') {
     const payload = body.input as {
-      trip?: IntelligenceTripContext;
+      trip?: ReasoningTripInput;
       candidates?: IntelligenceCandidate[];
       plannerContextRevision?: string;
     };
     if (!payload?.trip || !Array.isArray(payload.candidates)) {
       return json({ error: 'trip and candidates are required.' }, 400);
     }
+    candidateAuthorization = await authorizeCandidateTrip(
+      payload,
+      authentication.caller.userId,
+      (tripId, userId) => readOwnedTrip(cache, tripId, userId),
+    );
+    if (candidateAuthorization.ok === false) {
+      return json({ error: candidateAuthorization.detail }, authorizationStatus(candidateAuthorization.code));
+    }
+  }
 
+  const resolution = resolveReasoning(operation);
+  if (resolution.status === 'misconfigured') return json({ error: resolution.error }, 500);
+  if (resolution.status === 'unconfigured') return json({ error: 'AI reasoning is not configured.' }, 503);
+  const { options } = resolution;
+  const limits = aiReasoningLimits();
+  const budgetUsd = aiSafetyBudgetUsd();
+  if (!limits || budgetUsd === null) {
+    return json({ error: 'AI spending limits are not configured safely.' }, 503);
+  }
+  const maxCostUsd = maximumReservedCost({
+    provider: options.provider,
+    model: options.model,
+    maxOutputTokens: options.maxOutputTokens,
+  });
+  if (maxCostUsd === null) {
+    return json({ error: 'The selected AI provider/model has no conservative accounting policy.' }, 503);
+  }
+
+  const session = new SpendSession(
+    { readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())) },
+    budgetUsd,
+  );
+
+  if (operation === 'candidate-intelligence' && candidateAuthorization?.ok) {
+    const payload = body.input as {
+      trip: ReasoningTripInput;
+      candidates: IntelligenceCandidate[];
+      plannerContextRevision?: string;
+    };
+    const authorizedTrip = candidateAuthorization.trip;
     const { results, diagnostics } = await resolveCandidateIntelligence(
-      payload.trip,
+      authorizedTrip,
       payload.candidates,
       {
         model: options.model,
+        tripId: candidateAuthorization.tripId,
         plannerContextRevision: payload.plannerContextRevision,
         maxSerialisedChars: MAX_INPUT_CHARS,
-        readCache: (keys) => readCandidateIntelligence(cache, keys) as Promise<
+        readCache: (keys) => readCandidateIntelligence(cache, candidateAuthorization!.tripId, keys) as Promise<
           Map<string, ValidatedIntelligence | null | undefined>
         >,
         writeCache: (entries) => writeCandidateIntelligence(
           cache,
           entries.map((entry) => ({
+            tripId: candidateAuthorization!.tripId,
             cacheKey: entry.cacheKey,
             candidateId: entry.candidate.candidateId,
             candidateRevision: entry.candidate.candidateRevision,
@@ -195,23 +224,60 @@ Deno.serve(async (request) => {
           })),
           expiryFor('placeIdentity'),
         ),
+        claimBatch: (claimKey) => claimCandidateIntelligence(cache, {
+          claimKey,
+          userId: authentication.caller.userId,
+          tripId: candidateAuthorization!.tripId,
+          expiresAt: new Date(Date.now() + CLAIM_TTL_MS).toISOString(),
+        }),
+        releaseBatch: (claimKey) => releaseCandidateIntelligence(cache, claimKey),
         callMetered: async (requestPayload) => {
+          const batch = (requestPayload as { candidates?: IntelligenceCandidate[] }).candidates || [];
+          const materialKey = intelligenceBatchClaimKey({
+            tripId: candidateAuthorization!.tripId,
+            model: options.model,
+            cacheKeys: batch.map((candidate) => intelligenceCacheKey({
+              tripId: candidateAuthorization!.tripId,
+              candidateId: candidate.candidateId,
+              candidateRevision: candidate.candidateRevision,
+              plannerRevision: candidate.plannerRevision,
+              tripMaterialRevision: authorizedTrip.tripMaterialRevision,
+              model: options.model,
+            })),
+          });
+          const deps = meteredDependencies({
+            cache,
+            userId: authentication.caller.userId,
+            limits,
+            budgetUsd,
+            operation: 'candidate-intelligence',
+            provider: options.provider,
+            model: options.model,
+            tripId: candidateAuthorization!.tripId,
+            materialKey,
+            maxCostUsd,
+          }, providerCall('candidate-intelligence', options, requestPayload));
           const call = await meteredModelCall(
             {
               operation: 'candidate-intelligence',
               provider: options.provider,
               requestedModel: options.model,
+              accounting: {
+                userId: authentication.caller.userId,
+                tripId: candidateAuthorization!.tripId,
+                materialKey,
+                reservedUsd: maxCostUsd,
+              },
             },
             session,
-            { ...meteredDeps('candidate-intelligence'), call: () => meteredDeps('candidate-intelligence').call(requestPayload) },
+            deps,
           );
-          return call.ok
+          return call.ok === true
             ? { ok: true as const, result: call.result }
             : { ok: false as const, refusal: call.refusal };
         },
       },
     );
-
     return json({
       operation,
       provider: options.provider,
@@ -221,23 +287,26 @@ Deno.serve(async (request) => {
     });
   }
 
+  const deps = meteredDependencies({
+    cache,
+    userId: authentication.caller.userId,
+    limits,
+    budgetUsd,
+    operation,
+    provider: options.provider,
+    model: options.model,
+    maxCostUsd,
+  }, providerCall(operation, options, body.input));
   const outcome = await meteredModelCall(
-    { operation: body.operation, provider: options.provider, requestedModel: options.model },
-    session,
     {
-      ...meteredDeps(operation),
-      // One attempt, no retry, no failover to the other vendor — see
-      // `callModel`. A failed interpretation is a missing interpretation.
-      call: () => meteredDeps(operation).call(body.input),
+      operation,
+      provider: options.provider,
+      requestedModel: options.model,
+      accounting: { userId: authentication.caller.userId, reservedUsd: maxCostUsd },
     },
+    session,
+    deps,
   );
-
-  if (!outcome.ok) {
-    const status = outcome.refusal === 'quota-exhausted' ? 429
-      : outcome.refusal === 'provider-failed' ? 502
-        : 503;
-    return json({ error: outcome.detail, refusal: outcome.refusal }, status);
-  }
-
+  if (outcome.ok === false) return json({ error: outcome.detail, refusal: outcome.refusal }, responseStatus(outcome.refusal));
   return json({ operation, provider: options.provider, result: outcome.result });
 });

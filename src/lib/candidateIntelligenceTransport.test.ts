@@ -12,7 +12,7 @@ import {
   parseIntelligenceResponse,
 } from './candidateIntelligenceTransport';
 
-const trip = { tripMaterialRevision: 'p1', styles: ['local-neighbourhoods'], pace: 'relaxed' };
+const trip = { tripId: 'trip-1', tripMaterialRevision: 'p1', styles: ['local-neighbourhoods'], pace: 'relaxed' };
 const candidates = [{
   candidateId: 'a', candidateRevision: 'r1', plannerRevision: 'plan-a-v1', name: 'A', category: 'sight',
   matchedStyleTags: ['local-neighbourhoods'], pairableCandidateIds: [],

@@ -167,6 +167,47 @@ export const reasoningCallLimit = (): number => {
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 50;
 };
 
+export interface AiReasoningLimits {
+  global: number;
+  user: number;
+  trip: number;
+}
+
+/**
+ * The beta limits for the authenticated reasoning tier.
+ *
+ * This parser is deliberately separate from the older provider quota helper:
+ * the paid path must not turn a malformed environment value into an implicit
+ * allowance. An absent value uses the conservative default; a present but
+ * invalid value disables the paid path until somebody fixes the deployment.
+ */
+const positiveIntegerSetting = (name: string, fallback: number): number | null => {
+  const raw = Deno.env.get(name);
+  if (raw === null || raw === undefined || !raw.trim()) return fallback;
+  const value = Number(raw.trim());
+  return Number.isInteger(value) && value > 0 ? value : null;
+};
+
+export const aiReasoningLimits = (): AiReasoningLimits | null => {
+  const global = positiveIntegerSetting('AI_DAILY_CALL_LIMIT', 50);
+  const user = positiveIntegerSetting('AI_USER_DAILY_CALL_LIMIT', 8);
+  const trip = positiveIntegerSetting('AI_TRIP_DAILY_CALL_LIMIT', 4);
+  if (global === null || user === null || trip === null) return null;
+  return { global, user, trip };
+};
+
+/**
+ * The paid path also refuses a malformed spend ceiling. The historical helper
+ * remains compatible for the evidence response diagnostics, while new
+ * reservation callers use this fail-closed form.
+ */
+export const aiSafetyBudgetUsd = (): number | null => {
+  const raw = Deno.env.get('AI_BUDGET_USD');
+  if (raw === null || raw === undefined || !raw.trim()) return DEFAULT_SPEND_CEILING_USD;
+  const value = Number(raw.trim());
+  return Number.isFinite(value) && value > 0 ? value : null;
+};
+
 /**
  * The credential for the *selected* provider, or undefined.
  *

@@ -289,7 +289,11 @@ export async function linkCanonicalPlaces(
 
     const { error } = await client
       .from('canonical_places')
-      .insert(rows.map(({ providerPlaceId: _ignored, ...row }) => row));
+      .insert(rows.map((row) => {
+        const { providerPlaceId, ...insertRow } = row;
+        void providerPlaceId;
+        return insertRow;
+      }));
     if (error) return known;
 
     const links = rows.map((row) => ({
@@ -704,56 +708,21 @@ export async function writeEvidenceCache(
  * uncounted.
  */
 /**
- * Append one spending record, reporting whether it landed.
- *
- * Unlike every other write here this one is **not** best-effort from the
- * caller's point of view. A lost evidence row costs a re-fetch; a lost ledger
- * row means money was spent that the ceiling will never see, so the caller
- * stops making paid calls when this returns false.
- */
-export async function writeSpendEvent(
-  client: SupabaseClient | null,
-  row: Record<string, unknown>,
-): Promise<boolean> {
-  if (!client) return false;
-  try {
-    const { error } = await client.from('ai_spend_ledger').insert(row);
-    return !error;
-  } catch {
-    return false;
-  }
-}
-
-export async function writeSpendEvents(
-  client: SupabaseClient | null,
-  events: Array<Record<string, unknown>>,
-): Promise<void> {
-  if (!client || events.length === 0) return;
-  try {
-    await client.from('ai_spend_ledger').insert(events);
-  } catch {
-    // Best-effort. The guard reads the ledger and refuses when it cannot.
-  }
-}
-
-/**
- * Known spending inside a rolling window, in USD.
+ * Read durable spending inside the configured budget window, in USD.
  *
  * Returns `null` for "could not be read", which callers must treat as a
  * refusal rather than as zero — the same distinction `usageToday` draws
  * between an unused counter and an unreachable one.
  *
- * **Only `cost_status = 'known'` rows are summed, and that is a real
- * limitation rather than an oversight.** A call whose cost could not be
- * determined is genuinely absent from this total, so the figure is a floor and
- * not the truth. The caller compensates by treating the *existence* of unknown
- * events as its own reason to stop, instead of pretending they cost nothing
- * and letting them accumulate invisibly beneath the ceiling.
+ * Resolved known rows contribute their actual cost. Reserved or unresolved
+ * rows contribute their conservative reservation and also poison the
+ * unknown-event count, so callers cannot make another paid attempt while an
+ * accounting boundary is open.
  */
 export async function readSpendToDate(
   client: SupabaseClient | null,
   sinceIso?: string,
-): Promise<{ knownUsd: number; unknownEvents: number } | null> {
+): Promise<{ knownUsd: number; unknownEvents: number; reservedUsd: number } | null> {
   if (!client) return null;
   try {
     /**
@@ -764,18 +733,86 @@ export async function readSpendToDate(
      */
     const base = client
       .from('ai_spend_ledger')
-      .select('estimated_cost_usd, cost_status');
+      .select('estimated_cost_usd, cost_status, attempt_status, reserved_cost_usd');
     const { data, error } = await (sinceIso ? base.gte('created_at', sinceIso) : base);
     if (error || !data) return null;
     let knownUsd = 0;
     let unknownEvents = 0;
-    for (const row of data as Array<{ estimated_cost_usd: string | number | null; cost_status: string }>) {
-      if (row.cost_status === 'known') knownUsd += Number(row.estimated_cost_usd) || 0;
-      else unknownEvents += 1;
+    let reservedUsd = 0;
+    for (const row of data as Array<{
+      estimated_cost_usd: string | number | null;
+      cost_status: string;
+      attempt_status: string;
+      reserved_cost_usd: string | number | null;
+    }>) {
+      if (row.attempt_status === 'resolved' && row.cost_status === 'known') {
+        knownUsd += Number(row.estimated_cost_usd) || 0;
+      } else {
+        reservedUsd += Number(row.reserved_cost_usd) || 0;
+        unknownEvents += 1;
+      }
     }
-    return { knownUsd, unknownEvents };
+    return { knownUsd, unknownEvents, reservedUsd };
   } catch {
     return null;
+  }
+}
+
+/** Finalise the durable row created before a provider attempt. */
+export async function finalizeAiSpendAttempt(
+  client: SupabaseClient | null,
+  attemptId: string,
+  row: Record<string, unknown>,
+): Promise<boolean> {
+  if (!client) return false;
+  try {
+    const { data, error } = await client.rpc('finalize_ai_spend_attempt', {
+      p_attempt_id: attemptId,
+      p_provider_request_id: row.provider_request_id ?? null,
+      p_model_resolved: row.model_resolved ?? null,
+      p_input_tokens: row.input_tokens ?? null,
+      p_cached_input_tokens: row.cached_input_tokens ?? null,
+      p_output_tokens: row.output_tokens ?? null,
+      p_reasoning_tokens: row.reasoning_tokens ?? null,
+      p_total_tokens: row.total_tokens ?? null,
+      p_estimated_cost_usd: row.estimated_cost_usd ?? null,
+      p_cost_status: row.cost_status ?? 'unknown',
+      p_request_status: row.request_status ?? null,
+      p_error_code: row.error_code ?? null,
+    });
+    return !error && data === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function claimCandidateIntelligence(
+  client: SupabaseClient | null,
+  input: { claimKey: string; userId: string; tripId: string; expiresAt: string },
+): Promise<boolean> {
+  if (!client) return false;
+  try {
+    const { data, error } = await client.rpc('claim_candidate_intelligence', {
+      p_claim_key: input.claimKey,
+      p_user_id: input.userId,
+      p_trip_id: input.tripId,
+      p_expires_at: input.expiresAt,
+    });
+    return !error && data === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function releaseCandidateIntelligence(
+  client: SupabaseClient | null,
+  claimKey: string,
+): Promise<void> {
+  if (!client) return;
+  try {
+    await client.rpc('release_candidate_intelligence', { p_claim_key: claimKey });
+  } catch {
+    // Expiry is the recovery path if release itself is unavailable.
   }
 }
 
@@ -795,6 +832,7 @@ export async function readSpendToDate(
  */
 export async function readCandidateIntelligence(
   client: SupabaseClient | null,
+  tripId: string,
   cacheKeys: string[],
 ): Promise<Map<string, unknown | null | undefined>> {
   const found = new Map<string, unknown | null | undefined>();
@@ -803,6 +841,7 @@ export async function readCandidateIntelligence(
     const { data, error } = await client
       .from('ai_candidate_intelligence')
       .select('cache_key, intelligence, expires_at')
+      .eq('trip_id', tripId)
       .in('cache_key', cacheKeys);
     if (error || !data) return found;
     const now = Date.now();
@@ -838,6 +877,7 @@ export async function readCandidateIntelligence(
 export async function writeCandidateIntelligence(
   client: SupabaseClient | null,
   entries: Array<{
+    tripId: string;
     cacheKey: string;
     candidateId: string;
     candidateRevision: string;
@@ -856,6 +896,7 @@ export async function writeCandidateIntelligence(
       .upsert(
         entries.map((entry) => ({
           cache_key: entry.cacheKey,
+          trip_id: entry.tripId,
           candidate_id: entry.candidateId,
           candidate_revision: entry.candidateRevision,
           profile_revision: entry.tripMaterialRevision,

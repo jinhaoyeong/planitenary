@@ -21,6 +21,7 @@ import {
   intelligenceCacheKey,
   type IntelligenceCandidate,
   type IntelligenceTripContext,
+  type ValidatedIntelligence,
 } from '../../supabase/functions/_shared/candidateIntelligence';
 
 const trip: IntelligenceTripContext = {
@@ -69,6 +70,7 @@ function harness(over: Partial<{
 
   const deps = {
     model: 'gpt-5-nano',
+    tripId: 'trip-1',
     plannerRevision: 'plan-r1',
     maxSerialisedChars: 30_000,
     readCache: vi.fn().mockImplementation(async (keys: string[]) => {
@@ -85,6 +87,7 @@ function harness(over: Partial<{
 }
 
 const keyFor = (entry: IntelligenceCandidate) => intelligenceCacheKey({
+  tripId: 'trip-1',
   candidateId: entry.candidateId,
   candidateRevision: entry.candidateRevision,
   tripMaterialRevision: trip.tripMaterialRevision,
@@ -272,5 +275,53 @@ describe('validation still applies at the service boundary', () => {
     const { results } = await resolveCandidateIntelligence(trip, [], deps);
     expect(results).toHaveLength(0);
     expect(callMetered).not.toHaveBeenCalled();
+  });
+});
+
+describe('the live batch claim', () => {
+  it('allows only one concurrent request to pay for an exact trip batch', async () => {
+    const stored = new Map<string, ValidatedIntelligence | null>();
+    const claims = new Set<string>();
+    let finishProvider!: () => void;
+    let signalProviderStarted!: () => void;
+    const providerStarted = new Promise<void>((resolve) => { signalProviderStarted = resolve; });
+    const providerFinished = new Promise<void>((resolve) => { finishProvider = resolve; });
+    const callMetered = vi.fn(async (payload: unknown) => {
+      signalProviderStarted();
+      await providerFinished;
+      const sent = (payload as { candidates: IntelligenceCandidate[] }).candidates;
+      return { ok: true as const, result: answerFor(sent) };
+    });
+    const deps = {
+      model: 'gpt-5-nano',
+      tripId: 'trip-1',
+      maxSerialisedChars: 30_000,
+      readCache: vi.fn(async (keys: string[]) => new Map(
+        keys.filter((key) => stored.has(key)).map((key) => [key, stored.get(key)]),
+      )),
+      writeCache: vi.fn(async (entries: Array<{ cacheKey: string; intelligence: ValidatedIntelligence | null }>) => {
+        for (const entry of entries) stored.set(entry.cacheKey, entry.intelligence);
+      }),
+      claimBatch: vi.fn(async (key: string) => {
+        if (claims.has(key)) return false;
+        claims.add(key);
+        return true;
+      }),
+      releaseBatch: vi.fn(async (key: string) => { claims.delete(key); }),
+      callMetered,
+    };
+
+    const first = resolveCandidateIntelligence(trip, [candidate(0)], deps);
+    await providerStarted;
+    const second = await resolveCandidateIntelligence(trip, [candidate(0)], deps);
+
+    expect(callMetered).toHaveBeenCalledTimes(1);
+    expect(second.results[0]).toMatchObject({ status: 'unavailable', intelligence: null });
+    expect(second.diagnostics.blockedReason).toBe('duplicate-in-flight');
+
+    finishProvider();
+    const firstResult = await first;
+    expect(firstResult.results[0].status).toBe('ready');
+    expect(deps.releaseBatch).toHaveBeenCalledTimes(1);
   });
 });

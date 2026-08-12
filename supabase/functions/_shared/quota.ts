@@ -43,6 +43,70 @@ export interface QuotaRequest {
   failClosed?: boolean;
 }
 
+export interface AiReasoningReservationRequest {
+  userId: string;
+  tripId?: string;
+  provider: string;
+  model: string;
+  operation: string;
+  materialKey?: string;
+  reservedUsd: number;
+  budgetUsd: number;
+  budgetSince?: string;
+  globalLimit: number;
+  userLimit: number;
+  tripLimit: number;
+}
+
+export type AiReasoningReservationResult =
+  | { ok: true; attemptId: string }
+  | { ok: false; refusal: 'quota-exhausted' | 'budget-reached' | 'spend-unknown' | 'accounting-failed'; detail: string };
+
+/**
+ * Reserve all applicable reasoning dimensions and the pre-provider ledger row
+ * in one database transaction. A false result consumes nothing.
+ */
+export async function reserveAiReasoningAttempt(
+  client: SupabaseClient | null,
+  request: AiReasoningReservationRequest,
+): Promise<AiReasoningReservationResult> {
+  if (!client) {
+    return { ok: false, refusal: 'accounting-failed', detail: 'AI accounting is not configured.' };
+  }
+  try {
+    const { data, error } = await client.rpc('reserve_ai_reasoning_attempt', {
+      p_user_id: request.userId,
+      p_trip_id: request.tripId ?? null,
+      p_provider: request.provider,
+      p_model: request.model,
+      p_operation: request.operation,
+      p_material_key: request.materialKey ?? null,
+      p_reserved_cost_usd: request.reservedUsd,
+      p_budget_usd: request.budgetUsd,
+      p_budget_since: request.budgetSince ?? null,
+      p_global_limit: request.globalLimit,
+      p_user_limit: request.userLimit,
+      p_trip_limit: request.tripLimit,
+    });
+    if (error || !data || typeof data !== 'object') {
+      return { ok: false, refusal: 'accounting-failed', detail: 'The AI accounting reservation could not be created.' };
+    }
+    const result = data as { allowed?: unknown; reason?: unknown; attempt_id?: unknown };
+    if (result.allowed === true && (typeof result.attempt_id === 'string' || typeof result.attempt_id === 'number')) {
+      return { ok: true, attemptId: String(result.attempt_id) };
+    }
+    if (result.reason === 'quota-exhausted') {
+      return { ok: false, refusal: 'quota-exhausted', detail: 'The daily AI request allowance for this account or trip is spent.' };
+    }
+    if (result.reason === 'budget-reached') {
+      return { ok: false, refusal: 'budget-reached', detail: 'AI spending has reached the configured ceiling.' };
+    }
+    return { ok: false, refusal: 'spend-unknown', detail: 'AI spending could not be safely established.' };
+  } catch {
+    return { ok: false, refusal: 'accounting-failed', detail: 'The AI accounting reservation could not be created.' };
+  }
+}
+
 /**
  * Reserve quota for one call.
  *

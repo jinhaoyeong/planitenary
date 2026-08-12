@@ -20,7 +20,8 @@
  */
 import {
   aiBudgetEpoch,
-  aiBudgetUsd,
+  aiReasoningLimits,
+  aiSafetyBudgetUsd,
   expiryFor,
   json,
   preflight,
@@ -45,8 +46,10 @@ import {
   type PlaceBrief,
 } from '../_shared/reasoning.ts';
 import { reserveQuota, usageToday } from '../_shared/quota.ts';
-import { budgetWindowStart, type ModelUsage } from '../_shared/aiCost.ts';
-import { SpendSession, meteredModelCall } from '../_shared/meteredModel.ts';
+import { budgetWindowStart, maximumReservedCost, type ModelUsage } from '../_shared/aiCost.ts';
+import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/meteredModel.ts';
+import { authenticateRequest } from '../_shared/auth.ts';
+import { reserveAiReasoningAttempt } from '../_shared/quota.ts';
 import {
   type CachedAiBrief,
   type CachedEvidence,
@@ -56,12 +59,12 @@ import {
   readEvidenceProbes,
   readOpeningHours,
   readSpendToDate,
+  finalizeAiSpendAttempt,
   serviceClient,
   writeEvidenceCache,
   writeAiBriefs,
   writeEvidenceProbes,
   writeOpeningHours,
-  writeSpendEvent,
 } from '../_shared/cache.ts';
 import { lookupAiBrief, shouldFetchEvidence } from '../_shared/cacheKeys.ts';
 import {
@@ -96,6 +99,9 @@ Deno.serve(async (request) => {
   const early = preflight(request);
   if (early) return early;
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  const authentication = await authenticateRequest(request);
+  if (authentication.ok === false) return json({ error: authentication.detail }, authentication.status);
 
   const body = (await request.json().catch(() => ({}))) as EvidenceBody;
   const city = typeof body.city === 'string' ? body.city.trim() : '';
@@ -205,8 +211,21 @@ Deno.serve(async (request) => {
    */
   const briefResolution = resolveReasoning('place-brief');
   const admissionResolution = resolveReasoning('admission-read');
-  const briefOptions = briefResolution.status === 'ready' ? briefResolution.options : undefined;
-  const admissionOptions = admissionResolution.status === 'ready' ? admissionResolution.options : undefined;
+  const accountingLimits = aiReasoningLimits();
+  const accountingBudget = aiSafetyBudgetUsd();
+  const briefRawOptions = briefResolution.status === 'ready' ? briefResolution.options : undefined;
+  const admissionRawOptions = admissionResolution.status === 'ready' ? admissionResolution.options : undefined;
+  const briefReservation = briefRawOptions
+    ? maximumReservedCost(briefRawOptions)
+    : null;
+  const admissionReservation = admissionRawOptions
+    ? maximumReservedCost(admissionRawOptions)
+    : null;
+  const accountingReady = Boolean(cache && accountingLimits && accountingBudget !== null);
+  const briefOptions = accountingReady && briefRawOptions && briefReservation !== null ? briefRawOptions : undefined;
+  const admissionOptions = accountingReady && admissionRawOptions && admissionReservation !== null
+    ? admissionRawOptions
+    : undefined;
   const configError = [briefResolution, admissionResolution]
     .find((resolution) => resolution.status === 'misconfigured');
 
@@ -244,6 +263,40 @@ Deno.serve(async (request) => {
   const canFetchThreads = Boolean(secrets.redditClientId() && secrets.redditClientSecret());
   // An operator's own site needs no credential at all — it is always available.
   const placeWebsites = body.placeWebsites || [];
+
+  const session = new SpendSession(
+    { readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())) },
+    accountingBudget ?? 0,
+  );
+
+  const accountingDeps = (
+    operation: string,
+    options: { provider: string; model: string; maxOutputTokens: number },
+    materialKey: string,
+    call: MeteredDeps['call'],
+  ): MeteredDeps | null => {
+    if (!cache || !accountingLimits || accountingBudget === null) return null;
+    const reservedUsd = maximumReservedCost(options);
+    if (reservedUsd === null) return null;
+    return {
+      reserveAttempt: (row) => reserveAiReasoningAttempt(cache, {
+        userId: authentication.caller.userId,
+        provider: String(row.provider || options.provider),
+        model: String(row.model_requested || options.model),
+        operation,
+        materialKey,
+        reservedUsd,
+        budgetUsd: accountingBudget,
+        budgetSince: budgetWindowStart(aiBudgetEpoch()),
+        globalLimit: accountingLimits.global,
+        userLimit: accountingLimits.user,
+        tripLimit: accountingLimits.trip,
+      }),
+      finalizeAttempt: (attemptId, row) => finalizeAiSpendAttempt(cache, attemptId, row),
+      readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),
+      call,
+    };
+  };
 
   // Sequential on purpose: these are quota-limited APIs, and a burst of
   // parallel requests is the fastest way to get rate limited.
@@ -350,21 +403,55 @@ Deno.serve(async (request) => {
                 reasoningCounters.cacheHits += 1;
                 return cached as AdmissionFare[] | null;
               }
-              if (!await reserveQuota(cache, {
-                provider: REASONING_QUOTA_PROVIDER,
-                calls: 1,
-                units: 1,
-                callLimit: reasoningCallLimit(),
-                resetTimezone: REASONING_QUOTA_TIMEZONE,
-                failClosed: true,
-              })) {
+              if (admissionReservation === null) {
                 reasoningCounters.skipped += 1;
                 return undefined;
               }
-              const { fares, rejections } = await requestAdmissionRead(
-                { pageText, countryCode: country },
-                admissionOptions,
+              let admissionUsage: ModelUsage | undefined;
+              let admissionRequestId: string | undefined;
+              const deps = accountingDeps('admission-read', admissionOptions, revision, async () => {
+                admissionUsage = undefined;
+                admissionRequestId = undefined;
+                const answer = await requestAdmissionRead(
+                  { pageText, countryCode: country },
+                  {
+                    ...admissionOptions,
+                    onUsage: (reported) => { admissionUsage = reported; },
+                    onProviderResponse: (response) => {
+                      admissionUsage = response.usage || admissionUsage;
+                      admissionRequestId = response.providerRequestId;
+                    },
+                  },
+                );
+                return {
+                  result: answer,
+                  usage: admissionUsage,
+                  providerRequestId: admissionRequestId,
+                  status: answer.fares !== null ? 'success' : admissionUsage ? 'invalid_output' : 'provider_error',
+                };
+              });
+              if (!deps) {
+                reasoningCounters.skipped += 1;
+                return undefined;
+              }
+              const outcome = await meteredModelCall(
+                {
+                  operation: 'admission-read',
+                  provider: admissionOptions.provider,
+                  requestedModel: admissionOptions.model,
+                  accounting: { userId: authentication.caller.userId, reservedUsd: admissionReservation },
+                },
+                session,
+                deps,
               );
+              if (outcome.ok === false) {
+                reasoningCounters.skipped += 1;
+                return undefined;
+              }
+              const { fares, rejections } = outcome.result as {
+                fares: AdmissionFare[] | null;
+                rejections: Array<{ reason: string }>;
+              };
               countRejections(reasoningCounters, rejections);
               if (fares) reasoningCounters.succeeded += 1; else reasoningCounters.failed += 1;
               freshAiBriefs.push({
@@ -510,28 +597,6 @@ Deno.serve(async (request) => {
    * a later request, which is the correct outcome — unlike an *empty answer*,
    * which is knowledge and is stored.
    */
-  /**
-   * The spending ceiling, read once before any batch.
-   *
-   * Two independent refusals, both failing closed:
-   *
-   * - the ledger could not be read, so what today has cost is unknown;
-   * - it *was* read, and the total has reached the ceiling.
-   *
-   * A third case is subtler and refuses too: calls whose cost could not be
-   * determined. Those are missing from `knownUsd` entirely, so the total is a
-   * floor rather than the truth, and continuing to spend against a number
-   * known to be incomplete is how a ceiling gets quietly passed. Unknown-cost
-   * events therefore stop further paid work until somebody reconciles them.
-   */
-  const session = new SpendSession(
-    {
-      readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),
-      writeLedger: (row) => writeSpendEvent(cache, row),
-    },
-    aiBudgetUsd(),
-  );
-
   for (let start = 0; start < pendingBriefs.length; start += MAX_BRIEF_BATCH) {
     const batch = pendingBriefs.slice(start, start + MAX_BRIEF_BATCH);
     if (!briefOptions) break;
@@ -544,40 +609,49 @@ Deno.serve(async (request) => {
      * together on the strength of one stale "allowed".
      */
     let batchUsage: ModelUsage | undefined;
+    let providerRequestId: string | undefined;
     let produced = new Map<string, PlaceBrief | null>();
-
-    const outcome = await meteredModelCall(
-      { operation: 'place-brief', provider: briefOptions.provider, requestedModel: briefOptions.model },
-      session,
-      {
-        reserveQuota: () => reserveQuota(cache, {
-          provider: REASONING_QUOTA_PROVIDER,
-          calls: 1,
-          units: 1,
-          callLimit: reasoningCallLimit(),
-          resetTimezone: REASONING_QUOTA_TIMEZONE,
-          failClosed: true,
-        }),
-        readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),
-        writeLedger: (row) => writeSpendEvent(cache, row),
-        call: async () => {
-          const answer = await requestPlaceBriefBatch(
-            batch.map((entry) => entry.item),
-            { ...briefOptions, onUsage: (reported) => { batchUsage = reported; } },
-          );
-          produced = answer.briefs;
-          countRejections(reasoningCounters, answer.rejections);
-          return {
-            result: answer,
-            usage: batchUsage,
-            // A batch that came back with nothing usable was still billed.
-            status: answer.briefs.size > 0 ? 'success' : batchUsage ? 'invalid_output' : 'provider_error',
-          };
+    const materialKey = JSON.stringify([
+      'place-brief',
+      batch.map((entry) => [entry.item.candidateId, entry.item.evidenceRevision]).sort(),
+    ]);
+    const deps = accountingDeps('place-brief', briefOptions, materialKey, async () => {
+      batchUsage = undefined;
+      providerRequestId = undefined;
+      const answer = await requestPlaceBriefBatch(
+        batch.map((entry) => entry.item),
+        {
+          ...briefOptions,
+          onUsage: (reported) => { batchUsage = reported; },
+          onProviderResponse: (response) => {
+            batchUsage = response.usage || batchUsage;
+            providerRequestId = response.providerRequestId;
+          },
         },
+      );
+      produced = answer.briefs;
+      countRejections(reasoningCounters, answer.rejections);
+      return {
+        result: answer,
+        usage: batchUsage,
+        providerRequestId,
+        // A batch that came back with nothing usable was still billed.
+        status: answer.briefs.size > 0 ? 'success' : batchUsage ? 'invalid_output' : 'provider_error',
+      };
+    });
+    if (!deps || briefReservation === null) break;
+    const outcome = await meteredModelCall(
+      {
+        operation: 'place-brief',
+        provider: briefOptions.provider,
+        requestedModel: briefOptions.model,
+        accounting: { userId: authentication.caller.userId, reservedUsd: briefReservation },
       },
+      session,
+      deps,
     );
 
-    if (!outcome.ok) {
+    if (outcome.ok === false) {
       // Nothing is asked, so nothing is cached: an unasked place is retried on
       // a later request, unlike an empty *answer*, which is knowledge.
       reasoningCounters.skipped += pendingBriefs.length - start;

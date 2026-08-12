@@ -1,24 +1,15 @@
 /**
  * The one door every paid model call goes through.
  *
- * Before this existed, the spending guard lived inside `travel-evidence`,
- * which meant it protected exactly the operations that happened to be written
- * there. `travel-reasoning` — the generic endpoint the next two features were
- * about to use — had a request quota and no dollar ceiling at all. A budget
- * that only some callers respect is not a budget, and the way that fails is
- * quiet: the new feature works, nothing errors, and the ceiling is simply
- * absent from a path nobody remembered it had to cover.
+ * The important ordering is deliberately server-owned:
  *
- * So the ordering, the accounting and the refusals are collected here, once,
- * and both endpoints call it. Adding a paid operation now means calling this
- * function; there is no shorter path to the provider that also happens to skip
- * the guard.
+ *   budget read -> atomic quota + pre-provider accounting reservation
+ *   -> one provider attempt -> accounting finalisation -> result
  *
- * Dependencies are injected rather than imported. `providers.ts`, `cache.ts`
- * and `quota.ts` all reach for `Deno` or the Supabase client and cannot be
- * loaded under vitest — and a spending guard nothing can test is a spending
- * guard nobody knows has stopped working. Every rule below is exercised
- * directly with fakes.
+ * The reservation is created before the provider is contacted. If the
+ * database cannot create it, the provider is never reached. If finalisation
+ * fails, the reservation remains unresolved in the database and this session
+ * refuses further work; a later invocation sees the unresolved row too.
  */
 
 import {
@@ -31,25 +22,36 @@ import {
   type ModelUsage,
 } from './aiCost.ts';
 
-/** Known spend, and how much of the picture is missing from it. */
+/** Known finalised spend, plus reservations that are not finalised yet. */
 export interface SpendSnapshot {
   knownUsd: number;
   unknownEvents: number;
+  reservedUsd?: number;
 }
 
+export type ReservationRefusal = 'quota-exhausted' | 'budget-reached' | 'spend-unknown' | 'accounting-failed';
+
+export type AttemptReservation =
+  | { ok: true; attemptId: string }
+  | { ok: false; refusal: ReservationRefusal; detail: string };
+
 export interface MeteredDeps {
-  /** Reserve one request against the daily call quota. */
-  reserveQuota: () => Promise<boolean>;
+  /** Atomically reserves global/user/trip quota and a durable ledger attempt. */
+  reserveAttempt: (row: Record<string, unknown>) => Promise<AttemptReservation>;
+  /** Finalises the pre-provider row. False leaves it reserved/unresolved. */
+  finalizeAttempt: (attemptId: string, row: Record<string, unknown>) => Promise<boolean>;
   /** Spend since the budget epoch. `null` means it could not be read. */
   readSpend: () => Promise<SpendSnapshot | null>;
-  /** Append one ledger row. `false` means the write failed. */
-  writeLedger: (row: Record<string, unknown>) => Promise<boolean>;
   /**
-   * The provider request. Returns the parsed answer and whatever usage the
-   * provider reported, plus how the attempt ended — the three are independent
-   * and the caller must not infer any of them from the others.
+   * The provider request. The usage and request id belong to this attempt only;
+   * callers must create fresh state for every batch.
    */
-  call: () => Promise<{ result: unknown; usage?: ModelUsage; status: AiRequestStatus }>;
+  call: () => Promise<{
+    result: unknown;
+    usage?: ModelUsage;
+    providerRequestId?: string;
+    status: AiRequestStatus;
+  }>;
 }
 
 export type MeteredRefusal =
@@ -67,27 +69,19 @@ export type MeteredOutcome =
 /**
  * A budget held across several calls in one invocation.
  *
- * The persisted total is read once — it is a database round trip and the
- * numbers in between are ours — but it is then kept *current* by adding each
- * call's cost as it completes. Reading once and reusing that answer for a
- * whole batch loop is the bug this class exists to prevent: at $4.249 spent,
- * every batch in the loop would consult the same stale "allowed" and sail past
- * the ceiling together.
+ * Persisted reservations are included in the snapshot. Running reservations
+ * are replaced by their final known cost, never added twice.
  */
 export class SpendSession {
   private persisted: SpendSnapshot | null | undefined;
-  /** Cost accrued by calls this invocation has already made. */
-  private running = 0;
-  /** Set when a ledger write failed; no further paid call may happen. */
+  private runningKnown = 0;
+  private runningReserved = 0;
   private accountingBroken = false;
 
-  private readonly deps: Pick<MeteredDeps, 'readSpend' | 'writeLedger'>;
+  private readonly deps: Pick<MeteredDeps, 'readSpend'>;
   private readonly ceilingUsd: number;
 
-  // Assigned in the body rather than declared as constructor parameter
-  // properties: this project builds with `erasableSyntaxOnly`, which forbids
-  // the shorthand because it emits real code rather than erasing to nothing.
-  constructor(deps: Pick<MeteredDeps, 'readSpend' | 'writeLedger'>, ceilingUsd: number) {
+  constructor(deps: Pick<MeteredDeps, 'readSpend'>, ceilingUsd: number) {
     this.deps = deps;
     this.ceilingUsd = ceilingUsd;
   }
@@ -99,33 +93,21 @@ export class SpendSession {
   }
 
   async gate(): Promise<{ allowed: true } | { allowed: false; refusal: MeteredRefusal; detail: string }> {
-    /**
-     * A failed ledger write means a call happened whose cost we cannot
-     * account for. Continuing would spend against a total already known to be
-     * wrong, so the invocation stops making paid calls entirely — the same
-     * fail-closed reasoning as an unreadable counter, applied to a write.
-     */
     if (this.accountingBroken) {
       return {
         allowed: false,
         refusal: 'accounting-failed',
-        detail: 'A spending record could not be written, so no further metered calls are made.',
+        detail: 'A spending attempt remains unresolved, so no further metered calls are made.',
       };
     }
 
     const persisted = await this.snapshot();
-    /**
-     * Unknown-cost events are absent from `knownUsd` entirely, so the total is
-     * a floor rather than the truth. Spending against a number known to be
-     * incomplete is how a ceiling gets quietly passed, so their existence
-     * refuses just as an unreadable ledger does.
-     */
     const spent = persisted === null || persisted.unknownEvents > 0
       ? null
-      : persisted.knownUsd + this.running;
+      : persisted.knownUsd + (persisted.reservedUsd || 0) + this.runningKnown + this.runningReserved;
 
     const decision = spendGate(spent, this.ceilingUsd);
-    if (decision.allowed) return { allowed: true };
+    if (decision.allowed === true) return { allowed: true };
     return {
       allowed: false,
       refusal: decision.reason === 'ceiling-reached' ? 'budget-reached' : 'spend-unknown',
@@ -133,69 +115,79 @@ export class SpendSession {
     };
   }
 
+  noteReservation(reservedUsd: number): void {
+    this.runningReserved += reservedUsd;
+  }
+
   /**
-   * Record what a call cost and fold it into the running total.
+   * Fold the finalisation result into this invocation.
    *
-   * Written immediately rather than accumulated and flushed at the end. If the
-   * function dies between a provider charging us and a deferred flush, the
-   * cost vanishes from our accounting while remaining very much present on the
-   * invoice — and the next invocation would start from a total that is too low.
+   * A finalisation failure is never treated as success. The row created before
+   * the provider remains reserved in the database, so the next invocation also
+   * refuses or counts it rather than assuming the call never happened.
    */
-  async record(event: AiSpendEvent): Promise<boolean> {
-    const written = await this.deps.writeLedger(spendLedgerRow(event));
-    if (!written) {
+  settleReservation(reservedUsd: number, event: AiSpendEvent, finalised: boolean): boolean {
+    if (!finalised) {
+      // The durable row is still open, so keep its reservation visible in the
+      // same invocation's report as well as in the next invocation's read.
       this.accountingBroken = true;
       return false;
     }
-    if (event.estimatedUsd !== null) this.running += event.estimatedUsd;
-    // A call we could not cost makes every later total a floor, so it stops
-    // further paid work for the same reason an unreadable ledger does.
-    else this.accountingBroken = true;
+    if (event.estimatedUsd === null) {
+      // Finalisation succeeded, but the row remains unresolved with its
+      // conservative reservation because the real cost is still unknown.
+      this.accountingBroken = true;
+      return false;
+    }
+    this.runningReserved = Math.max(0, this.runningReserved - reservedUsd);
+    this.runningKnown += event.estimatedUsd;
     return true;
   }
 
-  /** For diagnostics. Known persisted spend plus this invocation's own. */
   async report(): Promise<{
     knownUsd: number | null;
+    reservedUsd: number | null;
     unknownEvents: number | null;
     ceilingUsd: number;
     remainingUsd: number | null;
   }> {
     const persisted = await this.snapshot();
     if (persisted === null) {
-      return { knownUsd: null, unknownEvents: null, ceilingUsd: this.ceilingUsd, remainingUsd: null };
+      return {
+        knownUsd: null,
+        reservedUsd: null,
+        unknownEvents: null,
+        ceilingUsd: this.ceilingUsd,
+        remainingUsd: null,
+      };
     }
-    const knownUsd = persisted.knownUsd + this.running;
+    const knownUsd = persisted.knownUsd + this.runningKnown;
+    const reservedUsd = (persisted.reservedUsd || 0) + this.runningReserved;
     return {
       knownUsd,
+      reservedUsd,
       unknownEvents: persisted.unknownEvents,
       ceilingUsd: this.ceilingUsd,
-      remainingUsd: Math.max(0, this.ceilingUsd - knownUsd),
+      remainingUsd: Math.max(0, this.ceilingUsd - knownUsd - reservedUsd),
     };
   }
 }
 
 /**
- * Make one paid model call, with every guard applied in the order that keeps
- * the cheapest refusal first.
- *
- * Budget before quota before provider: each step is more expensive to reach
- * than the last, and a refusal that has already spent a quota unit on a call
- * the budget was going to reject is a refusal that cost something.
- *
- * Records a ledger row for **every attempt that reached the provider**,
- * including ones whose reply could not be parsed — those were billed, and
- * `invalid_output` beside a real non-zero cost is precisely the signal worth
- * having. Attempts refused before the provider write nothing, because nothing
- * was spent.
+ * Make one paid model call with durable accounting around the provider.
  */
 export async function meteredModelCall(
   input: {
     operation: string;
     provider: string;
     requestedModel: string;
-    /** The refusal from the model allowlist, when the configured model failed it. */
     modelRefusal?: string;
+    accounting: {
+      userId: string;
+      tripId?: string;
+      materialKey?: string;
+      reservedUsd: number;
+    };
   },
   session: SpendSession,
   deps: MeteredDeps,
@@ -204,39 +196,88 @@ export async function meteredModelCall(
     return { ok: false, refusal: 'model-not-approved', detail: input.modelRefusal };
   }
 
-  const gate = await session.gate();
-  if (!gate.allowed) return { ok: false, refusal: gate.refusal, detail: gate.detail };
-
-  if (!await deps.reserveQuota()) {
+  if (!input.accounting.userId || !Number.isFinite(input.accounting.reservedUsd) || input.accounting.reservedUsd <= 0) {
     return {
       ok: false,
-      refusal: 'quota-exhausted',
-      detail: 'The daily AI request allowance for this deployment is spent.',
+      refusal: 'accounting-failed',
+      detail: 'The metered operation has no valid authenticated accounting reservation.',
     };
   }
 
-  const { result, usage, status } = await deps.call();
+  const gate = await session.gate();
+  if (gate.allowed === false) return { ok: false, refusal: gate.refusal, detail: gate.detail };
 
-  /**
-   * The provider reported usage but named a model we do not price, so the
-   * cost is unknown. Recorded as such — never as zero — and the session then
-   * refuses further paid work until somebody reconciles it.
-   */
+  let reservation: AttemptReservation;
+  try {
+    reservation = await deps.reserveAttempt({
+      user_id: input.accounting.userId,
+      trip_id: input.accounting.tripId ?? null,
+      material_key: input.accounting.materialKey ?? null,
+      provider: input.provider,
+      model_requested: input.requestedModel,
+      operation: input.operation,
+      reserved_cost_usd: input.accounting.reservedUsd,
+    });
+  } catch {
+    return {
+      ok: false,
+      refusal: 'accounting-failed',
+      detail: 'The AI accounting reservation failed, so the provider was not contacted.',
+    };
+  }
+  if (reservation.ok === false) {
+    return { ok: false, refusal: reservation.refusal, detail: reservation.detail };
+  }
+  session.noteReservation(input.accounting.reservedUsd);
+
+  let response: {
+    result: unknown;
+    usage?: ModelUsage;
+    providerRequestId?: string;
+    status: AiRequestStatus;
+  };
+  try {
+    response = await deps.call();
+  } catch {
+    response = { result: undefined, status: 'network_error' };
+  }
+
+  /** Unknown usage is recorded as unknown, never as zero. */
   const event = spendEvent({
     provider: input.provider,
     requestedModel: input.requestedModel,
     operation: input.operation,
-    usage,
-    status: usage === undefined && status === 'success' ? 'usage_missing' : status,
+    usage: response.usage,
+    status: response.usage === undefined && response.status === 'success' ? 'usage_missing' : response.status,
   });
 
-  await session.record(event);
-
-  if (status !== 'success') {
-    return { ok: false, refusal: 'provider-failed', detail: `Provider request ended as ${status}.` };
+  let finalised = false;
+  try {
+    finalised = await deps.finalizeAttempt(
+      reservation.attemptId,
+      spendLedgerRow(event, {
+        providerRequestId: response.providerRequestId,
+        userId: input.accounting.userId,
+        tripId: input.accounting.tripId,
+        materialKey: input.accounting.materialKey,
+      }),
+    );
+  } catch {
+    finalised = false;
   }
-  return { ok: true, result, event };
+  const accounted = session.settleReservation(input.accounting.reservedUsd, event, finalised);
+  if (!accounted) {
+    return {
+      ok: false,
+      refusal: 'accounting-failed',
+      detail: 'The provider attempt could not be finalised safely, so no successful answer is returned.',
+    };
+  }
+
+  if (response.status !== 'success') {
+    return { ok: false, refusal: 'provider-failed', detail: `Provider request ended as ${response.status}.` };
+  }
+  return { ok: true, result: response.result, event };
 }
 
-/** Re-exported so callers need only one import for the metered path. */
 export { estimateCost, spendEvent, spendLedgerRow };

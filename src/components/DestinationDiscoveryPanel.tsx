@@ -1139,11 +1139,14 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
    * input here. A key that cannot see UI state cannot be moved by it.
    */
   const materialKey = useMemo(
-    () => materialRequestKey({
-      tripMaterialRevision: intelligenceRequest.tripRevision,
-      candidates: intelligenceRequest.entries,
-    }),
-    [intelligenceRequest],
+    () => JSON.stringify([
+      itinerary.id,
+      materialRequestKey({
+        tripMaterialRevision: intelligenceRequest.tripRevision,
+        candidates: intelligenceRequest.entries,
+      }),
+    ]),
+    [intelligenceRequest, itinerary.id],
   );
   const latestMaterialKeyRef = useRef(materialKey);
   latestMaterialKeyRef.current = materialKey;
@@ -1161,7 +1164,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     controller.begin(issuedKey);
     let active = true;
     void fetchCandidateIntelligence(
-      { ...request.tripMaterial, tripMaterialRevision: request.tripRevision },
+      { tripId: itinerary.id, ...request.tripMaterial, tripMaterialRevision: request.tripRevision },
       request.entries,
     ).then((rows) => {
       // The key comparison, not the unmount flag, is what makes a late answer
@@ -1173,7 +1176,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       setIntelligence(Object.fromEntries(entries));
     });
     return () => { active = false; };
-  }, [materialKey]);
+  }, [itinerary.id, materialKey]);
 
   const setCandidates = useCallback(
     (update: PlaceCandidate[] | ((previous: PlaceCandidate[]) => PlaceCandidate[])) => {

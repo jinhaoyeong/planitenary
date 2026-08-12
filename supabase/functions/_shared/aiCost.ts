@@ -267,7 +267,13 @@ export function spendEvent(input: {
  */
 export function spendLedgerRow(
   event: AiSpendEvent,
-  extra: { providerRequestId?: string; errorCode?: string } = {},
+  extra: {
+    providerRequestId?: string;
+    errorCode?: string;
+    userId?: string;
+    tripId?: string;
+    materialKey?: string;
+  } = {},
 ): Record<string, unknown> {
   return {
     provider: event.provider,
@@ -283,11 +289,33 @@ export function spendLedgerRow(
     estimated_cost_usd: event.estimatedUsd,
     cost_status: event.estimatedUsd === null ? 'unknown' : 'known',
     request_status: event.status,
-    // Reserved, and deliberately unpopulated until the authentication work.
-    trip_id: null,
-    user_id: null,
+    trip_id: extra.tripId ?? null,
+    user_id: extra.userId ?? null,
+    material_key: extra.materialKey ?? null,
     error_code: extra.errorCode ?? event.unknownReason ?? null,
   };
+}
+
+/**
+ * Maximum reservation for one allowed OpenAI request.
+ *
+ * The request body is capped in characters, not tokens. Four tokens per
+ * character is intentionally a pessimistic upper bound for the tokenizer,
+ * with extra room for the fixed system/user envelope. The calculation charges
+ * input at the full rate even when prompt caching may later lower the bill.
+ * It is a ceiling guard, not a forecast, so over-reservation is the safe error.
+ */
+export const MAX_REASONING_INPUT_TOKENS = 125_000;
+
+export function maximumReservedCost(input: {
+  provider: string;
+  model: string;
+  maxOutputTokens: number;
+}): number | null {
+  if (input.provider !== 'openai') return null;
+  const price = MODEL_PRICING[input.model];
+  if (!price || !Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0) return null;
+  return (MAX_REASONING_INPUT_TOKENS * price.input + input.maxOutputTokens * price.output) / PER_TOKENS;
 }
 
 /**

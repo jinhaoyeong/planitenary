@@ -464,6 +464,12 @@ export interface ModelOptions {
    * must read as "cost unknown", never as "cost nothing".
    */
   onUsage?: (usage: ModelUsage) => void;
+  /** Provider identity for the accounting finalisation, including failures. */
+  onProviderResponse?: (response: {
+    usage?: ModelUsage;
+    providerRequestId?: string;
+    resolvedModel?: string;
+  }) => void;
 }
 
 /** @deprecated Use `ModelOptions`. Kept so existing call sites still compile. */
@@ -476,6 +482,8 @@ interface GeminiPayload {
 }
 
 interface OpenAiPayload {
+  id?: string;
+  model?: string;
   choices?: Array<{ message?: { content?: string } }>;
 }
 
@@ -547,7 +555,10 @@ async function callOpenAi(
     body: JSON.stringify(body),
     signal,
   });
-  if (!response.ok) return undefined;
+  if (!response.ok) {
+    options.onProviderResponse?.({ providerRequestId: response.headers.get('x-request-id') || undefined });
+    return undefined;
+  }
   const payload = await response.json() as OpenAiPayload;
 
   /**
@@ -557,6 +568,11 @@ async function callOpenAi(
    * calls that produced nothing for their price.
    */
   const usage = parseOpenAiUsage(payload);
+  options.onProviderResponse?.({
+    usage,
+    providerRequestId: typeof payload.id === 'string' ? payload.id : response.headers.get('x-request-id') || undefined,
+    resolvedModel: typeof payload.model === 'string' ? payload.model : undefined,
+  });
   if (usage) options.onUsage?.(usage);
 
   const text = (payload.choices || [])
@@ -800,7 +816,6 @@ export interface PlaceAdmissionLike {
   confidence: string;
   sourceUrl?: string;
   retrievedAt?: string;
-  [key: string]: unknown;
 }
 
 export interface PlaceBrief {
