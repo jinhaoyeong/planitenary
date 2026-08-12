@@ -199,8 +199,8 @@ describe('why it ranks here', () => {
 
   /**
    * Caught in a browser, not here: a live Osaka card read "Why it is #1 for
-   * you" directly above "Nothing stands out on paper — it is here for
-   * variety". Each half is defensible; together the heading makes a promise
+   * you" directly above "It adds a museum option in Osaka; the available
+   * evidence does not point to one standout reason." Each half is defensible; together the heading makes a promise
    * the next line breaks. The fallback point is the signal that there is no
    * ranking reason to give, so the heading must stop claiming one.
    */
@@ -208,7 +208,7 @@ describe('why it ranks here', () => {
     const base = rankedFor('Osaka Castle Museum');
     const unremarkable: RankedCandidate = {
       ...base,
-      rationale: [{ id: 'variety', kind: 'evidence', text: 'Nothing stands out on paper — it is here for variety', basis: 'no dimension cleared the notable threshold', comparative: false }],
+      rationale: [{ id: 'variety', kind: 'evidence', text: 'It adds a museum option in Osaka; the available evidence does not point to one standout reason.', basis: 'no dimension cleared the notable threshold', comparative: false }],
     } as RankedCandidate;
 
     show(unremarkable, { position: 1 });

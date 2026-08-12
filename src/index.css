@@ -871,6 +871,18 @@ body.planner-intelligence-active .pet-overlay {
   gap: 0.5rem;
 }
 
+.destination-deck-mobile-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.destination-deck-mobile-actions .pill-btn {
+  min-height: 2.2rem;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.76rem;
+}
+
 /* Stepping back through earlier places must be visible before the first
    decision, not discovered only after catching a four-second undo toast. */
 .destination-deck-back {

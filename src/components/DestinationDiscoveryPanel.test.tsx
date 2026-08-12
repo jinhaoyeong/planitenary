@@ -329,6 +329,19 @@ describe('DestinationDiscoveryPanel intelligence request lifecycle', () => {
     expect(mocks.invokeTravelReasoning).toHaveBeenCalledTimes(1);
   });
 
+  it('lets mobile reviewers switch to browse-all and back to the deck', async () => {
+    forceMobileReview();
+    await startReview();
+    await resolveEmpty(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Browse all' }));
+    expect(screen.getByRole('button', { name: 'One at a time' })).toBeInTheDocument();
+    expect(document.querySelector('.destination-review-groups')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'One at a time' }));
+    expect(screen.getByRole('button', { name: 'Close place review' })).toBeInTheDocument();
+  });
+
   it('keeps non-model trip edits on the existing key, while styles and pace issue new requests', async () => {
     const panel = await startReview();
     const base = profileFor();

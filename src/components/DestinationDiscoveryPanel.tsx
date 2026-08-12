@@ -2063,7 +2063,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     );
   }
 
-  if (isMobileReview) {
+  if (isMobileReview && desktopMode === 'deck') {
     return (
       <section className="destination-discovery-shell destination-discovery-review is-deck-only" aria-label={`Review places for ${cityLabel}`}>
         <div className="destination-deck-chrome">
@@ -2105,6 +2105,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
               <span>{reviewedCount} of {ranked.length}</span>
               <span>{selectedCount} selected</span>
             </div>
+          </div>
+          <div className="destination-deck-mobile-actions">
+            <button
+              type="button"
+              className="pill-btn pill-ghost"
+              onClick={() => { hapticTap(); setDesktopMode('list'); }}
+            >
+              <LayoutGrid className="w-4 h-4" aria-hidden="true" /> Browse all
+            </button>
           </div>
         </div>
 
