@@ -29,11 +29,47 @@ export interface SpendSnapshot {
   reservedUsd?: number;
 }
 
+export interface AiSpendSnapshotRow {
+  estimated_cost_usd: string | number | null;
+  cost_status: string;
+  attempt_status: string;
+  reserved_cost_usd: string | number | null;
+}
+
+/** Reduce ledger rows without importing the database client into unit tests. */
+export function summarizeAiSpendRows(rows: AiSpendSnapshotRow[]): SpendSnapshot & { reservedUsd: number } {
+  let knownUsd = 0;
+  let unknownEvents = 0;
+  let reservedUsd = 0;
+  for (const row of rows) {
+    if (row.attempt_status === 'resolved') {
+      if (row.cost_status === 'known' && row.estimated_cost_usd !== null) {
+        knownUsd += Number(row.estimated_cost_usd) || 0;
+      } else {
+        reservedUsd += Number(row.reserved_cost_usd) || 0;
+      }
+    } else {
+      reservedUsd += Number(row.reserved_cost_usd) || 0;
+      unknownEvents += 1;
+    }
+  }
+  return { knownUsd, unknownEvents, reservedUsd };
+}
+
 export type ReservationRefusal = 'quota-exhausted' | 'budget-reached' | 'spend-unknown' | 'accounting-failed';
 
 export type AttemptReservation =
   | { ok: true; attemptId: string }
   | { ok: false; refusal: ReservationRefusal; detail: string };
+
+/**
+ * What the provider adapter can prove about dispatch.
+ *
+ * Absence is deliberately treated as `possibly-dispatched`: older adapters
+ * and unexpected exceptions must retain the reservation, never manufacture a
+ * zero-cost attempt from missing telemetry.
+ */
+export type ProviderDispatchStatus = 'not-dispatched' | 'possibly-dispatched';
 
 export interface MeteredDeps {
   /** Atomically reserves global/user/trip quota and a durable ledger attempt. */
@@ -51,6 +87,7 @@ export interface MeteredDeps {
     usage?: ModelUsage;
     providerRequestId?: string;
     status: AiRequestStatus;
+    dispatchStatus?: ProviderDispatchStatus;
   }>;
 }
 
@@ -134,10 +171,10 @@ export class SpendSession {
       return false;
     }
     if (event.estimatedUsd === null) {
-      // Finalisation succeeded, but the row remains unresolved with its
-      // conservative reservation because the real cost is still unknown.
-      this.accountingBroken = true;
-      return false;
+      // A terminal bounded-unknown row keeps the full reservation as budget
+      // exposure. It is accounted for, so it must not permanently poison the
+      // whole AI tier; only a genuinely failed finalisation does that.
+      return true;
     }
     this.runningReserved = Math.max(0, this.runningReserved - reservedUsd);
     this.runningKnown += event.estimatedUsd;
@@ -235,21 +272,37 @@ export async function meteredModelCall(
     usage?: ModelUsage;
     providerRequestId?: string;
     status: AiRequestStatus;
+    dispatchStatus?: ProviderDispatchStatus;
   };
   try {
     response = await deps.call();
   } catch {
-    response = { result: undefined, status: 'network_error' };
+    // Once control entered an arbitrary adapter, an exception alone cannot
+    // prove the request stayed local. Conservative exposure is mandatory.
+    response = { result: undefined, status: 'network_error', dispatchStatus: 'possibly-dispatched' };
   }
 
-  /** Unknown usage is recorded as unknown, never as zero. */
-  const event = spendEvent({
+  const requestStatus = response.usage === undefined && response.status === 'success'
+    ? 'usage_missing'
+    : response.status;
+
+  /**
+   * Unknown usage is recorded as unknown unless the adapter positively proves
+   * the request never crossed the dispatch boundary. Only that case has known
+   * zero exposure; null token counts remain honest because no provider usage
+   * exists.
+   */
+  const measuredEvent = spendEvent({
     provider: input.provider,
     requestedModel: input.requestedModel,
     operation: input.operation,
     usage: response.usage,
-    status: response.usage === undefined && response.status === 'success' ? 'usage_missing' : response.status,
+    status: requestStatus,
   });
+  const definitelyNotDispatched = response.usage === undefined && response.dispatchStatus === 'not-dispatched';
+  const event: AiSpendEvent = definitelyNotDispatched
+    ? { ...measuredEvent, estimatedUsd: 0, unknownReason: undefined }
+    : measuredEvent;
 
   let finalised = false;
   try {
@@ -257,6 +310,7 @@ export async function meteredModelCall(
       reservation.attemptId,
       spendLedgerRow(event, {
         providerRequestId: response.providerRequestId,
+        errorCode: definitelyNotDispatched ? 'not-dispatched' : undefined,
         userId: input.accounting.userId,
         tripId: input.accounting.tripId,
         materialKey: input.accounting.materialKey,
@@ -274,8 +328,8 @@ export async function meteredModelCall(
     };
   }
 
-  if (response.status !== 'success') {
-    return { ok: false, refusal: 'provider-failed', detail: `Provider request ended as ${response.status}.` };
+  if (requestStatus !== 'success') {
+    return { ok: false, refusal: 'provider-failed', detail: `Provider request ended as ${requestStatus}.` };
   }
   return { ok: true, result: response.result, event };
 }

@@ -473,6 +473,8 @@ export interface ModelOptions {
    * must read as "cost unknown", never as "cost nothing".
    */
   onUsage?: (usage: ModelUsage) => void;
+  /** Called immediately before the provider fetch is attempted. */
+  onProviderDispatch?: () => void;
   /** Provider identity for the accounting finalisation, including failures. */
   onProviderResponse?: (response: {
     usage?: ModelUsage;
@@ -555,13 +557,15 @@ async function callOpenAi(
   // GPT-5 generation, which counts reasoning tokens against the reply too.
   if (options.maxOutputTokens) body.max_completion_tokens = options.maxOutputTokens;
 
+  const requestBody = JSON.stringify(body);
+  options.onProviderDispatch?.();
   const response = await doFetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(body),
+    body: requestBody,
     signal,
   });
   if (!response.ok) {
@@ -601,19 +605,21 @@ async function callGeminiApi(
 ): Promise<unknown> {
   const doFetch = options.fetchImpl || fetch;
   const model = options.model || 'gemini-2.5-flash';
+  const requestBody = JSON.stringify({
+    systemInstruction: { parts: [{ text: options.systemPrompt || SYSTEM }] },
+    contents: [{
+      role: 'user',
+      parts: [{ text: `Operation: ${operation}\nSource-backed input:\n${JSON.stringify(input)}` }],
+    }],
+    generationConfig: { responseMimeType: 'application/json' },
+  });
+  options.onProviderDispatch?.();
   const response = await doFetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: 'POST',
       headers: { 'x-goog-api-key': options.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: options.systemPrompt || SYSTEM }] },
-        contents: [{
-          role: 'user',
-          parts: [{ text: `Operation: ${operation}\nSource-backed input:\n${JSON.stringify(input)}` }],
-        }],
-        generationConfig: { responseMimeType: 'application/json' },
-      }),
+      body: requestBody,
       signal,
     },
   );

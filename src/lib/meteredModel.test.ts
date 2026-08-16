@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   SpendSession,
   meteredModelCall,
+  summarizeAiSpendRows,
   type MeteredDeps,
 } from '../../supabase/functions/_shared/meteredModel';
 import { DEFAULT_SPEND_CEILING_USD, budgetWindowStart } from '../../supabase/functions/_shared/aiCost';
@@ -185,15 +186,20 @@ describe('spending across several calls in one invocation', () => {
     expect(call).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps missing usage unresolved and refuses later paid work', async () => {
+  it('keeps ambiguous missing usage as terminal conservative exposure', async () => {
     const { run, call, written, session } = harness({
-      call: vi.fn().mockResolvedValue({ result: { ok: true }, usage: undefined, status: 'success' as const }),
+      call: vi.fn().mockResolvedValue({
+        result: { ok: true },
+        usage: undefined,
+        status: 'success' as const,
+        dispatchStatus: 'possibly-dispatched' as const,
+      }),
     });
-    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'provider-failed' });
     expect(written[0]).toMatchObject({ request_status: 'usage_missing', cost_status: 'unknown' });
     expect((await session.report()).reservedUsd).toBe(RESERVED_USD);
-    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
-    expect(call).toHaveBeenCalledTimes(1);
+    expect(await run()).toMatchObject({ ok: false, refusal: 'provider-failed' });
+    expect(call).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -209,12 +215,48 @@ describe('what the ledger records about an attempt', () => {
     expect(Number(written[0].estimated_cost_usd)).toBeCloseTo(CALL_USD, 12);
   });
 
-  it('records a provider failure with no invented tokens as unresolved', async () => {
+  it('records an ambiguous provider failure without invented tokens or zero cost', async () => {
     const { run, written } = harness({
-      call: vi.fn().mockResolvedValue({ result: undefined, usage: undefined, status: 'provider_error' as const }),
+      call: vi.fn().mockResolvedValue({
+        result: undefined,
+        usage: undefined,
+        status: 'provider_error' as const,
+        dispatchStatus: 'possibly-dispatched' as const,
+      }),
     });
-    expect(await run()).toMatchObject({ ok: false, refusal: 'accounting-failed' });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'provider-failed' });
     expect(written[0]).toMatchObject({ request_status: 'provider_error', input_tokens: null, estimated_cost_usd: null, cost_status: 'unknown' });
+  });
+
+  it('releases the reservation only when failure is proven pre-dispatch', async () => {
+    const { run, written, session } = harness({
+      call: vi.fn().mockResolvedValue({
+        result: undefined,
+        usage: undefined,
+        status: 'provider_error' as const,
+        dispatchStatus: 'not-dispatched' as const,
+      }),
+    });
+    expect(await run()).toMatchObject({ ok: false, refusal: 'provider-failed' });
+    expect(written[0]).toMatchObject({
+      request_status: 'provider_error',
+      input_tokens: null,
+      estimated_cost_usd: 0,
+      cost_status: 'known',
+      error_code: 'not-dispatched',
+    });
+    expect(await session.report()).toMatchObject({ knownUsd: 0, reservedUsd: 0, unknownEvents: 0 });
+  });
+
+  it('counts terminal bounded-unknown rows as exposure without reopening them', () => {
+    expect(summarizeAiSpendRows([
+      {
+        estimated_cost_usd: null,
+        cost_status: 'unknown',
+        attempt_status: 'resolved',
+        reserved_cost_usd: '0.00685000',
+      },
+    ])).toEqual({ knownUsd: 0, reservedUsd: 0.00685, unknownEvents: 0 });
   });
 
   it('keeps requested and resolved models separate', async () => {

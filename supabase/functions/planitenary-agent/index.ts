@@ -182,13 +182,16 @@ Deno.serve(async (request) => {
   const callOneRound = async (payload: AgentModelPayload) => {
     let usage: ModelUsage | undefined;
     let providerRequestId: string | undefined;
+    let dispatchStatus: 'not-dispatched' | 'possibly-dispatched' = 'not-dispatched';
 
     const call: MeteredDeps['call'] = async () => {
       usage = undefined;
       providerRequestId = undefined;
+      dispatchStatus = 'not-dispatched';
       const result = await callModel(`agent-${operation}`, payload, {
         ...options,
         systemPrompt: AGENT_SYSTEM_PROMPT,
+        onProviderDispatch: () => { dispatchStatus = 'possibly-dispatched'; },
         onUsage: (reported) => { usage = reported; },
         onProviderResponse: (response) => {
           providerRequestId = response.providerRequestId;
@@ -199,6 +202,7 @@ Deno.serve(async (request) => {
         result,
         usage,
         providerRequestId,
+        dispatchStatus,
         status: (result !== undefined ? 'success' : usage ? 'invalid_output' : 'provider_error') as
           'success' | 'invalid_output' | 'provider_error',
       };

@@ -101,11 +101,14 @@ const providerCall = (
 ): MeteredDeps['call'] => {
   let usage: ModelUsage | undefined;
   let providerRequestId: string | undefined;
+  let dispatchStatus: 'not-dispatched' | 'possibly-dispatched' = 'not-dispatched';
   return async () => {
     usage = undefined;
     providerRequestId = undefined;
+    dispatchStatus = 'not-dispatched';
     const result = await callModel(operation, payload, {
       ...options,
+      onProviderDispatch: () => { dispatchStatus = 'possibly-dispatched'; },
       onUsage: (reported) => { usage = reported; },
       onProviderResponse: (response) => {
         providerRequestId = response.providerRequestId;
@@ -116,6 +119,7 @@ const providerCall = (
       result,
       usage,
       providerRequestId,
+      dispatchStatus,
       status: (result !== undefined ? 'success' : usage ? 'invalid_output' : 'provider_error') as
         'success' | 'invalid_output' | 'provider_error',
     };

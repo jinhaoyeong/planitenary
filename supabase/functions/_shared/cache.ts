@@ -21,6 +21,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { aiBriefKey, parseAppliesTo, probeKey, routePairKey } from './cacheKeys.ts';
 import { parsePlaceImage, rankPlaceImages, type PlaceImage } from './placeImages.ts';
+import { summarizeAiSpendRows, type AiSpendSnapshotRow } from './meteredModel.ts';
 
 let cachedClient: SupabaseClient | null | undefined;
 
@@ -866,10 +867,11 @@ export async function writeEvidenceCache(
  * refusal rather than as zero — the same distinction `usageToday` draws
  * between an unused counter and an unreachable one.
  *
- * Resolved known rows contribute their actual cost. Reserved or unresolved
- * rows contribute their conservative reservation and also poison the
- * unknown-event count, so callers cannot make another paid attempt while an
- * accounting boundary is open.
+ * Resolved known rows contribute their actual cost. Resolved unknown rows are
+ * terminal bounded-unknown attempts: they contribute their full conservative
+ * reservation without poisoning the tier. Only reserved or legacy unresolved
+ * rows increment the unknown-event count, because those accounting boundaries
+ * are genuinely still open.
  */
 export async function readSpendToDate(
   client: SupabaseClient | null,
@@ -888,23 +890,7 @@ export async function readSpendToDate(
       .select('estimated_cost_usd, cost_status, attempt_status, reserved_cost_usd');
     const { data, error } = await (sinceIso ? base.gte('created_at', sinceIso) : base);
     if (error || !data) return null;
-    let knownUsd = 0;
-    let unknownEvents = 0;
-    let reservedUsd = 0;
-    for (const row of data as Array<{
-      estimated_cost_usd: string | number | null;
-      cost_status: string;
-      attempt_status: string;
-      reserved_cost_usd: string | number | null;
-    }>) {
-      if (row.attempt_status === 'resolved' && row.cost_status === 'known') {
-        knownUsd += Number(row.estimated_cost_usd) || 0;
-      } else {
-        reservedUsd += Number(row.reserved_cost_usd) || 0;
-        unknownEvents += 1;
-      }
-    }
-    return { knownUsd, unknownEvents, reservedUsd };
+    return summarizeAiSpendRows(data as AiSpendSnapshotRow[]);
   } catch {
     return null;
   }

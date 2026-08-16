@@ -409,13 +409,16 @@ Deno.serve(async (request) => {
               }
               let admissionUsage: ModelUsage | undefined;
               let admissionRequestId: string | undefined;
+              let admissionDispatch: 'not-dispatched' | 'possibly-dispatched' = 'not-dispatched';
               const deps = accountingDeps('admission-read', admissionOptions, revision, async () => {
                 admissionUsage = undefined;
                 admissionRequestId = undefined;
+                admissionDispatch = 'not-dispatched';
                 const answer = await requestAdmissionRead(
                   { pageText, countryCode: country },
                   {
                     ...admissionOptions,
+                    onProviderDispatch: () => { admissionDispatch = 'possibly-dispatched'; },
                     onUsage: (reported) => { admissionUsage = reported; },
                     onProviderResponse: (response) => {
                       admissionUsage = response.usage || admissionUsage;
@@ -427,6 +430,7 @@ Deno.serve(async (request) => {
                   result: answer,
                   usage: admissionUsage,
                   providerRequestId: admissionRequestId,
+                  dispatchStatus: admissionDispatch,
                   status: answer.fares !== null ? 'success' : admissionUsage ? 'invalid_output' : 'provider_error',
                 };
               });
@@ -610,6 +614,7 @@ Deno.serve(async (request) => {
      */
     let batchUsage: ModelUsage | undefined;
     let providerRequestId: string | undefined;
+    let batchDispatch: 'not-dispatched' | 'possibly-dispatched' = 'not-dispatched';
     let produced = new Map<string, PlaceBrief | null>();
     const materialKey = JSON.stringify([
       'place-brief',
@@ -618,10 +623,12 @@ Deno.serve(async (request) => {
     const deps = accountingDeps('place-brief', briefOptions, materialKey, async () => {
       batchUsage = undefined;
       providerRequestId = undefined;
+      batchDispatch = 'not-dispatched';
       const answer = await requestPlaceBriefBatch(
         batch.map((entry) => entry.item),
         {
           ...briefOptions,
+          onProviderDispatch: () => { batchDispatch = 'possibly-dispatched'; },
           onUsage: (reported) => { batchUsage = reported; },
           onProviderResponse: (response) => {
             batchUsage = response.usage || batchUsage;
@@ -635,6 +642,7 @@ Deno.serve(async (request) => {
         result: answer,
         usage: batchUsage,
         providerRequestId,
+        dispatchStatus: batchDispatch,
         // A batch that came back with nothing usable was still billed.
         status: answer.briefs.size > 0 ? 'success' : batchUsage ? 'invalid_output' : 'provider_error',
       };
