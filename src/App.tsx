@@ -13,6 +13,7 @@ import { Documents } from './components/Documents';
 import { PhotoWall } from './components/PhotoWall';
 import { ProfilePanel } from './components/ProfilePanel';
 import { AppSettingsPanel } from './components/AppSettingsPanel';
+import { AskPlanitenaryPanel } from './components/AskPlanitenaryPanel';
 import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -1102,7 +1103,7 @@ function App() {
                   hidden: { opacity: 0, y: -10 },
                   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } }
                 }}
-                onClick={() => handleTabChange(tab.id as any)}
+                onClick={() => handleTabChange(tab.id)}
                 className="relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors"
                 style={{ color: activeTab === tab.id ? 'var(--ink)' : 'var(--ink-muted)' }}
               >
@@ -1119,6 +1120,9 @@ function App() {
           </motion.nav>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {!isDemoUser && !isLocalTestUser && user && (
+              <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
+            )}
             <motion.button
               onClick={openRestoreModal}
               className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
@@ -1567,7 +1571,7 @@ function App() {
             return (
               <motion.button
                 key={tab.id}
-                onClick={() => handleTabChange(tab.id as any)}
+                onClick={() => handleTabChange(tab.id)}
                 className="relative flex-1 flex flex-col items-center justify-center py-1.5 rounded-full min-w-0"
                 whileTap={{ scale: 0.9 }}
                 aria-label={tab.label}
@@ -1630,7 +1634,7 @@ function App() {
                   <button
                     key={tab.id}
                     onClick={() => {
-                      handleTabChange(tab.id as any);
+                      handleTabChange(tab.id);
                       setIsMenuOpen(false);
                     }}
                     className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 p-3 rounded-xl flex flex-col items-center gap-2 transition-colors border border-slate-200 dark:border-slate-700"

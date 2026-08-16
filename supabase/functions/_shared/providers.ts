@@ -14,11 +14,25 @@ import {
   type ReasoningOperation,
 } from './reasoning.ts';
 
+import {
+  AGENT_MAX_OUTPUT_TOKENS,
+  agentModelRefusal,
+  type AgentOperation,
+} from './agentContract.ts';
+
 export {
   isReasoningOperation,
   REASONING_OPERATIONS,
   type ReasoningOperation,
 } from './reasoning.ts';
+
+export {
+  AGENT_LIMITS,
+  AGENT_OPERATIONS,
+  AGENT_SYSTEM_PROMPT,
+  isAgentOperation,
+  type AgentOperation,
+} from './agentContract.ts';
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -66,6 +80,21 @@ const env = (name: string): string | undefined => {
 /** Secrets, resolved once. Absent secret means that provider is simply off. */
 export const secrets = {
   google: () => env('GOOGLE_MAPS_API_KEY'),
+  /**
+   * Brave Search, for the agent's `search_web` tool.
+   *
+   * The only source in this app that can answer "is this closed right now" or
+   * "what opened this year". Absent it, `searchWeb` falls back to keyless
+   * MediaWiki full-text search and **says so in its result**, because an
+   * encyclopedia answering a question about current conditions is exactly the
+   * kind of confident-but-stale answer this codebase refuses to let pass
+   * silently.
+   *
+   * Whether the configured Brave account can bill is a deployment fact, not
+   * something this adapter assumes. Agent-side call caps and the query cache
+   * bound usage independently of the provider's commercial plan.
+   */
+  braveSearch: () => env('BRAVE_SEARCH_API_KEY'),
   /**
    * YouTube Data API v3, on its own key.
    *
@@ -285,6 +314,47 @@ export type ReasoningResolution =
   | { status: 'ready'; options: ResolvedReasoning }
   | { status: 'unconfigured' }
   | { status: 'misconfigured'; error: string };
+
+/**
+ * The same resolution, for the agent tier.
+ *
+ * Separate from {@link resolveReasoning} because the agent has its own model
+ * allowlist and its own output ceilings — see `AGENT_OPENAI_MODELS_BY_OPERATION`
+ * for why merging the two tiers would open a path to the model that skips trip
+ * ownership. The credential, the provider selection and the effort setting are
+ * shared, because those are deployment facts rather than per-tier ones.
+ *
+ * **Gemini is refused outright here.** The existing tier keeps its Gemini
+ * adapter for compatibility; the agent is new, and a new tier has no reason to
+ * inherit a provider nobody has approved for it. `no model fallback` is easier
+ * to guarantee when there is only ever one.
+ */
+export function resolveAgentReasoning(operation: AgentOperation): ReasoningResolution {
+  const apiKey = reasoningKey();
+  if (!apiKey) return { status: 'unconfigured' };
+
+  const provider = reasoningProvider();
+  if (provider !== 'openai') {
+    return {
+      status: 'misconfigured',
+      error: `TRAVEL_REASONING_PROVIDER "${provider}" is not approved for the agent tier. Allowed: openai.`,
+    };
+  }
+
+  const refusal = agentModelRefusal(operation, openaiModel());
+  if (refusal) return { status: 'misconfigured', error: refusal };
+
+  return {
+    status: 'ready',
+    options: {
+      apiKey,
+      provider,
+      model: openaiModel(),
+      reasoningEffort: openaiReasoningEffort(),
+      maxOutputTokens: AGENT_MAX_OUTPUT_TOKENS[operation],
+    },
+  };
+}
 
 export function resolveReasoning(operation: ReasoningOperation): ReasoningResolution {
   const apiKey = reasoningKey();

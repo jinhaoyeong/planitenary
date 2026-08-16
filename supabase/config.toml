@@ -37,3 +37,6 @@ verify_jwt = true
 
 [functions.travel-reasoning]
 verify_jwt = true
+
+[functions.planitenary-agent]
+verify_jwt = true

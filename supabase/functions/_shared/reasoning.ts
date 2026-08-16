@@ -449,6 +449,15 @@ export interface ModelOptions {
    * some other limit stops it mid-structure.
    */
   maxOutputTokens?: number;
+  /**
+   * A caller-specific system contract.
+   *
+   * The default remains the evidence-interpreter contract used by the cheap
+   * reasoning tier. The agent supplies its orchestration contract through
+   * this same provider adapter, so there is still one metered OpenAI network
+   * path rather than a second client hidden beside it.
+   */
+  systemPrompt?: string;
   /** Injected so tests never reach the network. */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -531,7 +540,7 @@ async function callOpenAi(
   const body: Record<string, unknown> = {
     model: options.model || 'gpt-5-nano',
     messages: [
-      { role: 'system', content: SYSTEM },
+      { role: 'system', content: options.systemPrompt || SYSTEM },
       {
         role: 'user',
         content: `Operation: ${operation}\nSource-backed input:\n${JSON.stringify(input)}`,
@@ -598,7 +607,7 @@ async function callGeminiApi(
       method: 'POST',
       headers: { 'x-goog-api-key': options.apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
+        systemInstruction: { parts: [{ text: options.systemPrompt || SYSTEM }] },
         contents: [{
           role: 'user',
           parts: [{ text: `Operation: ${operation}\nSource-backed input:\n${JSON.stringify(input)}` }],
