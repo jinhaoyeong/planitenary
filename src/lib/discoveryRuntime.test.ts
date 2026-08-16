@@ -4,6 +4,7 @@ import {
   capabilityFor,
   discoverPlaces,
   fetchPlaceEvidence,
+  fetchPlacePhotos,
   loadProviderRuntime,
   parseCurrentEvents,
   parseWeatherRisk,
@@ -238,5 +239,58 @@ describe('discovering places', () => {
     const outcome = await discoverPlaces({ city: 'Rome', countryCode: 'IT' });
     expect(outcome.usingFixture).toBe(true);
     expect(outcome.candidates.every((candidate) => candidate.city === 'Rome')).toBe(true);
+  });
+
+  /**
+   * The seam where a bad URL would reach an `<img src>`.
+   *
+   * Everything upstream of here is server-side and re-checkable; this is the
+   * last point before a string is handed to the browser as a photograph to
+   * load, so a payload the server never produced must still be refused.
+   */
+  describe('photographs', () => {
+    const withLead = (id: string, providerPlaceId: string): PlaceCandidate => ({
+      id,
+      providerPlaceId,
+      name: `Place ${id}`,
+      imageLeads: [{ kind: 'wikidata', value: 'Q321242' }],
+    } as PlaceCandidate);
+
+    it('accepts a Wikimedia-hosted photograph and keys it by candidate id', async () => {
+      const invoke = vi.fn().mockResolvedValue({
+        images: {
+          g1: [{
+            url: 'https://upload.wikimedia.org/wikipedia/commons/e/e4/Osaka_Castle.jpg',
+            sourcePage: 'https://commons.wikimedia.org/wiki/File:Osaka_Castle.jpg',
+            author: '663highland',
+            licence: 'CC BY 2.5',
+            lead: 'wikidata',
+          }],
+        },
+      });
+      const photos = await fetchPlacePhotos([withLead('cand-1', 'g1')], invoke);
+      expect(photos['cand-1'].url).toBe('https://upload.wikimedia.org/wikipedia/commons/e/e4/Osaka_Castle.jpg');
+      expect(photos['cand-1'].attribution).toBe('663highland · CC BY 2.5 · Wikimedia Commons');
+    });
+
+    it('refuses a photograph hosted anywhere else, leaving the card its placard', async () => {
+      const invoke = vi.fn().mockResolvedValue({
+        images: { g1: [{ url: 'https://cdn.example.com/castle.jpg', licence: 'CC0', sourcePage: 'https://x.test' }] },
+      });
+      // No entry at all, so `photoUrl` stays unset and `PlaceMedia` renders the
+      // neighbourhood placard rather than a broken or hostile image.
+      expect(await fetchPlacePhotos([withLead('cand-1', 'g1')], invoke)).toEqual({});
+    });
+
+    it('never asks about a place that carries no pointer', async () => {
+      const invoke = vi.fn();
+      expect(await fetchPlacePhotos([candidate('cand-1', 'g1')], invoke)).toEqual({});
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it('degrades to no photographs when the lookup fails', async () => {
+      const invoke = vi.fn().mockRejectedValue(new Error('wikimedia down'));
+      expect(await fetchPlacePhotos([withLead('cand-1', 'g1')], invoke)).toEqual({});
+    });
   });
 });

@@ -17,7 +17,7 @@ import { AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform
 import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
 import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
-import { capabilityFor, discoverPlaces, fetchPlaceEvidence, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
+import { capabilityFor, discoverPlaces, fetchPlaceEvidence, fetchPlacePhotos, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
 import {
   IntelligenceRequestController,
   foldIntelligenceResults,
@@ -239,8 +239,30 @@ function PlaceMedia({ candidate, className }: { candidate: PlaceCandidate; class
           <span>{candidate.neighbourhood || candidate.city}</span>
         </div>
       )}
+      {/*
+        The credit is not a caption. CC BY and CC BY-SA both require the author
+        be named, so this line is part of the permission to show the photograph
+        at all — which is why it renders whenever the photograph does, and why
+        it links the file page rather than merely naming a licence: the page is
+        where the full author and licence text lives, and where somebody
+        checking the claim would need to go.
+      */}
       {showPhoto && candidate.photoAttribution && (
-        <small className="destination-photo-credit">{candidate.photoAttribution}</small>
+        candidate.photoSourcePage ? (
+          <a
+            className="destination-photo-credit"
+            href={candidate.photoSourcePage}
+            target="_blank"
+            rel="noreferrer noopener"
+            // The photo sits inside a swipeable deck card, so a drag that ends
+            // on the credit must not also open a tab.
+            draggable={false}
+          >
+            {candidate.photoAttribution}
+          </a>
+        ) : (
+          <small className="destination-photo-credit">{candidate.photoAttribution}</small>
+        )
       )}
     </div>
   );
@@ -1398,6 +1420,56 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     });
     return () => { active = false; };
   }, [phase, usingFixture, currentDeckCard, pendingDeck, setCandidates, capability.destination.city, capability.destination.countryCode, capability.places.provider]);
+
+  /**
+   * Real photographs, for the cards the traveller is actually looking at.
+   *
+   * A separate effect from evidence, and a separate request, because the two
+   * answer to different limits: evidence is metered and rationed per place,
+   * while images come from Wikimedia, which cannot bill and answers a whole
+   * deck in a handful of batched calls. Folding images into the evidence call
+   * would tie a free lookup to a rationed one and lose the pictures whenever
+   * the metered path declined to run.
+   *
+   * The same "asked already" ledger discipline applies: re-ranking happens
+   * every time evidence lands, so without it every arrival would re-request
+   * the same photographs.
+   */
+  const photosRequestedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (phase !== 'review' || usingFixture || !isSupabaseConfigured()) return;
+    const visible = [
+      ...(currentDeckCard ? [currentDeckCard] : []),
+      ...pendingDeck.slice(0, EVIDENCE_PREFETCH_COUNT),
+    ];
+    const wanted = visible
+      .map(({ candidate }) => candidate)
+      // A place with no pointer has nothing to look up, and a place that
+      // already has its photograph has nothing to gain.
+      .filter((candidate) => (candidate.imageLeads?.length ?? 0) > 0
+        && !candidate.photoUrl
+        && !photosRequestedRef.current.has(candidate.id));
+    const unique = [...new Map(wanted.map((candidate) => [candidate.id, candidate])).values()];
+    if (unique.length === 0) return;
+
+    unique.forEach((candidate) => photosRequestedRef.current.add(candidate.id));
+    let active = true;
+    void fetchPlacePhotos(unique, invokeTravelFunction, { provider: capability.places.provider })
+      .then((photos) => {
+        if (!active || Object.keys(photos).length === 0) return;
+        setCandidates((previous) => previous.map((candidate) => {
+          const photo = photos[candidate.id];
+          if (!photo) return candidate;
+          return {
+            ...candidate,
+            photoUrl: photo.url,
+            photoAttribution: photo.attribution,
+            photoSourcePage: photo.sourcePage,
+          };
+        }));
+      });
+    return () => { active = false; };
+  }, [phase, usingFixture, currentDeckCard, pendingDeck, setCandidates, capability.places.provider]);
   /**
    * Context every card shares: the traveller's dates, so a weekly closure can
    * be named as a day of *their* trip, and a conversion for sourced fares. Held

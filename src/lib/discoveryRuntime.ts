@@ -28,6 +28,7 @@ import {
 } from './travelEvidence';
 import type { TripDestination } from './tripProfile';
 import { isPlaceAdmission, type PlaceAdmission } from '../../supabase/functions/_shared/placeCost';
+import { parsePlaceImage } from '../../supabase/functions/_shared/placeImages';
 
 /** Cached so every panel mount does not re-ask the server. */
 let runtimeCache: { value: ProviderRuntime; fetchedAt: number } | null = null;
@@ -360,6 +361,100 @@ export async function fetchPlaceEvidence(
     return digestEvidence(payload, withProviderId);
   } catch {
     return EMPTY_EVIDENCE_DIGEST;
+  }
+}
+
+/**
+ * The photograph a card should show, and the credit it must carry with it.
+ *
+ * Keyed by candidate id, like everything else downstream of a fetch — the
+ * server answers by provider place id, because that is what it was asked with.
+ */
+export interface PlacePhoto {
+  url: string;
+  attribution: string;
+  /** The Commons file page, carrying the full licence and author text. */
+  sourcePage: string;
+}
+
+/**
+ * Re-validate a photograph that has crossed the network.
+ *
+ * This is not a second licence check — the licence text is not here. It is a
+ * host and shape check, so a malformed or hostile payload degrades to no
+ * photograph rather than to an `<img>` loading from wherever the payload said.
+ * `parsePlaceImage` owns the host rule, and it is deliberately the same
+ * function the server writes and reads its cache through: a picture allowed on
+ * screen by one rule and into the database by another is a rule with a gap.
+ */
+function parsePhotos(payload: unknown, candidates: PlaceCandidate[]): Record<string, PlacePhoto> {
+  const photos: Record<string, PlacePhoto> = {};
+  if (!payload || typeof payload !== 'object') return photos;
+  const byProviderId = new Map(
+    candidates
+      .filter((candidate) => candidate.providerPlaceId)
+      .map((candidate) => [candidate.providerPlaceId!, candidate.id]),
+  );
+
+  const raw = (payload as { images?: unknown }).images;
+  if (!raw || typeof raw !== 'object') return photos;
+
+  for (const [providerId, candidateId] of byProviderId) {
+    const list = (raw as Record<string, unknown>)[providerId];
+    if (!Array.isArray(list)) continue;
+    // Already ranked best-first by the server; the first one that survives
+    // validation is the hero. A rejected leader falls through to the next
+    // rather than costing the place its picture.
+    for (const entry of list) {
+      const image = parsePlaceImage(entry);
+      if (!image) continue;
+      photos[candidateId] = { url: image.url, attribution: image.attribution, sourcePage: image.sourcePage };
+      break;
+    }
+  }
+
+  return photos;
+}
+
+/**
+ * Fetch real photographs for a specific handful of candidates.
+ *
+ * Deliberately *not* called for the whole shortlist, for the reason
+ * {@link fetchPlaceEvidence} is not: a sixty-place list abandoned after four
+ * cards must cost four places' worth of lookups. Wikimedia cannot bill, so the
+ * restraint here is about being a good citizen of a donation-funded API rather
+ * than about a budget — but the shape of the rule is the same one.
+ *
+ * Never throws. A plan built from real places is still worth having when the
+ * pictures are missing; a card with no photograph shows its neighbourhood
+ * placard instead, which is honest.
+ */
+export async function fetchPlacePhotos(
+  candidates: PlaceCandidate[],
+  invoke?: (name: string, body: unknown) => Promise<unknown>,
+  options?: { provider?: string; travelStartsInDays?: number },
+): Promise<Record<string, PlacePhoto>> {
+  /**
+   * Only places that carry a pointer are worth asking about. A place with no
+   * `imageLeads` has no `wikimedia_commons` tag, no Wikidata item and no
+   * article — there is nothing to look up, and sending it would spend a slot
+   * in the batch to be told so.
+   */
+  const withLeads = candidates.filter(
+    (candidate) => candidate.providerPlaceId && (candidate.imageLeads?.length ?? 0) > 0,
+  );
+  if (!invoke || withLeads.length === 0) return {};
+
+  try {
+    const payload = await invoke('travel-images', {
+      placeIds: withLeads.map((candidate) => candidate.providerPlaceId),
+      placeLeads: withLeads.map((candidate) => candidate.imageLeads ?? []),
+      provider: options?.provider,
+      travelStartsInDays: options?.travelStartsInDays,
+    });
+    return parsePhotos(payload, withLeads);
+  } catch {
+    return {};
   }
 }
 

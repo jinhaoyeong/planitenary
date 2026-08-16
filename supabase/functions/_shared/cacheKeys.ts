@@ -56,8 +56,9 @@ export function weatherLocationKey(coordinates: [number, number]): string {
  * Bump this whenever a field is added to what discovery returns.
  *
  * - v2: `admission` (structured entry cost, replacing the `priceLevel`-only view)
+ * - v3: `imageLeads` (where a real photograph of this place might be found)
  */
-const DISCOVERY_SCHEMA_VERSION = 2;
+const DISCOVERY_SCHEMA_VERSION = 3;
 
 /**
  * Cache key for one city's discovery results. Case and surrounding whitespace
@@ -143,6 +144,12 @@ export function parseAppliesTo(value: unknown): {
  *   fetched. That is the honest trade: correct data, uncached.
  * - A fresh probe means we asked recently. That answer stands even when the
  *   provider returned nothing, which is the case a document cache cannot record.
+ *
+ * The photograph lookup in `travel-images` passes its own probe set through
+ * here too. The decision is identical — was this place asked of this source
+ * recently — and the reason it matters is stronger there, because most OSM
+ * places carry no image tag at all, so "nothing found" is the *common* answer
+ * rather than the exceptional one.
  */
 export function shouldFetchEvidence(input: {
   configured: boolean;

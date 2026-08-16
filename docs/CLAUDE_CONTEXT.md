@@ -23,16 +23,19 @@ React + Vite (TypeScript, strict)          Supabase Edge Functions (Deno)
 │   ├── travelBehaviour.ts    pace         ├── travel-weather        forecast
 │   ├── timezones.ts          jet lag      ├── travel-events         Ticketmaster
 │   └── destinationCapability.ts           ├── travel-import-link    pasted social links
-└── src/components/                        └── travel-reasoning      Gemini (not configured)
-    └── DestinationDiscoveryPanel.tsx
+└── src/components/                        ├── travel-images         real place photographs
+    └── DestinationDiscoveryPanel.tsx      └── travel-reasoning      OpenAI
+
                                            supabase/functions/_shared/
                                            ├── providers.ts      secrets, fetch, freshness
                                            ├── cache.ts          read/write-through caches
                                            ├── cacheKeys.ts      pure keys + fetch decisions
                                            ├── claims.ts         text → claims
                                            ├── evidenceSources.ts the four gatherers
+                                           ├── imageSources.ts   Wikimedia image gatherers
                                            ├── officialSource.ts JSON-LD + SSRF guard
                                            ├── osmPlaces.ts      OSM tag mapping
+                                           ├── placeImages.ts    licence + host + ranking
                                            ├── wikivoyage.ts     listing parser
                                            └── quota.ts          daily caps
 ```
@@ -44,6 +47,7 @@ Panel → travel-capabilities  → which providers are live
       → travel-discover      → PlaceCandidate[]  (cached 30d / 7d near travel)
       → rankWithIntelligence → 8-dimension score
       → travel-evidence      → current deck card + 4 ahead, NOT the whole shortlist
+      → travel-images        → same window; real photographs, batched per source
       → buildDestinationItinerary
            pass 1  fill days in cluster order
            pass 2  rebalance fatigue across days
@@ -61,6 +65,7 @@ Panel → travel-capabilities  → which providers are live
 | `20260806000100_add_discovery_cache` | `discovery_cache`, `evidence_probes`, index on `source_documents`, service-role grants |
 | `20260806000200_add_provider_usage` | `provider_usage` + `consume_provider_quota()` |
 | `20260806000300_grant_opening_hours_writes` | Grant for `opening_hours_snapshots` |
+| `20260816000100_add_place_images` | `place_images`, `place_image_probes` + service-role grants |
 
 ### Tables that carry the most weight
 
@@ -76,6 +81,14 @@ Panel → travel-capabilities  → which providers are live
 - **`opening_hours_snapshots`** — operator-published hours. Must persist,
   because the nightly refresh marks the probe fresh and the next live request
   therefore skips the fetch.
+- **`place_images`** + **`place_image_probes`** — real photographs and the
+  record that Commons was asked. The probe table carries more weight here than
+  `evidence_probes` does: *most OSM places have no photograph at all*, so
+  "nothing found" is the common answer rather than the exception, and without
+  the probe the majority of every deck is looked up again on every run. The
+  `licence` column is not metadata — CC BY and CC BY-SA require attribution, so
+  a row that lost it must stop being shown, and `parsePlaceImage` refuses to
+  read one back without it.
 
 Grants are always written explicitly. A silent write failure looks exactly like
 "this place publishes nothing" — which is how the original cost bug hid.
@@ -88,6 +101,7 @@ Grants are always written explicitly. A silent write failure looks exactly like
 | --- | --- | --- | --- |
 | **OpenStreetMap (Overpass)** | Free | None | Primary discovery. `OVERPASS_ENDPOINT` overridable |
 | **Wikivoyage** | Free | None | Curated `see/do/eat`, one request per *city* |
+| **Wikimedia Commons / Wikidata** | Free | None | Real place photographs. Batched 50 titles or ids per request |
 | **Nominatim** | Free | None | City geocoding fallback; needs User-Agent |
 | **Official venue websites** | Free | None | Authority 1.0. Only source allowed to assert a closure |
 | **YouTube Data API v3** | Free | `YOUTUBE_API_KEY` | 100 searches/day; capped app-side at 90 |
@@ -139,6 +153,31 @@ downstream of that.
 fact shown to a traveller points at a source record with a **verbatim excerpt**.
 If an LLM is introduced, reject any claim whose excerpt is not a literal
 substring of the source text.
+
+### A photograph is a factual claim, and is never generated
+A picture is the first thing a traveller looks at and the last thing they think
+to doubt, which makes it exactly the kind of assertion the rule above governs.
+**No image of a place may ever be generated** — not by a model, not by
+similarity search. A generated approximation of Osaka Castle is a false
+statement about what somebody will see when they arrive, and one they cannot
+detect. Every image is a real photograph with its author, its licence and a link
+to its file page.
+
+Two consequences worth stating separately, because both are load-bearing:
+
+**Only Wikimedia hosts reach an `<img src>`.** The leads come from
+community-edited OSM tags — the same untrusted input `isSafePublicUrl` guards on
+the official-source path — but an image element is loaded by the *traveller's*
+browser, so an arbitrary URL there hands a stranger the IP address of everybody
+who sees the card. The `image=` tag is therefore never hotlinked: it is accepted
+only when it already points into Wikimedia, and only as a *file title*, with the
+real URL rebuilt from Commons alongside the licence.
+
+**An unrecognised licence is not permission.** Commons also holds fair-use,
+non-commercial and no-derivatives files. The gate is an allowlist, refusals run
+before it (`CC BY-NC` starts with an allowed prefix), and the catch is often in
+a field other than the short name. A refusal costs a photograph, which is always
+the safe outcome.
 
 ### Authority gates operational facts
 `OPERATIONAL_CLAIMS` + `claimIsPresentableAsFact` restrict closures,
@@ -246,7 +285,7 @@ guess (`0.25`) fired on nothing at all.
 
 ```bash
 npm run build     # tsc -b — the ONLY real typecheck
-npm test          # vitest, 523 tests / 31 files
+npm test          # vitest, 1401 tests / 66 files
 npx eslint <changed files>
 ```
 
@@ -310,6 +349,13 @@ memoised.
 (replacing seven billed text searches); separate capped food query with a
 reserved shortlist share; Wikivoyage curation; `notability` replacing star
 ratings; real `indoorOutdoor` from tags.
+
+**Real place photographs** — `travel-images` resolving Wikimedia leads that
+`travel-discover` carries out of the Overpass response for free; licence
+allowlist and Wikimedia-only host rule in `_shared/placeImages.ts`; every
+endpoint batched 50 titles or ids per request; `place_images` +
+`place_image_probes` making "this place has no photograph" a cacheable answer;
+credit line linking the Commons file page. **Nothing generated, ever.**
 
 **Evidence** — official venue websites (schema.org JSON-LD hours and closure
 notices, behind an SSRF guard); YouTube video evidence; pasted

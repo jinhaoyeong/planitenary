@@ -598,6 +598,23 @@ export const geminiModel = (): string => env('GEMINI_MODEL') || 'gemini-2.5-flas
  */
 export const FRESHNESS_SECONDS = {
   placeIdentity: { normal: 30 * 86_400, nearTravel: 7 * 86_400 },
+  /**
+   * A photograph of a place, which is the one thing here that travel does not
+   * make more urgent — so `nearTravel` deliberately does not shorten it.
+   *
+   * Every other entry in this table shortens near travel because the answer
+   * can *change*: hours shift for a holiday, a route reroutes, a place closes.
+   * What a temple looks like does not become more current a week before the
+   * trip, so refreshing it faster would spend requests on an identical answer.
+   *
+   * Thirty days is therefore also the window in which a file deleted from
+   * Commons — or one relicensed to something this app may not display — stops
+   * being shown. Acceptable because neither is silent: a deleted file 404s and
+   * the card falls back to its neighbourhood placard, and `travel-refresh`
+   * does not cover images, so the TTL is the whole correction mechanism rather
+   * than a backstop to one.
+   */
+  placeImage: { normal: 30 * 86_400, nearTravel: 30 * 86_400 },
   reviewSummary: { normal: 7 * 86_400, nearTravel: 86_400 },
   trend: { normal: 86_400, nearTravel: 6 * 3600 },
   openingHours: { normal: 7 * 86_400, nearTravel: 86_400 },

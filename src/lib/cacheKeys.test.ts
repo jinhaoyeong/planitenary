@@ -40,7 +40,10 @@ describe('discovery city keys', () => {
   });
 
   it('tolerates a missing country code rather than throwing', () => {
-    expect(discoveryCityKey('Osaka')).toBe('v2|osaka|');
+    // The version is matched loosely on purpose: this test is about the empty
+    // country segment, and pinning the schema version here made an unrelated
+    // assertion fail every time a field was added to discovery.
+    expect(discoveryCityKey('Osaka')).toMatch(/^v\d+\|osaka\|$/);
   });
 
   it('carries a schema version, so rows written before a new field expire at deploy', () => {

@@ -1344,6 +1344,28 @@ body.planner-intelligence-active .pet-overlay {
   white-space: nowrap;
 }
 
+/*
+ * The credit is a link to the Commons file page, because that is where the
+ * full author and licence text lives — the credit line itself is truncated to
+ * 70% of the media width, so it can only ever be a summary of the attribution
+ * the licence actually requires.
+ *
+ * Deliberately not styled as a link at rest. It sits over a photograph inside
+ * a swipeable deck, and blue underlined text there reads as a caption
+ * competing with the card rather than as a credit under it.
+ */
+a.destination-photo-credit {
+  display: block;
+  color: #fff;
+  text-decoration: none;
+}
+
+a.destination-photo-credit:hover,
+a.destination-photo-credit:focus-visible {
+  text-decoration: underline;
+  background: rgb(0 0 0 / 0.7);
+}
+
 .destination-deck-photo {
   min-height: 11rem;
   height: 100%;

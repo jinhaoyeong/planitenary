@@ -20,6 +20,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { aiBriefKey, parseAppliesTo, probeKey, routePairKey } from './cacheKeys.ts';
+import { parsePlaceImage, rankPlaceImages, type PlaceImage } from './placeImages.ts';
 
 let cachedClient: SupabaseClient | null | undefined;
 
@@ -388,6 +389,151 @@ export async function writeOpeningHours(
           expires_at: expiresAt,
         })),
         { onConflict: 'canonical_place_id,captured_for' },
+      );
+  } catch {
+    // Best-effort.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Place photographs
+// ---------------------------------------------------------------------------
+
+/**
+ * Every live photograph for these places, keyed by canonical place id and
+ * already ranked best-first.
+ *
+ * Rows are re-validated through `parsePlaceImage` rather than cast. The
+ * columns are ordinary text and can hold whatever an older writer put there,
+ * and a row that lost its licence — or whose URL no longer points at a
+ * Wikimedia host — must degrade to no photograph rather than to an `<img>`
+ * loading from wherever the row said.
+ */
+export async function readPlaceImages(
+  client: SupabaseClient,
+  canonicalPlaceIds: string[],
+): Promise<Map<string, PlaceImage[]>> {
+  const result = new Map<string, PlaceImage[]>();
+  const ids = [...new Set(canonicalPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return result;
+  try {
+    const { data, error } = await client
+      .from('place_images')
+      .select('canonical_place_id, image_url, thumbnail_url, width, height, source_page, author, licence, licence_url, lead')
+      .in('canonical_place_id', ids)
+      .gt('expires_at', new Date().toISOString());
+    if (error || !data) return result;
+    for (const row of data) {
+      const image = parsePlaceImage({
+        url: row.image_url,
+        thumbnailUrl: row.thumbnail_url,
+        width: row.width,
+        height: row.height,
+        sourcePage: row.source_page,
+        author: row.author,
+        licence: row.licence,
+        licenceUrl: row.licence_url,
+        lead: row.lead,
+      });
+      if (!image) continue;
+      const placeId = String(row.canonical_place_id);
+      result.set(placeId, [...(result.get(placeId) || []), image]);
+    }
+    // Ranked on the way out, so a cache hit orders identically to a fresh
+    // fetch. Postgres returns rows in no guaranteed order, and a hero image
+    // that changes between a cached and an uncached render is the kind of
+    // difference nobody attributes to the cache.
+    for (const [placeId, images] of result) result.set(placeId, rankPlaceImages(images));
+  } catch {
+    // Best-effort: an unreadable cache just means we ask Commons again.
+  }
+  return result;
+}
+
+/**
+ * Replace a place's photographs with what was just fetched.
+ *
+ * Wholesale replacement, not an upsert of the new rows alongside the old: a
+ * file deleted from Commons, or one whose licence changed to something this
+ * app may not display, has to be able to *disappear*. An upsert-only write
+ * would leave it rendering until its own row expired, which is precisely the
+ * window in which showing it is the problem.
+ */
+export async function writePlaceImages(
+  client: SupabaseClient,
+  entries: Array<{ canonicalPlaceId: string; images: PlaceImage[] }>,
+  expiresAt: string,
+): Promise<void> {
+  if (entries.length === 0) return;
+  try {
+    const placeIds = [...new Set(entries.map((entry) => entry.canonicalPlaceId))];
+    await client.from('place_images').delete().in('canonical_place_id', placeIds);
+
+    const rows = entries.flatMap((entry) => entry.images.map((image) => ({
+      canonical_place_id: entry.canonicalPlaceId,
+      image_url: image.url,
+      thumbnail_url: image.thumbnailUrl ?? null,
+      width: image.width ?? null,
+      height: image.height ?? null,
+      source: image.source,
+      source_page: image.sourcePage,
+      author: image.author ?? null,
+      licence: image.licence,
+      licence_url: image.licenceUrl ?? null,
+      lead: image.lead,
+      retrieved_at: new Date().toISOString(),
+      expires_at: expiresAt,
+    })));
+    if (rows.length === 0) return;
+    await client
+      .from('place_images')
+      .upsert(rows, { onConflict: 'canonical_place_id,image_url' });
+  } catch {
+    // Best-effort.
+  }
+}
+
+/** Places whose photograph lookup ran recently, whatever it found. */
+export async function readImageProbes(
+  client: SupabaseClient,
+  canonicalPlaceIds: string[],
+): Promise<Set<string>> {
+  const fresh = new Set<string>();
+  const ids = [...new Set(canonicalPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return fresh;
+  try {
+    const { data, error } = await client
+      .from('place_image_probes')
+      .select('canonical_place_id, source')
+      .in('canonical_place_id', ids)
+      .gt('expires_at', new Date().toISOString());
+    if (error || !data) return fresh;
+    for (const row of data) {
+      fresh.add(probeKey(String(row.canonical_place_id), String(row.source)));
+    }
+  } catch {
+    // Best-effort: an unreadable probe log just means we look again.
+  }
+  return fresh;
+}
+
+export async function writeImageProbes(
+  client: SupabaseClient,
+  probes: Array<{ canonicalPlaceId: string; source: string }>,
+  expiresAt: string,
+): Promise<void> {
+  if (probes.length === 0) return;
+  try {
+    await client
+      .from('place_image_probes')
+      .upsert(
+        probes.map((probe) => ({
+          canonical_place_id: probe.canonicalPlaceId,
+          source: probe.source,
+          retrieved_at: new Date().toISOString(),
+          expires_at: expiresAt,
+        })),
+        { onConflict: 'canonical_place_id,source' },
       );
   } catch {
     // Best-effort.

@@ -45,6 +45,7 @@ import {
   parseOsmOpeningRules,
   type OsmElement,
 } from '../_shared/osmPlaces.ts';
+import { osmImageLeads, type ImageLead } from '../_shared/placeImages.ts';
 import {
   matchListing,
   WIKIVOYAGE_CATEGORIES,
@@ -468,6 +469,8 @@ interface OpenCandidate {
   categories: string[];
   experienceTags: string[];
   notability: number;
+  /** Pointers to a real photograph, resolved later — see `osmImageLeads`. */
+  imageLeads?: ImageLead[];
   dietaryOptions?: string[];
   priceLevel?: number;
   openingHours?: {
@@ -796,6 +799,17 @@ function buildOsmCandidate(
       ...osmNotabilitySignals(tags),
       ...(listing ? ['appears in the Wikivoyage city guide'] : []),
     ],
+    /**
+     * Where a real photograph of this place might be found — pointers only,
+     * resolved later by `travel-images` for the handful of cards a traveller
+     * actually reaches.
+     *
+     * Derived from tags already in this Overpass response, so it costs no
+     * extra request. Resolving images *here* would mean one lookup per place
+     * across a sixty-place shortlist, which is the fan-out shape that made the
+     * previous provider expensive.
+     */
+    imageLeads: osmImageLeads(tags),
     dietaryOptions: osmDietaryOptions(tags),
     priceLevel: osmPriceLevel(tags),
     // `osmPriceLevel` answers one question — is entry free — and this branch

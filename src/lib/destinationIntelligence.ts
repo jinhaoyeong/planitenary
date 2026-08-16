@@ -16,6 +16,10 @@ import {
   mergeAdmission,
   type PlaceAdmission,
 } from '../../supabase/functions/_shared/placeCost';
+// Same reasoning as the admission shape: a photograph's licence and credit are
+// resolved once, server-side, and the client only ever reads them.
+export type { ImageLead, PlaceImage } from '../../supabase/functions/_shared/placeImages';
+import type { ImageLead } from '../../supabase/functions/_shared/placeImages';
 
 /**
  * Declared in `../data` so the persisted `Activity.provider` and the in-flight
@@ -84,8 +88,26 @@ export interface PlaceCandidate {
   name: string;
   localName?: string;
   description?: string;
+  /**
+   * A real photograph of this place, on a Wikimedia host. Never generated —
+   * see `supabase/functions/_shared/placeImages.ts` for why an approximated
+   * landmark is a false claim a traveller cannot check.
+   */
   photoUrl?: string;
+  /**
+   * The credit line shown under it. Not decoration: CC BY and CC BY-SA both
+   * require the author be named, so this is part of the permission to display
+   * the photograph, and a photo without it must not be shown.
+   */
   photoAttribution?: string;
+  /** The Commons file page, where the full licence and author text live. */
+  photoSourcePage?: string;
+  /**
+   * Where a photograph of this place might be found — pointers derived from
+   * OSM tags at discovery time, which costs no request. `travel-images`
+   * resolves them for the cards a traveller actually reaches.
+   */
+  imageLeads?: ImageLead[];
   countryCode: string;
   region?: string;
   city: string;
