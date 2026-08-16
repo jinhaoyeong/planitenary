@@ -24,9 +24,8 @@ import {
   intelligenceBatchClaimKey,
   intelligenceCacheKey,
   type IntelligenceCandidate,
-  type ValidatedIntelligence,
 } from '../_shared/candidateIntelligence.ts';
-import { resolveCandidateIntelligence } from '../_shared/intelligenceService.ts';
+import { resolveCandidateIntelligence, type CacheReadOutcome } from '../_shared/intelligenceService.ts';
 import { authenticateRequest } from '../_shared/auth.ts';
 import { authorizeCandidateTrip, type ReasoningTripInput } from '../_shared/reasoningRequest.ts';
 import { readOwnedTrip } from '../_shared/tripOwnership.ts';
@@ -206,9 +205,11 @@ Deno.serve(async (request) => {
         tripId: candidateAuthorization.tripId,
         plannerContextRevision: payload.plannerContextRevision,
         maxSerialisedChars: MAX_INPUT_CHARS,
-        readCache: (keys) => readCandidateIntelligence(cache, candidateAuthorization!.tripId, keys) as Promise<
-          Map<string, ValidatedIntelligence | null | undefined>
-        >,
+        readCache: (keys) => readCandidateIntelligence(
+          cache,
+          candidateAuthorization!.tripId,
+          keys,
+        ) as Promise<CacheReadOutcome>,
         writeCache: (entries) => writeCandidateIntelligence(
           cache,
           entries.map((entry) => ({

@@ -57,6 +57,7 @@ function harness(over: Partial<{
   cached: Map<string, unknown>;
   reply: unknown;
   refusal: string;
+  readFails: boolean;
 }> = {}) {
   const written: Array<{ cacheKey: string; intelligence: unknown }> = [];
   const callMetered = vi.fn().mockImplementation(async (payload: unknown) => {
@@ -74,9 +75,10 @@ function harness(over: Partial<{
     plannerRevision: 'plan-r1',
     maxSerialisedChars: 30_000,
     readCache: vi.fn().mockImplementation(async (keys: string[]) => {
-      const found = new Map();
-      for (const key of keys) if (over.cached?.has(key)) found.set(key, over.cached.get(key));
-      return found;
+      if (over.readFails) return { ok: false as const, reason: 'cache-read-failed' };
+      const entries = new Map();
+      for (const key of keys) if (over.cached?.has(key)) entries.set(key, over.cached.get(key));
+      return { ok: true as const, entries };
     }),
     writeCache: vi.fn().mockImplementation(async (entries: Array<{ cacheKey: string; intelligence: unknown }>) => {
       written.push(...entries.map((entry) => ({ cacheKey: entry.cacheKey, intelligence: entry.intelligence })));
@@ -160,6 +162,44 @@ describe('what a request actually costs', () => {
     expect(callMetered).not.toHaveBeenCalled();
     expect(diagnostics.cacheHits).toBe(15);
     expect(results[0]).toMatchObject({ intelligence: null, status: 'deterministic-only' });
+  });
+});
+
+/**
+ * The defect that made a cache failure cost money.
+ *
+ * A read that errored used to return an empty map, which is byte-identical to
+ * "nothing is cached" — so a database blip presented fifteen already-answered
+ * candidates as fifteen misses and bought them again. The three outcomes have
+ * to stay three.
+ */
+describe('a cache that cannot be read is not a cache miss', () => {
+  it('never reaches the provider when the cache read fails', async () => {
+    const { deps, callMetered, written } = harness({ readFails: true });
+
+    const { results, diagnostics } = await resolveCandidateIntelligence(trip, fifteen, deps);
+
+    expect(callMetered).not.toHaveBeenCalled();
+    expect(diagnostics.meteredRequests).toBe(0);
+    expect(diagnostics.batches).toBe(0);
+    // Not counted as misses: a miss is a fact about the cache, and we have none.
+    expect(diagnostics.cacheMisses).toBe(0);
+    expect(diagnostics.cacheHits).toBe(0);
+    expect(diagnostics.blockedReason).toBe('cache-read-failed');
+    expect(diagnostics.deterministicFallbacks).toBe(15);
+    // Nothing was learned, so nothing may be remembered.
+    expect(written).toHaveLength(0);
+    expect(deps.writeCache).not.toHaveBeenCalled();
+    for (const result of results) {
+      // `unavailable`, never `deterministic-only`: this is temporary, not settled.
+      expect(result).toMatchObject({ intelligence: null, status: 'unavailable' });
+    }
+  });
+
+  it('returns one result per candidate even when it answers nothing', async () => {
+    const { deps } = harness({ readFails: true });
+    const { results } = await resolveCandidateIntelligence(trip, fifteen.slice(0, 3), deps);
+    expect(results.map((entry) => entry.candidateId)).toEqual(['place-0', 'place-1', 'place-2']);
   });
 });
 
@@ -296,9 +336,10 @@ describe('the live batch claim', () => {
       model: 'gpt-5-nano',
       tripId: 'trip-1',
       maxSerialisedChars: 30_000,
-      readCache: vi.fn(async (keys: string[]) => new Map(
-        keys.filter((key) => stored.has(key)).map((key) => [key, stored.get(key)]),
-      )),
+      readCache: vi.fn(async (keys: string[]) => ({
+        ok: true as const,
+        entries: new Map(keys.filter((key) => stored.has(key)).map((key) => [key, stored.get(key) ?? null])),
+      })),
       writeCache: vi.fn(async (entries: Array<{ cacheKey: string; intelligence: ValidatedIntelligence | null }>) => {
         for (const entry of entries) stored.set(entry.cacheKey, entry.intelligence);
       }),

@@ -1,11 +1,17 @@
 /**
  * Read-through / write-through cache for billed provider calls.
  *
- * Every helper here is best-effort: a cache failure must never break the
+ * Most helpers here are best-effort: a cache failure must never break the
  * function. If the cache cannot be read we fall through to the live provider;
  * if it cannot be written we still return the fresh result. The whole point is
  * to *reduce* provider spend, so a broken cache degrades to today's behaviour,
  * never to an error.
+ *
+ * **Candidate intelligence is the exception, because there the provider sends a
+ * bill.** Falling through on a failed read spends money on answers we may
+ * already hold, at the moment the database is least healthy, so that read
+ * reports failure as its own outcome and the caller fails closed. See
+ * `candidateIntelligenceCache.ts`.
  *
  * Writes use the service-role key because the reference tables are readable by
  * any signed-in user but writable only by the service role (see the RLS policy
@@ -817,47 +823,17 @@ export async function releaseCandidateIntelligence(
 }
 
 /**
- * Cached candidate intelligence, by material cache key.
+ * Reading the candidate-intelligence cache lives in its own module.
  *
- * The returned map distinguishes three states and callers must branch on
- * presence, not truthiness:
- *
- *   absent    → never asked about these exact facts
- *   `null`    → asked, and nothing survived validation
- *   an object → asked, and this is what survived
- *
- * The middle one is the reason this cache is worth having at all: without it, a
- * candidate the model had nothing useful to say about is paid for again every
- * single time the deck is opened.
+ * This file builds its service client from `Deno.env`, so nothing that imports
+ * it can be loaded by vitest or by the app typecheck — and that lookup is where
+ * a bug quietly costs money on every deck open. Re-exported here so the cache
+ * surface stays in one place for callers.
  */
-export async function readCandidateIntelligence(
-  client: SupabaseClient | null,
-  tripId: string,
-  cacheKeys: string[],
-): Promise<Map<string, unknown | null | undefined>> {
-  const found = new Map<string, unknown | null | undefined>();
-  if (!client || cacheKeys.length === 0) return found;
-  try {
-    const { data, error } = await client
-      .from('ai_candidate_intelligence')
-      .select('cache_key, intelligence, expires_at')
-      .eq('trip_id', tripId)
-      .in('cache_key', cacheKeys);
-    if (error || !data) return found;
-    const now = Date.now();
-    for (const row of data as Array<{ cache_key: string; intelligence: unknown; expires_at: string }>) {
-      // Expiry here is garbage collection, not freshness — correctness is
-      // governed by the material key — but an expired row is still skipped
-      // rather than served, so a sweep and a read cannot disagree.
-      if (new Date(row.expires_at).getTime() <= now) continue;
-      found.set(row.cache_key, row.intelligence ?? null);
-    }
-    return found;
-  } catch {
-    // A cache failure falls through to the provider, never to an error.
-    return found;
-  }
-}
+export {
+  readCandidateIntelligence,
+  type CandidateIntelligenceRead,
+} from './candidateIntelligenceCache.ts';
 
 /**
  * Persist candidate intelligence, one row per candidate.

@@ -56,9 +56,24 @@ export interface IntelligenceDiagnostics {
   blockedReason?: string;
 }
 
+/**
+ * What the cache was able to say.
+ *
+ * `ok: false` is not a miss. It means the question could not be asked, so the
+ * one thing that must not follow is a provider call made on the assumption
+ * that nothing was stored.
+ */
+export type CacheReadOutcome =
+  | { ok: true; entries: Map<string, ValidatedIntelligence | null> }
+  | { ok: false; reason: string };
+
 export interface IntelligenceServiceDeps {
-  /** Cached answers by cache key. `undefined` for a miss, `null` for a stored empty answer. */
-  readCache: (keys: string[]) => Promise<Map<string, ValidatedIntelligence | null | undefined>>;
+  /**
+   * Cached answers by cache key. Within a successful read, a key absent from
+   * `entries` is a miss and a key present with `null` is a stored empty answer.
+   * A failed read is a third outcome and fails closed.
+   */
+  readCache: (keys: string[]) => Promise<CacheReadOutcome>;
   /** Persist answers. Only ever called with results the model actually produced. */
   writeCache: (entries: Array<{
     cacheKey: string;
@@ -121,8 +136,31 @@ export async function resolveCandidateIntelligence(
   const results = new Map<string, CandidateIntelligenceResult>();
   const misses: IntelligenceCandidate[] = [];
 
+  /**
+   * Fail closed when the cache could not be read at all.
+   *
+   * A cache we cannot question is not a cache with nothing in it. Treating the
+   * two alike is a cost-safety defect rather than merely a correctness one: a
+   * transient database fault would present every already-answered candidate as
+   * a miss and buy all of them again, at the exact moment the system is least
+   * healthy. Nothing is written either, because nothing was learned.
+   */
+  if (cached.ok === false) {
+    diagnostics.blockedReason = cached.reason || 'cache-unavailable';
+    for (const candidate of candidates) {
+      diagnostics.deterministicFallbacks += 1;
+      results.set(candidate.candidateId, {
+        candidateId: candidate.candidateId, intelligence: null, status: 'unavailable',
+      });
+    }
+    return {
+      results: candidates.map((candidate) => results.get(candidate.candidateId)!),
+      diagnostics,
+    };
+  }
+
   for (const candidate of candidates) {
-    const hit = cached.get(keyFor(candidate));
+    const hit = cached.entries.get(keyFor(candidate));
     // `undefined` is a miss; `null` is a stored answer meaning "asked, nothing
     // survived". Branching on presence rather than truthiness is the whole
     // reason the empty answer is worth storing.
@@ -153,7 +191,10 @@ export async function resolveCandidateIntelligence(
        */
       const settled = await deps.readCache(batch.map(keyFor));
       for (const candidate of batch) {
-        const hit = settled.get(keyFor(candidate));
+        // A failed re-read yields no settled answer, which lands on the
+        // deterministic fallback below. It cannot start a second provider
+        // attempt from here either way.
+        const hit = settled.ok ? settled.entries.get(keyFor(candidate)) : undefined;
         if (hit !== undefined) {
           diagnostics.cacheHits += 1;
           results.set(candidate.candidateId, {
