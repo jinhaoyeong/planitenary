@@ -24,6 +24,11 @@ export interface AskProposal {
   /** Only ever a figure a routing tool returned; the server drops the rest. */
   travelMinutes?: number;
   placeNames?: string[];
+  replan?: {
+    objective: string;
+    affectedDays: number[];
+    moves: Array<{ placeName: string; fromDay?: number; toDay: number }>;
+  };
 }
 
 /** One tool the assistant ran, so the panel can show what it actually did. */
@@ -66,6 +71,24 @@ function parseProposal(value: unknown): AskProposal | undefined {
   const raw = value as Record<string, unknown>;
   const summary = text(raw.summary, 500);
   if (!summary) return undefined;
+  const replanRaw = raw.replan && typeof raw.replan === 'object'
+    ? raw.replan as Record<string, unknown>
+    : undefined;
+  const objective = text(replanRaw?.objective, 300);
+  const affectedDays = Array.isArray(replanRaw?.affectedDays)
+    ? replanRaw.affectedDays.filter((day): day is number =>
+      typeof day === 'number' && Number.isInteger(day) && day > 0 && day <= 60).slice(0, 10)
+    : [];
+  const moves = Array.isArray(replanRaw?.moves)
+    ? replanRaw.moves.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const move = entry as Record<string, unknown>;
+      const placeName = text(move.placeName, 160);
+      const toDay = typeof move.toDay === 'number' && Number.isInteger(move.toDay) ? move.toDay : undefined;
+      const fromDay = typeof move.fromDay === 'number' && Number.isInteger(move.fromDay) ? move.fromDay : undefined;
+      return placeName && toDay && toDay > 0 ? [{ placeName, fromDay, toDay }] : [];
+    }).slice(0, 12)
+    : [];
   return {
     summary,
     day: typeof raw.day === 'number' && Number.isInteger(raw.day) ? raw.day : undefined,
@@ -75,6 +98,7 @@ function parseProposal(value: unknown): AskProposal | undefined {
     placeNames: Array.isArray(raw.placeNames)
       ? raw.placeNames.filter((name): name is string => typeof name === 'string' && Boolean(name.trim())).slice(0, 8)
       : undefined,
+    replan: objective && affectedDays.length > 0 ? { objective, affectedDays, moves } : undefined,
   };
 }
 

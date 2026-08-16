@@ -22,6 +22,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { aiBriefKey, parseAppliesTo, probeKey, routePairKey } from './cacheKeys.ts';
 import { parsePlaceImage, rankPlaceImages, type PlaceImage } from './placeImages.ts';
 import { summarizeAiSpendRows, type AiSpendSnapshotRow } from './meteredModel.ts';
+import type { TripItineraryProposal } from './itineraryProposal.ts';
 
 let cachedClient: SupabaseClient | null | undefined;
 
@@ -34,6 +35,54 @@ export function serviceClient(): SupabaseClient | null {
     ? createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
     : null;
   return cachedClient;
+}
+
+// ---------------------------------------------------------------------------
+// Exact-material itinerary proposal cache
+// ---------------------------------------------------------------------------
+
+export async function readItineraryProposalCache(
+  client: SupabaseClient | null,
+  tripId: string,
+  materialRevision: string,
+): Promise<TripItineraryProposal | null> {
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('itinerary_proposal_cache')
+      .select('proposal')
+      .eq('trip_id', tripId)
+      .eq('material_revision', materialRevision)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+    if (error || !data?.proposal || typeof data.proposal !== 'object') return null;
+    const proposal = data.proposal as TripItineraryProposal;
+    return proposal.kind === 'itinerary-proposal-v1'
+      && proposal.tripId === tripId
+      && proposal.materialRevision === materialRevision
+      && proposal.applied === false
+      ? proposal
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeItineraryProposalCache(
+  client: SupabaseClient | null,
+  proposal: TripItineraryProposal,
+): Promise<void> {
+  if (!client || proposal.applied !== false) return;
+  try {
+    await client.from('itinerary_proposal_cache').upsert({
+      trip_id: proposal.tripId,
+      material_revision: proposal.materialRevision,
+      proposal,
+      expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+    }, { onConflict: 'trip_id,material_revision' });
+  } catch {
+    // Best-effort. A failed preview-cache write never changes the itinerary.
+  }
 }
 
 // ---------------------------------------------------------------------------

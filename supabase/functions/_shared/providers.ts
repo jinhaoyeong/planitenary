@@ -30,6 +30,7 @@ export {
   AGENT_LIMITS,
   AGENT_OPERATIONS,
   AGENT_SYSTEM_PROMPT,
+  ITINERARY_PLANNER_SYSTEM_PROMPT,
   isAgentOperation,
   type AgentOperation,
 } from './agentContract.ts';

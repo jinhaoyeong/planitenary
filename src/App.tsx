@@ -14,6 +14,7 @@ import { PhotoWall } from './components/PhotoWall';
 import { ProfilePanel } from './components/ProfilePanel';
 import { AppSettingsPanel } from './components/AppSettingsPanel';
 import { AskPlanitenaryPanel } from './components/AskPlanitenaryPanel';
+import { PlanTripProposalPanel } from './components/PlanTripProposalPanel';
 import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -1121,7 +1122,10 @@ function App() {
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {!isDemoUser && !isLocalTestUser && user && (
-              <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
+              <>
+                <PlanTripProposalPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
+                <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
+              </>
             )}
             <motion.button
               onClick={openRestoreModal}

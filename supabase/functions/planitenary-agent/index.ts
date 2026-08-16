@@ -39,6 +39,7 @@
 import {
   AGENT_LIMITS,
   AGENT_SYSTEM_PROMPT,
+  ITINERARY_PLANNER_SYSTEM_PROMPT,
   aiBudgetEpoch,
   aiReasoningLimits,
   aiSafetyBudgetUsd,
@@ -53,11 +54,23 @@ import { callModel } from '../_shared/reasoning.ts';
 import { budgetWindowStart, maximumReservedCost, type ModelUsage } from '../_shared/aiCost.ts';
 import { authenticateRequest, bearerToken } from '../_shared/auth.ts';
 import { readOwnedTrip } from '../_shared/tripOwnership.ts';
-import { finalizeAiSpendAttempt, readSpendToDate, serviceClient } from '../_shared/cache.ts';
+import {
+  finalizeAiSpendAttempt,
+  readItineraryProposalCache,
+  readSpendToDate,
+  serviceClient,
+  writeItineraryProposalCache,
+} from '../_shared/cache.ts';
 import { reserveAiReasoningAttempt } from '../_shared/quota.ts';
 import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/meteredModel.ts';
 import { runAgent, type AgentModelPayload } from '../_shared/agentRuntime.ts';
 import { createToolExecutor } from '../_shared/agentToolAdapters.ts';
+import {
+  buildPlanningMaterial,
+  runItineraryProposalEngine,
+  type ProposalRouteMode,
+  type RouteMatrixLeg,
+} from '../_shared/itineraryProposal.ts';
 
 interface AgentBody {
   operation?: string;
@@ -67,6 +80,44 @@ interface AgentBody {
 
 /** A traveller's question. Long enough for a real one, short enough to bound. */
 const MAX_QUESTION_CHARS = 600;
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+const asArray = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+
+/** Flatten the real sibling-function matrix into traceable route legs. */
+const routeLegsFromTool = (value: unknown): RouteMatrixLeg[] => {
+  const result = asRecord(value);
+  const placeIds = asArray(result?.placeIds).filter((entry): entry is string => typeof entry === 'string');
+  const payload = asRecord(result?.matrix);
+  const matrix = asArray(payload?.matrix);
+  const mode = ['walking', 'public-transport', 'driving', 'cycling'].includes(String(result?.mode))
+    ? result?.mode as ProposalRouteMode
+    : 'walking';
+  const legs: RouteMatrixLeg[] = [];
+  for (let originIndex = 0; originIndex < placeIds.length; originIndex += 1) {
+    const row = asArray(matrix[originIndex]);
+    for (let destinationIndex = 0; destinationIndex < placeIds.length; destinationIndex += 1) {
+      if (originIndex === destinationIndex) continue;
+      const cell = asRecord(row[destinationIndex]);
+      const duration = typeof cell?.durationMinutes === 'number' && Number.isFinite(cell.durationMinutes)
+        ? Math.round(cell.durationMinutes)
+        : undefined;
+      const source = cell?.source === 'cache' ? 'cache' : 'provider';
+      legs.push({
+        fromPlaceId: placeIds[originIndex],
+        toPlaceId: placeIds[destinationIndex],
+        status: cell?.status === 'ok' && duration !== undefined ? 'ok' : 'unknown',
+        durationMinutes: duration,
+        distanceMeters: typeof cell?.distanceMeters === 'number' ? Math.round(cell.distanceMeters) : undefined,
+        mode,
+        source: cell?.status === 'ok' ? source : 'unavailable',
+      });
+    }
+  }
+  return legs;
+};
 
 const responseStatus = (refusal: string): number => {
   if (refusal === 'quota-exhausted' || refusal === 'budget-reached') return 429;
@@ -98,7 +149,7 @@ Deno.serve(async (request) => {
   const limits = AGENT_LIMITS[operation];
 
   const question = typeof body.question === 'string' ? body.question.trim() : '';
-  if (!question) return json({ error: 'A question is required.' }, 400);
+  if (operation !== 'build-itinerary' && !question) return json({ error: 'A question is required.' }, 400);
   if (question.length > MAX_QUESTION_CHARS) {
     return json({ error: `Question too long: ${question.length} characters, limit ${MAX_QUESTION_CHARS}.` }, 413);
   }
@@ -179,7 +230,10 @@ Deno.serve(async (request) => {
    * cost to another. The material key names the operation, the trip and the
    * round, so the ledger can show what a single question actually cost.
    */
-  const callOneRound = async (payload: AgentModelPayload) => {
+  const callOneRound = async (
+    payload: AgentModelPayload | (Record<string, unknown> & { round: number }),
+    systemPrompt = AGENT_SYSTEM_PROMPT,
+  ) => {
     let usage: ModelUsage | undefined;
     let providerRequestId: string | undefined;
     let dispatchStatus: 'not-dispatched' | 'possibly-dispatched' = 'not-dispatched';
@@ -190,7 +244,7 @@ Deno.serve(async (request) => {
       dispatchStatus = 'not-dispatched';
       const result = await callModel(`agent-${operation}`, payload, {
         ...options,
-        systemPrompt: AGENT_SYSTEM_PROMPT,
+        systemPrompt,
         onProviderDispatch: () => { dispatchStatus = 'possibly-dispatched'; },
         onUsage: (reported) => { usage = reported; },
         onProviderResponse: (response) => {
@@ -250,6 +304,92 @@ Deno.serve(async (request) => {
       : { ok: false as const, refusal: outcome.refusal, detail: outcome.detail };
   };
 
+  if (operation === 'build-itinerary') {
+    const material = buildPlanningMaterial(trip.tripId, itinerary);
+    const materialChars = JSON.stringify(material).length;
+    if (materialChars > limits.maxInputChars) {
+      return json({ error: `Planning material too large: ${materialChars} characters, limit ${limits.maxInputChars}.` }, 413);
+    }
+
+    const cachedProposal = await readItineraryProposalCache(cache, trip.tripId, material.revision);
+    if (cachedProposal) {
+      return json({
+        operation,
+        tripId: trip.tripId,
+        status: cachedProposal.status === 'valid' ? 'answered' : 'partial',
+        itineraryProposal: cachedProposal,
+        applied: false,
+        cached: true,
+        transcript: [],
+        budget: { modelRounds: 0, toolCalls: 0, webSearches: 0, routeCalls: 0, placeLookups: 0 },
+        limits,
+        spend: await session.report(),
+      });
+    }
+
+    const transcript: Array<{ tool: string; ok: boolean; detail?: string }> = [];
+    let modelRounds = 0;
+    let refusal: { refusal: string; detail?: string } | undefined;
+
+    try {
+      const proposal = await runItineraryProposalEngine(material, {
+        chooseComposition: async ({ round, conflicts, previous }) => {
+          const outcome = await callOneRound({
+            operation,
+            round,
+            planningMaterial: material,
+            conflicts,
+            previousComposition: previous,
+            finalRound: round >= 1 + material.limits.maxRepairIterations,
+          }, ITINERARY_PLANNER_SYSTEM_PROMPT);
+          modelRounds += 1;
+          if (outcome.ok === false) {
+            refusal = { refusal: outcome.refusal, detail: outcome.detail };
+            throw new Error('planner-model-refused');
+          }
+          return outcome.value;
+        },
+        getRouteMatrix: async ({ placeIds, mode }) => {
+          const result = await executeTool({ tool: 'get_route_matrix', args: { placeIds, mode } });
+          transcript.push({ tool: 'get_route_matrix', ok: result.ok, detail: result.ok ? undefined : result.detail });
+          return result.ok ? routeLegsFromTool(result.result) : [];
+        },
+      });
+      await writeItineraryProposalCache(cache, proposal);
+
+      return json({
+        operation,
+        tripId: trip.tripId,
+        status: proposal.status === 'valid' ? 'answered' : 'partial',
+        itineraryProposal: proposal,
+        applied: false,
+        cached: false,
+        transcript,
+        budget: {
+          modelRounds,
+          toolCalls: transcript.length,
+          webSearches: 0,
+          routeCalls: transcript.filter((entry) => entry.tool === 'get_route_matrix').length,
+          placeLookups: 0,
+        },
+        limits,
+        spend: await session.report(),
+      });
+    } catch (error) {
+      if (!refusal) throw error;
+      return json({
+        operation,
+        tripId: trip.tripId,
+        status: 'refused',
+        applied: false,
+        transcript,
+        refusal: refusal.refusal,
+        detail: refusal.detail,
+        spend: await session.report(),
+      }, responseStatus(refusal.refusal));
+    }
+  }
+
   /**
    * The context the model reasons over: the trip's shape, not its contents.
    *
@@ -278,7 +418,7 @@ Deno.serve(async (request) => {
 
   const run = await runAgent(
     { operation, question, context },
-    { limits, callModel: callOneRound, executeTool },
+    { limits, callModel: (payload) => callOneRound(payload), executeTool },
   );
 
   const status = run.status === 'refused' && run.refusal ? responseStatus(run.refusal) : 200;

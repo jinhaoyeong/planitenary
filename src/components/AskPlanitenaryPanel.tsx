@@ -237,6 +237,21 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
                             {result.proposal.travelMinutes ? `${result.proposal.travelMinutes} min from routing` : ''}
                           </p>
                         )}
+                        {result.proposal.replan && (
+                          <div className="mt-3 border-t border-slate-700 pt-3">
+                            <p className="text-xs font-semibold text-rose-200">Replan preview · Days {result.proposal.replan.affectedDays.join(', ')}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-300">{result.proposal.replan.objective}</p>
+                            {result.proposal.replan.moves.length > 0 && (
+                              <ul className="mt-2 space-y-1 text-xs text-slate-300">
+                                {result.proposal.replan.moves.map((move, index) => (
+                                  <li key={`${move.placeName}-${index}`}>
+                                    {move.placeName}: {move.fromDay ? `Day ${move.fromDay}` : 'Unscheduled'} → Day {move.toDay}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
                       </section>
                     )}
 

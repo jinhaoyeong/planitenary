@@ -36,7 +36,7 @@
  */
 
 /** Every operation the agent tier will answer. Anything else is refused. */
-export const AGENT_OPERATIONS = ['ask', 'research-trip', 'research-place'] as const;
+export const AGENT_OPERATIONS = ['ask', 'research-trip', 'research-place', 'build-itinerary'] as const;
 
 export type AgentOperation = typeof AGENT_OPERATIONS[number];
 
@@ -122,6 +122,19 @@ export const AGENT_LIMITS: Record<AgentOperation, AgentLimits> = {
     maxRouteCalls: 1,
     maxPlaceLookups: 2,
   },
+  /**
+   * A complete proposal has more material than a question, but remains tightly
+   * bounded: at most one composition plus two repairs are expected. Eight is
+   * the hard outer ceiling if malformed replies consume rounds before that.
+   */
+  'build-itinerary': {
+    maxInputChars: 48_000,
+    maxModelRounds: 8,
+    maxToolCalls: 10,
+    maxWebSearches: 0,
+    maxRouteCalls: 3,
+    maxPlaceLookups: 2,
+  },
 };
 
 /**
@@ -138,6 +151,7 @@ export const AGENT_MAX_OUTPUT_TOKENS: Record<AgentOperation, number> = {
   ask: 1_600,
   'research-trip': 1_600,
   'research-place': 1_000,
+  'build-itinerary': 3_000,
 };
 
 /**
@@ -162,14 +176,26 @@ When more facts are needed and tools are available, return:
 {"tool_calls":[{"tool":"tool_name","args":{}}]}
 
 When you can answer, or finalRound is true, return:
-{"answer":"concise answer","citations":["exact tool URL"],"proposal":{"summary":"optional read-only proposal","day":1,"travelMinutes":27,"placeNames":["exact tool place name"]}}
+{"answer":"concise answer","citations":["exact tool URL"],"proposal":{"summary":"optional read-only proposal","day":1,"travelMinutes":27,"placeNames":["exact tool place name"],"replan":{"objective":"make Day 3 easier","affectedDays":[3,4],"moves":[{"placeName":"exact tool place name","fromDay":3,"toDay":4}]}}}
 
 Use only the supplied context and findings. Never invent a place, coordinate, route, travel time, opening hour, price, event, forecast, closure, photograph, licence, or URL. Travel times must be copied from routing findings. Cite only exact URLs in findings. You cannot save, apply, book, or mutate anything. If a tool failed or a fact is unavailable, say so plainly. On finalRound, do not request tools.`;
+
+/**
+ * The planning model chooses composition only. Clock arithmetic, routes,
+ * opening hours, buffers and conflict decisions are intentionally absent from
+ * its output contract and are added by `itineraryProposal.ts` afterwards.
+ */
+export const ITINERARY_PLANNER_SYSTEM_PROMPT = `You are Planitenary's read-only itinerary composition planner.
+Return one JSON object and nothing else:
+{"days":[{"day":1,"placeIds":["exact supplied id"],"rationale":"short reason"}]}
+
+Use only place IDs and day numbers in the supplied planning material. Respect fixed-day and Must-do priorities. Group nearby places and avoid unnecessary cross-city movement. Do not output times, durations, coordinates, routes, opening hours, weather, prices, bookings, or invented places. Deterministic Planitenary code calculates and validates all of those after your reply. If structured conflicts are supplied, repair only the ordering/day assignment needed to address them. You cannot save or apply anything.`;
 
 export const AGENT_OPENAI_MODELS_BY_OPERATION: Record<AgentOperation, readonly string[]> = {
   ask: [AGENT_OPENAI_MODEL],
   'research-trip': [AGENT_OPENAI_MODEL],
   'research-place': [AGENT_OPENAI_MODEL],
+  'build-itinerary': [AGENT_OPENAI_MODEL],
 };
 
 /**
@@ -586,6 +612,12 @@ export interface RawAgentAnswer {
     /** Travel times must match a routing result — see {@link validateAgentAnswer}. */
     travelMinutes?: number;
     placeNames?: string[];
+    /** Structured preview only. There is still no writer behind it. */
+    replan?: {
+      objective: string;
+      affectedDays: number[];
+      moves: Array<{ placeName: string; fromDay?: number; toDay: number }>;
+    };
   };
 }
 
@@ -632,9 +664,32 @@ export function parseAgentTurn(value: unknown): AgentTurn {
     : [];
 
   const proposalRaw = raw.proposal as {
-    summary?: unknown; day?: unknown; travelMinutes?: unknown; placeNames?: unknown;
+    summary?: unknown; day?: unknown; travelMinutes?: unknown; placeNames?: unknown; replan?: unknown;
   } | undefined;
   const summary = proposalRaw ? text(proposalRaw.summary, MAX_SUMMARY_CHARS) : undefined;
+  const replanRaw = proposalRaw?.replan && typeof proposalRaw.replan === 'object'
+    ? proposalRaw.replan as Record<string, unknown>
+    : undefined;
+  const objective = text(replanRaw?.objective, 300);
+  const affectedDays = Array.isArray(replanRaw?.affectedDays)
+    ? replanRaw.affectedDays.filter((day): day is number =>
+      typeof day === 'number' && Number.isInteger(day) && day > 0 && day <= 60).slice(0, 10)
+    : [];
+  const moves = Array.isArray(replanRaw?.moves)
+    ? replanRaw.moves.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const move = entry as Record<string, unknown>;
+      const placeName = text(move.placeName, 160);
+      const toDay = typeof move.toDay === 'number' && Number.isInteger(move.toDay) && move.toDay > 0 && move.toDay <= 60
+        ? move.toDay
+        : undefined;
+      if (!placeName || !toDay) return [];
+      const fromDay = typeof move.fromDay === 'number' && Number.isInteger(move.fromDay) && move.fromDay > 0 && move.fromDay <= 60
+        ? move.fromDay
+        : undefined;
+      return [{ placeName, fromDay, toDay }];
+    }).slice(0, 12)
+    : [];
 
   return {
     kind: 'answer',
@@ -652,6 +707,9 @@ export function parseAgentTurn(value: unknown): AgentTurn {
             ? Math.round(proposalRaw.travelMinutes)
             : undefined,
           placeNames: boundedList(proposalRaw?.placeNames, 8, 160),
+          replan: objective && affectedDays.length > 0
+            ? { objective, affectedDays, moves }
+            : undefined,
         }
         : undefined,
     },
@@ -743,6 +801,14 @@ export function validateAgentAnswer(
       return false;
     });
     proposal = { ...proposal, placeNames: kept.length > 0 ? kept : undefined };
+  }
+  if (proposal?.replan) {
+    const moves = proposal.replan.moves.filter((move) => {
+      if (evidence.knownPlaceNames.has(move.placeName.toLowerCase())) return true;
+      rejected.push({ value: move.placeName, reason: 'invented-place' });
+      return false;
+    });
+    proposal = { ...proposal, replan: { ...proposal.replan, moves } };
   }
 
   // Structured validation alone is not enough: the model could omit

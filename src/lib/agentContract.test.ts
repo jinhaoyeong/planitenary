@@ -91,6 +91,7 @@ describe('only gpt-5-nano, and never corrected to it', () => {
 
   it('rejects an operation nobody declared', () => {
     expect(isAgentOperation('ask')).toBe(true);
+    expect(isAgentOperation('build-itinerary')).toBe(true);
     expect(isAgentOperation('save-itinerary')).toBe(false);
     expect(isAgentOperation('candidate-intelligence')).toBe(false);
   });
@@ -100,16 +101,22 @@ describe('every operation is bounded on every axis', () => {
   it('caps rounds, tools, searches, routes and lookups for each operation', () => {
     for (const operation of AGENT_OPERATIONS) {
       const limits = AGENT_LIMITS[operation];
-      for (const value of Object.values(limits)) {
-        expect(value).toBeGreaterThan(0);
+      for (const [name, value] of Object.entries(limits)) {
+        if (operation === 'build-itinerary' && name === 'maxWebSearches') expect(value).toBe(0);
+        else expect(value).toBeGreaterThan(0);
         expect(Number.isFinite(value)).toBe(true);
       }
-      // Small on purpose: production allows five provider calls a day in
-      // total, so one question must not be able to take them all.
-      expect(limits.maxModelRounds).toBeLessThanOrEqual(6);
+      // Ask stays smaller; the complete-planning operation gets a hard eight
+      // round ceiling but normally uses one composition plus at most 2 repairs.
+      expect(limits.maxModelRounds).toBeLessThanOrEqual(operation === 'build-itinerary' ? 8 : 6);
       expect(limits.maxWebSearches).toBeLessThanOrEqual(2);
-      expect(AGENT_MAX_OUTPUT_TOKENS[operation]).toBeLessThanOrEqual(1_600);
+      expect(AGENT_MAX_OUTPUT_TOKENS[operation]).toBeLessThanOrEqual(operation === 'build-itinerary' ? 3_000 : 1_600);
     }
+    expect(AGENT_LIMITS['build-itinerary']).toMatchObject({
+      maxModelRounds: 8,
+      maxWebSearches: 0,
+      maxRouteCalls: 3,
+    });
   });
 
   it('stops charging once a budget line is spent', () => {
@@ -177,6 +184,34 @@ describe('malformed model output fails safely', () => {
 describe('an answer is held to what the tools returned', () => {
   const evidenceFrom = (tool: 'get_route' | 'search_web', result: unknown) =>
     collectEvidence(emptyEvidence(), tool, result);
+
+  it('keeps a structured replan preview read-only and drops invented move targets', () => {
+    const evidence = collectEvidence(emptyEvidence(), 'get_current_itinerary', {
+      days: [{ activities: [{ name: 'Osaka Castle' }] }],
+    });
+    const turn = parseAgentTurn({
+      answer: 'Move the castle to Day 3.',
+      citations: [],
+      proposal: {
+        summary: 'A lighter Day 2.',
+        replan: {
+          objective: 'Make Day 2 less tiring.',
+          affectedDays: [2, 3],
+          moves: [
+            { placeName: 'Osaka Castle', fromDay: 2, toDay: 3 },
+            { placeName: 'Invented Palace', fromDay: 2, toDay: 3 },
+          ],
+        },
+      },
+    });
+    expect(turn.kind).toBe('answer');
+    if (turn.kind !== 'answer') return;
+    const validated = validateAgentAnswer(turn.answer, evidence);
+    expect(validated.proposal?.replan?.moves).toEqual([
+      { placeName: 'Osaka Castle', fromDay: 2, toDay: 3 },
+    ]);
+    expect(validated.rejected).toContainEqual({ value: 'Invented Palace', reason: 'invented-place' });
+  });
 
   it('keeps a citation a tool returned and drops one it did not', () => {
     const evidence = evidenceFrom('search_web', {

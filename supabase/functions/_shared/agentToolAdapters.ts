@@ -367,8 +367,8 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
   };
 
   const routeFor = async (places: KnownPlace[], mode: string, matrix: boolean): Promise<ToolOutcome> => {
-    const points = places
-      .filter((place) => place.coordinates)
+    const routedPlaces = places.filter((place) => place.coordinates);
+    const points = routedPlaces
       .map((place) => ({ placeId: place.providerPlaceId, coordinates: place.coordinates }));
     if (points.length < 2) {
       return {
@@ -391,7 +391,15 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
         destinations: matrix ? points : [points[1]],
         mode: matrixMode,
       });
-      return { ok: true, result: { mode: matrixMode, places: places.map((place) => place.name), matrix: payload } };
+      return {
+        ok: true,
+        result: {
+          mode: matrixMode,
+          placeIds: routedPlaces.map((place) => place.id),
+          places: routedPlaces.map((place) => place.name),
+          matrix: payload,
+        },
+      };
     } catch (error) {
       return { ok: false, detail: error instanceof Error ? error.message : 'The routing provider did not answer.' };
     }
