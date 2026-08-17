@@ -401,3 +401,35 @@ describe('revision ordering decides which write wins', () => {
     expect(isNewerItineraryRevision(legacy, at(1))).toBe(false);
   });
 });
+
+describe('flight duration survives sanitisation', () => {
+  it('keeps a positive flight durationMinutes through save and reload', () => {
+    const flight: Activity = {
+      time: '10:00',
+      name: 'HND → KIX',
+      description: 'Arrival',
+      type: 'flight',
+      durationMinutes: 150,
+    };
+    const stored = JSON.parse(JSON.stringify(sanitizeItinerary(tripWith([flight]), emptyItinerary)));
+    const reloaded = sanitizeItinerary(stored, emptyItinerary);
+    expect(reloaded.days[0].activities[0]).toMatchObject({
+      type: 'flight',
+      time: '10:00',
+      durationMinutes: 150,
+    });
+  });
+
+  it('still loads a legacy flight that has no durationMinutes', () => {
+    const flight: Activity = {
+      time: '10:00',
+      name: 'HND → KIX',
+      description: 'Arrival',
+      type: 'flight',
+    };
+    const saved = sanitizeItinerary(tripWith([flight]), emptyItinerary);
+    expect(saved.days).toHaveLength(1);
+    expect(saved.days[0].activities[0]).toMatchObject({ type: 'flight', time: '10:00', name: 'HND → KIX' });
+    expect(saved.days[0].activities[0].durationMinutes).toBeUndefined();
+  });
+});

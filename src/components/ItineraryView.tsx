@@ -21,6 +21,8 @@ import { sanitizeTripProfile } from '../lib/tripProfile';
 import { declaredTripDays, longTripItineraryNotice } from '../lib/tripDuration';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
 import { markManualFieldEdits } from '../lib/identityFields';
+import { applyActivityDuration, durationFieldsFromMinutes, formatFlightDuration } from '../lib/flightDuration';
+import { FlightDurationFields } from './FlightDurationFields';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -169,6 +171,10 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
   timezone?: string;
 }) => {
   const [editedActivity, setEditedActivity] = useState(activity);
+  const [durationHours, setDurationHours] = useState('');
+  const [durationMinutesPart, setDurationMinutesPart] = useState('');
+  const [durationError, setDurationError] = useState('');
+  const wasEditingRef = useRef(false);
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [searchResults, setSearchResults] = useState<{display_name: string, lat: string, lon: string}[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -498,6 +504,17 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
   }, [isEditing]);
 
   useEffect(() => {
+    if (isEditing && !wasEditingRef.current) {
+      setEditedActivity(activity);
+      const fields = durationFieldsFromMinutes(activity.type === 'flight' ? activity.durationMinutes : undefined);
+      setDurationHours(fields.hours);
+      setDurationMinutesPart(fields.minutes);
+      setDurationError('');
+    }
+    wasEditingRef.current = isEditing;
+  }, [isEditing, activity]);
+
+  useEffect(() => {
     return () => {
       clearLongPressTimer();
       stopVoiceRecording();
@@ -542,6 +559,12 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
                   key={opt.id}
                   onClick={() => {
                     setEditedActivity({...editedActivity, type: opt.id});
+                    if (opt.id === 'flight') {
+                      const fields = durationFieldsFromMinutes(editedActivity.durationMinutes);
+                      setDurationHours(fields.hours);
+                      setDurationMinutesPart(fields.minutes);
+                    }
+                    setDurationError('');
                     setShowIconPicker(false);
                   }}
                   className={clsx(
@@ -556,6 +579,23 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
             </div>
           )}
         </div>
+
+        {editedActivity.type === 'flight' && (
+          <FlightDurationFields
+            idPrefix="edit-flight-duration"
+            hours={durationHours}
+            minutes={durationMinutesPart}
+            onHoursChange={(value) => {
+              setDurationHours(value);
+              setDurationError('');
+            }}
+            onMinutesChange={(value) => {
+              setDurationMinutesPart(value);
+              setDurationError('');
+            }}
+            error={durationError}
+          />
+        )}
 
         <textarea 
           value={editedActivity.description}
@@ -676,7 +716,14 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
             Delete
           </button>
           <button
-            onClick={() => onEdit?.({ ...editedActivity, rating: normalizeActivityRating(editedActivity.rating) })}
+            onClick={() => {
+              const committed = applyActivityDuration(editedActivity, durationHours, durationMinutesPart);
+              if (!committed.ok) {
+                setDurationError(committed.error);
+                return;
+              }
+              onEdit?.({ ...committed.activity, rating: normalizeActivityRating(committed.activity.rating) });
+            }}
             className="px-3 py-1.5 text-xs bg-slate-900 dark:bg-rose-600 text-white rounded-lg"
           >
             Save
@@ -838,6 +885,11 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
     >
       <div className="flex flex-col items-center min-w-[60px]">
         <span className="text-sm font-bold text-slate-400 group-hover:text-rose-500 dark:group-hover:text-rose-400 transition-colors">{activity.time}</span>
+        {activity.type === 'flight' && formatFlightDuration(activity.durationMinutes) && (
+          <span className="mt-1 text-center text-[10px] font-semibold leading-tight text-slate-400 dark:text-slate-500">
+            {formatFlightDuration(activity.durationMinutes)}
+          </span>
+        )}
         <div className="h-full w-0.5 bg-slate-100 dark:bg-slate-800 mt-2 mb-2 group-hover:bg-rose-100 dark:group-hover:bg-rose-900 transition-colors"></div>
       </div>
       <div className="flex-1">
@@ -1113,6 +1165,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     description: '',
     cost: ''
   });
+  const [addFlightHours, setAddFlightHours] = useState('');
+  const [addFlightMinutes, setAddFlightMinutes] = useState('');
+  const [addFlightDurationError, setAddFlightDurationError] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1305,12 +1360,17 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
       cost: newActivity.cost || '',
       coordinates: newActivity.coordinates // Include coordinates if available
     };
+    const committed = applyActivityDuration(activityToAdd, addFlightHours, addFlightMinutes);
+    if (!committed.ok) {
+      setAddFlightDurationError(committed.error);
+      return;
+    }
 
     const updatedDays = customItinerary.days.map(day => {
       if (day.day === targetDayNumber) {
         return {
           ...day,
-          activities: sortActivitiesByTime([...day.activities, activityToAdd])
+          activities: sortActivitiesByTime([...day.activities, committed.activity])
         };
       }
       return day;
@@ -1366,6 +1426,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
       description: '',
       cost: ''
     });
+    setAddFlightHours('');
+    setAddFlightMinutes('');
+    setAddFlightDurationError('');
     setShowAddModal(true);
   };
 
@@ -2342,6 +2405,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 
                 {isEditingMode && editingActivityIndex !== originalIndex && (
                   <button 
+                    type="button"
+                    aria-label={`Edit ${activity.name}`}
                     onClick={() => setEditingActivityIndex(originalIndex)}
                     className="absolute top-4 right-4 p-2 bg-white dark:bg-slate-800 rounded-xl shadow-sm text-slate-400 hover:text-rose-500 opacity-0 group-hover/edit:opacity-100 transition-all md:opacity-0 opacity-100"
                   >
@@ -2379,7 +2444,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl p-6 relative z-10 border border-slate-100 dark:border-slate-800"
+              className="bg-white dark:bg-slate-900 w-full max-w-md max-h-[min(90dvh,44rem)] overflow-y-auto rounded-2xl shadow-2xl p-6 relative z-10 border border-slate-100 dark:border-slate-800"
             >
               <button 
                 onClick={() => setShowAddModal(false)}
@@ -2509,7 +2574,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                   <div className="relative">
                     <select
                       value={newActivity.type}
-                      onChange={(e) => setNewActivity({...newActivity, type: e.target.value as ActivityType})}
+                      onChange={(e) => {
+                        setNewActivity({...newActivity, type: e.target.value as ActivityType});
+                        setAddFlightDurationError('');
+                      }}
                       className="editorial-select w-full"
                     >
                       {ICON_OPTIONS.map(opt => (
@@ -2518,6 +2586,23 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                     </select>
                   </div>
                 </div>
+
+                {newActivity.type === 'flight' && (
+                  <FlightDurationFields
+                    idPrefix="add-flight-duration"
+                    hours={addFlightHours}
+                    minutes={addFlightMinutes}
+                    onHoursChange={(value) => {
+                      setAddFlightHours(value);
+                      setAddFlightDurationError('');
+                    }}
+                    onMinutesChange={(value) => {
+                      setAddFlightMinutes(value);
+                      setAddFlightDurationError('');
+                    }}
+                    error={addFlightDurationError}
+                  />
+                )}
 
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Description</label>

@@ -18,6 +18,7 @@ import {
   DEPARTURE_LEAD_MINUTES as proposalDepartureLead,
   buildPlanningMaterial,
   clockToMinutes,
+  isPlannerPlace,
   runItineraryProposalEngine,
   validateItineraryProposal,
   type PlanningMaterial,
@@ -26,7 +27,8 @@ import {
   type TripItineraryProposal,
 } from '../../supabase/functions/_shared/itineraryProposal';
 import { lookupExactItineraryProposalCache } from '../../supabase/functions/_shared/itineraryProposalCache';
-import { isNewerItineraryRevision } from './itinerarySanitize';
+import { applyActivityDuration } from './flightDuration';
+import { emptyItinerary, isNewerItineraryRevision, sanitizeItinerary } from './itinerarySanitize';
 
 const hours = [{ opensAt: '09:00', closesAt: '21:00', days: [0, 1, 2, 3, 4, 5, 6] }];
 
@@ -542,5 +544,85 @@ describe('Flight-Aware Planning V1', () => {
       item.travelFromPrevious?.durationMinutes === undefined
       || item.travelFromPrevious.source === 'provider'
       || item.travelFromPrevious.source === 'cache')).toBe(true);
+  });
+
+  it('recognises a Flight created through the Add Flight form as a timed fixed event', async () => {
+    const committed = applyActivityDuration({
+      type: 'flight',
+      time: '10:00',
+      name: 'HND → KIX',
+      description: 'Added manually',
+    }, '2', '0');
+    expect(committed.ok).toBe(true);
+    if (!committed.ok) return;
+
+    const source = sanitizeItinerary(itinerary({
+      days: [{ day: 1, date: '2026-08-17', city: 'Osaka', activities: [castle, committed.activity] }],
+    }) as never, emptyItinerary);
+    const savedFlight = source.days[0].activities.find((activity) => activity.type === 'flight')!;
+    const { material, proposal } = await propose(JSON.parse(JSON.stringify(source)) as Record<string, unknown>, {
+      composition: { days: [{ day: 1, placeIds: ['discovered-osm-n1'] }] },
+    });
+
+    expect(isPlannerPlace({ ...savedFlight })).toBe(false);
+    expect(material.days[0]?.fixedEvents).toEqual([expect.objectContaining({
+      role: 'arrival',
+      transportKind: 'flight',
+      startTime: '10:00',
+      endTime: '12:00',
+    })]);
+    expect(material.days[0]?.startTime).toBe('14:00');
+    expect(placeItems(proposal, 1).every((item) => !startsBefore(item, '14:00'))).toBe(true);
+  });
+
+  it('still ignores a legacy Flight that has no durationMinutes', async () => {
+    const { material } = await propose(itinerary({
+      days: [{
+        day: 1,
+        date: '2026-08-17',
+        city: 'Osaka',
+        activities: [castle, { id: 'flight-legacy', time: '10:00', name: 'HND → KIX', description: '', type: 'flight' }],
+      }],
+    }), {
+      composition: { days: [{ day: 1, placeIds: ['discovered-osm-n1'] }] },
+    });
+
+    expect(material.days[0]?.fixedEvents ?? []).toEqual([]);
+    expect(material.days[0]?.startTime).not.toBe('14:00');
+  });
+
+  it('changes planning material revision when only the flight duration changes', async () => {
+    const twoHours = itinerary({
+      days: [{ day: 1, date: '2026-08-17', city: 'Osaka', activities: [castle, flight({ time: '10:00', durationMinutes: 120 })] }],
+    });
+    const threeHours = itinerary({
+      days: [{ day: 1, date: '2026-08-17', city: 'Osaka', activities: [castle, flight({ time: '10:00', durationMinutes: 180 })] }],
+    });
+    const originalMaterial = await buildPlanningMaterial('trip-1', twoHours);
+    const editedMaterial = await buildPlanningMaterial('trip-1', threeHours);
+    expect(editedMaterial.revision).not.toBe(originalMaterial.revision);
+
+    const lookup = await lookupExactItineraryProposalCache({
+      tripId: 'trip-1',
+      itinerary: threeHours,
+      maxInputChars: 20_000,
+      readCache: async () => ({
+        kind: 'itinerary-proposal-v1',
+        id: 'proposal-old-duration',
+        tripId: 'trip-1',
+        materialRevision: originalMaterial.revision,
+        createdAt: '2026-08-17T08:00:00.000Z',
+        status: 'valid',
+        applied: false,
+        pace: 'balanced',
+        days: [],
+        conflicts: [],
+        warnings: [],
+        omittedPlaceIds: [],
+        routeSummary: { matrixCalls: 0, confirmedLegs: 0, unavailableLegs: 0, allDurationsProviderDerived: true },
+        repairIterations: 0,
+      }),
+    });
+    expect(lookup.kind).toBe('miss');
   });
 });
