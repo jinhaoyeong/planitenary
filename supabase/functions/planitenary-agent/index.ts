@@ -12,8 +12,13 @@
  * ## The order, which is the whole security model
  *
  *   authenticate -> prove trip ownership -> validate operation and size
- *   -> resolve an approved model -> budget gate + atomic quota reservation
- *   -> provider -> usage accounting -> ledger finalisation -> validate answer
+ *   -> for build-itinerary: derive current material and try an exact cache hit
+ *   -> only on a cache miss (or for other operations):
+ *        resolve an approved model -> budget gate + atomic quota reservation
+ *        -> provider -> usage accounting -> ledger finalisation -> validate answer
+ *
+ * The kill switch (`OPENAI_MODEL=disabled`) therefore blocks new paid calls.
+ * It must not hide an already-paid exact cached proposal.
  *
  * Every model round goes through `meteredModelCall`, the same door the rest of
  * the app uses. There is no other way to reach a provider from here: the loop
@@ -45,6 +50,7 @@ import {
   aiSafetyBudgetUsd,
   isAgentOperation,
   json,
+  openaiModel,
   preflight,
   resolveAgentReasoning,
   AGENT_OPERATIONS,
@@ -66,11 +72,17 @@ import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/met
 import { runAgent, type AgentModelPayload } from '../_shared/agentRuntime.ts';
 import { createToolExecutor } from '../_shared/agentToolAdapters.ts';
 import {
-  buildPlanningMaterial,
   runItineraryProposalEngine,
+  type PlanningMaterial,
   type ProposalRouteMode,
   type RouteMatrixLeg,
 } from '../_shared/itineraryProposal.ts';
+import {
+  cachedItineraryProposalEnvelope,
+  generationDisabledRefusal,
+  isGenerationKillSwitch,
+  lookupExactItineraryProposalCache,
+} from '../_shared/itineraryProposalCache.ts';
 
 interface AgentBody {
   operation?: string;
@@ -177,7 +189,44 @@ Deno.serve(async (request) => {
   if (trip.kind === 'error') return json({ error: 'The trip could not be read.' }, 503);
   if (trip.kind === 'missing') return json({ error: 'Trip not found.' }, 404);
 
+  const itinerary = trip.itineraryData && typeof trip.itineraryData === 'object'
+    ? trip.itineraryData as Record<string, unknown>
+    : null;
+
+  /**
+   * Exact cache before any model initialisation.
+   *
+   * Auth and ownership have already run. The material revision is derived from
+   * the authorised trip, then the cache is asked for that exact pair. A hit
+   * returns the stored proposal with zero reservation, ledger, or provider
+   * work. A miss continues into the paid path below.
+   */
+  let itineraryProposalMaterial: PlanningMaterial | undefined;
+  if (operation === 'build-itinerary') {
+    const lookup = await lookupExactItineraryProposalCache({
+      tripId: trip.tripId,
+      itinerary,
+      maxInputChars: limits.maxInputChars,
+      readCache: (ownedTripId, materialRevision) =>
+        readItineraryProposalCache(cache, ownedTripId, materialRevision),
+    });
+    if (lookup.kind === 'too-large') {
+      return json({
+        error: `Planning material too large: ${lookup.materialChars} characters, limit ${lookup.limit}.`,
+      }, 413);
+    }
+    if (lookup.kind === 'hit') {
+      return json(cachedItineraryProposalEnvelope(lookup.proposal, limits));
+    }
+    itineraryProposalMaterial = lookup.material;
+  }
+
   const resolution = resolveAgentReasoning(operation);
+  if (operation === 'build-itinerary' && (
+    resolution.status === 'unconfigured' || isGenerationKillSwitch(openaiModel())
+  )) {
+    return json(generationDisabledRefusal(trip.tripId), 503);
+  }
   if (resolution.status === 'misconfigured') return json({ error: resolution.error }, 500);
   if (resolution.status === 'unconfigured') return json({ error: 'The assistant is not configured.' }, 503);
   const { options } = resolution;
@@ -209,10 +258,6 @@ Deno.serve(async (request) => {
     { readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())) },
     budgetUsd,
   );
-
-  const itinerary = trip.itineraryData && typeof trip.itineraryData === 'object'
-    ? trip.itineraryData as Record<string, unknown>
-    : null;
 
   const token = bearerToken(request);
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
@@ -310,27 +355,8 @@ Deno.serve(async (request) => {
   };
 
   if (operation === 'build-itinerary') {
-    const material = await buildPlanningMaterial(trip.tripId, itinerary);
-    const materialChars = JSON.stringify(material).length;
-    if (materialChars > limits.maxInputChars) {
-      return json({ error: `Planning material too large: ${materialChars} characters, limit ${limits.maxInputChars}.` }, 413);
-    }
-
-    const cachedProposal = await readItineraryProposalCache(cache, trip.tripId, material.revision);
-    if (cachedProposal) {
-      return json({
-        operation,
-        tripId: trip.tripId,
-        status: cachedProposal.status === 'valid' ? 'answered' : 'partial',
-        itineraryProposal: cachedProposal,
-        applied: false,
-        cached: true,
-        transcript: [],
-        budget: { modelRounds: 0, toolCalls: 0, webSearches: 0, routeCalls: 0, placeLookups: 0 },
-        limits,
-        spend: await session.report(),
-      });
-    }
+    const material = itineraryProposalMaterial;
+    if (!material) return json({ error: 'Planning material could not be built.' }, 500);
 
     const transcript: Array<{ tool: string; ok: boolean; detail?: string }> = [];
     let modelRounds = 0;

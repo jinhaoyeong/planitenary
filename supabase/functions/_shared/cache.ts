@@ -22,6 +22,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { aiBriefKey, parseAppliesTo, probeKey, routePairKey } from './cacheKeys.ts';
 import { parsePlaceImage, rankPlaceImages, type PlaceImage } from './placeImages.ts';
 import { summarizeAiSpendRows, type AiSpendSnapshotRow } from './meteredModel.ts';
+import { usableCachedItineraryProposal } from './itineraryProposalCache.ts';
 import type { TripItineraryProposal } from './itineraryProposal.ts';
 
 let cachedClient: SupabaseClient | null | undefined;
@@ -56,13 +57,7 @@ export async function readItineraryProposalCache(
       .gt('expires_at', new Date().toISOString())
       .maybeSingle();
     if (error || !data?.proposal || typeof data.proposal !== 'object') return null;
-    const proposal = data.proposal as TripItineraryProposal;
-    return proposal.kind === 'itinerary-proposal-v1'
-      && proposal.tripId === tripId
-      && proposal.materialRevision === materialRevision
-      && proposal.applied === false
-      ? proposal
-      : null;
+    return usableCachedItineraryProposal(data.proposal, tripId, materialRevision);
   } catch {
     return null;
   }

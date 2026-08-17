@@ -9,6 +9,10 @@ const cache = readFileSync(
   new URL('../../supabase/functions/_shared/cache.ts', import.meta.url),
   'utf8',
 );
+const cacheGate = readFileSync(
+  new URL('../../supabase/functions/_shared/itineraryProposalCache.ts', import.meta.url),
+  'utf8',
+);
 const migration = readFileSync(
   new URL('../../supabase/migrations/20260816081502_add_itinerary_proposal_cache.sql', import.meta.url),
   'utf8',
@@ -47,8 +51,30 @@ describe('Phase 2A server boundary', () => {
   it('reuses a proposal only for the exact trip and material revision', () => {
     expect(cache).toContain(".eq('trip_id', tripId)");
     expect(cache).toContain(".eq('material_revision', materialRevision)");
-    expect(cache).toContain("proposal.applied === false");
     expect(cache).toContain("onConflict: 'trip_id,material_revision'");
+    expect(cacheGate).toContain('value.tripId === tripId');
+    expect(cacheGate).toContain('value.materialRevision === materialRevision');
+    expect(cacheGate).toContain('value.applied === false');
+  });
+
+  it('looks up an exact cached proposal after ownership and before any model gate', () => {
+    const authenticated = handler.indexOf('authenticateRequest(request)');
+    const owned = handler.indexOf('readOwnedTrip(cache, tripId, authentication.caller.userId)');
+    const cacheLookup = handler.indexOf('lookupExactItineraryProposalCache({');
+    const cacheRead = handler.indexOf('readItineraryProposalCache(cache, ownedTripId, materialRevision)');
+    const modelGate = handler.indexOf('resolveAgentReasoning(operation)');
+    const reserve = handler.indexOf('reserveAiReasoningAttempt(cache');
+    const provider = handler.indexOf('const outcome = await callOneRound({');
+
+    expect(authenticated).toBeGreaterThan(-1);
+    expect(owned).toBeGreaterThan(authenticated);
+    expect(cacheLookup).toBeGreaterThan(owned);
+    expect(cacheRead).toBeGreaterThan(cacheLookup);
+    expect(modelGate).toBeGreaterThan(cacheLookup);
+    expect(reserve).toBeGreaterThan(modelGate);
+    expect(provider).toBeGreaterThan(reserve);
+    expect(handler).toContain('cachedItineraryProposalEnvelope(lookup.proposal, limits)');
+    expect(handler).toContain('generationDisabledRefusal(trip.tripId)');
   });
 
   it('adds a server-only, RLS-protected preview cache without destructive SQL', () => {
