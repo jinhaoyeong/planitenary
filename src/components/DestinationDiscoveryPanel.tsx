@@ -1678,6 +1678,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     }
   };
 
+  const closeReview = () => {
+    hapticTap();
+    setPhase('idle');
+  };
+
   /** Per-city review state and stay length, for the switcher's own labels. */
   const cityProgress = useMemo(() => tripDestinations.map((entry) => {
     const label = Object.keys(candidatesByCity).find((city) => city.toLowerCase() === entry.city.toLowerCase());
@@ -1728,6 +1733,18 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       </div>
     );
   };
+
+  const renderCloseReview = (variant: 'icon' | 'labeled') => (
+    <button
+      type="button"
+      className={variant === 'icon' ? 'destination-deck-close' : 'pill-btn pill-ghost'}
+      aria-label="Close place review"
+      onClick={closeReview}
+    >
+      <X className={variant === 'icon' ? 'w-5 h-5' : 'w-4 h-4'} aria-hidden="true" />
+      {variant === 'labeled' ? 'Close' : null}
+    </button>
+  );
 
   const updateDecision = (candidateId: string, decision: CandidateDecision, options?: { name?: string; silent?: boolean }) => {
     const previous = decisionsRef.current[candidateId];
@@ -2158,14 +2175,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
             <span className="fixture-badge">
               <Database className="w-4 h-4" /> {ranked.length} verified
             </span>
-            <button
-              type="button"
-              className="destination-deck-close"
-              aria-label="Close place review"
-              onClick={() => { hapticTap(); setPhase('idle'); }}
-            >
-              <X className="w-5 h-5" />
-            </button>
+            {renderCloseReview('icon')}
           </div>
           <h3>Choose places for {cityLabel}</h3>
           <CitySwitcher compact />
@@ -2246,7 +2256,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
                       : `About ${shortlistSize.shortlist} places for ${cityLabel} — its likely share of ${tripDayCount} days at a ${tripBehaviour.pace.replace('-', ' ')} pace. Set how long you are staying in each city to make this exact.`
                     : `About ${shortlistSize.shortlist} places for ${tripDayCount} ${tripDayCount === 1 ? 'day' : 'days'} — roughly what a ${tripBehaviour.pace.replace('-', ' ')} pace fits, with room for the ones that will not slot in.`}
               </p>
-              <button type="button" className="pill-btn pill-ghost" onClick={() => { hapticTap(); setPhase('idle'); }}>Close</button>
+              {renderCloseReview('labeled')}
             </div>
           </div>
         )}
@@ -2270,13 +2280,15 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
 
         {currentDeckCard && buildableCount >= 2 && (
           <div className="destination-review-footer destination-deck-footer">
-            <div>
+            <div className="destination-review-footer-copy">
               <strong>{selectedCount} selected</strong>
               <span>You can build anytime</span>
             </div>
-            <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={routeLoading}>
-              {routeLoading ? 'Checking routes…' : 'Build'}
-            </button>
+            <div className="destination-review-footer-actions">
+              <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={routeLoading}>
+                {routeLoading ? 'Checking routes…' : 'Build'}
+              </button>
+            </div>
           </div>
         )}
       </section>
@@ -2306,23 +2318,26 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           )}
         </div>
         <div className="destination-review-summary">
-          <div className="destination-review-mode-toggle" role="group" aria-label="Review layout">
-            <button
-              type="button"
-              className={desktopMode === 'deck' ? 'is-active' : ''}
-              aria-pressed={desktopMode === 'deck'}
-              onClick={() => setDesktopMode('deck')}
-            >
-              <Layers className="w-4 h-4" aria-hidden="true" /> One at a time
-            </button>
-            <button
-              type="button"
-              className={desktopMode === 'list' ? 'is-active' : ''}
-              aria-pressed={desktopMode === 'list'}
-              onClick={() => setDesktopMode('list')}
-            >
-              <LayoutGrid className="w-4 h-4" aria-hidden="true" /> Browse all
-            </button>
+          <div className="destination-review-summary-toolbar">
+            <div className="destination-review-mode-toggle" role="group" aria-label="Review layout">
+              <button
+                type="button"
+                className={desktopMode === 'deck' ? 'is-active' : ''}
+                aria-pressed={desktopMode === 'deck'}
+                onClick={() => setDesktopMode('deck')}
+              >
+                <Layers className="w-4 h-4" aria-hidden="true" /> One at a time
+              </button>
+              <button
+                type="button"
+                className={desktopMode === 'list' ? 'is-active' : ''}
+                aria-pressed={desktopMode === 'list'}
+                onClick={() => setDesktopMode('list')}
+              >
+                <LayoutGrid className="w-4 h-4" aria-hidden="true" /> Browse all
+              </button>
+            </div>
+            {renderCloseReview('labeled')}
           </div>
           <div className="destination-review-summary-actions">
             <button type="button" className="pill-btn pill-ghost" onClick={selectRecommended}>Recommended shortlist</button>
@@ -2456,13 +2471,16 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       </AnimatePresence>
 
       <div className="destination-review-footer">
-        <div>
+        <div className="destination-review-footer-copy">
           <strong>{selectedCount} selected</strong>
           <span>{reviewedCount} reviewed · skip stays out of the plan</span>
         </div>
-        <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={buildableCount < 2 || routeLoading}>
-          {routeLoading ? 'Checking routes…' : 'Build itinerary'}
-        </button>
+        <div className="destination-review-footer-actions">
+          {renderCloseReview('labeled')}
+          <button type="button" className="pill-btn pill-primary" onClick={() => void previewPlan()} disabled={buildableCount < 2 || routeLoading}>
+            {routeLoading ? 'Checking routes…' : 'Build itinerary'}
+          </button>
+        </div>
       </div>
     </section>
   );

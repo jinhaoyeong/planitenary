@@ -328,7 +328,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
         className={`planner-organise-panel p-4 sm:p-5 space-y-3 ${organiseOpen ? 'is-open' : 'is-collapsed'}`}
         style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-section, var(--card-radius, 1.5rem))' }}
       >
-        <div className="flex items-center justify-between gap-3">
+        <div className="planner-organise-toggle">
           <button
             type="button"
             className="planner-organise-header"

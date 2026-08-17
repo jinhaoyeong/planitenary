@@ -1904,8 +1904,17 @@ a.destination-photo-credit:focus-visible {
   backdrop-filter: blur(14px);
 }
 
-.destination-review-footer div {
+.destination-review-footer-copy {
   display: grid;
+  min-width: 0;
+}
+
+.destination-review-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .destination-review-footer strong {
@@ -1926,6 +1935,14 @@ a.destination-photo-credit:focus-visible {
   display: grid;
   justify-items: end;
   gap: 0.6rem;
+}
+
+.destination-review-summary-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .destination-discovery-error {
@@ -2057,6 +2074,13 @@ a.destination-photo-credit:focus-visible {
   text-transform: uppercase;
 }
 
+.planner-organise-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .planner-organise-header {
   display: flex;
   /* Center the two-line label and chevron as one control. */
@@ -2119,6 +2143,33 @@ a.destination-photo-credit:focus-visible {
     flex-direction: column;
     padding: 0.65rem 0.85rem;
     transition: padding 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .planner-organise-toggle,
+  .planner-organise-header {
+    width: 100%;
+  }
+
+  /* Folded, the title sits in the middle of the card. The chevron keeps the
+     right column, with a matching empty column on the left so the two-line
+     label stays optically centered instead of hugging the start edge. */
+  .planner-organise-panel.is-collapsed .planner-organise-header {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
+    align-items: center;
+    gap: 0;
+    text-align: center;
+  }
+
+  .planner-organise-panel.is-collapsed .planner-organise-heading {
+    grid-column: 2;
+    justify-items: center;
+  }
+
+  .planner-organise-panel.is-collapsed .planner-organise-chevron {
+    grid-column: 3;
+    justify-self: end;
+    margin-top: 0;
   }
 
   .planner-organise-panel.is-collapsed {
@@ -2328,6 +2379,15 @@ a.destination-photo-credit:focus-visible {
     font-size: 0.78rem;
   }
 
+  .destination-review-footer-copy,
+  .destination-review-footer-actions {
+    width: 100%;
+  }
+
+  .destination-review-footer-actions {
+    justify-content: stretch;
+  }
+
   .destination-review-footer .pill-btn,
   .destination-built-actions .pill-btn {
     width: 100%;
@@ -2349,6 +2409,11 @@ a.destination-photo-credit:focus-visible {
 
   .destination-review-summary {
     justify-items: stretch;
+  }
+
+  .destination-review-summary-toolbar {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .destination-selection-count span {

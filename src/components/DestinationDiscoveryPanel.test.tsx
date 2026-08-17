@@ -342,6 +342,37 @@ describe('DestinationDiscoveryPanel intelligence request lifecycle', () => {
     expect(screen.getByRole('button', { name: 'Close place review' })).toBeInTheDocument();
   });
 
+  it('lets a desktop reviewer close an accidental Start without applying', async () => {
+    const panel = await startReview();
+    await resolveEmpty(0);
+
+    expect(screen.getByRole('heading', { name: /Choose what belongs/ })).toBeInTheDocument();
+    const itineraryWritesBeforeClose = panel.onItineraryChange.mock.calls.length;
+    const closeButtons = screen.getAllByRole('button', { name: 'Close place review' });
+    expect(closeButtons.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(closeButtons[0]);
+
+    await waitForStart();
+    expect(screen.getByRole('heading', { name: /Build (your|a) / })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Choose what belongs/ })).not.toBeInTheDocument();
+    expect(panel.onItineraryChange.mock.calls.length).toBe(itineraryWritesBeforeClose);
+  });
+
+  it('lets a mobile reviewer close an accidental Start without applying', async () => {
+    forceMobileReview();
+    const panel = await startReview();
+    await resolveEmpty(0);
+
+    expect(screen.getByRole('heading', { name: /Choose places for / })).toBeInTheDocument();
+    const itineraryWritesBeforeClose = panel.onItineraryChange.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Close place review' }));
+
+    await waitForStart();
+    expect(screen.getByRole('heading', { name: /Build (your|a) / })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Choose places for / })).not.toBeInTheDocument();
+    expect(panel.onItineraryChange.mock.calls.length).toBe(itineraryWritesBeforeClose);
+  });
+
   it('keeps non-model trip edits on the existing key, while styles and pace issue new requests', async () => {
     const panel = await startReview();
     const base = profileFor();
