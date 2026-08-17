@@ -46,10 +46,9 @@ const kuromon = place('discovered-osm-n2', 'Kuromon Ichiba Market', [34.6653, 13
 const mint = place('discovered-osm-n3', 'Mint Museum', [34.6947, 135.5197]);
 
 /**
- * A flight the planner has no authority over, and must never touch. Early
- * enough to clear the day's usable window — `buildPlanningMaterial` excludes
- * flights from its material, so the engine cannot schedule around one, and a
- * collision is caught at validation rather than written.
+ * A flight the planner has no authority over, and must never touch.
+ * Timed flights are hard scheduling constraints; Apply still copies this
+ * object through byte-for-byte.
  */
 const flight = {
   id: 'flight-out',
@@ -270,9 +269,7 @@ describe('applying a proposal to an itinerary', () => {
     expect(validation.warnings.length).toBeGreaterThan(0);
   });
 
-  it('blocks a write where a preserved activity collides with a scheduled place', async () => {
-    // The planner never sees flights, so it cannot plan around one. Refusing is
-    // the only safe answer: the alternative is writing a double-booked morning.
+  it('does not write sightseeing on top of a preserved flight', async () => {
     const lateFlight = trip({
       days: [
         { day: 1, date: '2026-08-17', city: 'Osaka', title: 'Day one', activities: [glico, kuromon] },
@@ -286,10 +283,24 @@ describe('applying a proposal to an itinerary', () => {
       ],
     });
     const proposal = await propose(lateFlight);
-    const validation = validateStagedChange(proposal, applyProposalToItinerary(lateFlight, proposal));
+    const applied = applyProposalToItinerary(lateFlight, proposal);
+    const dayTwo = (applied.itinerary.days as Array<{ day: number; activities: Array<Record<string, unknown>> }>)
+      .find((day) => day.day === 2);
+    const preserved = dayTwo?.activities.find((activity) => activity.id === 'flight-out');
+    const overlap = (dayTwo?.activities ?? []).filter((activity) => {
+      if (activity.id === 'flight-out' || typeof activity.time !== 'string') return false;
+      const start = Number(activity.time.slice(0, 2)) * 60 + Number(activity.time.slice(3, 5));
+      const end = start + (typeof activity.durationMinutes === 'number' ? activity.durationMinutes : 0);
+      return start < 11 * 60 && end > 8 * 60;
+    });
 
-    expect(validation.ok).toBe(false);
-    expect(validation.blocking.join(' ')).toMatch(/overlap/i);
+    expect(preserved).toEqual({ ...flight, time: '08:00', durationMinutes: 180 });
+    expect(overlap).toEqual([]);
+    expect(proposal.days[1]?.items.some((item) => {
+      const start = Number(item.startTime.slice(0, 2)) * 60 + Number(item.startTime.slice(3, 5));
+      const end = Number(item.endTime.slice(0, 2)) * 60 + Number(item.endTime.slice(3, 5));
+      return start < 11 * 60 && end > 8 * 60;
+    })).toBe(false);
   });
 
   it('blocks a resulting itinerary whose activities overlap', async () => {

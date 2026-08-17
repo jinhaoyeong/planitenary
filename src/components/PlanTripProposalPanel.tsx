@@ -514,6 +514,9 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                               <div>
                                 <h4 id={`proposal-day-${day.day}`} className="font-display text-2xl">Day {day.day} · {day.city}</h4>
                                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{day.date || 'Date not set'} · usable {day.startTime}–{day.endTime}</p>
+                                {day.warnings.map((warning) => (
+                                  <p key={warning} className="mt-1 text-xs text-slate-500 dark:text-slate-400">{warning}</p>
+                                ))}
                               </div>
                               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{day.metrics.freeMinutes} min open</span>
                             </div>

@@ -50,6 +50,32 @@ export interface PlanningPlace {
   reservation: boolean;
 }
 
+export type FixedTransportRole = 'arrival' | 'departure' | 'transfer';
+export type FixedTransportKind = 'flight' | 'transport';
+
+/**
+ * A timed flight or user-entered transport already on the itinerary.
+ *
+ * These are facts, not planner output. The model may see them as available
+ * windows; it may not move, invent, or delete them.
+ */
+export interface PlanningFixedEvent {
+  id: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  role: FixedTransportRole;
+  transportKind: FixedTransportKind;
+  coordinates?: [number, number];
+}
+
+/** One usable sightseeing interval on a day, after fixed transport is reserved. */
+export interface PlanningDayWindow {
+  startTime: string;
+  endTime: string;
+  city: string;
+}
+
 export interface PlanningDayMaterial {
   day: number;
   date?: string;
@@ -59,6 +85,10 @@ export interface PlanningDayMaterial {
   maxMainActivities: number;
   fixedPlaceIds: string[];
   note?: string;
+  /** Present only when the itinerary already contains timed fixed transport. */
+  fixedEvents?: PlanningFixedEvent[];
+  /** Present only when fixed transport splits or tightens the day. */
+  windows?: PlanningDayWindow[];
 }
 
 export interface PlanningMaterial {
@@ -229,8 +259,16 @@ export interface ProposalEngineDeps {
 const MAX_PLACES = 25;
 const MAX_DAYS = 21;
 export const MAX_REPAIR_ITERATIONS = 2;
-const ARRIVAL_SETTLING_MINUTES = 120;
-const DEPARTURE_LEAD_MINUTES = 210;
+/**
+ * Getting out of an airport and to somewhere the day can start.
+ * Shared with `destinationPlanner` trip-edge shaping — not a new guess.
+ */
+export const ARRIVAL_SETTLING_MINUTES = 120;
+/**
+ * Leaving for the airport: check-in, security, and not running for it.
+ * Shared with `destinationPlanner` trip-edge shaping — not a new guess.
+ */
+export const DEPARTURE_LEAD_MINUTES = 210;
 
 const PACE_RULES: Record<ProposalPace, {
   start: string;
@@ -438,6 +476,243 @@ export const isPlannerPlace = (activity: Record<string, unknown>, day?: number):
   && !PLANNER_EXCLUDED_KINDS.includes(text(activity.kind, 40) ?? '')
   && text(activity.type, 60) !== 'flight';
 
+interface RawFixedTransport {
+  id: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  start: number;
+  end: number;
+  transportKind: FixedTransportKind;
+  coordinates?: [number, number];
+}
+
+/**
+ * Timed flights and user-entered transport already on a day.
+ *
+ * Untimed rows are ignored: inventing a duration would be the one thing this
+ * feature must not do. Same-day clamp only — an overnight block is reserved
+ * through end-of-day rather than guessed into tomorrow.
+ */
+const extractFixedTransport = (activity: Record<string, unknown>, dayNumber: number): RawFixedTransport | undefined => {
+  const type = text(activity.type, 60);
+  const kind = text(activity.kind, 40);
+  if (type !== 'flight' && kind !== 'transport') return undefined;
+  const startTime = text(activity.time, 5);
+  const start = clockToMinutes(startTime);
+  const duration = number(activity.durationMinutes);
+  if (start === undefined || duration === undefined || duration <= 0) return undefined;
+  const end = Math.min(1439, start + duration);
+  if (end <= start) return undefined;
+  const name = text(activity.name, 160) ?? (type === 'flight' ? 'Flight' : 'Transport');
+  const id = text(activity.id, 120) ?? `${dayNumber}:fixed:${name.toLowerCase()}`;
+  return {
+    id,
+    name,
+    startTime: startTime!,
+    endTime: minutesToClock(end),
+    start,
+    end,
+    transportKind: type === 'flight' ? 'flight' : 'transport',
+    coordinates: coordinates(activity.coordinates),
+  };
+};
+
+const formatTravellerClock = (value: string): string => {
+  const minutes = clockToMinutes(value);
+  if (minutes === undefined) return value;
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return minute === 0 ? `${twelve}:00 ${period}` : `${twelve}:${String(minute).padStart(2, '0')} ${period}`;
+};
+
+const classifyFixedTransport = (
+  indexInDay: number,
+  eventsOnDay: number,
+  dayIndex: number,
+  dayCount: number,
+  city: string,
+  prevCity?: string,
+  nextCity?: string,
+): FixedTransportRole => {
+  const isEarliest = indexInDay === 0;
+  const isLatest = indexInDay === eventsOnDay - 1;
+  const alreadyHere = Boolean(prevCity && prevCity === city);
+  const cityChangedFromPrev = Boolean(prevCity && prevCity !== city);
+  const cityChangesNext = Boolean(nextCity && nextCity !== city);
+  const inbound = isEarliest && !alreadyHere && (dayIndex === 0 || cityChangedFromPrev);
+  // A one-day trip is an arrival, never a trip-edge departure — same rule as
+  // `shapeTripEdge`. Last-day departures only exist when there is a later
+  // day to have come from, or the next day's city says the traveller is leaving.
+  const outbound = isLatest && ((dayCount > 1 && dayIndex === dayCount - 1) || cityChangesNext);
+  if (inbound && outbound) return 'transfer';
+  if (inbound) return 'arrival';
+  if (outbound) return 'departure';
+  return 'transfer';
+};
+
+const subtractIntervals = (
+  span: { start: number; end: number },
+  holes: Array<{ start: number; end: number }>,
+): Array<{ start: number; end: number }> => {
+  let parts = span.end > span.start ? [span] : [];
+  for (const hole of holes) {
+    parts = parts.flatMap((part) => {
+      if (hole.end <= part.start || hole.start >= part.end) return [part];
+      const next: Array<{ start: number; end: number }> = [];
+      if (hole.start > part.start) next.push({ start: part.start, end: Math.min(hole.start, part.end) });
+      if (hole.end < part.end) next.push({ start: Math.max(hole.end, part.start), end: part.end });
+      return next.filter((entry) => entry.end > entry.start);
+    });
+  }
+  return parts;
+};
+
+const constrainDayAroundFixedTransport = (
+  day: PlanningDayMaterial,
+  rawEvents: RawFixedTransport[],
+  context: { dayIndex: number; dayCount: number; prevCity?: string; nextCity?: string },
+): PlanningDayMaterial => {
+  if (rawEvents.length === 0) return day;
+  const sorted = [...rawEvents].sort((left, right) => left.start - right.start || left.end - right.end);
+  const fixedEvents: PlanningFixedEvent[] = sorted.map((event, index) => ({
+    id: event.id,
+    name: event.name,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    role: classifyFixedTransport(
+      index,
+      sorted.length,
+      context.dayIndex,
+      context.dayCount,
+      day.city,
+      context.prevCity,
+      context.nextCity,
+    ),
+    transportKind: event.transportKind,
+    coordinates: event.coordinates,
+  }));
+
+  let start = clockToMinutes(day.startTime) ?? 0;
+  let end = clockToMinutes(day.endTime) ?? 1439;
+  const notes = day.note ? [day.note] : [];
+  const holes: Array<{ start: number; end: number }> = [];
+  let lastOutboundEnd: number | undefined;
+
+  for (const event of fixedEvents) {
+    const eventStart = clockToMinutes(event.startTime)!;
+    const eventEnd = clockToMinutes(event.endTime)!;
+    const flight = event.transportKind === 'flight';
+    const settling = flight ? ARRIVAL_SETTLING_MINUTES : 0;
+    const lead = flight ? DEPARTURE_LEAD_MINUTES : 0;
+    if (event.role === 'arrival') {
+      holes.push({ start: 0, end: eventEnd + settling });
+      start = Math.max(start, eventEnd + settling);
+      notes.push(`Arrival at ${formatTravellerClock(event.endTime)} — activities planned afterward.`);
+    } else if (event.role === 'departure') {
+      const unconstrainedStart = clockToMinutes(day.startTime) ?? 0;
+      // A takeoff already before the sightseeing day only reserves its interval.
+      // An 18:00 departure still ends the day after the existing airport lead.
+      if (eventStart >= unconstrainedStart) {
+        holes.push({ start: Math.max(0, eventStart - lead), end: 1440 });
+        end = Math.min(end, eventStart - lead);
+        notes.push(`Activities finish before the ${formatTravellerClock(event.startTime)} departure.`);
+      } else {
+        holes.push({ start: eventStart, end: eventEnd });
+      }
+    } else {
+      holes.push({
+        start: Math.max(0, eventStart - lead),
+        end: eventEnd + settling,
+      });
+    }
+    if (event.role === 'transfer' || event.role === 'departure') lastOutboundEnd = eventEnd + settling;
+  }
+
+  const span = { start, end };
+  const parts = subtractIntervals(span, holes);
+  const windows: PlanningDayWindow[] = parts.map((part) => ({
+    startTime: minutesToClock(part.start),
+    endTime: minutesToClock(part.end),
+    city: lastOutboundEnd !== undefined && context.nextCity && part.start >= lastOutboundEnd
+      ? context.nextCity
+      : day.city,
+  }));
+
+  let maxMainActivities = day.maxMainActivities;
+  let startTime = minutesToClock(Math.max(0, start));
+  let endTime = minutesToClock(Math.max(0, end));
+  if (windows.length === 0 || windows.every((window) => {
+    const width = (clockToMinutes(window.endTime) ?? 0) - (clockToMinutes(window.startTime) ?? 0);
+    return width < 15;
+  })) {
+    maxMainActivities = 0;
+    startTime = minutesToClock(Math.max(0, start));
+    endTime = minutesToClock(Math.max(0, Math.min(start, end)));
+    notes.push('This day has no usable planning window around fixed transport.');
+  } else if (fixedEvents.some((event) => event.role === 'arrival') && start >= 17 * 60) {
+    maxMainActivities = 0;
+  }
+
+  return {
+    ...day,
+    startTime,
+    endTime,
+    maxMainActivities,
+    note: notes.filter((entry, index, all) => all.indexOf(entry) === index).join(' '),
+    fixedEvents,
+    windows,
+  };
+};
+
+const dayWindowsOf = (day: PlanningDayMaterial): PlanningDayWindow[] =>
+  day.windows && day.windows.length > 0
+    ? day.windows
+    : [{ startTime: day.startTime, endTime: day.endTime, city: day.city }];
+
+const citiesOnDay = (day: PlanningDayMaterial): Set<string> =>
+  new Set([day.city, ...dayWindowsOf(day).map((window) => window.city)]);
+
+const overlappingFixedEvent = (
+  events: PlanningFixedEvent[] | undefined,
+  start: number,
+  end: number,
+): PlanningFixedEvent | undefined =>
+  events?.find((event) => {
+    const eventStart = clockToMinutes(event.startTime);
+    const eventEnd = clockToMinutes(event.endTime);
+    return eventStart !== undefined && eventEnd !== undefined && start < eventEnd && end > eventStart;
+  });
+
+const nextFeasibleStart = (
+  day: PlanningDayMaterial,
+  placeCity: string,
+  earliest: number,
+  duration: number,
+): number | undefined => {
+  const windows = dayWindowsOf(day);
+  const mixedCities = windows.some((window) => window.city !== day.city);
+  const blocks = [...(day.fixedEvents ?? [])].sort((left, right) =>
+    (clockToMinutes(left.startTime) ?? 0) - (clockToMinutes(right.startTime) ?? 0));
+  for (const window of windows) {
+    if (mixedCities && window.city !== placeCity) continue;
+    const windowStart = clockToMinutes(window.startTime);
+    const windowEnd = clockToMinutes(window.endTime);
+    if (windowStart === undefined || windowEnd === undefined) continue;
+    let start = Math.max(earliest, windowStart);
+    for (const block of blocks) {
+      const blockStart = clockToMinutes(block.startTime);
+      const blockEnd = clockToMinutes(block.endTime);
+      if (blockStart === undefined || blockEnd === undefined) continue;
+      if (start < blockEnd && start + duration > blockStart) start = blockEnd;
+    }
+    if (start >= windowStart && start + duration <= windowEnd) return start;
+  }
+  return undefined;
+};
+
 export interface PlannerActivityRef {
   placeId: string;
   activity: Record<string, unknown>;
@@ -581,20 +856,25 @@ export async function buildPlanningMaterial(
     return activity ? [activity] : [];
   }));
 
-  const days = rawDays.map((raw, index): PlanningDayMaterial => {
+  const fixedByDay: RawFixedTransport[][] = [];
+  const draftDays = rawDays.map((raw, index): PlanningDayMaterial => {
     const day = asRecord(raw) ?? {};
     const dayNumber = Number.isInteger(day.day) ? Number(day.day) : index + 1;
     const city = text(day.city, 120) ?? text(asArray(profile?.destinations)[0] && asRecord(asArray(profile?.destinations)[0])?.city, 120) ?? 'Destination';
     const fixedPlaceIds: string[] = [];
+    const events: RawFixedTransport[] = [];
     for (const rawActivity of asArray(day.activities)) {
       const activity = asRecord(rawActivity);
       if (!activity) continue;
+      const fixed = extractFixedTransport(activity, dayNumber);
+      if (fixed) events.push(fixed);
       const place = activityPlace(activity, { day: dayNumber, city, decisions, mustDo, safeLegacyKeys });
       if (!place || seen.has(place.id)) continue;
       seen.add(place.id);
       candidatePlaces.push(place);
       if (place.locked) fixedPlaceIds.push(place.id);
     }
+    fixedByDay.push(events);
     let startTime = text(constraints?.preferredStartTime, 5) ?? rules.start;
     let endTime = text(constraints?.preferredEndTime, 5) ?? rules.end;
     let maxMainActivities = Math.max(1, Math.min(6, Math.round(number(constraints?.maxMainActivitiesPerDay) ?? rules.maxMain)));
@@ -621,6 +901,12 @@ export async function buildPlanningMaterial(
       note,
     };
   });
+  const days = draftDays.map((draft, index) => constrainDayAroundFixedTransport(draft, fixedByDay[index] ?? [], {
+    dayIndex: index,
+    dayCount: draftDays.length,
+    prevCity: draftDays[index - 1]?.city,
+    nextCity: draftDays[index + 1]?.city,
+  }));
 
   for (const raw of asArray(itinerary.unassignedActivities)) {
     const activity = asRecord(raw);
@@ -748,7 +1034,7 @@ export function defaultComposition(material: PlanningMaterial): ModelItineraryCo
         || left.name.localeCompare(right.name);
     });
   for (const place of sorted) {
-    const day = material.days.find((candidate) => candidate.city === place.city
+    const day = material.days.find((candidate) => citiesOnDay(candidate).has(place.city)
       && (assignments.find((entry) => entry.day === candidate.day)?.placeIds.length ?? 0) < (capacity.get(candidate.day) ?? 0))
       ?? material.days.find((candidate) =>
         (assignments.find((entry) => entry.day === candidate.day)?.placeIds.length ?? 0) < (capacity.get(candidate.day) ?? 0));
@@ -826,44 +1112,73 @@ function composeSchedule(
 
     const movableCount = ordered.filter((place) => !place.locked).length;
     if (movableCount > day.maxMainActivities) {
-      const edgeCode = day.day === material.days[0]?.day && material.arrivalTime
+      const edgeCode = (day.fixedEvents ?? []).some((event) => event.role === 'arrival') || (day.day === material.days[0]?.day && material.arrivalTime)
         ? 'arrival-day-infeasible'
-        : day.day === material.days[material.days.length - 1]?.day && material.departureTime
+        : (day.fixedEvents ?? []).some((event) => event.role === 'departure') || (day.day === material.days[material.days.length - 1]?.day && material.departureTime)
           ? 'departure-day-infeasible'
           : 'day-window-exceeded';
       conflicts.push({
         code: edgeCode,
         severity: 'error',
         day: day.day,
-        message: `Day ${day.day} allows ${day.maxMainActivities} movable ${day.maxMainActivities === 1 ? 'place' : 'places'} at this pace, but ${movableCount} were proposed.`,
+        message: day.maxMainActivities === 0 && (day.fixedEvents?.length ?? 0) > 0
+          ? `Day ${day.day} has no usable planning window around fixed transport.`
+          : `Day ${day.day} allows ${day.maxMainActivities} movable ${day.maxMainActivities === 1 ? 'place' : 'places'} at this pace, but ${movableCount} were proposed.`,
       });
     }
 
     const dayStart = clockToMinutes(day.startTime) ?? clockToMinutes(rules.start)!;
     const dayEnd = clockToMinutes(day.endTime) ?? clockToMinutes(rules.end)!;
+    const inboundEvent = (day.fixedEvents ?? []).find((event) => event.role === 'arrival');
+    const outboundEvent = (day.fixedEvents ?? []).find((event) => event.role === 'departure');
+    const asAnchor = (event: PlanningFixedEvent): PlanningPlace => ({
+      id: event.id,
+      name: event.name,
+      city: day.city,
+      cluster: day.city,
+      categories: [event.transportKind],
+      priority: 'locked',
+      durationRangeMinutes: [1, 1],
+      openingHours: [],
+      sourceUrls: [],
+      locked: true,
+      reservation: false,
+      coordinates: event.coordinates,
+    });
     let clock = dayStart;
-    let previous: PlanningPlace | undefined;
+    let previous: PlanningPlace | undefined = inboundEvent?.coordinates ? asAnchor(inboundEvent) : undefined;
     let lunchAdded = false;
     const items: ProposedItineraryItem[] = [];
+    const hasFixedTransport = (day.fixedEvents?.length ?? 0) > 0;
 
     for (const place of ordered) {
       if (scheduled.has(place.id)) {
         conflicts.push({ code: 'duplicate-place', severity: 'error', day: day.day, placeId: place.id, message: `${place.name} is already assigned to another day.` });
         continue;
       }
-      const leg = previous ? routes.get(routeKey(previous.id, place.id)) : undefined;
-      const travelMinutes = previous && leg?.status === 'ok' && typeof leg.durationMinutes === 'number'
+      if (hasFixedTransport && !place.locked && day.maxMainActivities === 0) {
+        continue;
+      }
+      const duration = durationFor(place, material.pace);
+      const inboundAnchor = !previous && inboundEvent?.coordinates ? asAnchor(inboundEvent) : undefined;
+      let from = previous ?? inboundAnchor;
+      const fromAirport = Boolean(from && inboundEvent && from.id === inboundEvent.id);
+      let leg = from ? routes.get(routeKey(from.id, place.id)) : undefined;
+      let travelMinutes = from && leg?.status === 'ok' && typeof leg.durationMinutes === 'number'
         ? Math.max(0, Math.round(leg.durationMinutes))
         : 0;
-      const buffer = previous ? rules.buffer : 0;
-      if (previous && (!leg || leg.status !== 'ok' || typeof leg.durationMinutes !== 'number')) {
+      let buffer = from && !fromAirport ? rules.buffer : 0;
+      if (from && (!leg || leg.status !== 'ok' || typeof leg.durationMinutes !== 'number')) {
         conflicts.push({
-          code: 'route-unavailable', severity: 'warning', day: day.day, placeId: place.id, relatedPlaceId: previous.id,
-          message: `No provider route was available from ${previous.name} to ${place.name}; no travel duration was invented.`,
+          code: 'route-unavailable', severity: 'warning', day: day.day, placeId: place.id, relatedPlaceId: from.id,
+          message: `No provider route was available from ${from.name} to ${place.name}; no travel duration was invented.`,
         });
       }
-      let arrival = clock + travelMinutes;
-      let start = arrival + buffer;
+      const inboundEnd = inboundEvent ? clockToMinutes(inboundEvent.endTime) : undefined;
+      let arrival = fromAirport && inboundEnd !== undefined
+        ? Math.max(clock, inboundEnd + travelMinutes)
+        : clock + travelMinutes;
+      let start = fromAirport ? Math.max(arrival, clock) : arrival + buffer;
       const fixedStart = clockToMinutes(place.fixedStartTime);
       if (fixedStart !== undefined) {
         if (start > fixedStart) {
@@ -878,17 +1193,19 @@ function composeSchedule(
 
       if (!lunchAdded && start >= 12 * 60 + 30 && start <= 14 * 60 + 30) {
         const meal = makeMeal(day.day, Math.max(clock, 12 * 60 + 30), rules.mealMinutes);
-        if ((clockToMinutes(meal.endTime) ?? dayEnd + 1) <= dayEnd) {
+        const mealStart = clockToMinutes(meal.startTime)!;
+        const mealEnd = clockToMinutes(meal.endTime)!;
+        if (mealEnd <= dayEnd && !overlappingFixedEvent(day.fixedEvents, mealStart, mealEnd)) {
           items.push(meal);
-          clock = clockToMinutes(meal.endTime)!;
+          clock = mealEnd;
+          previous = undefined;
           arrival = clock + travelMinutes;
-          start = arrival + buffer;
+          start = fromAirport ? Math.max(arrival, clock) : arrival + buffer;
           if (fixedStart !== undefined) start = fixedStart;
         }
         lunchAdded = true;
       }
 
-      const duration = durationFor(place, material.pace);
       const hours = hoursForDate(place, day.date);
       const warnings: string[] = [];
       if (place.openingHours.length === 0) {
@@ -913,20 +1230,101 @@ function composeSchedule(
           });
         }
       }
-      const end = start + duration;
+      let end = start + duration;
+      if (hasFixedTransport) {
+        const crossed = (day.fixedEvents ?? []).find((event) => {
+          const eventStart = clockToMinutes(event.startTime);
+          const eventEnd = clockToMinutes(event.endTime);
+          return eventStart !== undefined && eventEnd !== undefined && clock <= eventStart && start >= eventEnd;
+        });
+        if (crossed) {
+          previous = crossed.coordinates ? asAnchor(crossed) : undefined;
+          from = previous;
+          leg = from ? routes.get(routeKey(from.id, place.id)) : undefined;
+          travelMinutes = from && leg?.status === 'ok' && typeof leg.durationMinutes === 'number'
+            ? Math.max(0, Math.round(leg.durationMinutes))
+            : 0;
+          buffer = from ? rules.buffer : 0;
+        }
+        const feasible = nextFeasibleStart(day, place.city, start, duration);
+        if (feasible === undefined || overlappingFixedEvent(day.fixedEvents, feasible, feasible + duration)) {
+          const blocked = overlappingFixedEvent(day.fixedEvents, start, end);
+          const departure = outboundEvent || blocked?.role === 'departure' || blocked?.role === 'transfer';
+          const arrivalBlock = inboundEvent || blocked?.role === 'arrival';
+          const code: ProposalConflictCode = blocked
+            ? 'activity-overlap'
+            : departure
+              ? 'departure-day-infeasible'
+              : arrivalBlock
+                ? 'arrival-day-infeasible'
+                : 'day-window-exceeded';
+          const message = blocked
+            ? `${place.name} overlaps ${blocked.name}.`
+            : departure
+              ? `${place.name} could not fit before your departure.`
+              : arrivalBlock
+                ? `${place.name} starts before you arrive.`
+                : `${place.name} does not fit around fixed transport on Day ${day.day}.`;
+          if (place.priority === 'must-do' || place.locked) {
+            conflicts.push({ code, severity: 'error', day: day.day, placeId: place.id, message });
+          } else if (blocked) {
+            conflicts.push({ code, severity: 'error', day: day.day, placeId: place.id, message });
+          }
+          continue;
+        }
+        if (feasible > start) {
+          start = feasible;
+          arrival = Math.min(arrival, start);
+          end = start + duration;
+        }
+        if (outboundEvent?.coordinates && place.coordinates) {
+          const toAirport = routes.get(routeKey(place.id, outboundEvent.id));
+          const takeoff = clockToMinutes(outboundEvent.startTime);
+          if (toAirport?.status === 'ok' && typeof toAirport.durationMinutes === 'number' && takeoff !== undefined) {
+            const lead = outboundEvent.transportKind === 'flight' ? DEPARTURE_LEAD_MINUTES : 0;
+            const latest = takeoff - Math.max(lead, toAirport.durationMinutes + rules.buffer);
+            if (end > latest) {
+              conflicts.push({
+                code: 'departure-day-infeasible',
+                severity: 'error',
+                day: day.day,
+                placeId: place.id,
+                message: `${place.name} could not fit before your departure.`,
+              });
+              continue;
+            }
+          } else if (!toAirport || toAirport.status !== 'ok' || typeof toAirport.durationMinutes !== 'number') {
+            conflicts.push({
+              code: 'route-unavailable',
+              severity: 'warning',
+              day: day.day,
+              placeId: place.id,
+              relatedPlaceId: outboundEvent.id,
+              message: `No provider route was available from ${place.name} to ${outboundEvent.name}; no travel duration was invented.`,
+            });
+          }
+        }
+      }
       if (end > dayEnd) {
         conflicts.push({
-          code: day.day === material.days[material.days.length - 1]?.day && material.departureTime
+          code: outboundEvent || (day.day === material.days[material.days.length - 1]?.day && material.departureTime)
             ? 'departure-day-infeasible' : 'day-window-exceeded',
           severity: 'error', day: day.day, placeId: place.id,
-          message: `${place.name} would end at ${minutesToClock(end)}, after Day ${day.day}'s ${day.endTime} limit.`,
+          message: outboundEvent
+            ? `${place.name} could not fit before your departure.`
+            : `${place.name} would end at ${minutesToClock(end)}, after Day ${day.day}'s ${day.endTime} limit.`,
         });
+        if (hasFixedTransport) continue;
       }
-      if (day.day === material.days[0]?.day && material.arrivalTime && start < dayStart) {
+      if ((day.day === material.days[0]?.day && material.arrivalTime && start < dayStart)
+        || (inboundEvent && start < dayStart)) {
         conflicts.push({
           code: 'arrival-day-infeasible', severity: 'error', day: day.day, placeId: place.id,
-          message: `${place.name} starts before the arrival-day buffer ends.`,
+          message: inboundEvent
+            ? `${place.name} starts before you arrive.`
+            : `${place.name} starts before the arrival-day buffer ends.`,
         });
+        if (hasFixedTransport) continue;
       }
 
       items.push({
@@ -938,9 +1336,9 @@ function composeSchedule(
         startTime: minutesToClock(start),
         endTime: minutesToClock(end),
         visitDurationMinutes: duration,
-        travelFromPrevious: previous ? {
-          fromPlaceId: previous.id,
-          fromName: previous.name,
+        travelFromPrevious: from ? {
+          fromPlaceId: from.id,
+          fromName: from.name,
           mode: leg?.mode ?? 'walking',
           requestedMode: leg?.requestedMode ?? leg?.mode ?? 'walking',
           providerMode: leg?.providerMode,
@@ -965,7 +1363,12 @@ function composeSchedule(
     }
 
     if (!lunchAdded && items.length > 1 && clock < dayEnd - rules.mealMinutes) {
-      items.push(makeMeal(day.day, Math.max(clock, 12 * 60 + 30), rules.mealMinutes));
+      const meal = makeMeal(day.day, Math.max(clock, 12 * 60 + 30), rules.mealMinutes);
+      const mealStart = clockToMinutes(meal.startTime)!;
+      const mealEnd = clockToMinutes(meal.endTime)!;
+      if (!overlappingFixedEvent(day.fixedEvents, mealStart, mealEnd) && mealEnd <= dayEnd) {
+        items.push(meal);
+      }
     }
     items.sort((left, right) => (clockToMinutes(left.startTime) ?? 0) - (clockToMinutes(right.startTime) ?? 0));
     const usedEnd = items.reduce((latest, item) => Math.max(latest, clockToMinutes(item.endTime) ?? latest), dayStart);
@@ -1001,10 +1404,24 @@ function composeSchedule(
   });
 
   for (const place of material.places.filter((candidate) => candidate.priority === 'must-do' || candidate.priority === 'locked')) {
-    if (!scheduled.has(place.id)) conflicts.push({
-      code: 'must-do-omitted', severity: 'error', placeId: place.id,
-      message: `${place.name} is ${place.locked ? 'locked' : 'Must do'} but does not fit in the proposal.`,
-    });
+    if (!scheduled.has(place.id)) {
+      const blockedDay = material.days.find((day) =>
+        (day.fixedEvents?.length ?? 0) > 0
+        && (citiesOnDay(day).has(place.city) || day.city === place.city));
+      const departure = blockedDay?.fixedEvents?.some((event) => event.role === 'departure' || event.role === 'transfer');
+      const arrival = blockedDay?.fixedEvents?.some((event) => event.role === 'arrival');
+      conflicts.push({
+        code: 'must-do-omitted',
+        severity: 'error',
+        placeId: place.id,
+        day: blockedDay?.day,
+        message: departure
+          ? `${place.name} could not fit before your departure.`
+          : arrival
+            ? `${place.name} starts before you arrive.`
+            : `${place.name} is ${place.locked ? 'locked' : 'Must do'} but does not fit in the proposal.`,
+      });
+    }
   }
   for (const place of material.excludedRequiredPlaces) conflicts.push({
     code: 'must-do-omitted',
@@ -1071,10 +1488,63 @@ export function validateItineraryProposal(
           message: `${item.name} is outside its verified opening window.`,
         });
       }
+      const blocked = overlappingFixedEvent(materialDay?.fixedEvents, start, end);
+      if (blocked) {
+        conflicts.push({
+          code: 'activity-overlap',
+          severity: 'error',
+          day: day.day,
+          placeId: item.placeId,
+          message: `${item.name} overlaps ${blocked.name}.`,
+        });
+      }
+      if (materialDay?.windows && materialDay.windows.length > 0 && item.type !== 'meal') {
+        const inside = materialDay.windows.some((window) => {
+          const windowStart = clockToMinutes(window.startTime);
+          const windowEnd = clockToMinutes(window.endTime);
+          return windowStart !== undefined && windowEnd !== undefined && start >= windowStart && end <= windowEnd;
+        });
+        if (!inside) {
+          const arrival = (materialDay.fixedEvents ?? []).some((event) => event.role === 'arrival');
+          const departure = (materialDay.fixedEvents ?? []).some((event) => event.role === 'departure');
+          conflicts.push({
+            code: arrival && startLimit !== undefined && start < startLimit
+              ? 'arrival-day-infeasible'
+              : departure
+                ? 'departure-day-infeasible'
+                : 'day-window-exceeded',
+            severity: 'error',
+            day: day.day,
+            placeId: item.placeId,
+            message: arrival && startLimit !== undefined && start < startLimit
+              ? `${item.name} starts before you arrive.`
+              : departure
+                ? `${item.name} could not fit before your departure.`
+                : `${item.name} does not fit around fixed transport on Day ${day.day}.`,
+          });
+        }
+      }
     });
   }
   for (const place of material.places.filter((candidate) => candidate.priority === 'must-do' || candidate.priority === 'locked')) {
-    if (!scheduled.has(place.id)) conflicts.push({ code: 'must-do-omitted', severity: 'error', placeId: place.id, message: `${place.name} is required but omitted.` });
+    if (!scheduled.has(place.id)) {
+      const blockedDay = material.days.find((day) =>
+        (day.fixedEvents?.length ?? 0) > 0
+        && (citiesOnDay(day).has(place.city) || day.city === place.city));
+      const departure = blockedDay?.fixedEvents?.some((event) => event.role === 'departure' || event.role === 'transfer');
+      const arrival = blockedDay?.fixedEvents?.some((event) => event.role === 'arrival');
+      conflicts.push({
+        code: 'must-do-omitted',
+        severity: 'error',
+        placeId: place.id,
+        day: blockedDay?.day,
+        message: departure
+          ? `${place.name} could not fit before your departure.`
+          : arrival
+            ? `${place.name} starts before you arrive.`
+            : `${place.name} is required but omitted.`,
+      });
+    }
   }
   for (const place of material.excludedRequiredPlaces) conflicts.push({
     code: 'must-do-omitted',
@@ -1109,7 +1579,10 @@ export async function runItineraryProposalEngine(
   for (let attempt = 0; attempt <= MAX_REPAIR_ITERATIONS; attempt += 1) {
     const raw = await deps.chooseComposition({ material, round: attempt + 1, conflicts, previous });
     const composition = parseModelComposition(raw, material) ?? defaultComposition(material);
-    const placeIds = [...new Set(composition.days.flatMap((day) => day.placeIds))];
+    const placeIds = [...new Set([
+      ...composition.days.flatMap((day) => day.placeIds),
+      ...material.days.flatMap((day) => (day.fixedEvents ?? []).flatMap((event) => event.coordinates ? [event.id] : [])),
+    ])];
     routeLegs = placeIds.length >= 2
       ? await deps.getRouteMatrix({ placeIds, mode: 'walking' })
       : [];
