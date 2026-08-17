@@ -1451,6 +1451,9 @@ function App() {
               <ItineraryView 
                 itinerary={customItinerary || activeItinerary} 
                 onItineraryChange={handleItineraryChange}
+                planChanges={!isDemoUser && !isLocalTestUser && user
+                  ? { tripId: activeItineraryId, tripName: displayItinerary.name }
+                  : undefined}
               />
             )}
             {activeTab === 'maps' && <Maps itinerary={customItinerary || activeItinerary} onItineraryChange={handleItineraryChange} />}

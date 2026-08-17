@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import { getPhotos, subscribeToPhotoChanges, syncAllPhotosFromRemote } from '../lib/photoStorage';
 import { PhotoGallery } from './PhotoGallery';
 import { PlannerPreview } from './PlannerPreview';
+import { ItineraryChangeHistoryPanel } from './ItineraryChangeHistoryPanel';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
 import { admissionChip } from '../lib/admissionCopy';
@@ -1100,9 +1101,10 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
   );
 };
 
-export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }: { 
+export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, planChanges }: {
   itinerary: Itinerary;
   onItineraryChange?: (itinerary: Itinerary) => void;
+  planChanges?: { tripId: string; tripName?: string };
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newActivity, setNewActivity] = useState<Partial<Activity>>({
@@ -1828,6 +1830,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange }
               {isEditingMode ? <Save className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
               {isEditingMode ? 'Done Customizing' : 'Customize Plan'}
             </button>
+
+            {planChanges && (
+              <ItineraryChangeHistoryPanel key={planChanges.tripId} tripId={planChanges.tripId} tripName={planChanges.tripName} />
+            )}
             
             {isEditingMode && (
               <button

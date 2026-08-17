@@ -1,8 +1,12 @@
-/** Client transport for the Phase 2B write boundary. */
+/** Client transport for the Phase 2B write boundary and its read-only history. */
 import { invokeTravelFunction } from './supabase';
 import { sanitizeItinerary } from './itinerarySanitize';
 import type { Itinerary } from '../data';
 import type { ItineraryChangeDiff } from '../../supabase/functions/_shared/itineraryChange';
+import {
+  presentHistoryRecord,
+  type ItineraryHistoryItem,
+} from '../../supabase/functions/_shared/itineraryChangeHistory';
 
 export type ChangeRefusalCode =
   | 'proposal-stale'
@@ -36,6 +40,12 @@ export type ApplyChangeResult =
 export type UndoChangeResult =
   | { ok: true; changeId: string; itinerary: Itinerary; alreadyUndone: boolean }
   | { ok: false; refusal: ChangeRefusalCode; detail: string };
+
+export type HistoryChangeResult =
+  | { ok: true; changes: ItineraryHistoryItem[] }
+  | { ok: false; refusal: ChangeRefusalCode; detail: string };
+
+export type { ItineraryHistoryItem };
 
 type Invoke = (name: string, body: unknown) => Promise<unknown>;
 
@@ -169,6 +179,48 @@ export async function undoItineraryChange(
       ok: false,
       refusal: 'unavailable',
       detail: error instanceof Error ? error.message : 'The itinerary writer is unavailable.',
+    };
+  }
+}
+
+/**
+ * Load the traveller-facing plan-change history for an owned trip.
+ *
+ * Identifiers only go out; snapshots and hashes never come back. Transport
+ * failures become a generic refusal so a database diagnostic cannot reach the UI.
+ */
+export async function listItineraryChangeHistory(
+  tripId: string,
+  invoke: Invoke = invokeTravelFunction,
+): Promise<HistoryChangeResult> {
+  if (!tripId) return { ok: false, refusal: 'trip-not-found', detail: 'A trip is required.' };
+  try {
+    const envelope = record(await invoke('itinerary-change', { operation: 'history', tripId }));
+    if (Array.isArray(envelope.changes) || envelope.operation === 'history') {
+      const changes = (Array.isArray(envelope.changes) ? envelope.changes : [])
+        .flatMap((entry) => {
+          const row = record(entry);
+          const item = presentHistoryRecord({
+            id: text(row.id, 80) ?? '',
+            status: text(row.status, 20) ?? '',
+            appliedAt: text(row.appliedAt, 60) ?? '',
+            undoneAt: text(row.undoneAt, 60) ?? null,
+            diff: row.diff,
+          });
+          return item ? [item] : [];
+        });
+      return { ok: true, changes };
+    }
+    return {
+      ok: false,
+      refusal: refusalOf(envelope.refusal),
+      detail: 'Plan changes could not be loaded.',
+    };
+  } catch {
+    return {
+      ok: false,
+      refusal: 'unavailable',
+      detail: 'Plan changes could not be loaded.',
     };
   }
 }

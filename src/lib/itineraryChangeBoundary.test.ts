@@ -799,7 +799,7 @@ describe('write boundary structure', () => {
   it('authenticates before it reads or writes anything', () => {
     const authenticated = handler.indexOf('authenticateRequest(request)');
     expect(authenticated).toBeGreaterThan(-1);
-    for (const call of ['serviceClient()', 'readOwnedTrip(', 'stageItineraryChange(', 'applyItineraryChange(', 'undoItineraryChange(']) {
+    for (const call of ['serviceClient()', 'readOwnedTrip(', 'listItineraryChangeHistory(', 'stageItineraryChange(', 'applyItineraryChange(', 'undoItineraryChange(']) {
       expect(handler.indexOf(call)).toBeGreaterThan(authenticated);
     }
   });
@@ -839,12 +839,25 @@ describe('write boundary structure', () => {
       'supabase/functions/itinerary-change/index.ts',
       'supabase/functions/_shared/itineraryChangeService.ts',
       'supabase/functions/_shared/itineraryChange.ts',
+      'supabase/functions/_shared/itineraryChangeHistory.ts',
     ];
     for (const file of files) {
       expect(codeOf(file)).not.toMatch(
         /reasoning|meteredModel|callModel|openai|OPENAI|reserveAiReasoningAttempt|ai_spend_ledger|SpendSession/,
       );
     }
+  });
+
+  it('reads history only after identity and ownership are proven', () => {
+    const history = handler.indexOf("operation === 'history'");
+    const owned = handler.indexOf('readOwnedTrip(', history);
+    const listed = handler.indexOf('listItineraryChangeHistory(', history);
+    expect(history).toBeGreaterThan(-1);
+    expect(owned).toBeGreaterThan(history);
+    expect(listed).toBeGreaterThan(owned);
+    expect(handler).toContain(".from('itinerary_change_history')");
+    expect(handler).toContain(".select('id, status, applied_at, undone_at, itinerary_change_proposals!inner(diff)')");
+    expect(handler).not.toMatch(/before_itinerary|after_itinerary|before_hash|after_hash/);
   });
 
   it('never marks a proposal cache row as authorisation to write', () => {

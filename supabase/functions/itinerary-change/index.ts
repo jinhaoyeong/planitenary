@@ -7,7 +7,7 @@
  * transaction. Keeping them apart is what lets this file state, and mean, that
  * **no model is invoked here**: there is no reasoning import, no provider
  * client, no quota reservation and no spend ledger call anywhere in the module
- * graph below `stage`, `apply` and `undo`.
+ * graph below `stage`, `apply`, `undo` and `history`.
  *
  * ## The order, which is the security model
  *
@@ -18,7 +18,8 @@
  *
  * A trip id, a proposal id, or a change id. Never itinerary content, never a
  * patch, never a proposal body. The result of an apply was fixed when it was
- * staged, and is stored server-side; the confirmation only names it.
+ * staged, and is stored server-side; the confirmation only names it. History
+ * is a read of already-persisted rows for that owned trip.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { json, preflight } from '../_shared/providers.ts';
@@ -36,6 +37,12 @@ import {
   type UndoOutcome,
 } from '../_shared/itineraryChangeService.ts';
 import type { ChangeRefusal } from '../_shared/itineraryChange.ts';
+import {
+  historyRecordFromAuthorityRow,
+  listItineraryChangeHistory,
+  type HistoryDeps,
+  type HistoryRecord,
+} from '../_shared/itineraryChangeHistory.ts';
 
 /**
  * The entire request surface. Every field is an identifier — a trip, a plan, a
@@ -174,6 +181,28 @@ const changeDeps = (client: SupabaseClient): ChangeDeps => ({
   now: () => Date.now(),
 });
 
+/**
+ * Service-role read of history metadata + the staged proposal diff.
+ *
+ * Snapshots and hashes stay in the database. The join is inner because every
+ * history row is bound to a proposal; a missing proposal would have cascaded.
+ */
+const historyDeps = (client: SupabaseClient): HistoryDeps => ({
+  async readHistory(tripId, userId, limit): Promise<HistoryRecord[] | null> {
+    const { data, error } = await client
+      .from('itinerary_change_history')
+      .select('id, status, applied_at, undone_at, itinerary_change_proposals!inner(diff)')
+      .eq('trip_id', tripId)
+      .eq('user_id', userId)
+      .order('applied_at', { ascending: false })
+      .limit(limit);
+    if (error) return null;
+    return (Array.isArray(data) ? data : [])
+      .map(historyRecordFromAuthorityRow)
+      .filter((entry): entry is HistoryRecord => entry !== null);
+  },
+});
+
 Deno.serve(async (request) => {
   const early = preflight(request);
   if (early) return early;
@@ -187,12 +216,37 @@ Deno.serve(async (request) => {
 
   const body = (await request.json().catch(() => ({}))) as ChangeBody;
   const operation = text(body.operation, 20);
-  if (operation !== 'stage' && operation !== 'apply' && operation !== 'undo') {
-    return json({ error: 'Unknown operation. Allowed: stage, apply, undo.' }, 400);
+  if (operation !== 'stage' && operation !== 'apply' && operation !== 'undo' && operation !== 'history') {
+    return json({ error: 'Unknown operation. Allowed: stage, apply, undo, history.' }, 400);
   }
 
   const client = serviceClient();
   if (!client) return json({ error: 'The itinerary write boundary is not configured.' }, 503);
+
+  if (operation === 'history') {
+    const tripId = text(body.tripId, 180);
+    if (!tripId) return json({ error: 'A tripId is required.' }, 400);
+
+    /**
+     * Ownership before any history row is read. `readOwnedTrip` queries by trip
+     * and verified user together, so a missing trip and somebody else's trip
+     * are refused identically.
+     */
+    const trip = await readOwnedTrip(client, tripId, userId);
+    if (trip.kind === 'error') return json({ error: 'The trip could not be read.' }, 503);
+    if (trip.kind === 'missing') return json({ error: 'Trip not found.' }, 404);
+
+    const listed = await listItineraryChangeHistory(trip.tripId, userId, historyDeps(client));
+    if (!listed.ok) {
+      return json({ operation, error: listed.detail }, REFUSAL_STATUS[listed.refusal] ?? 503);
+    }
+    return json({
+      operation,
+      tripId: trip.tripId,
+      changes: listed.changes,
+    });
+  }
+
   const deps = changeDeps(client);
 
   if (operation === 'stage') {
