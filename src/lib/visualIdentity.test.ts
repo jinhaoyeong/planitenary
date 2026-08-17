@@ -290,5 +290,14 @@ describe('visual identity CSS application', () => {
     const dark = resolveVisualIdentity(profile(), { theme: 'dark' });
     expect(light.cssVars['--accent']).toBe(light.palette.accent);
     expect(dark.cssVars['--accent']).toBe(dark.palette.darkAccent);
+    // The soft tint is what selected surfaces sit on, so a light value leaking
+    // into dark mode renders their labels unreadable.
+    expect(light.cssVars['--accent-soft']).toBe(light.palette.accentSoft);
+    expect(dark.cssVars['--accent-soft']).toBe(dark.palette.darkAccentSoft);
+  });
+
+  it('falls back to the light palette only when no theme is supplied', () => {
+    const omitted = resolveVisualIdentity(profile());
+    expect(omitted.cssVars['--accent-soft']).toBe(omitted.palette.accentSoft);
   });
 });

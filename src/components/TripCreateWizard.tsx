@@ -29,6 +29,7 @@ import { CityStayPlanner } from './ui/CityStayPlanner';
 import { ToggleRow } from './ui/ToggleRow';
 import { VisualDesignControls } from './VisualDesignControls';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
+import { useTheme } from '../contexts/ThemeContext';
 import {
   BUDGET_OPTIONS,
   MOOD_OPTIONS,
@@ -126,6 +127,10 @@ export function TripCreateWizard({
   // Already resolved upstream: a saved preference if there is one, otherwise
   // the device region.
   const detectedHomeCurrency = defaultHomeCurrency;
+  // The dialog writes palette variables onto its own subtree, so it has to
+  // resolve them for the active theme. Without this the light palette leaks
+  // into dark mode and selected chips render light-on-light.
+  const { theme } = useTheme();
   const [stepIndex, setStepIndex] = useState(0);
   const [profile, setProfile] = useState<TripProfile>(() => createEmptyProfile(detectedHomeCurrency));
   const [countryCode, setCountryCode] = useState('');
@@ -252,8 +257,8 @@ export function TripCreateWizard({
     [resolvedProfile, duration.days],
   );
   const resolvedVisualIdentity = useMemo(
-    () => resolveVisualIdentity(resolvedProfile),
-    [resolvedProfile],
+    () => resolveVisualIdentity(resolvedProfile, { theme }),
+    [resolvedProfile, theme],
   );
 
   if (!open) return null;
