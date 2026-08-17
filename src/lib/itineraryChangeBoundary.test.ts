@@ -289,23 +289,47 @@ class FakeChangeDatabase {
       undoChange: async (changeId, callerId): Promise<UndoOutcome> => {
         const change = this.history.find((entry) => entry.id === changeId && entry.userId === callerId);
         if (!change) return { ok: false, refusal: 'change-not-undoable' };
-        if (change.status === 'undone') {
-          return { ok: true, changeId: change.id, itinerary: change.beforeItinerary, alreadyUndone: true };
-        }
         const row = this.itineraries.get(change.tripId);
+
+        // A retry writes nothing and answers with the live row, never the
+        // snapshot — the snapshot's revision is older than what is committed.
+        if (change.status === 'undone') {
+          if (!row || row.userId !== callerId) return { ok: false, refusal: 'change-not-undoable' };
+          return { ok: true, changeId: change.id, itinerary: row.data, alreadyUndone: true };
+        }
         if (!row || row.userId !== callerId) return { ok: false, refusal: 'change-not-undoable' };
         if (this.hash(row.data) !== change.afterHash) return { ok: false, refusal: 'undo-stale' };
 
-        row.data = JSON.parse(JSON.stringify(change.beforeItinerary));
+        // Content from the snapshot, ordering from the row being undone.
+        const current = row.data as { revision?: unknown };
+        const currentRevision = typeof current?.revision === 'number' && Number.isFinite(current.revision)
+          ? Math.max(0, Math.floor(current.revision))
+          : 0;
+        const restored = JSON.parse(JSON.stringify(change.beforeItinerary)) as Record<string, unknown>;
+        restored.revision = currentRevision + 1;
+
+        row.data = restored;
         this.writes += 1;
         change.status = 'undone';
-        return { ok: true, changeId: change.id, itinerary: change.beforeItinerary, alreadyUndone: false };
+        return { ok: true, changeId: change.id, itinerary: restored, alreadyUndone: false };
       },
 
       now: () => this.clock,
     };
   }
 }
+
+/** Everything a traveller can see — the ordering counter deliberately excluded. */
+const withoutRevision = (itinerary: unknown): Record<string, unknown> => {
+  const copy = { ...(itinerary ?? {}) as Record<string, unknown> };
+  delete copy.revision;
+  return copy;
+};
+
+const revisionOf = (itinerary: unknown): number => {
+  const value = (itinerary as { revision?: unknown } | null)?.revision;
+  return typeof value === 'number' ? value : 0;
+};
 
 /** Name a proposal the way the panel does: by what is on screen. */
 const reviewed = (proposal: TripItineraryProposal) => ({
@@ -463,19 +487,23 @@ describe('Phase 2B write boundary', () => {
     expect(database.history).toHaveLength(1);
   });
 
-  it('restores the exact snapshot on undo', async () => {
+  it('restores the exact snapshot on undo, apart from the version counter', async () => {
     const { database, staged } = await stagedTrip();
     if (!staged.ok) throw new Error('staging failed');
-    const before = canonicalJson(database.currentItinerary('trip-1'));
+    const before = database.currentItinerary('trip-1');
 
     const applied = await applyItineraryChange(staged.proposal.proposalId, OWNER, database.deps());
     if (!applied.ok) throw new Error('apply failed');
-    expect(canonicalJson(database.currentItinerary('trip-1'))).not.toBe(before);
+    expect(canonicalJson(database.currentItinerary('trip-1'))).not.toBe(canonicalJson(before));
 
     const undone = await undoItineraryChange(applied.changeId, OWNER, database.deps());
+    const after = database.currentItinerary('trip-1');
 
     expect(undone.ok).toBe(true);
-    expect(canonicalJson(database.currentItinerary('trip-1'))).toBe(before);
+    // Every field the traveller can see comes back exactly...
+    expect(withoutRevision(after)).toEqual(withoutRevision(before));
+    // ...and the counter that orders writes across devices moves forward.
+    expect(revisionOf(after)).toBe(revisionOf(before) + 2);
     // History is a record, not a workspace: the row survives the undo.
     expect(database.history).toHaveLength(1);
     expect(database.history[0].status).toBe('undone');
@@ -495,6 +523,54 @@ describe('Phase 2B write boundary', () => {
     if (!retry.ok) return;
     expect(retry.alreadyUndone).toBe(true);
     expect(database.writes).toBe(writesAfterFirst);
+  });
+
+  it('answers a lost-response retry with the committed state, not the snapshot', async () => {
+    /**
+     * The first undo commits revision 7 and its HTTP response is lost. The
+     * client retries. Returning `before_itinerary` here would hand back revision
+     * 5 over a database at 7 and recreate the ordering defect on the client.
+     */
+    const { database, staged } = await stagedTrip();
+    if (!staged.ok) throw new Error('staging failed');
+    const applied = await applyItineraryChange(staged.proposal.proposalId, OWNER, database.deps());
+    if (!applied.ok) throw new Error('apply failed');
+
+    const first = await undoItineraryChange(applied.changeId, OWNER, database.deps());
+    if (!first.ok) throw new Error('undo failed');
+    const committed = revisionOf(database.currentItinerary('trip-1'));
+
+    const retry = await undoItineraryChange(applied.changeId, OWNER, database.deps());
+
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) return;
+    expect(retry.alreadyUndone).toBe(true);
+    expect(revisionOf(retry.itinerary)).toBe(committed);
+    expect(revisionOf(retry.itinerary)).toBeGreaterThan(revisionOf(applied.itinerary));
+  });
+
+  it('does not let a retry paper over an edit made after the undo', async () => {
+    const { database, staged } = await stagedTrip();
+    if (!staged.ok) throw new Error('staging failed');
+    const applied = await applyItineraryChange(staged.proposal.proposalId, OWNER, database.deps());
+    if (!applied.ok) throw new Error('apply failed');
+    await undoItineraryChange(applied.changeId, OWNER, database.deps());
+
+    // The traveller edits, the way `handleItineraryChange` would.
+    database.externalEdit('trip-1', (data) => {
+      data.name = 'Edited after undo';
+      data.revision = revisionOf(data) + 1;
+    });
+    const writesBefore = database.writes;
+
+    const retry = await undoItineraryChange(applied.changeId, OWNER, database.deps());
+
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) return;
+    expect(database.writes).toBe(writesBefore);
+    expect((retry.itinerary as { name: string }).name).toBe('Edited after undo');
+    expect(revisionOf(retry.itinerary)).toBe(revisionOf(database.currentItinerary('trip-1')));
+    expect((database.currentItinerary('trip-1') as { name: string }).name).toBe('Edited after undo');
   });
 
   it('refuses to undo over a newer edit', async () => {
