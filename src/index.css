@@ -3101,6 +3101,66 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   box-shadow: none;
 }
 
+/**
+ * Secondary header controls, as one segmented object.
+ *
+ * They were five separate bordered pills of identical weight sitting beside the
+ * two real actions, which made a phone header read as seven equal choices. A
+ * single bordered group with a quiet fill says "settings live here" in one
+ * glance and leaves the accented Plan button as the only thing competing for
+ * attention.
+ */
+.app-utility-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.1875rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background-color: color-mix(in srgb, var(--bg-elevated) 60%, transparent);
+}
+
+/**
+ * Box styling only — `display` is deliberately left to the Tailwind classes on
+ * each button. Setting it here outspecifies `hidden` / `xl:inline-flex` and
+ * quietly freezes every one of these controls at one breakpoint's visibility.
+ */
+.app-utility-cluster > button {
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.app-utility-cluster > button:hover {
+  background-color: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+/**
+ * The trip name gets one line at every width.
+ *
+ * The ellipsis used to be scoped to the desktop grid, so on a phone the name
+ * wrapped to three lines and dragged the whole header out of shape.
+ */
+.app-brand {
+  display: block;
+  min-width: 0;
+  max-width: 11rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 640px) {
+  .app-brand {
+    max-width: 18rem;
+  }
+}
+
 @media (min-width: 1280px) {
   /**
    * Brand left, tabs centred, actions right.
@@ -3124,11 +3184,7 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   }
 
   .app-brand {
-    display: block;
     max-width: 15rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   /**

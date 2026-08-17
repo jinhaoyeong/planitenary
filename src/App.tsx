@@ -1154,7 +1154,7 @@ function App() {
             over these controls the moment the header is tight — which is how a
             click on "Plan my trip" ended up hitting a tab instead.
           */}
-          <div className="relative z-10 flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="relative z-10 flex items-center gap-2 shrink-0">
             {!isDemoUser && !isLocalTestUser && user && (
               <>
                 <PlanTripProposalPanel
@@ -1166,55 +1166,67 @@ function App() {
                 <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
               </>
             )}
-            <motion.button
-              onClick={openRestoreModal}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              whileTap={{ scale: 0.95 }}
-              whileHover={{ y: -1 }}
-              aria-label="Restore backup"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden 2xl:inline">Restore</span>
-            </motion.button>
-            <motion.button
-              onClick={toggleTheme}
-              className="p-2 rounded-full"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              aria-label="Toggle theme"
-              whileTap={{ scale: 0.9, rotate: -12 }}
-            >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </motion.button>
-            <motion.button
-              onClick={() => handleTabChange('settings')}
-              className="inline-flex p-2 rounded-full"
-              style={{ color: activeTab === 'settings' ? 'var(--accent)' : 'var(--ink)', border: '1px solid var(--border)' }}
-              whileTap={{ scale: 0.9 }}
-              aria-label="Open app settings"
-              title="App settings"
-            >
-              <Settings className="w-4 h-4" />
-            </motion.button>
-            <motion.button
-              onClick={() => handleTabChange('profile')}
-              className="inline-flex p-2 rounded-full"
-              style={{ color: activeTab === 'profile' ? 'var(--accent)' : 'var(--ink)', border: '1px solid var(--border)' }}
-              whileTap={{ scale: 0.9 }}
-              aria-label="Open profile settings"
-              title="Profile settings"
-            >
-              <UserRound className="w-4 h-4" />
-            </motion.button>
-            <motion.button
-              className="xl:hidden p-2 rounded-full"
-              style={{ color: 'var(--ink)', border: '1px solid var(--border)' }}
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              whileTap={{ scale: 0.9 }}
-              aria-label="Menu"
-            >
-              {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-            </motion.button>
+            {/*
+              One segmented control rather than a row of identical pills, so the
+              two things a traveller actually came for — plan, and ask — read as
+              the actions and everything else reads as settings.
+
+              Restore, app settings and profile only appear from `xl`, which is
+              exactly where the menu button disappears. Below that they are all
+              reachable from Quick Menu, and duplicating them in the bar was what
+              squeezed the trip name into three wrapped lines on a phone.
+            */}
+            <div className="app-utility-cluster">
+              <motion.button
+                onClick={toggleTheme}
+                className="hidden sm:inline-flex"
+                style={{ color: 'var(--ink)' }}
+                aria-label="Toggle theme"
+                whileTap={{ scale: 0.9, rotate: -12 }}
+              >
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </motion.button>
+              <motion.button
+                onClick={openRestoreModal}
+                className="hidden xl:inline-flex"
+                style={{ color: 'var(--ink)' }}
+                whileTap={{ scale: 0.95 }}
+                aria-label="Restore backup"
+                title="Restore backup"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </motion.button>
+              <motion.button
+                onClick={() => handleTabChange('settings')}
+                className="hidden xl:inline-flex"
+                style={{ color: activeTab === 'settings' ? 'var(--accent)' : 'var(--ink)' }}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Open app settings"
+                title="App settings"
+              >
+                <Settings className="w-4 h-4" />
+              </motion.button>
+              <motion.button
+                onClick={() => handleTabChange('profile')}
+                className="hidden xl:inline-flex"
+                style={{ color: activeTab === 'profile' ? 'var(--accent)' : 'var(--ink)' }}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Open profile settings"
+                title="Profile settings"
+              >
+                <UserRound className="w-4 h-4" />
+              </motion.button>
+              <motion.button
+                className="inline-flex xl:hidden"
+                style={{ color: 'var(--ink)' }}
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Menu"
+                aria-expanded={isMenuOpen}
+              >
+                {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+              </motion.button>
+            </div>
           </div>
         </div>
       </header>
@@ -1687,6 +1699,16 @@ function App() {
                   </button>
                 ))}
               </div>
+
+              {/* The header hides the theme toggle on phones, so it lives here. */}
+              <button
+                onClick={toggleTheme}
+                className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-colors"
+                style={{ color: 'var(--ink)', borderColor: 'var(--border)' }}
+              >
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+              </button>
 
               <button
                 onClick={() => {
