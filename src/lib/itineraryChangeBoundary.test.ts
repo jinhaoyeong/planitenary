@@ -856,8 +856,16 @@ describe('write boundary structure', () => {
     expect(owned).toBeGreaterThan(history);
     expect(listed).toBeGreaterThan(owned);
     expect(handler).toContain(".from('itinerary_change_history')");
-    expect(handler).toContain(".select('id, status, applied_at, undone_at, itinerary_change_proposals!inner(diff)')");
+    expect(handler).toContain('.select(HISTORY_DIFF_SELECT)');
+    expect(handler).toContain(".eq('trip_id', tripId)");
+    expect(handler).toContain(".eq('user_id', userId)");
     expect(handler).not.toMatch(/before_itinerary|after_itinerary|before_hash|after_hash/);
+  });
+
+  it('disambiguates the history→proposal embed by the source-proposal FK', () => {
+    expect(handler).toContain('HISTORY_DIFF_SELECT');
+    expect(handler).not.toContain('itinerary_change_proposals!inner(diff)');
+    expect(handler).not.toMatch(/itinerary_change_proposals!itinerary_change_proposals_resulting_change_fk/);
   });
 
   it('never marks a proposal cache row as authorisation to write', () => {
@@ -879,6 +887,17 @@ describe('write boundary migration', () => {
       // No mutation policy exists for a browser role, so RLS denies by default.
       expect(migration).not.toMatch(new RegExp(`create policy[\\s\\S]*on public\\.${table}[\\s\\S]*to authenticated`));
     }
+  });
+
+  it('has two FKs between history and proposals; apply binds history.proposal_id', () => {
+    expect(migration).toMatch(
+      /proposal_id uuid not null unique references public\.itinerary_change_proposals\(id\)/,
+    );
+    expect(migration).toContain('constraint itinerary_change_proposals_resulting_change_fk');
+    expect(migration).toContain('foreign key (resulting_change_id) references public.itinerary_change_history(id)');
+    const apply = migration.slice(migration.indexOf('function public.apply_itinerary_change'));
+    expect(apply).toMatch(/insert into public\.itinerary_change_history \([\s\S]*proposal_id/);
+    expect(apply).toMatch(/values \(\s*v_proposal\.id/);
   });
 
   it('locks every row it decides on', () => {

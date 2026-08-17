@@ -9,7 +9,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  HISTORY_DIFF_SELECT,
   HISTORY_LIMIT,
+  HISTORY_SOURCE_PROPOSAL_FK,
   formatHistoryAppliedAt,
   historyDetailSections,
   historyRecordFromAuthorityRow,
@@ -263,6 +265,36 @@ describe('history client transport', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.changes).toHaveLength(1);
+  });
+});
+
+describe('history PostgREST embed', () => {
+  const handler = readFileSync(
+    resolve(process.cwd(), 'supabase/functions/itinerary-change/index.ts'),
+    'utf8',
+  );
+  const migration = readFileSync(
+    resolve(process.cwd(), 'supabase/migrations/20260817090000_add_itinerary_change_boundary.sql'),
+    'utf8',
+  );
+
+  it('qualifies the source-proposal FK instead of the ambiguous generic embed', () => {
+    expect(HISTORY_SOURCE_PROPOSAL_FK).toBe('itinerary_change_history_proposal_id_fkey');
+    expect(HISTORY_DIFF_SELECT).toBe(
+      'id, status, applied_at, undone_at, itinerary_change_proposals!itinerary_change_history_proposal_id_fkey!inner(diff)',
+    );
+    expect(HISTORY_DIFF_SELECT).not.toContain('itinerary_change_proposals!inner(diff)');
+    expect(HISTORY_DIFF_SELECT).not.toContain('itinerary_change_proposals_resulting_change_fk');
+    expect(HISTORY_DIFF_SELECT).not.toMatch(/before_itinerary|after_itinerary|before_hash|after_hash|material_revision/);
+    expect(handler).toContain('.select(HISTORY_DIFF_SELECT)');
+    expect(handler).not.toContain('itinerary_change_proposals!inner(diff)');
+  });
+
+  it('still matches the production proposal_id constraint the apply path writes', () => {
+    expect(migration).toMatch(
+      /proposal_id uuid not null unique references public\.itinerary_change_proposals\(id\)/,
+    );
+    expect(HISTORY_SOURCE_PROPOSAL_FK).toBe('itinerary_change_history_proposal_id_fkey');
   });
 });
 

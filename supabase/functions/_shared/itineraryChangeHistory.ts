@@ -9,6 +9,17 @@
 export const HISTORY_LIMIT = 20;
 export const HISTORY_HEADLINE = 'AI plan applied';
 
+/**
+ * Production constraint `itinerary_change_history.proposal_id →
+ * itinerary_change_proposals.id`. Apply writes that column from the staged
+ * proposal whose `diff` this list presents. PostgREST also sees the reverse
+ * `resulting_change_id` FK, so the generic embed is ambiguous and must not be
+ * used.
+ */
+export const HISTORY_SOURCE_PROPOSAL_FK = 'itinerary_change_history_proposal_id_fkey';
+export const HISTORY_DIFF_SELECT =
+  `id, status, applied_at, undone_at, itinerary_change_proposals!${HISTORY_SOURCE_PROPOSAL_FK}!inner(diff)`;
+
 export interface PublicHistoryPlace {
   name: string;
   day?: number;

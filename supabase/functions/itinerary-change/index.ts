@@ -38,6 +38,7 @@ import {
 } from '../_shared/itineraryChangeService.ts';
 import type { ChangeRefusal } from '../_shared/itineraryChange.ts';
 import {
+  HISTORY_DIFF_SELECT,
   historyRecordFromAuthorityRow,
   listItineraryChangeHistory,
   type HistoryDeps,
@@ -186,17 +187,22 @@ const changeDeps = (client: SupabaseClient): ChangeDeps => ({
  *
  * Snapshots and hashes stay in the database. The join is inner because every
  * history row is bound to a proposal; a missing proposal would have cascaded.
+ * The embed names `itinerary_change_history_proposal_id_fkey` because the two
+ * tables also share `itinerary_change_proposals_resulting_change_fk`.
  */
 const historyDeps = (client: SupabaseClient): HistoryDeps => ({
   async readHistory(tripId, userId, limit): Promise<HistoryRecord[] | null> {
     const { data, error } = await client
       .from('itinerary_change_history')
-      .select('id, status, applied_at, undone_at, itinerary_change_proposals!inner(diff)')
+      .select(HISTORY_DIFF_SELECT)
       .eq('trip_id', tripId)
       .eq('user_id', userId)
       .order('applied_at', { ascending: false })
       .limit(limit);
-    if (error) return null;
+    if (error) {
+      console.error('itinerary-change history read failed', error.code ?? 'unknown');
+      return null;
+    }
     return (Array.isArray(data) ? data : [])
       .map(historyRecordFromAuthorityRow)
       .filter((entry): entry is HistoryRecord => entry !== null);
