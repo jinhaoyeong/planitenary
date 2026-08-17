@@ -14,6 +14,7 @@ import {
   themesMatch,
 } from '../lib/tripSettings';
 import type { ThemePalettePreset, TripAppSettings, TripThemeSettings } from '../lib/tripSettings';
+import { readableInkOn } from '../lib/colorContrast';
 
 interface SettingsPanelProps {
   itinerary: Itinerary;
@@ -62,7 +63,7 @@ const DARK_TOKEN_SWATCHES: Record<keyof TripThemeSettings, string[]> = {
   ink: ['#F5EFE4', '#FFB3FF', '#F3E3EA', '#E0DDEF', '#FFFFFF', '#FFFFFF', '#E5E5E5'],
   inkMuted: ['#A39B8C', '#D67AD6', '#E4A2B1', '#A09AAD', '#CCCCCC', '#CCCCCC', '#A3A3A3'],
   accent: ['#FF6B9A', '#FF6BEF', '#FBE2A7', '#A995C9', '#FF6666', '#818CF8', '#E05D38'],
-  accentSoft: ['#3A1F2A', '#46204F', '#E4A2B1', '#5A5370', '#FFFF33', '#2DD4BF', '#2A3656'],
+  accentSoft: ['#3A1F2A', '#46204F', '#3A2430', '#5A5370', '#4A3A00', '#12352F', '#2A3656'],
 };
 
 type SettingsSectionId = 'story' | 'copy' | 'theme';
@@ -429,6 +430,8 @@ export function SettingsPanel({ itinerary, settings, onSave }: SettingsPanelProp
     '--ink-muted': activePalette.inkMuted,
     '--accent': activePalette.accent,
     '--accent-soft': activePalette.accentSoft,
+    '--accent-ink': readableInkOn(activePalette.accent),
+    '--accent-soft-ink': readableInkOn(activePalette.accentSoft),
     '--border': `color-mix(in srgb, ${activePalette.ink} 22%, ${activePalette.bgElevated})`,
     backgroundColor: activePalette.bgElevated,
     color: activePalette.ink,

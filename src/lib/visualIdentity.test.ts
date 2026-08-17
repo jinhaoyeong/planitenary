@@ -289,6 +289,19 @@ describe('visual identity CSS application', () => {
     const light = resolveVisualIdentity(profile(), { theme: 'light' });
     const dark = resolveVisualIdentity(profile(), { theme: 'dark' });
     expect(light.cssVars['--accent']).toBe(light.palette.accent);
+    expect(light.cssVars['--accent-soft']).toBe(light.palette.accentSoft);
+    expect(light.cssVars['--accent-soft-ink']).toBe('#0F0E0D');
     expect(dark.cssVars['--accent']).toBe(dark.palette.darkAccent);
+    expect(dark.cssVars['--accent-soft']).toBe(dark.palette.darkAccentSoft);
+    expect(dark.cssVars['--accent-soft-ink']).toBe('#FFFFFF');
+    // Soft fills must stay on the dark side of the palette in dark mode so
+    // cream/ink copy on resume banners and toggles stays readable.
+    expect(dark.cssVars['--accent-soft']).not.toBe(light.cssVars['--accent-soft']);
+  });
+
+  it('defaults to the light palette when theme is omitted', () => {
+    const resolved = resolveVisualIdentity(profile());
+    expect(resolved.cssVars['--accent-soft']).toBe(resolved.palette.accentSoft);
+    expect(resolved.cssVars['--accent-soft-ink']).toBe('#0F0E0D');
   });
 });

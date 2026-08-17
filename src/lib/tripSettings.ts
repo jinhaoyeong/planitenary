@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { readableInkOn } from './colorContrast';
 
 export interface TripCopyLabels {
   itineraryTab: string;
@@ -112,7 +113,8 @@ export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
       ink: '#F3E3EA',
       inkMuted: '#E4A2B1',
       accent: '#FBE2A7',
-      accentSoft: '#E4A2B1',
+      // Soft fills must stay dark enough for cream ink; pastel pink washed out toggles.
+      accentSoft: '#3A2430',
     },
   },
   {
@@ -154,7 +156,8 @@ export const THEME_PALETTE_PRESETS: ThemePalettePreset[] = [
       ink: '#FFFFFF',
       inkMuted: '#CCCCCC',
       accent: '#FF6666',
-      accentSoft: '#FFFF33',
+      // Soft fill sits under body copy — keep it dark, not neon yellow.
+      accentSoft: '#4A3A00',
     },
   },
   {
@@ -233,6 +236,8 @@ export const getThemeForMode = (settings: Pick<TripAppSettings, 'theme' | 'light
 
 export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode): CSSProperties => {
   const border = `color-mix(in srgb, ${palette.ink} 22%, ${palette.bgElevated})`;
+  const accentInk = readableInkOn(palette.accent);
+  const accentSoftInk = readableInkOn(palette.accentSoft);
   const sharedTokens = {
     '--background': palette.bg,
     '--foreground': palette.ink,
@@ -241,12 +246,12 @@ export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode)
     '--popover': palette.bgElevated,
     '--popover-foreground': palette.ink,
     '--primary': palette.accent,
-    '--primary-foreground': '#0F0E0D',
+    '--primary-foreground': accentInk,
     '--secondary': palette.accentSoft,
-    '--secondary-foreground': palette.ink,
+    '--secondary-foreground': accentSoftInk,
     '--muted': palette.accentSoft,
     '--muted-foreground': palette.inkMuted,
-    '--accent-foreground': '#0F0E0D',
+    '--accent-foreground': accentInk,
     '--input': border,
     '--ring': palette.accent,
   };
@@ -260,7 +265,8 @@ export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode)
       '--ink-muted': palette.inkMuted,
       '--accent': palette.accent,
       '--accent-soft': palette.accentSoft,
-      '--accent-ink': '#0F0E0D',
+      '--accent-ink': accentInk,
+      '--accent-soft-ink': accentSoftInk,
       '--border': border,
       '--shadow-lift': '0 1px 0 rgba(15,14,13,0.04), 0 12px 32px -16px rgba(15,14,13,0.18)',
     } as CSSProperties;
@@ -274,7 +280,8 @@ export const buildTripThemeStyle = (palette: TripThemeSettings, mode: ThemeMode)
     '--ink-muted': palette.inkMuted,
     '--accent': palette.accent,
     '--accent-soft': palette.accentSoft,
-    '--accent-ink': '#0F0E0D',
+    '--accent-ink': accentInk,
+    '--accent-soft-ink': accentSoftInk,
     '--border': border,
     '--shadow-lift': '0 1px 0 rgba(0,0,0,0.3), 0 18px 40px -18px rgba(0,0,0,0.6)',
   } as CSSProperties;

@@ -2429,6 +2429,7 @@ a.destination-photo-credit:focus-visible {
   --accent-fill: var(--accent);
   --accent-soft: #FFE4EE;
   --accent-ink: #0F0E0D;
+  --accent-soft-ink: #0F0E0D;
   --border: #E8E1D5;
   --warn: #B45309;
   --shadow-lift: 0 1px 0 rgba(15,14,13,0.04), 0 12px 32px -16px rgba(15,14,13,0.18);
@@ -2478,6 +2479,7 @@ a.destination-photo-credit:focus-visible {
   --accent-fill: var(--accent);
   --accent-soft: #3A1F2A;
   --accent-ink: #0F0E0D;
+  --accent-soft-ink: #FFFFFF;
   --border: #2C2521;
   --warn: #F5A524;
   --shadow-lift: 0 1px 0 rgba(0,0,0,0.3), 0 18px 40px -18px rgba(0,0,0,0.6);

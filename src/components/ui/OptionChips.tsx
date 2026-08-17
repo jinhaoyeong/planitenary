@@ -30,7 +30,7 @@ export function OptionChips<T extends string>({
             style={{
               backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg)',
               border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-              color: 'var(--ink)',
+              color: active ? 'var(--accent-soft-ink)' : 'var(--ink)',
             }}
             aria-pressed={active}
           >
@@ -38,7 +38,16 @@ export function OptionChips<T extends string>({
               <span className="text-sm font-semibold">{option.label}</span>
               {active && !single && <Check className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />}
             </span>
-            <span className="mt-1 block text-xs" style={{ color: 'var(--ink-muted)' }}>{option.hint}</span>
+            <span
+              className="mt-1 block text-xs"
+              style={{
+                color: active
+                  ? 'color-mix(in srgb, var(--accent-soft-ink) 72%, transparent)'
+                  : 'var(--ink-muted)',
+              }}
+            >
+              {option.hint}
+            </span>
           </button>
         );
       })}

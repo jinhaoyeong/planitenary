@@ -28,6 +28,7 @@ import { DateRangeCalendar } from './ui/DateRangeCalendar';
 import { CityStayPlanner } from './ui/CityStayPlanner';
 import { ToggleRow } from './ui/ToggleRow';
 import { VisualDesignControls } from './VisualDesignControls';
+import { useTheme } from '../contexts/ThemeContext';
 import { resolveVisualIdentity } from '../lib/visualIdentity';
 import {
   BUDGET_OPTIONS,
@@ -126,6 +127,7 @@ export function TripCreateWizard({
   // Already resolved upstream: a saved preference if there is one, otherwise
   // the device region.
   const detectedHomeCurrency = defaultHomeCurrency;
+  const { theme } = useTheme();
   const [stepIndex, setStepIndex] = useState(0);
   const [profile, setProfile] = useState<TripProfile>(() => createEmptyProfile(detectedHomeCurrency));
   const [countryCode, setCountryCode] = useState('');
@@ -251,9 +253,11 @@ export function TripCreateWizard({
     () => buildTripIdentity(resolvedProfile, { plannedDays: duration.days }),
     [resolvedProfile, duration.days],
   );
+  // Theme must match the shell: without it the dialog inherits dark ink while
+  // destination tokens paint light accent-soft fills, and soft panels go blank.
   const resolvedVisualIdentity = useMemo(
-    () => resolveVisualIdentity(resolvedProfile),
-    [resolvedProfile],
+    () => resolveVisualIdentity(resolvedProfile, { theme }),
+    [resolvedProfile, theme],
   );
 
   if (!open) return null;
@@ -356,7 +360,7 @@ export function TripCreateWizard({
           {resumedDraft && (
             <div
               className="flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3"
-              style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
+              style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent-soft-ink)' }}
             >
               <p className="text-sm">
                 Picked up where you left off. Your earlier answers are still here.
@@ -404,14 +408,17 @@ export function TripCreateWizard({
                     <span
                       key={destination.id}
                       className="adaptive-chip inline-flex items-center gap-2 pl-3 pr-2 py-1.5 text-sm"
-                      style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
+                      style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent-soft-ink)' }}
                     >
                       <MapPin className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent)' }} />
                       {/* Region and country keep two Georgetowns apart. */}
                       <span className="min-w-0">
                         <span className="block leading-tight">{destination.city}</span>
                         {(destination.region || destination.country) && (
-                          <span className="block text-[11px] leading-tight" style={{ color: 'var(--ink-muted)' }}>
+                          <span
+                            className="block text-[11px] leading-tight"
+                            style={{ color: 'color-mix(in srgb, var(--accent-soft-ink) 72%, transparent)' }}
+                          >
                             {[destination.region, destination.country].filter(Boolean).join(' · ')}
                           </span>
                         )}
@@ -624,11 +631,21 @@ export function TripCreateWizard({
                         style={{
                           backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg)',
                           border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                          color: active ? 'var(--accent-soft-ink)' : 'var(--ink)',
                         }}
                         aria-pressed={active}
                       >
                         <span className="text-sm font-semibold">{option.label}</span>
-                        <span className="mt-1 block text-xs" style={{ color: 'var(--ink-muted)' }}>{option.hint}</span>
+                        <span
+                          className="mt-1 block text-xs"
+                          style={{
+                            color: active
+                              ? 'color-mix(in srgb, var(--accent-soft-ink) 72%, transparent)'
+                              : 'var(--ink-muted)',
+                          }}
+                        >
+                          {option.hint}
+                        </span>
                       </button>
                     );
                   })}
@@ -739,7 +756,7 @@ export function TripCreateWizard({
                     <span
                       key={chip}
                       className="adaptive-chip px-2.5 py-1 text-xs font-semibold"
-                      style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}
+                      style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent-soft-ink)' }}
                     >
                       {chip}
                     </span>
