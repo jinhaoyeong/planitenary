@@ -4,7 +4,7 @@
  * Supabase client, so it loads here exactly as it does in the function.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { reserveQuota, usageToday } from '../../supabase/functions/_shared/quota';
+import { reserveAiReasoningAttempt, reserveQuota, usageToday } from '../../supabase/functions/_shared/quota';
 
 type Client = Parameters<typeof reserveQuota>[0];
 
@@ -87,3 +87,44 @@ describe('reporting the day’s usage', () => {
       .toBeNull();
   });
 });
+
+describe('reserving a metered AI attempt', () => {
+  const reservation = {
+    userId: '11111111-1111-1111-1111-111111111111',
+    tripId: 'trip-a68e884d-fc5a-4b13-8c37-45f33e197fc3',
+    provider: 'openai',
+    model: 'gpt-5-nano',
+    operation: 'agent-build-itinerary',
+    reservedUsd: 0.01,
+    budgetUsd: 4.25,
+    globalLimit: 10,
+    userLimit: 8,
+  };
+
+  it('records the trip id while omitting a blocking trip cap', async () => {
+    const client = rpcClient({ data: { allowed: true, attempt_id: 10 } });
+    const result = await reserveAiReasoningAttempt(client, reservation);
+    expect(result).toEqual({ ok: true, attemptId: '10' });
+    expect((client as unknown as { rpc: ReturnType<typeof vi.fn> }).rpc).toHaveBeenCalledWith(
+      'reserve_ai_reasoning_attempt',
+      expect.objectContaining({
+        p_trip_id: reservation.tripId,
+        p_global_limit: 10,
+        p_user_limit: 8,
+        p_trip_limit: null,
+        p_budget_usd: 4.25,
+      }),
+    );
+  });
+
+  it('still maps a global or user quota refusal', async () => {
+    expect(await reserveAiReasoningAttempt(rpcClient({ data: { allowed: false, reason: 'quota-exhausted' } }), reservation))
+      .toMatchObject({ ok: false, refusal: 'quota-exhausted' });
+  });
+
+  it('still maps a budget refusal without changing accounting semantics', async () => {
+    expect(await reserveAiReasoningAttempt(rpcClient({ data: { allowed: false, reason: 'budget-reached' } }), reservation))
+      .toMatchObject({ ok: false, refusal: 'budget-reached' });
+  });
+});
+

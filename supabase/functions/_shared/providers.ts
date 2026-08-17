@@ -200,7 +200,6 @@ export const reasoningCallLimit = (): number => {
 export interface AiReasoningLimits {
   global: number;
   user: number;
-  trip: number;
 }
 
 /**
@@ -221,9 +220,8 @@ const positiveIntegerSetting = (name: string, fallback: number): number | null =
 export const aiReasoningLimits = (): AiReasoningLimits | null => {
   const global = positiveIntegerSetting('AI_DAILY_CALL_LIMIT', 50);
   const user = positiveIntegerSetting('AI_USER_DAILY_CALL_LIMIT', 8);
-  const trip = positiveIntegerSetting('AI_TRIP_DAILY_CALL_LIMIT', 4);
-  if (global === null || user === null || trip === null) return null;
-  return { global, user, trip };
+  if (global === null || user === null) return null;
+  return { global, user };
 };
 
 /**

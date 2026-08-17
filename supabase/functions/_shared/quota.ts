@@ -55,7 +55,6 @@ export interface AiReasoningReservationRequest {
   budgetSince?: string;
   globalLimit: number;
   userLimit: number;
-  tripLimit: number;
 }
 
 export type AiReasoningReservationResult =
@@ -86,7 +85,7 @@ export async function reserveAiReasoningAttempt(
       p_budget_since: request.budgetSince ?? null,
       p_global_limit: request.globalLimit,
       p_user_limit: request.userLimit,
-      p_trip_limit: request.tripLimit,
+      p_trip_limit: null,
     });
     if (error || !data || typeof data !== 'object') {
       return { ok: false, refusal: 'accounting-failed', detail: 'The AI accounting reservation could not be created.' };
@@ -96,7 +95,7 @@ export async function reserveAiReasoningAttempt(
       return { ok: true, attemptId: String(result.attempt_id) };
     }
     if (result.reason === 'quota-exhausted') {
-      return { ok: false, refusal: 'quota-exhausted', detail: 'The daily AI request allowance for this account or trip is spent.' };
+      return { ok: false, refusal: 'quota-exhausted', detail: 'The daily AI request allowance for this account is spent.' };
     }
     if (result.reason === 'budget-reached') {
       return { ok: false, refusal: 'budget-reached', detail: 'AI spending has reached the configured ceiling.' };

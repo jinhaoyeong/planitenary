@@ -72,7 +72,7 @@ export type AttemptReservation =
 export type ProviderDispatchStatus = 'not-dispatched' | 'possibly-dispatched';
 
 export interface MeteredDeps {
-  /** Atomically reserves global/user/trip quota and a durable ledger attempt. */
+  /** Atomically reserves global/user quota and a durable ledger attempt. */
   reserveAttempt: (row: Record<string, unknown>) => Promise<AttemptReservation>;
   /** Finalises the pre-provider row. False leaves it reserved/unresolved. */
   finalizeAttempt: (attemptId: string, row: Record<string, unknown>) => Promise<boolean>;

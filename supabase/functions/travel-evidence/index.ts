@@ -290,7 +290,6 @@ Deno.serve(async (request) => {
         budgetSince: budgetWindowStart(aiBudgetEpoch()),
         globalLimit: accountingLimits.global,
         userLimit: accountingLimits.user,
-        tripLimit: accountingLimits.trip,
       }),
       finalizeAttempt: (attemptId, row) => finalizeAiSpendAttempt(cache, attemptId, row),
       readSpend: () => readSpendToDate(cache, budgetWindowStart(aiBudgetEpoch())),

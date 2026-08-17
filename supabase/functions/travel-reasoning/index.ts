@@ -86,7 +86,6 @@ const meteredDependencies = (input: {
       budgetSince: budgetWindowStart(aiBudgetEpoch()),
       globalLimit: input.limits.global,
       userLimit: input.limits.user,
-      tripLimit: input.limits.trip,
     }),
     finalizeAttempt: (attemptId, row) => finalizeAiSpendAttempt(input.cache, attemptId, row),
     readSpend: () => readSpendToDate(input.cache, budgetWindowStart(aiBudgetEpoch())),
