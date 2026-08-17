@@ -15,6 +15,11 @@ import {
 } from './destinationPlanner';
 import { createEmptyProfile, manualDestination, type TripMood, type TripProfile } from './tripProfile';
 import { deriveTravelBehaviour } from './travelBehaviour';
+import {
+  ARRIVAL_SETTLING_MINUTES,
+  DEPARTURE_LEAD_MINUTES,
+} from '../../supabase/functions/_shared/itineraryEdgeTiming';
+import { toMinutes, toTime } from './humanScheduler';
 
 const place = (
   id: string,
@@ -191,8 +196,9 @@ describe('sending the sheltered part of the city to the wet day', () => {
 
 describe('the edges of a trip are not ordinary days', () => {
   it('starts day one after the plane lands, with time to drop bags', () => {
-    const shape = shapeTripEdge(0, 4, { arrivalTime: '11:00' });
-    expect(shape.startTimeOverride).toBe('13:00');
+    const arrivalTime = '11:00';
+    const shape = shapeTripEdge(0, 4, { arrivalTime });
+    expect(shape.startTimeOverride).toBe(toTime(toMinutes(arrivalTime) + ARRIVAL_SETTLING_MINUTES));
     expect(shape.maxMainOverride).toBe(1);
   });
 
@@ -202,9 +208,9 @@ describe('the edges of a trip are not ordinary days', () => {
   });
 
   it('ends the last day in time to leave for the airport', () => {
-    // A 20:00 flight means leaving by 16:30, not heading back at 21:30.
-    const shape = shapeTripEdge(3, 4, { departureTime: '20:00' });
-    expect(shape.returnTimeOverride).toBe('16:30');
+    const departureTime = '20:00';
+    const shape = shapeTripEdge(3, 4, { departureTime });
+    expect(shape.returnTimeOverride).toBe(toTime(toMinutes(departureTime) - DEPARTURE_LEAD_MINUTES));
   });
 
   it('leaves the days in the middle alone', () => {

@@ -7,6 +7,11 @@ import {
   type TripProfile,
 } from './tripProfile';
 import { shapeTripEdge } from './destinationPlanner';
+import {
+  ARRIVAL_SETTLING_MINUTES,
+  DEPARTURE_LEAD_MINUTES,
+} from '../../supabase/functions/_shared/itineraryEdgeTiming';
+import { toMinutes, toTime } from './humanScheduler';
 
 const kyoto = (overrides: Partial<TripProfile> = {}): TripProfile => ({
   ...createEmptyProfile('MYR'),
@@ -62,7 +67,11 @@ describe('flight times captured on the profile', () => {
     const profile = sanitizeTripProfile({ ...kyoto(), arrivalTime: '11:00:00', departureTime: '20:00:00' });
     const firstDay = shapeTripEdge(0, 5, { arrivalTime: profile?.arrivalTime });
     const lastDay = shapeTripEdge(4, 5, { departureTime: profile?.departureTime });
-    expect(firstDay.startTimeOverride).toBe('13:00');
-    expect(lastDay.returnTimeOverride).toBe('16:30');
+    expect(firstDay.startTimeOverride).toBe(
+      toTime(toMinutes(profile!.arrivalTime!) + ARRIVAL_SETTLING_MINUTES),
+    );
+    expect(lastDay.returnTimeOverride).toBe(
+      toTime(toMinutes(profile!.departureTime!) - DEPARTURE_LEAD_MINUTES),
+    );
   });
 });

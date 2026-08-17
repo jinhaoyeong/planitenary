@@ -29,6 +29,10 @@ import { scorePlaces, STYLE_TAGS, type ScoringInputs } from './placeIntelligence
 import { cityForDay as cityForLegDay, describeCityLegs, orderedCities, planCityLegs, type CityLeg } from './cityLegs';
 import { cityStayTotal, fitCityStays, legsFromCityStays, reconcileCityStays } from './cityStays';
 import { distanceMeters } from './placeIdentity';
+import {
+  ARRIVAL_SETTLING_MINUTES,
+  DEPARTURE_LEAD_MINUTES,
+} from '../../supabase/functions/_shared/itineraryEdgeTiming';
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -563,14 +567,10 @@ export function assignClustersToDays(
   return assigned;
 }
 
-/** Getting out of an airport and to somewhere you can start the day. */
-const ARRIVAL_SETTLING_MINUTES = 120;
 /** Keep a late-arrival day open long enough to find and eat one dinner. */
 const ARRIVAL_MEAL_ALLOWANCE_MINUTES = 180;
 /** Do not let an arrival-day override run past the end of the local day. */
 const END_OF_DAY_MINUTES = 24 * 60 - 1;
-/** Leaving for the airport: check-in, security, and not running for it. */
-const DEPARTURE_LEAD_MINUTES = 210;
 /** Beyond this shift, the body is genuinely on another clock. */
 const JET_LAG_THRESHOLD_HOURS = 5;
 /** How many days a long-haul arrival keeps affecting the plan. */

@@ -12,6 +12,10 @@ import { applyProposalToItinerary, canonicalJson } from '../../supabase/function
 import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
+} from '../../supabase/functions/_shared/itineraryEdgeTiming';
+import {
+  ARRIVAL_SETTLING_MINUTES as proposalArrivalSettling,
+  DEPARTURE_LEAD_MINUTES as proposalDepartureLead,
   buildPlanningMaterial,
   clockToMinutes,
   runItineraryProposalEngine,
@@ -155,6 +159,7 @@ describe('Flight-Aware Planning V1', () => {
     })]);
     expect(material.days[0]?.startTime).toBe('11:30');
     expect(ARRIVAL_SETTLING_MINUTES).toBe(120);
+    expect(proposalArrivalSettling).toBe(ARRIVAL_SETTLING_MINUTES);
     expect(proposal.days[0]?.warnings.join(' ')).toMatch(/Arrival at 9:30 AM/i);
     expect(placeItems(proposal, 1).every((item) => !startsBefore(item, '11:30'))).toBe(true);
     expect(placeItems(proposal, 1).some((item) => overlaps(item, '08:00', '09:30'))).toBe(false);
@@ -192,6 +197,7 @@ describe('Flight-Aware Planning V1', () => {
     });
 
     expect(DEPARTURE_LEAD_MINUTES).toBe(210);
+    expect(proposalDepartureLead).toBe(DEPARTURE_LEAD_MINUTES);
     expect(material.days[1]?.fixedEvents).toEqual([expect.objectContaining({ role: 'departure', startTime: '18:00' })]);
     expect(material.days[1]?.endTime).toBe('14:30');
     expect(placeItems(proposal, 2).every((item) => !endsAfter(item, '14:30'))).toBe(true);

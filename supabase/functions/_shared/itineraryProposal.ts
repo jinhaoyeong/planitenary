@@ -3,21 +3,29 @@
  *
  * The model is allowed to choose a day and an ordering. It is not allowed to
  * choose a clock time, an opening window, or a travel duration. Those values
- * are produced here from owned-trip material and route-provider results. This
- * module deliberately has no imports and no Deno APIs so Vitest exercises the
- * exact scheduling and validation rules used by the Edge Function.
+ * are produced here from owned-trip material and route-provider results.
  *
  * Nothing in this file persists data. A proposal always carries `applied:
  * false`; there is no save callback, database client, or itinerary writer.
  *
- * The one import is a fingerprint helper. Both identities this module mints — a
- * material revision and a proposal ID — are compared for equality at the Phase
- * 2B write boundary, where matching means "this is the trip and the plan the
- * traveller reviewed". They were previously a 32-bit FNV-1a digest in base 36,
- * which was appropriate while they were only cache keys and is not appropriate
- * for an authorisation identity.
+ * Imports stay tiny and Deno-free so Vitest exercises the exact scheduling
+ * rules used by the Edge Function: a fingerprint helper, and the shared
+ * arrival/departure buffers also used by `destinationPlanner`.
+ *
+ * Both identities this module mints — a material revision and a proposal ID —
+ * are compared for equality at the Phase 2B write boundary, where matching
+ * means "this is the trip and the plan the traveller reviewed". They were
+ * previously a 32-bit FNV-1a digest in base 36, which was appropriate while
+ * they were only cache keys and is not appropriate for an authorisation
+ * identity.
  */
 import { canonicalFingerprint } from './canonicalHash.ts';
+import {
+  ARRIVAL_SETTLING_MINUTES,
+  DEPARTURE_LEAD_MINUTES,
+} from './itineraryEdgeTiming.ts';
+
+export { ARRIVAL_SETTLING_MINUTES, DEPARTURE_LEAD_MINUTES };
 
 export type ProposalPace = 'relaxed' | 'balanced' | 'fast';
 export type ProposalPriority = 'must-do' | 'interested' | 'optional' | 'locked';
@@ -259,16 +267,6 @@ export interface ProposalEngineDeps {
 const MAX_PLACES = 25;
 const MAX_DAYS = 21;
 export const MAX_REPAIR_ITERATIONS = 2;
-/**
- * Getting out of an airport and to somewhere the day can start.
- * Shared with `destinationPlanner` trip-edge shaping — not a new guess.
- */
-export const ARRIVAL_SETTLING_MINUTES = 120;
-/**
- * Leaving for the airport: check-in, security, and not running for it.
- * Shared with `destinationPlanner` trip-edge shaping — not a new guess.
- */
-export const DEPARTURE_LEAD_MINUTES = 210;
 
 const PACE_RULES: Record<ProposalPace, {
   start: string;
