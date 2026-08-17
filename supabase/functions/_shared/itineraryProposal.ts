@@ -355,9 +355,86 @@ const placeIdOf = (activity: Record<string, unknown>, day?: number): string | un
   ?? text(activity.providerPlaceId, 120)
   ?? (text(activity.name, 160) ? `${day ?? 0}:${text(activity.name, 160)!.toLowerCase()}` : undefined);
 
+/**
+ * The discovery panel records a Must do against `candidate.id`, but the place it
+ * saves carries `discovered-<candidate.id>`. Looking a decision up by the saved
+ * activity ID alone therefore always missed, and an explicit Must do silently
+ * arrived here as `optional`.
+ *
+ * So resolve a decision against every identity one saved place can honestly be
+ * known by. Names are deliberately absent: `placeIdOf` may fall back to one to
+ * give a place an ID, but a decision must never be inherited from a different
+ * place that happens to share a name.
+ */
+const DISCOVERED_ACTIVITY_PREFIX = 'discovered-';
+
+/**
+ * The identities that name exactly one logical place, most current first, so a
+ * live decision always outranks a stale one recorded under an older form.
+ */
+const canonicalKeysOf = (activity: Record<string, unknown>): string[] => {
+  const activityId = text(activity.id, 120);
+  const providerPlaceId = text(activity.providerPlaceId, 120);
+  const provider = text(activity.provider, 40);
+  const candidateId = activityId && activityId.startsWith(DISCOVERED_ACTIVITY_PREFIX)
+    ? text(activityId.slice(DISCOVERED_ACTIVITY_PREFIX.length), 120)
+    : undefined;
+  return [...new Set([
+    // What the discovery panel is keying decisions with right now.
+    candidateId,
+    // `osm-n123` is how discovery composes that key from the provider pair.
+    // Rebuilding it resolves trips saved before the activity kept its candidate
+    // ID, without rewriting any stored decision.
+    provider && providerPlaceId ? `${provider}-${providerPlaceId}` : undefined,
+    activityId,
+  ].filter((key): key is string => Boolean(key)))];
+};
+
+/**
+ * A bare provider place ID such as `n3507545614` is only meaningful next to the
+ * provider that issued it, so it is a legacy read path and never a canonical
+ * identity — see `unambiguousLegacyKeys` for when it may be trusted.
+ */
+const legacyKeyOf = (activity: Record<string, unknown>): string | undefined =>
+  text(activity.providerPlaceId, 120);
+
+/**
+ * Bare provider IDs are not namespaced, so two providers can issue the same raw
+ * string for different places. Accept one as a decision key only where it names
+ * a single place across the whole trip; where it does not, fail closed to no
+ * legacy match rather than promote somebody else's place.
+ */
+const unambiguousLegacyKeys = (activities: Record<string, unknown>[]): Set<string> => {
+  const owners = new Map<string, Set<string>>();
+  for (const activity of activities) {
+    const legacy = legacyKeyOf(activity);
+    if (!legacy) continue;
+    const owner = canonicalKeysOf(activity)[0] ?? legacy;
+    const claimed = owners.get(legacy) ?? new Set<string>();
+    claimed.add(owner);
+    owners.set(legacy, claimed);
+  }
+  return new Set([...owners]
+    .filter(([, claimed]) => claimed.size === 1)
+    .map(([legacy]) => legacy));
+};
+
+/** Canonical identities first, then a bare provider ID only where it is safe. */
+const decisionKeysOf = (activity: Record<string, unknown>, safeLegacyKeys: Set<string>): string[] => {
+  const keys = canonicalKeysOf(activity);
+  const legacy = legacyKeyOf(activity);
+  return legacy && safeLegacyKeys.has(legacy) && !keys.includes(legacy) ? [...keys, legacy] : keys;
+};
+
 const activityPlace = (
   activity: Record<string, unknown>,
-  options: { day?: number; city?: string; decisions: Record<string, unknown>; mustDo: Set<string> },
+  options: {
+    day?: number;
+    city?: string;
+    decisions: Record<string, unknown>;
+    mustDo: Set<string>;
+    safeLegacyKeys: Set<string>;
+  },
 ): PlanningPlace | undefined => {
   const name = text(activity.name, 160);
   const id = placeIdOf(activity, options.day);
@@ -368,11 +445,16 @@ const activityPlace = (
   if (type === 'flight') return undefined;
   const fixed = activity.locked === true
     || asArray(activity.lockedFields).some((entry) => entry === 'all' || entry === 'schedule');
-  const decision = text(options.decisions[id], 20)
-    ?? text(options.decisions[text(activity.providerPlaceId, 120) ?? ''], 20);
+  // One canonical identity set for both the traveller's discovery decision and
+  // the trip's Must do constraint, so the two can never disagree about a place.
+  const decisionKeys = decisionKeysOf(activity, options.safeLegacyKeys);
+  const decision = decisionKeys
+    .map((key) => text(options.decisions[key], 20))
+    .find((entry): entry is string => Boolean(entry));
+  const requiredByConstraint = decisionKeys.some((key) => options.mustDo.has(key));
   const priority: ProposalPriority = fixed
     ? 'locked'
-    : options.mustDo.has(id) || decision === 'must-do'
+    : requiredByConstraint || decision === 'must-do'
       ? 'must-do'
       : decision === 'interested' ? 'interested' : 'optional';
   const duration = Math.max(15, Math.min(720, Math.round(number(activity.durationMinutes) ?? 90)));
@@ -432,6 +514,15 @@ export function buildPlanningMaterial(
   const preferences = { hiddenGems: typeof profile?.hiddenGems === 'boolean' ? profile.hiddenGems : undefined };
   const candidatePlaces: PlanningPlace[] = [];
   const seen = new Set<string>();
+  // Whether a bare provider ID is safe to read a decision from depends on every
+  // other place in the trip, so it has to be settled before any one is judged.
+  const safeLegacyKeys = unambiguousLegacyKeys([
+    ...rawDays.flatMap((raw) => asArray(asRecord(raw)?.activities)),
+    ...asArray(itinerary.unassignedActivities),
+  ].flatMap((raw) => {
+    const activity = asRecord(raw);
+    return activity ? [activity] : [];
+  }));
 
   const days = rawDays.map((raw, index): PlanningDayMaterial => {
     const day = asRecord(raw) ?? {};
@@ -441,7 +532,7 @@ export function buildPlanningMaterial(
     for (const rawActivity of asArray(day.activities)) {
       const activity = asRecord(rawActivity);
       if (!activity) continue;
-      const place = activityPlace(activity, { day: dayNumber, city, decisions, mustDo });
+      const place = activityPlace(activity, { day: dayNumber, city, decisions, mustDo, safeLegacyKeys });
       if (!place || seen.has(place.id)) continue;
       seen.add(place.id);
       candidatePlaces.push(place);
@@ -481,6 +572,7 @@ export function buildPlanningMaterial(
       city: text(activity.location, 120) ?? days[0]?.city,
       decisions,
       mustDo,
+      safeLegacyKeys,
     });
     if (!place || seen.has(place.id)) continue;
     seen.add(place.id);
