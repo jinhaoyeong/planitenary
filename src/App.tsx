@@ -1088,7 +1088,13 @@ function App() {
           willChange: 'transform',
         }}
       >
-        <div className="app-header-inner max-w-7xl mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
+        {/*
+          Wider than the page content at 2xl only, which is where the action
+          buttons reveal their labels. The header is a utility bar rather than
+          reading content, and the extra 96px is what lets all seven tabs stay
+          visible instead of scrolling once those labels appear.
+        */}
+        <div className="app-header-inner max-w-7xl 2xl:max-w-[92rem] mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 shrink min-w-0">
             {!isDemoUser && (
               <button
@@ -1127,7 +1133,7 @@ function App() {
                   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } }
                 }}
                 onClick={() => handleTabChange(tab.id)}
-                className="relative px-4 py-2 text-sm font-semibold tracking-tight transition-colors"
+                className="relative shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold tracking-tight transition-colors"
                 style={{ color: activeTab === tab.id ? 'var(--ink)' : 'var(--ink-muted)' }}
               >
                 {tab.label}
@@ -1142,7 +1148,13 @@ function App() {
             ))}
           </motion.nav>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/*
+            `relative z-10` keeps the actions above the tab strip. The tabs are
+            positioned for their active underline, so without this they paint
+            over these controls the moment the header is tight — which is how a
+            click on "Plan my trip" ended up hitting a tab instead.
+          */}
+          <div className="relative z-10 flex items-center gap-1.5 sm:gap-2 shrink-0">
             {!isDemoUser && !isLocalTestUser && user && (
               <>
                 <PlanTripProposalPanel
@@ -1163,7 +1175,7 @@ function App() {
               aria-label="Restore backup"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Restore</span>
+              <span className="hidden 2xl:inline">Restore</span>
             </motion.button>
             <motion.button
               onClick={toggleTheme}

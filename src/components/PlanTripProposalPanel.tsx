@@ -217,7 +217,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
       <motion.button
         type="button"
         onClick={openPlanner}
-        className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold"
+        className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold"
         style={{ color: 'var(--accent-ink, #fff)', backgroundColor: 'var(--accent)' }}
         whileTap={{ scale: 0.96 }}
         whileHover={{ y: -1 }}

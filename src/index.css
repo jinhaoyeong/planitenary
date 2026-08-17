@@ -3102,11 +3102,25 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
 }
 
 @media (min-width: 1280px) {
+  /**
+   * Brand left, tabs centred, actions right.
+   *
+   * The two outer tracks are `auto` — sized to what they hold — and the tabs
+   * take `minmax(0, 1fr)` in the middle, so the tabs are the one group that
+   * gives when all three cannot fit.
+   *
+   * It used to be `minmax(14rem, 1fr) auto minmax(14rem, 1fr)`. The tabs claimed
+   * their full min-content width from the `auto` centre track, the side tracks
+   * were pinned to a 14rem floor, and the actions — every child `shrink-0` —
+   * were 479px of buttons in a 278px track. They overflowed sideways under the
+   * tabs, and since each tab is `position: relative` for its active underline,
+   * the tabs painted over those buttons and swallowed clicks meant for them.
+   */
   .app-header-inner {
     display: grid;
-    grid-template-columns: minmax(14rem, 1fr) auto minmax(14rem, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    column-gap: 1.5rem;
+    column-gap: 1.25rem;
   }
 
   .app-brand {
@@ -3117,9 +3131,26 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
     text-overflow: ellipsis;
   }
 
+  /**
+   * Scrolls rather than overflowing, so a cramped header stays usable.
+   *
+   * `justify-self: stretch` rather than `center` is deliberate: `center` sizes
+   * the item to its content and centres that, so the box can spill past its
+   * track on both sides and `overflow-x` never gets a chance to engage. Filling
+   * the track and centring the tabs *within* it keeps the same look and makes
+   * the overflow real.
+   */
   .app-primary-nav {
-    justify-self: center;
+    justify-self: stretch;
+    justify-content: center;
     gap: 0.125rem;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .app-primary-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .app-header-inner > :last-child {

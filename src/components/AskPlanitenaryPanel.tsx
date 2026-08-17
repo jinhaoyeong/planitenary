@@ -110,7 +110,7 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
       <motion.button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3"
+        className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3"
         style={{ color: 'var(--ink)', border: '1px solid var(--border)', background: 'var(--surface)' }}
         whileHover={{ y: -1 }}
         whileTap={{ scale: 0.96 }}
@@ -118,8 +118,8 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
         aria-expanded={open}
       >
         <MessageCircleQuestion className="h-4 w-4" aria-hidden="true" />
-        <span className="hidden lg:inline">Ask Planitenary</span>
-        <span className="sr-only lg:hidden">Ask Planitenary</span>
+        <span className="hidden 2xl:inline">Ask Planitenary</span>
+        <span className="sr-only 2xl:hidden">Ask Planitenary</span>
       </motion.button>
 
       {typeof document !== 'undefined' && createPortal(
