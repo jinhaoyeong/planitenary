@@ -290,6 +290,28 @@ function App() {
     });
   };
 
+  /**
+   * Adopt an itinerary the server has already written.
+   *
+   * Deliberately not `handleItineraryChange`: that one bumps the revision for a
+   * local edit, and doing so here would change the trip away from the exact
+   * bytes the apply stored — the next autosave would write the altered version
+   * and Undo would refuse, having been asked to restore over an itinerary it no
+   * longer recognises. This is a write that already happened, so local state
+   * copies it rather than re-deriving it.
+   */
+  const adoptWrittenItinerary = (written: Itinerary) => {
+    setCustomItinerary(() => {
+      latestItineraryRef.current = written;
+      logItinerarySync('applied-proposal', {
+        applied: true,
+        incomingRevision: written.revision,
+        incomingDays: written.days.length,
+      });
+      return written;
+    });
+  };
+
   const commitHeroText = (field: keyof Itinerary, value: string) => {
     if (!isHomeHeroEditing) return;
     const draftField = field === 'name' ? 'headline' : field === 'heroEyebrow' ? 'eyebrow' : field === 'coverHeadline' ? 'coverHeadline' : field === 'coverLabel' ? 'coverLabel' : field === 'coverYear' ? 'coverYear' : field === 'heroDayBadge' ? 'dayBadge' : field === 'description' ? 'description' : field === 'primaryButtonLabel' ? 'primaryLabel' : field === 'secondaryButtonLabel' ? 'secondaryLabel' : null;
@@ -1123,7 +1145,12 @@ function App() {
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {!isDemoUser && !isLocalTestUser && user && (
               <>
-                <PlanTripProposalPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
+                <PlanTripProposalPanel
+                  tripId={activeItineraryId}
+                  tripName={displayItinerary.name}
+                  itinerary={customItinerary || activeItinerary}
+                  onApplied={adoptWrittenItinerary}
+                />
                 <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
               </>
             )}

@@ -92,7 +92,7 @@ describe('Phase 2A deterministic itinerary proposal', () => {
       durationMinutes: 60,
       coordinates: [34.6 + index / 10_000, 135.5],
     }));
-    const source = buildPlanningMaterial('trip-1', {
+    const source = await buildPlanningMaterial('trip-1', {
       tripProfile: { styles: [] },
       planningConstraints: { mustDoActivityIds: activities.map((activity) => activity.id) },
       days: [{ day: 1, city: 'Osaka', activities }],
@@ -106,7 +106,7 @@ describe('Phase 2A deterministic itinerary proposal', () => {
     ]));
   });
 
-  it('changes the exact proposal revision when planning preferences change', () => {
+  it('changes the exact proposal revision when planning preferences change', async () => {
     const itinerary = {
       cities: ['Osaka'],
       tripProfile: {
@@ -119,8 +119,8 @@ describe('Phase 2A deterministic itinerary proposal', () => {
       planningConstraints: { accommodationLocation: 'Namba', accommodationCoordinates: [34.67, 135.5] },
       days: [{ day: 1, city: 'Osaka', activities: [] }],
     };
-    const first = buildPlanningMaterial('trip-1', itinerary);
-    const changed = buildPlanningMaterial('trip-1', {
+    const first = await buildPlanningMaterial('trip-1', itinerary);
+    const changed = await buildPlanningMaterial('trip-1', {
       ...itinerary,
       tripProfile: { ...itinerary.tripProfile, styles: ['food'] },
     });
@@ -179,7 +179,7 @@ describe('Phase 2A deterministic itinerary proposal', () => {
   });
 
   it('applies the arrival buffer and rejects an overfilled arrival day', async () => {
-    const source = buildPlanningMaterial('trip-1', {
+    const source = await buildPlanningMaterial('trip-1', {
       name: 'Late arrival',
       cities: ['Osaka'],
       tripProfile: { arrivalTime: '16:00', startDate: '2026-08-17', moods: [], tripTypes: [], styles: [] },

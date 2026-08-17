@@ -14,11 +14,40 @@ import {
   X,
 } from 'lucide-react';
 import { planTripProposal, type PlanTripResult } from '../lib/planTripProposal';
+import {
+  applyItineraryChange,
+  stageItineraryChange,
+  undoItineraryChange,
+  type StagedChange,
+} from '../lib/itineraryChangeClient';
+import type { Itinerary } from '../data';
 
 interface PlanTripProposalPanelProps {
   tripId: string;
   tripName?: string;
+  /** The trip as it stands, used only as the shape a server result falls back to. */
+  itinerary?: Itinerary;
+  /**
+   * Hand the authoritative post-write itinerary back to the app. Applying is a
+   * server-side write, so local state has to adopt the result exactly rather
+   * than re-deriving it, or the next autosave would write something else over it.
+   */
+  onApplied?: (itinerary: Itinerary) => void;
 }
+
+/**
+ * Applying is a real write, so it is a small state machine rather than a button.
+ * Nothing advances without the traveller: `idle -> confirm` needs a click, and
+ * `confirm -> applied` needs a second one against a diff they can read.
+ */
+type WritePhase =
+  | { phase: 'idle' }
+  | { phase: 'staging' }
+  | { phase: 'confirm'; staged: StagedChange }
+  | { phase: 'applying'; staged: StagedChange }
+  | { phase: 'applied'; changeId: string }
+  | { phase: 'undoing'; changeId: string }
+  | { phase: 'undone' };
 
 const PLANNING_STEPS = [
   'Arranging your saved places',
@@ -53,11 +82,39 @@ function PlanningStepMarker({ active, done, index }: { active: boolean; done: bo
   );
 }
 
-export function PlanTripProposalPanel({ tripId, tripName }: PlanTripProposalPanelProps) {
+/** One readable line per structured change atom. Wording only; the facts are the diff. */
+function changeSummary(staged: StagedChange): string[] {
+  const diff = staged.diff;
+  const lines: string[] = [];
+  const list = (entries: Array<{ name: string }>, limit = 3) => {
+    const names = entries.slice(0, limit).map((entry) => entry.name);
+    return entries.length > limit ? `${names.join(', ')} and ${entries.length - limit} more` : names.join(', ');
+  };
+  if (diff.added?.length) lines.push(`Adds ${list(diff.added)} to your days.`);
+  if (diff.moved?.length) {
+    lines.push(...diff.moved.slice(0, 3).map((entry) => `Moves ${entry.name} from day ${entry.fromDay} to day ${entry.toDay}.`));
+  }
+  if (diff.retimed?.length) {
+    lines.push(...diff.retimed.slice(0, 3).map((entry) => `Retimes ${entry.name} from ${entry.fromTime} to ${entry.toTime}.`));
+  }
+  if (diff.unscheduled?.length) lines.push(`Moves ${list(diff.unscheduled)} to your unassigned list — nothing is deleted.`);
+  if (diff.windowsAdded?.length) lines.push(`Adds ${diff.windowsAdded.length} meal, rest or open window.`);
+  if (diff.travelChanged?.length) lines.push(`Updates ${diff.travelChanged.length} travel time from the route provider.`);
+  if (diff.preservedMustDo?.length) lines.push(`Keeps every Must do: ${list(diff.preservedMustDo)}.`);
+  return lines.length > 0 ? lines : ['No activity changes — times and details only.'];
+}
+
+export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }: PlanTripProposalPanelProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<PlanTripResult | null>(null);
+  const [write, setWrite] = useState<WritePhase>({ phase: 'idle' });
+  const [writeError, setWriteError] = useState<string | null>(null);
+
+  /** No exit, no second click, and no backdrop dismiss while a write is in flight. */
+  const busy = loading || write.phase === 'staging' || write.phase === 'applying' || write.phase === 'undoing';
+  const proposal = result?.proposal;
 
   useEffect(() => {
     if (!loading) return;
@@ -68,23 +125,83 @@ export function PlanTripProposalPanel({ tripId, tripName }: PlanTripProposalPane
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !loading) setOpen(false);
+      if (event.key === 'Escape' && !busy) setOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [loading, open]);
+  }, [busy, open]);
 
   const generate = async () => {
     if (loading) return;
     setLoading(true);
     setProgress(0);
     setResult(null);
+    setWrite({ phase: 'idle' });
+    setWriteError(null);
     const next = await planTripProposal(tripId);
     setResult(next);
     setLoading(false);
   };
 
-  const proposal = result?.proposal;
+  /**
+   * Step one of two. Binds the reviewed plan to the trip's current state on the
+   * server and brings back the diff — it authorises a write without performing
+   * one, so a traveller who stops here has changed nothing.
+   */
+  const prepare = async () => {
+    if (write.phase !== 'idle' && write.phase !== 'undone') return;
+    // Stage the plan on screen, by its identity. Not "this trip's latest plan":
+    // another tab may have regenerated one since, and the traveller is agreeing
+    // to what they can see.
+    if (!proposal) return;
+    setWriteError(null);
+    setWrite({ phase: 'staging' });
+    const staged = await stageItineraryChange(tripId, {
+      proposalId: proposal.id,
+      materialRevision: proposal.materialRevision,
+    });
+    if (!staged.ok) {
+      setWrite({ phase: 'idle' });
+      setWriteError(staged.detail);
+      return;
+    }
+    if (!staged.staged.applicable) {
+      setWrite({ phase: 'idle' });
+      setWriteError(staged.staged.blocking[0] ?? 'This plan has unresolved conflicts and cannot be applied.');
+      return;
+    }
+    setWrite({ phase: 'confirm', staged: staged.staged });
+  };
+
+  /** Step two of two, and the only call in this component that writes. */
+  const confirmApply = async () => {
+    if (write.phase !== 'confirm') return;
+    const staged = write.staged;
+    setWrite({ phase: 'applying', staged });
+    const applied = await applyItineraryChange(staged.proposalId, itinerary ?? ({} as Itinerary));
+    if (!applied.ok) {
+      setWrite({ phase: 'idle' });
+      setWriteError(applied.detail);
+      return;
+    }
+    onApplied?.(applied.itinerary);
+    setWrite({ phase: 'applied', changeId: applied.changeId });
+  };
+
+  const undo = async () => {
+    if (write.phase !== 'applied') return;
+    const changeId = write.changeId;
+    setWrite({ phase: 'undoing', changeId });
+    const undone = await undoItineraryChange(changeId, itinerary ?? ({} as Itinerary));
+    if (!undone.ok) {
+      setWrite({ phase: 'applied', changeId });
+      setWriteError(undone.detail);
+      return;
+    }
+    onApplied?.(undone.itinerary);
+    setWrite({ phase: 'undone' });
+  };
+
   const errorCount = useMemo(
     () => proposal?.conflicts.filter((conflict) => conflict.severity === 'error').length ?? 0,
     [proposal],
@@ -120,7 +237,7 @@ export function PlanTripProposalPanel({ tripId, tripName }: PlanTripProposalPane
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onMouseDown={(event) => {
-                if (event.target === event.currentTarget && !loading) setOpen(false);
+                if (event.target === event.currentTarget && !busy) setOpen(false);
               }}
             >
               <motion.section
@@ -137,13 +254,13 @@ export function PlanTripProposalPanel({ tripId, tripName }: PlanTripProposalPane
                   <div className="min-w-0">
                     <h2 id="plan-trip-title" className="font-display text-3xl tracking-[-0.025em] sm:text-4xl">Plan my trip</h2>
                     <p className="mt-1 max-w-xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-                      A complete, route-aware proposal for {tripName || 'this trip'}. Nothing here changes your saved itinerary.
+                      A complete, route-aware proposal for {tripName || 'this trip'}. Nothing changes until you apply it.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setOpen(false)}
-                    disabled={loading}
+                    disabled={busy}
                     className="rounded-full border border-slate-200 p-2 text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-40 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
                     aria-label="Close Plan my trip"
                   >
@@ -193,6 +310,101 @@ export function PlanTripProposalPanel({ tripId, tripName }: PlanTripProposalPane
 
                   {!loading && proposal && (
                     <div className="space-y-8">
+                      {writeError && (
+                        <section role="alert" className="rounded-2xl bg-rose-50 p-4 text-rose-950 dark:bg-rose-950/40 dark:text-rose-100">
+                          <div className="flex items-center gap-2 text-sm font-semibold">
+                            <AlertTriangle className="h-4 w-4" /> Nothing was changed
+                          </div>
+                          <p className="mt-2 text-xs leading-5">{writeError}</p>
+                          <button
+                            type="button"
+                            className="mt-3 rounded-full bg-rose-600 px-4 py-2 text-xs font-semibold text-white"
+                            onClick={() => void generate()}
+                          >
+                            Review a fresh plan
+                          </button>
+                        </section>
+                      )}
+
+                      {write.phase === 'confirm' && (
+                        <section
+                          aria-labelledby="apply-confirm-title"
+                          className="rounded-2xl border-2 border-rose-500 p-4 dark:border-rose-400"
+                        >
+                          <h3 id="apply-confirm-title" className="text-base font-semibold">
+                            Apply this plan to your itinerary?
+                          </h3>
+                          <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                            This replaces the days below in your saved itinerary. You can undo it straight afterwards.
+                          </p>
+                          <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-700 dark:text-slate-200">
+                            {changeSummary(write.staged).map((line) => <li key={line}>· {line}</li>)}
+                          </ul>
+                          {write.staged.warnings.length > 0 && (
+                            <ul className="mt-3 space-y-1 text-xs leading-5 text-amber-700 dark:text-amber-300">
+                              {write.staged.warnings.slice(0, 4).map((warning) => <li key={warning}>{warning}</li>)}
+                            </ul>
+                          )}
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                              onClick={() => void confirmApply()}
+                              disabled={busy}
+                            >
+                              Apply to my itinerary
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-full px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60 dark:text-slate-300 dark:hover:bg-slate-900"
+                              onClick={() => setWrite({ phase: 'idle' })}
+                              disabled={busy}
+                            >
+                              Not yet
+                            </button>
+                          </div>
+                        </section>
+                      )}
+
+                      {write.phase === 'applying' && (
+                        <p role="status" className="flex items-center gap-2 text-sm font-semibold">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Applying to your itinerary…
+                        </p>
+                      )}
+
+                      {write.phase === 'applied' && (
+                        <section
+                          aria-labelledby="apply-success-title"
+                          className="rounded-2xl bg-emerald-50 p-4 text-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-100"
+                        >
+                          <h3 id="apply-success-title" className="flex items-center gap-2 text-sm font-semibold">
+                            <Check className="h-4 w-4" /> Applied to your itinerary
+                          </h3>
+                          <p className="mt-1 text-xs leading-5">
+                            Your saved days now match this plan. Undo restores exactly what you had before.
+                          </p>
+                          <button
+                            type="button"
+                            className="mt-3 rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold disabled:opacity-60 dark:border-emerald-300"
+                            onClick={() => void undo()}
+                            disabled={busy}
+                          >
+                            Undo this change
+                          </button>
+                        </section>
+                      )}
+
+                      {write.phase === 'undoing' && (
+                        <p role="status" className="flex items-center gap-2 text-sm font-semibold">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Undoing…
+                        </p>
+                      )}
+
+                      {write.phase === 'undone' && (
+                        <p role="status" className="rounded-2xl bg-slate-100 p-4 text-sm font-semibold dark:bg-slate-900">
+                          Change undone. Your itinerary is back to what it was.
+                        </p>
+                      )}
                       <section className="grid gap-4 border-b border-slate-200 pb-6 dark:border-slate-800 sm:grid-cols-[1fr_auto] sm:items-end">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -207,7 +419,8 @@ export function PlanTripProposalPanel({ tripId, tripName }: PlanTripProposalPane
                           </p>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                          <ShieldCheck className="h-4 w-4 text-emerald-600" /> Proposal only · not saved
+                          <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                          {write.phase === 'applied' ? 'Applied · undo available' : 'Proposal only · not saved'}
                         </div>
                       </section>
 
@@ -285,11 +498,23 @@ export function PlanTripProposalPanel({ tripId, tripName }: PlanTripProposalPane
                       Keep editing manually
                     </button>
                     <div className="flex flex-col gap-2 sm:flex-row">
-                      <button type="button" className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900" onClick={() => void generate()} disabled={loading}>
+                      <button type="button" className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900" onClick={() => void generate()} disabled={busy}>
                         Regenerate proposal
                       </button>
-                      <button type="button" disabled className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400" title="Saving arrives in Phase 2B">
-                        Apply in Phase 2B <ArrowRight className="h-4 w-4" />
+                      {/*
+                        Never auto-applies. The plan arrives as a proposal, this
+                        button only opens the confirmation, and the confirmation
+                        is where the write is agreed to.
+                      */}
+                      <button
+                        type="button"
+                        onClick={() => void prepare()}
+                        disabled={busy || !proposal || proposal.status !== 'valid' || write.phase === 'confirm' || write.phase === 'applied'}
+                        title={proposal?.status === 'valid' ? 'Review the changes before saving them' : 'Resolve the conflicts above first'}
+                        className="inline-flex items-center justify-center gap-2 rounded-full bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
+                      >
+                        {write.phase === 'staging' ? 'Preparing…' : 'Apply plan…'}
+                        <ArrowRight className="h-4 w-4" />
                       </button>
                     </div>
                   </div>

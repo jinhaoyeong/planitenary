@@ -310,7 +310,7 @@ Deno.serve(async (request) => {
   };
 
   if (operation === 'build-itinerary') {
-    const material = buildPlanningMaterial(trip.tripId, itinerary);
+    const material = await buildPlanningMaterial(trip.tripId, itinerary);
     const materialChars = JSON.stringify(material).length;
     if (materialChars > limits.maxInputChars) {
       return json({ error: `Planning material too large: ${materialChars} characters, limit ${limits.maxInputChars}.` }, 413);

@@ -40,3 +40,9 @@ verify_jwt = true
 
 [functions.planitenary-agent]
 verify_jwt = true
+
+# The only function that writes an itinerary. It calls no model and no provider;
+# it stages, applies and undoes previously validated results. A signed-in caller
+# is required at the gateway as well as inside the handler.
+[functions.itinerary-change]
+verify_jwt = true

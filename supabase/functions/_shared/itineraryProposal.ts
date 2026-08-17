@@ -9,7 +9,15 @@
  *
  * Nothing in this file persists data. A proposal always carries `applied:
  * false`; there is no save callback, database client, or itinerary writer.
+ *
+ * The one import is a fingerprint helper. Both identities this module mints — a
+ * material revision and a proposal ID — are compared for equality at the Phase
+ * 2B write boundary, where matching means "this is the trip and the plan the
+ * traveller reviewed". They were previously a 32-bit FNV-1a digest in base 36,
+ * which was appropriate while they were only cache keys and is not appropriate
+ * for an authorisation identity.
  */
+import { canonicalFingerprint } from './canonicalHash.ts';
 
 export type ProposalPace = 'relaxed' | 'balanced' | 'fast';
 export type ProposalPriority = 'must-do' | 'interested' | 'optional' | 'locked';
@@ -286,14 +294,6 @@ const weekday = (date?: string): number | undefined => {
   return Number.isFinite(timestamp) ? new Date(timestamp).getUTCDay() : undefined;
 };
 
-const hash = (value: string): string => {
-  let current = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    current ^= value.charCodeAt(index);
-    current = Math.imul(current, 16777619);
-  }
-  return (current >>> 0).toString(36);
-};
 
 const cleanUrl = (value: unknown): string | undefined => {
   const candidate = text(value, 1000);
@@ -426,6 +426,65 @@ const decisionKeysOf = (activity: Record<string, unknown>, safeLegacyKeys: Set<s
   return legacy && safeLegacyKeys.has(legacy) && !keys.includes(legacy) ? [...keys, legacy] : keys;
 };
 
+/** Schedule furniture the planner rebuilds rather than treats as a place. */
+export const PLANNER_MANAGED_KINDS = ['meal-window', 'rest-window', 'free-time'] as const;
+
+const PLANNER_EXCLUDED_KINDS: string[] = [...PLANNER_MANAGED_KINDS, 'transport'];
+
+/** Whether the planner is allowed to schedule this activity as a place at all. */
+export const isPlannerPlace = (activity: Record<string, unknown>, day?: number): boolean =>
+  Boolean(text(activity.name, 160))
+  && Boolean(placeIdOf(activity, day))
+  && !PLANNER_EXCLUDED_KINDS.includes(text(activity.kind, 40) ?? '')
+  && text(activity.type, 60) !== 'flight';
+
+export interface PlannerActivityRef {
+  placeId: string;
+  activity: Record<string, unknown>;
+  /** The day it currently sits on; absent for the unassigned inbox. */
+  day?: number;
+}
+
+/**
+ * Every activity the planner may schedule, under the exact identity and in the
+ * exact dedup order `buildPlanningMaterial` gives it. Applying a proposal has
+ * to resolve a place ID back to the activity the material named, so the two
+ * walks share this one definition rather than reimplementing it.
+ */
+export function indexPlannerActivities(itineraryValue: unknown): PlannerActivityRef[] {
+  const itinerary = asRecord(itineraryValue) ?? {};
+  const refs: PlannerActivityRef[] = [];
+  const seen = new Set<string>();
+  const add = (activity: Record<string, unknown>, day?: number) => {
+    if (!isPlannerPlace(activity, day)) return;
+    const placeId = placeIdOf(activity, day)!;
+    if (seen.has(placeId)) return;
+    seen.add(placeId);
+    refs.push({ placeId, activity, day });
+  };
+  asArray(itinerary.days).slice(0, MAX_DAYS).forEach((raw, index) => {
+    const day = asRecord(raw) ?? {};
+    const dayNumber = Number.isInteger(day.day) ? Number(day.day) : index + 1;
+    for (const rawActivity of asArray(day.activities)) {
+      const activity = asRecord(rawActivity);
+      if (activity) add(activity, dayNumber);
+    }
+  });
+  for (const raw of asArray(itinerary.unassignedActivities)) {
+    const activity = asRecord(raw);
+    if (activity) add(activity);
+  }
+  return refs;
+}
+
+/** The day numbers `buildPlanningMaterial` and a proposal both work over. */
+export function plannedDayNumbers(itineraryValue: unknown): number[] {
+  return asArray(asRecord(itineraryValue)?.days).slice(0, MAX_DAYS).map((raw, index) => {
+    const day = asRecord(raw) ?? {};
+    return Number.isInteger(day.day) ? Number(day.day) : index + 1;
+  });
+}
+
 const activityPlace = (
   activity: Record<string, unknown>,
   options: {
@@ -436,13 +495,11 @@ const activityPlace = (
     safeLegacyKeys: Set<string>;
   },
 ): PlanningPlace | undefined => {
-  const name = text(activity.name, 160);
-  const id = placeIdOf(activity, options.day);
-  if (!name || !id) return undefined;
+  if (!isPlannerPlace(activity, options.day)) return undefined;
+  const name = text(activity.name, 160)!;
+  const id = placeIdOf(activity, options.day)!;
   const kind = text(activity.kind, 40);
-  if (['meal-window', 'rest-window', 'free-time', 'transport'].includes(kind ?? '')) return undefined;
   const type = text(activity.type, 60);
-  if (type === 'flight') return undefined;
   const fixed = activity.locked === true
     || asArray(activity.lockedFields).some((entry) => entry === 'all' || entry === 'schedule');
   // One canonical identity set for both the traveller's discovery decision and
@@ -487,10 +544,10 @@ const activityPlace = (
 };
 
 /** Convert owned itinerary JSON into the only bounded material the model sees. */
-export function buildPlanningMaterial(
+export async function buildPlanningMaterial(
   tripId: string,
   itineraryValue: unknown,
-): PlanningMaterial {
+): Promise<PlanningMaterial> {
   const itinerary = asRecord(itineraryValue) ?? {};
   const profile = asRecord(itinerary.tripProfile);
   const constraints = asRecord(itinerary.planningConstraints);
@@ -604,7 +661,13 @@ export function buildPlanningMaterial(
     byCluster.set(id, cluster);
   }
 
-  const stable = JSON.stringify({
+  /**
+   * The revision is compared for equality when a reviewed plan is staged, so it
+   * has to name this exact material rather than merely index it. Canonical
+   * serialisation keeps it a property of the material rather than of the order
+   * these fields happened to be assembled in.
+   */
+  const revision = `plan-v1-${await canonicalFingerprint({
     tripId,
     itineraryRevision: itinerary.revision,
     pace,
@@ -621,12 +684,12 @@ export function buildPlanningMaterial(
     days,
     places,
     excludedRequiredPlaces,
-  });
+  })}`;
 
   return {
     version: 1,
     tripId,
-    revision: `plan-v1-${hash(stable)}`,
+    revision,
     name: text(itinerary.name, 160) ?? 'Untitled trip',
     cities,
     pace,
@@ -1063,28 +1126,61 @@ export async function runItineraryProposalEngine(
   const confirmedLegs = finalDays.reduce((total, day) => total + day.items.filter((item) => item.travelFromPrevious?.status === 'confirmed').length, 0);
   const unavailableLegs = finalDays.reduce((total, day) => total + day.items.filter((item) => item.travelFromPrevious?.status === 'unavailable').length, 0);
   const now = deps.now?.() ?? new Date().toISOString();
-  return {
-    kind: 'itinerary-proposal-v1',
-    id: `proposal-${hash(`${material.revision}:${now}`)}`,
+  const status = conflicts.some((conflict) => conflict.severity === 'error') ? 'needs-review' : 'valid';
+  const omittedPlaceIds = material.places.filter((place) => !scheduled.has(place.id)).map((place) => place.id);
+  const routeSummary = {
+    matrixCalls,
+    confirmedLegs,
+    unavailableLegs,
+    allDurationsProviderDerived: finalDays.every((day) => day.items.every((item) =>
+      item.travelFromPrevious?.durationMinutes === undefined
+      || item.travelFromPrevious.source === 'provider'
+      || item.travelFromPrevious.source === 'cache')),
+  };
+  /**
+   * The ID is a fingerprint of the plan, not of the moment it was made.
+   *
+   * Phase 2B stages by this ID, so "same ID" has to mean "same plan" for that
+   * binding to be worth anything — and it has to mean it against an adversary,
+   * not merely on average, which is why this is SHA-256 over a canonical form
+   * rather than the short non-cryptographic digest these identities used while
+   * they were only cache keys.
+   *
+   * Everything that can change what the traveller sees, what validation decides,
+   * or what Apply writes participates. That includes `createdAt`, which is not
+   * decoration here: `applyProposalToItinerary` stamps it onto every generated
+   * meal and rest window, so two otherwise identical plans made at different
+   * moments produce different itineraries and must not share an identity. Only
+   * `kind` and `applied` are left out, both being constants, along with the ID
+   * itself.
+   */
+  const fingerprint = await canonicalFingerprint({
     tripId: material.tripId,
     materialRevision: material.revision,
     createdAt: now,
-    status: conflicts.some((conflict) => conflict.severity === 'error') ? 'needs-review' : 'valid',
+    status,
+    pace: material.pace,
+    days: finalDays,
+    conflicts,
+    warnings: conflicts.filter((conflict) => conflict.severity === 'warning').map((conflict) => conflict.message),
+    omittedPlaceIds,
+    routeSummary,
+    repairIterations,
+  });
+  return {
+    kind: 'itinerary-proposal-v1',
+    id: `proposal-${fingerprint}`,
+    tripId: material.tripId,
+    materialRevision: material.revision,
+    createdAt: now,
+    status,
     applied: false,
     pace: material.pace,
     days: finalDays,
     conflicts,
     warnings: conflicts.filter((conflict) => conflict.severity === 'warning').map((conflict) => conflict.message),
-    omittedPlaceIds: material.places.filter((place) => !scheduled.has(place.id)).map((place) => place.id),
-    routeSummary: {
-      matrixCalls,
-      confirmedLegs,
-      unavailableLegs,
-      allDurationsProviderDerived: finalDays.every((day) => day.items.every((item) =>
-        item.travelFromPrevious?.durationMinutes === undefined
-        || item.travelFromPrevious.source === 'provider'
-        || item.travelFromPrevious.source === 'cache')),
-    },
+    omittedPlaceIds,
+    routeSummary,
     repairIterations,
   };
 }
