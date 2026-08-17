@@ -11,7 +11,7 @@ import { expiryFor, fetchJson, json, preflight, ProviderError, secrets } from '.
 import { parseAmapWalkingRoute, parseBaiduWalkingRoute } from '../_shared/regionalRoutes.ts';
 import { readRouteCache, type RouteCacheRow, serviceClient, writeRouteCache } from '../_shared/cache.ts';
 import { pairsNeedingProvider, routePairKey, routePointKey } from '../_shared/cacheKeys.ts';
-import { sameRoutingPoint } from '../_shared/routingProvider.ts';
+import { providerModeFor, sameRoutingPoint } from '../_shared/routingProvider.ts';
 
 interface Point { placeId?: string; coordinates?: [number, number] }
 
@@ -23,20 +23,6 @@ interface MatrixBody {
   travelStartsInDays?: number;
   provider?: 'google' | 'openrouteservice' | 'amap' | 'baidu';
 }
-
-/**
- * Google travel modes → OpenRouteService profiles.
- *
- * Transit is absent on purpose: ORS does not offer a public-transport matrix on
- * the free tier. Rather than routing a transit request as walking — which would
- * silently invent a plausible-looking but wrong duration — those elements stay
- * `unknown`, and the client falls back to its labelled straight-line estimate.
- */
-const ORS_PROFILES: Record<string, string> = {
-  WALK: 'foot-walking',
-  DRIVE: 'driving-car',
-  BICYCLE: 'cycling-regular',
-};
 
 const TRAVEL_MODES: Record<string, string> = {
   walking: 'WALK',
@@ -107,7 +93,8 @@ Deno.serve(async (request) => {
   if (origins.length === 0 || destinations.length === 0) {
     return json({ error: 'Origins and destinations are required.' }, 400);
   }
-  const mode = TRAVEL_MODES[body.mode || 'public-transport'] || 'TRANSIT';
+  const requestedMode = body.mode || 'public-transport';
+  const mode = TRAVEL_MODES[requestedMode] || 'TRANSIT';
   // Google permits up to 625 elements for ordinary matrices, but transit
   // matrices are limited to 100 origin/destination combinations.
   const maxElements = mode === 'TRANSIT' ? 100 : 625;
@@ -123,8 +110,15 @@ Deno.serve(async (request) => {
   const requestedOpenRouteService = body.provider === 'openrouteservice';
   const requestedGoogle = body.provider === 'google';
 
-  if (regionalProvider && body.mode && body.mode !== 'walking') {
-    return json({ error: 'Regional providers currently support walking routes only; public transit is not assumed.' }, 400);
+  if (regionalProvider && requestedMode !== 'walking') {
+    return json({
+      error: 'route-unavailable',
+      code: 'route-unavailable',
+      provider: regionalProvider,
+      requestedMode,
+      providerMode: null,
+      detail: 'Regional providers currently support walking routes only in Planitenary.',
+    }, 422);
   }
 
   const key = secrets.google();
@@ -137,6 +131,23 @@ Deno.serve(async (request) => {
     return json({ error: 'Routing is not configured.' }, 503);
   }
   const useOpenRouteService = requestedOpenRouteService || (!requestedGoogle && !key && Boolean(orsKey));
+  const orsProfile = providerModeFor('openrouteservice', requestedMode);
+  if (useOpenRouteService && !orsProfile) {
+    return json({
+      error: 'route-unavailable',
+      code: 'route-unavailable',
+      provider: 'openrouteservice',
+      requestedMode,
+      providerMode: null,
+      detail: `Hosted OpenRouteService does not support ${requestedMode} in Planitenary.`,
+    }, 422);
+  }
+  const selectedProvider = regionalProvider ?? (useOpenRouteService ? 'openrouteservice' : 'google');
+  const providerMode = regionalProvider === 'amap' || regionalProvider === 'baidu'
+    ? 'walking'
+    : useOpenRouteService
+      ? orsProfile
+      : mode;
 
   // Cache identity for every endpoint. Points without a placeId or coordinates
   // cannot be cached, so they read as permanent misses rather than a bad key.
@@ -205,7 +216,7 @@ Deno.serve(async (request) => {
       }
       if (cache) await writeRouteCache(cache, freshRows);
 
-      return json({ matrix, provider: regionalProvider, cached: pairs.length === 0, partial: origins.length * destinations.length > maxRegionalPairs, failedPairs, expiresAt: cacheExpiry });
+      return json({ matrix, provider: regionalProvider, requestedMode, providerMode, cached: pairs.length === 0, partial: origins.length * destinations.length > maxRegionalPairs, failedPairs, expiresAt: cacheExpiry });
     }
 
     // Read-through: build the matrix from cache first. If every needed pair is
@@ -243,18 +254,12 @@ Deno.serve(async (request) => {
       (originIndex, destinationIndex) => sameRoutingPoint(origins[originIndex], destinations[destinationIndex]),
     );
     if (complete) {
-      return json({ matrix, cached: true, expiresAt: cacheExpiry });
+      return json({ matrix, cached: true, provider: selectedProvider, requestedMode, providerMode, expiresAt: cacheExpiry });
     }
 
     // OpenRouteService: the keyless-adjacent path. Free tier, hard-capped, and
     // it returns 429 rather than an invoice when the cap is reached.
     if (useOpenRouteService && orsKey) {
-      const profile = ORS_PROFILES[mode];
-      if (!profile) {
-        // Transit has no ORS equivalent; leave it honestly unknown.
-        return json({ matrix, cached: false, provider: 'openrouteservice', unsupportedMode: body.mode, expiresAt: cacheExpiry });
-      }
-
       // ORS routes coordinates only — it has no notion of a provider place id.
       const points = [...origins, ...destinations];
       if (points.some((point) => !point.coordinates)) {
@@ -265,7 +270,7 @@ Deno.serve(async (request) => {
       const sourceIndices = origins.map((_, index) => index);
       const destinationIndices = destinations.map((_, index) => origins.length + index);
 
-      const orsPayload = await fetchJson(`https://api.heigit.org/openrouteservice/v2/matrix/${profile}`, {
+      const orsPayload = await fetchJson(`https://api.heigit.org/openrouteservice/v2/matrix/${orsProfile}`, {
         method: 'POST',
         headers: { Authorization: orsKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -295,7 +300,7 @@ Deno.serve(async (request) => {
       }));
       if (cache) await writeRouteCache(cache, orsRows);
 
-      return json({ matrix, cached: false, provider: 'openrouteservice', expiresAt: cacheExpiry });
+      return json({ matrix, cached: false, provider: 'openrouteservice', requestedMode, providerMode: orsProfile, expiresAt: cacheExpiry });
     }
 
     // Reaching here means Google is the chosen provider: the regional and ORS
@@ -339,7 +344,7 @@ Deno.serve(async (request) => {
     }
     if (cache) await writeRouteCache(cache, freshRows);
 
-    return json({ matrix, cached: false, expiresAt: cacheExpiry });
+    return json({ matrix, cached: false, provider: 'google', requestedMode, providerMode: mode, expiresAt: cacheExpiry });
   } catch (error) {
     const status = error instanceof ProviderError ? error.status : 502;
     return json({ error: error instanceof Error ? error.message : 'Routing failed.' }, status);

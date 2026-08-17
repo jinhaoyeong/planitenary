@@ -24,6 +24,17 @@ const strings = (value: unknown, max = 20): string[] =>
     ? value.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim())).slice(0, max)
     : [];
 
+const providerModeMatches = (requestedMode: string, providerMode: string | undefined): boolean => {
+  if (!providerMode) return true;
+  const supported: Record<string, readonly string[]> = {
+    walking: ['walking', 'foot-walking', 'WALK'],
+    driving: ['driving-car', 'DRIVE'],
+    cycling: ['cycling-regular', 'BICYCLE'],
+    'public-transport': ['TRANSIT'],
+  };
+  return supported[requestedMode]?.includes(providerMode) === true;
+};
+
 const parseItem = (value: unknown): ProposedItineraryItem | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
@@ -49,6 +60,11 @@ const parseItem = (value: unknown): ProposedItineraryItem | undefined => {
     ? rawTravel.source
     : undefined;
   const routeMode = ['walking', 'public-transport', 'driving', 'cycling'].find((candidate) => candidate === rawTravel?.mode);
+  const requestedMode = ['walking', 'public-transport', 'driving', 'cycling']
+    .find((candidate) => candidate === rawTravel?.requestedMode);
+  const displayMode = requestedMode ?? routeMode;
+  const providerMode = text(rawTravel?.providerMode, 80);
+  const modeMismatch = Boolean(displayMode && !providerModeMatches(displayMode, providerMode));
 
   return {
     id,
@@ -59,15 +75,18 @@ const parseItem = (value: unknown): ProposedItineraryItem | undefined => {
     startTime,
     endTime,
     visitDurationMinutes: Math.round(duration),
-    travelFromPrevious: rawTravel && fromPlaceId && fromName && travelStatus && source && routeMode
+    travelFromPrevious: rawTravel && fromPlaceId && fromName && travelStatus && source && displayMode
       ? {
           fromPlaceId,
           fromName,
-          mode: routeMode as 'walking' | 'public-transport' | 'driving' | 'cycling',
-          durationMinutes: finite(rawTravel.durationMinutes),
+          mode: displayMode as 'walking' | 'public-transport' | 'driving' | 'cycling',
+          requestedMode: requestedMode as 'walking' | 'public-transport' | 'driving' | 'cycling' | undefined,
+          providerMode,
+          provider: text(rawTravel.provider, 80),
+          durationMinutes: modeMismatch ? undefined : finite(rawTravel.durationMinutes),
           distanceMeters: finite(rawTravel.distanceMeters),
-          source,
-          status: travelStatus,
+          source: modeMismatch ? 'unavailable' : source,
+          status: modeMismatch ? 'unavailable' : travelStatus,
         }
       : undefined,
     bufferMinutes: Math.max(0, Math.round(finite(raw.bufferMinutes) ?? 0)),

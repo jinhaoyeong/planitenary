@@ -92,9 +92,11 @@ const routeLegsFromTool = (value: unknown): RouteMatrixLeg[] => {
   const placeIds = asArray(result?.placeIds).filter((entry): entry is string => typeof entry === 'string');
   const payload = asRecord(result?.matrix);
   const matrix = asArray(payload?.matrix);
-  const mode = ['walking', 'public-transport', 'driving', 'cycling'].includes(String(result?.mode))
-    ? result?.mode as ProposalRouteMode
+  const mode = ['walking', 'public-transport', 'driving', 'cycling'].includes(String(result?.requestedMode ?? result?.mode))
+    ? (result?.requestedMode ?? result?.mode) as ProposalRouteMode
     : 'walking';
+  const providerMode = typeof result?.providerMode === 'string' ? result.providerMode : undefined;
+  const provider = typeof result?.provider === 'string' ? result.provider : undefined;
   const legs: RouteMatrixLeg[] = [];
   for (let originIndex = 0; originIndex < placeIds.length; originIndex += 1) {
     const row = asArray(matrix[originIndex]);
@@ -112,6 +114,9 @@ const routeLegsFromTool = (value: unknown): RouteMatrixLeg[] => {
         durationMinutes: duration,
         distanceMeters: typeof cell?.distanceMeters === 'number' ? Math.round(cell.distanceMeters) : undefined,
         mode,
+        requestedMode: mode,
+        providerMode,
+        provider,
         source: cell?.status === 'ok' ? source : 'unavailable',
       });
     }

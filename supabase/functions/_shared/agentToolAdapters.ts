@@ -37,6 +37,7 @@ import { AGENT_TOOLS, type AgentToolCall, type AgentToolName } from './agentCont
 import type { ToolOutcome } from './agentRuntime.ts';
 import {
   selectRoutingProvider,
+  type RequestedRoutingMode,
   type RoutingProviderAvailability,
 } from './routingProvider.ts';
 
@@ -409,32 +410,35 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
           + 'Do not estimate one.',
       };
     }
+    const requestedMode: RequestedRoutingMode = mode === 'transit'
+      ? 'public-transport'
+      : mode === 'driving' || mode === 'cycling'
+        ? mode
+        : 'walking';
     const selection = selectRoutingProvider(
       routedPlaces.map((place) => place.countryCode),
+      requestedMode,
       routingProviders,
     );
     if (selection.status === 'route-unavailable') {
       return { ok: false, detail: `route-unavailable: ${selection.reason}` };
     }
-    /**
-     * `walking` is the app's own vocabulary; the matrix function speaks
-     * Google's. Transit is passed through even though OpenRouteService has no
-     * transit matrix on the free tier — the function answers `unknown` for
-     * those elements rather than silently routing them as walking, and an
-     * admitted gap is what the model should see.
-     */
-    const matrixMode = mode === 'transit' ? 'public-transport' : mode;
+    // Provider selection already proved this exact requested mode is
+    // implemented. Unsupported transit never reaches the sibling function.
     try {
       const payload = await callFunction('travel-route-matrix', {
         origins: matrix ? points : [points[0]],
         destinations: matrix ? points : [points[1]],
-        mode: matrixMode,
+        mode: requestedMode,
         provider: selection.provider,
       });
       return {
         ok: true,
         result: {
-          mode: matrixMode,
+          mode: requestedMode,
+          requestedMode,
+          providerMode: selection.providerMode,
+          provider: selection.provider,
           placeIds: routedPlaces.map((place) => place.id),
           places: routedPlaces.map((place) => place.name),
           matrix: payload,

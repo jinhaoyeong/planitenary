@@ -7,6 +7,8 @@
  */
 
 export type DeterministicRoutingProvider = 'amap' | 'openrouteservice';
+export type RequestedRoutingMode = 'walking' | 'driving' | 'cycling' | 'public-transport';
+export type ProviderRoutingMode = 'walking' | 'foot-walking' | 'driving-car' | 'cycling-regular';
 
 export interface RoutingProviderAvailability {
   amap: boolean;
@@ -14,8 +16,25 @@ export interface RoutingProviderAvailability {
 }
 
 export type RoutingProviderSelection =
-  | { status: 'selected'; provider: DeterministicRoutingProvider }
+  | {
+    status: 'selected';
+    provider: DeterministicRoutingProvider;
+    requestedMode: RequestedRoutingMode;
+    providerMode: ProviderRoutingMode;
+  }
   | { status: 'route-unavailable'; reason: string };
+
+/** The modes implemented by the hosted providers this application calls. */
+export function providerModeFor(
+  provider: DeterministicRoutingProvider,
+  requestedMode: RequestedRoutingMode,
+): ProviderRoutingMode | undefined {
+  if (provider === 'amap') return requestedMode === 'walking' ? 'walking' : undefined;
+  if (requestedMode === 'walking') return 'foot-walking';
+  if (requestedMode === 'driving') return 'driving-car';
+  if (requestedMode === 'cycling') return 'cycling-regular';
+  return undefined;
+}
 
 const countryCode = (value: string | undefined): string | undefined => {
   const normalised = value?.trim().toUpperCase();
@@ -33,6 +52,7 @@ const countryCode = (value: string | undefined): string | undefined => {
  */
 export function selectRoutingProvider(
   countryCodes: ReadonlyArray<string | undefined>,
+  requestedMode: RequestedRoutingMode,
   available: RoutingProviderAvailability,
 ): RoutingProviderSelection {
   const normalised = countryCodes.map(countryCode);
@@ -53,16 +73,30 @@ export function selectRoutingProvider(
   }
 
   if (hasChina) {
-    return available.amap
-      ? { status: 'selected', provider: 'amap' }
-      : { status: 'route-unavailable', reason: 'Amap routing is not configured for this China trip.' };
+    if (!available.amap) {
+      return { status: 'route-unavailable', reason: 'Amap routing is not configured for this China trip.' };
+    }
+    const providerMode = providerModeFor('amap', requestedMode);
+    return providerMode
+      ? { status: 'selected', provider: 'amap', requestedMode, providerMode }
+      : {
+        status: 'route-unavailable',
+        reason: `Amap does not support ${requestedMode} in Planitenary's current routing adapter.`,
+      };
   }
 
-  return available.openRouteService
-    ? { status: 'selected', provider: 'openrouteservice' }
-    : {
+  if (!available.openRouteService) {
+    return {
       status: 'route-unavailable',
       reason: 'OpenRouteService routing is not configured for this non-China trip.',
+    };
+  }
+  const providerMode = providerModeFor('openrouteservice', requestedMode);
+  return providerMode
+    ? { status: 'selected', provider: 'openrouteservice', requestedMode, providerMode }
+    : {
+      status: 'route-unavailable',
+      reason: `Hosted OpenRouteService does not support ${requestedMode} in Planitenary.`,
     };
 }
 

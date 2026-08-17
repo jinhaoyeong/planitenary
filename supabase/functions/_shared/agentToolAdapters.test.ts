@@ -41,6 +41,7 @@ describe('real agent tool adapters', () => {
       expect(body.origins[0].placeId).toBe('node/1');
       expect(body.destinations[0].placeId).toBe('way/2');
       expect(body.provider).toBe('openrouteservice');
+      expect(body.mode).toBe('walking');
       return new Response(JSON.stringify({ matrix: [[{ status: 'ok', durationMinutes: 27 }]] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -54,6 +55,14 @@ describe('real agent tool adapters', () => {
     } as AgentToolCall);
 
     expect(result.ok).toBe(true);
+    expect(result).toMatchObject({
+      result: {
+        mode: 'walking',
+        requestedMode: 'walking',
+        providerMode: 'foot-walking',
+        provider: 'openrouteservice',
+      },
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -89,6 +98,46 @@ describe('real agent tool adapters', () => {
     const result = await executor(itinerary, { amap: true, openRouteService: false })({
       tool: 'get_route',
       args: { fromPlaceId: 'hotel', toPlaceId: 'castle', mode: 'walking' },
+    } as AgentToolCall);
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      detail: expect.stringContaining('route-unavailable'),
+    }));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses ORS public transport before fetching instead of mislabelling a walking route', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executor()({
+      tool: 'get_route',
+      args: { fromPlaceId: 'hotel', toPlaceId: 'castle', mode: 'transit' },
+    } as AgentToolCall);
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      detail: expect.stringContaining('route-unavailable'),
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      detail: expect.stringContaining('does not support public-transport'),
+    }));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses unsupported Amap modes before fetching', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const chinaTrip = {
+      ...itinerary,
+      tripProfile: { destinations: [{ city: 'Beijing', countryCode: 'CN' }] },
+      days: [{ ...itinerary.days[0], city: 'Beijing' }],
+    };
+
+    const result = await executor(chinaTrip)({
+      tool: 'get_route',
+      args: { fromPlaceId: 'hotel', toPlaceId: 'castle', mode: 'driving' },
     } as AgentToolCall);
 
     expect(result).toEqual(expect.objectContaining({

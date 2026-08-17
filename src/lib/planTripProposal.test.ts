@@ -55,4 +55,35 @@ describe('Plan my trip client boundary', () => {
     const result = await planTripProposal('trip-1', vi.fn().mockResolvedValue({ status: 'answered', itineraryProposal: { applied: true } }));
     expect(result).toEqual({ status: 'refused', detail: 'The planner returned a malformed proposal, so it was not shown.' });
   });
+
+  it('never displays an ORS walking duration as public transport', () => {
+    const withMislabeledRoute = {
+      ...payload,
+      days: [{
+        ...payload.days[0],
+        items: [{
+          ...payload.days[0].items[0],
+          travelFromPrevious: {
+            fromPlaceId: 'hotel',
+            fromName: 'Hotel',
+            mode: 'public-transport',
+            requestedMode: 'public-transport',
+            providerMode: 'foot-walking',
+            provider: 'openrouteservice',
+            durationMinutes: 27,
+            source: 'provider',
+            status: 'confirmed',
+          },
+        }],
+      }],
+    };
+
+    expect(parseTripProposal(withMislabeledRoute)?.days[0].items[0].travelFromPrevious).toMatchObject({
+      mode: 'public-transport',
+      providerMode: 'foot-walking',
+      status: 'unavailable',
+      source: 'unavailable',
+      durationMinutes: undefined,
+    });
+  });
 });

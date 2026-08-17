@@ -100,6 +100,9 @@ export interface RouteMatrixLeg {
   durationMinutes?: number;
   distanceMeters?: number;
   mode: ProposalRouteMode;
+  requestedMode?: ProposalRouteMode;
+  providerMode?: string;
+  provider?: string;
   source: 'provider' | 'cache' | 'unavailable';
 }
 
@@ -107,6 +110,9 @@ export interface ProposedTravelLeg {
   fromPlaceId: string;
   fromName: string;
   mode: ProposalRouteMode;
+  requestedMode?: ProposalRouteMode;
+  providerMode?: string;
+  provider?: string;
   durationMinutes?: number;
   distanceMeters?: number;
   source: 'provider' | 'cache' | 'unavailable';
@@ -781,6 +787,9 @@ function composeSchedule(
           fromPlaceId: previous.id,
           fromName: previous.name,
           mode: leg?.mode ?? 'walking',
+          requestedMode: leg?.requestedMode ?? leg?.mode ?? 'walking',
+          providerMode: leg?.providerMode,
+          provider: leg?.provider,
           durationMinutes: leg?.status === 'ok' ? travelMinutes : undefined,
           distanceMeters: leg?.distanceMeters,
           source: leg?.status === 'ok' ? leg.source : 'unavailable',

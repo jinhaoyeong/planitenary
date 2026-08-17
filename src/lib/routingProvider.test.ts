@@ -8,29 +8,56 @@ describe('deterministic routing provider selection', () => {
   const configured = { amap: true, openRouteService: true };
 
   it('selects Amap for a China trip', () => {
-    expect(selectRoutingProvider(['CN', 'cn'], configured)).toEqual({
+    expect(selectRoutingProvider(['CN', 'cn'], 'walking', configured)).toEqual({
       status: 'selected',
       provider: 'amap',
+      requestedMode: 'walking',
+      providerMode: 'walking',
     });
   });
 
-  it('selects OpenRouteService for Japan and other known non-China trips', () => {
-    expect(selectRoutingProvider(['JP', 'JP'], configured)).toEqual({
+  it.each([
+    ['walking', 'foot-walking'],
+    ['driving', 'driving-car'],
+    ['cycling', 'cycling-regular'],
+  ] as const)('maps non-China %s routing to the genuine ORS %s profile', (requestedMode, providerMode) => {
+    expect(selectRoutingProvider(['JP', 'JP'], requestedMode, configured)).toEqual({
       status: 'selected',
       provider: 'openrouteservice',
+      requestedMode,
+      providerMode,
     });
-    expect(selectRoutingProvider(['MY', 'SG'], configured)).toEqual({
+    expect(selectRoutingProvider(['MY', 'SG'], requestedMode, configured)).toEqual({
       status: 'selected',
       provider: 'openrouteservice',
+      requestedMode,
+      providerMode,
     });
   });
+
+  it('refuses hosted ORS public transport instead of relabelling another profile', () => {
+    expect(selectRoutingProvider(['JP'], 'public-transport', configured)).toMatchObject({
+      status: 'route-unavailable',
+      reason: expect.stringContaining('does not support public-transport'),
+    });
+  });
+
+  it.each(['driving', 'cycling', 'public-transport'] as const)(
+    'refuses Amap %s because the current adapter implements walking only',
+    (mode) => {
+      expect(selectRoutingProvider(['CN'], mode, configured)).toMatchObject({
+        status: 'route-unavailable',
+        reason: expect.stringContaining(`does not support ${mode}`),
+      });
+    },
+  );
 
   it('fails closed when the appropriate provider is absent or geography is unsafe', () => {
-    expect(selectRoutingProvider(['JP'], { amap: true, openRouteService: false }))
+    expect(selectRoutingProvider(['JP'], 'walking', { amap: true, openRouteService: false }))
       .toMatchObject({ status: 'route-unavailable' });
-    expect(selectRoutingProvider(['CN', 'JP'], configured))
+    expect(selectRoutingProvider(['CN', 'JP'], 'walking', configured))
       .toMatchObject({ status: 'route-unavailable' });
-    expect(selectRoutingProvider([undefined], configured))
+    expect(selectRoutingProvider([undefined], 'walking', configured))
       .toMatchObject({ status: 'route-unavailable' });
   });
 });
