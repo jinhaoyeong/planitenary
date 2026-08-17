@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlanTripProposalPanel } from './PlanTripProposalPanel';
 import { planTripProposal } from '../lib/planTripProposal';
@@ -9,6 +9,7 @@ import {
   undoItineraryChange,
 } from '../lib/itineraryChangeClient';
 import { emptyItinerary } from '../lib/itinerarySanitize';
+import { GENERATION_DISABLED_DETAIL } from '../../supabase/functions/_shared/itineraryProposalCache';
 import type { Itinerary } from '../data';
 
 vi.mock('../lib/planTripProposal', async (importOriginal) => {
@@ -212,13 +213,176 @@ describe('Plan my trip proposal panel', () => {
       detail: 'This trip has changed since the plan was made.',
     });
     await openPanel();
+    expect(mockedPlan).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('This trip has changed since the plan was made.');
-    expect(screen.getByRole('button', { name: 'Review a fresh plan' })).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Your itinerary changed since this plan was created.');
+    expect(alert).toHaveTextContent('Create a fresh plan so it matches your latest itinerary.');
+    expect(alert).not.toHaveTextContent(/material revision|source proposal|409/i);
+    expect(within(alert).getByRole('button', { name: 'Create fresh plan' })).toBeInTheDocument();
+    expect(screen.getByText('Osaka Castle')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Apply plan/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate proposal' })).not.toBeInTheDocument();
     expect(mockedApply).not.toHaveBeenCalled();
+    expect(mockedPlan).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Apply this plan to your itinerary?')).not.toBeInTheDocument();
+  });
+
+  it('does not regenerate until the traveller asks for a fresh stale plan', async () => {
+    mockedStage.mockResolvedValue({
+      ok: false,
+      refusal: 'proposal-stale',
+      detail: 'This trip has changed since the plan was made.',
+    });
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+    const alert = await screen.findByRole('alert');
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Create fresh plan' }));
+    await waitFor(() => expect(mockedPlan).toHaveBeenCalledTimes(2));
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+    expect(mockedApply).not.toHaveBeenCalled();
+  });
+
+  it('lets an explicit fresh-plan request reuse an exact cached proposal', async () => {
+    mockedStage.mockResolvedValue({
+      ok: false,
+      refusal: 'proposal-stale',
+      detail: 'This trip has changed since the plan was made.',
+    });
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+    await screen.findByRole('alert');
+
+    mockedPlan.mockResolvedValue({
+      status: 'answered',
+      proposal: {
+        kind: 'itinerary-proposal-v1', id: 'p-cached', tripId: 'trip-1', materialRevision: 'r2',
+        createdAt: '2026-08-16T09:00:00Z', status: 'valid', applied: false, pace: 'balanced',
+        days: [{
+          day: 1, city: 'Osaka', startTime: '09:15', endTime: '21:30', warnings: [],
+          metrics: { placeCount: 1, travelMinutes: 0, freeMinutes: 90, clusterChanges: 0 },
+          items: [
+            { id: 'c', placeId: 'c', type: 'place', name: 'Cached Dotonbori plan', arrivalTime: '09:15', startTime: '09:15', endTime: '10:45', visitDurationMinutes: 90, bufferMinutes: 0, rationale: 'Cached', warnings: [], evidence: [], priority: 'must-do' },
+          ],
+        }],
+        conflicts: [], warnings: [], omittedPlaceIds: [],
+        routeSummary: { matrixCalls: 0, confirmedLegs: 0, unavailableLegs: 0, allDurationsProviderDerived: true },
+        repairIterations: 0,
+      },
+    });
+
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Create fresh plan' }));
+    expect(await screen.findByText('Cached Dotonbori plan')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Apply plan/ })).toBeEnabled();
+    expect(mockedPlan).toHaveBeenCalledTimes(2);
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not bypass the generation kill switch when recovering from stale', async () => {
+    mockedStage.mockResolvedValue({
+      ok: false,
+      refusal: 'proposal-stale',
+      detail: 'This trip has changed since the plan was made.',
+    });
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+    await screen.findByRole('alert');
+
+    mockedPlan.mockResolvedValue({
+      status: 'refused',
+      detail: GENERATION_DISABLED_DETAIL,
+    });
+
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Create fresh plan' }));
+    expect(await screen.findByText('No proposal was generated')).toBeInTheDocument();
+    expect(screen.getByText(GENERATION_DISABLED_DETAIL)).toBeInTheDocument();
+    expect(mockedPlan).toHaveBeenCalledTimes(2);
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+    expect(mockedApply).not.toHaveBeenCalled();
+  });
+
+  it('closes a stale panel without writing', async () => {
+    mockedStage.mockResolvedValue({
+      ok: false,
+      refusal: 'proposal-stale',
+      detail: 'This trip has changed since the plan was made.',
+    });
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Plan my trip' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mockedPlan).toHaveBeenCalledTimes(1);
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+    expect(mockedApply).not.toHaveBeenCalled();
+    expect(mockedUndo).not.toHaveBeenCalled();
+  });
+
+  it('explains an unavailable source proposal and still offers a fresh plan', async () => {
+    mockedStage.mockResolvedValue({
+      ok: false,
+      refusal: 'proposal-invalid',
+      detail: 'A reviewed plan is required.',
+    });
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This plan is no longer available.');
+    expect(alert).toHaveTextContent('Generate a fresh plan based on your current trip.');
+    expect(within(alert).getByRole('button', { name: 'Create fresh plan' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Apply plan/ })).not.toBeInTheDocument();
+    expect(mockedApply).not.toHaveBeenCalled();
+    expect(mockedPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires another explicit review after a staged confirmation expires', async () => {
+    mockedApply.mockResolvedValue({
+      ok: false,
+      refusal: 'proposal-expired',
+      detail: 'This plan has expired. Generate it again to apply it.',
+    });
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply to my itinerary' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This confirmation expired.');
+    expect(alert).toHaveTextContent('Review the latest plan again before applying it.');
+    expect(screen.queryByText('Apply this plan to your itinerary?')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Apply plan/ })).not.toBeInTheDocument();
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+    expect(mockedApply).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Review this plan again' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Apply plan/ })).toBeEnabled();
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+    expect(mockedApply).toHaveBeenCalledTimes(1);
+    expect(mockedPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not silently restage when the itinerary changes after confirmation', async () => {
+    mockedApply.mockResolvedValue({
+      ok: false,
+      refusal: 'proposal-stale',
+      detail: 'Your itinerary changed after this plan was prepared. Review a fresh proposal before applying.',
+    });
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply to my itinerary' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Your itinerary changed since this plan was created.');
+    expect(within(alert).getByRole('button', { name: 'Create fresh plan' })).toBeInTheDocument();
+    expect(screen.queryByText('Apply this plan to your itinerary?')).not.toBeInTheDocument();
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+    expect(mockedApply).toHaveBeenCalledTimes(1);
+    expect(mockedPlan).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to open the confirmation for a plan the server says is blocked', async () => {
@@ -230,7 +394,10 @@ describe('Plan my trip proposal panel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Glico Man Sign is a Must do and was left out.');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("This plan can't be applied yet.");
+    expect(alert).toHaveTextContent('Glico Man Sign is a Must do and was left out.');
+    expect(screen.queryByRole('button', { name: /Apply plan/ })).not.toBeInTheDocument();
     expect(mockedApply).not.toHaveBeenCalled();
   });
 

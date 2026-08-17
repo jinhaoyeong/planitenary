@@ -32,12 +32,30 @@ export const isSupabaseConfigured = () => {
 };
 
 /**
+ * A 4xx/5xx function body that already names a product refusal.
+ *
+ * itinerary-change returns `{ refusal, detail }` rather than `{ error }`, so
+ * throwing the HTTP wrapper would hide whether the plan was stale, expired,
+ * or gone. Returning the envelope lets the caller keep those codes.
+ */
+export function structuredFunctionEnvelope(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.refusal === 'string' && record.refusal.trim()) return record;
+  if (record.status === 'refused' && typeof record.detail === 'string' && record.detail.trim()) return record;
+  return null;
+}
+
+/**
  * Call a travel intelligence Edge Function.
  *
  * Provider keys live in Supabase function secrets, so every third-party call
  * goes through here rather than the browser. Throws on failure; callers are
  * expected to fall back to a labelled offline path rather than surfacing an
  * error, because a plan should degrade honestly, not disappear.
+ *
+ * Structured refusals are the exception: they are returned as data so a stale
+ * or expired plan can be explained without looking like a transport crash.
  */
 export async function invokeTravelFunction(name: string, body?: unknown): Promise<unknown> {
   if (!hasSupabaseConfig) throw new Error('Supabase is not configured.');
@@ -50,15 +68,22 @@ export async function invokeTravelFunction(name: string, body?: unknown): Promis
     // empty destination; never expose request headers or secret values.
     const context = (error as { context?: unknown }).context;
     if (context && typeof context === 'object' && 'clone' in context && typeof context.clone === 'function') {
-      let providerMessage: string | undefined;
       try {
-        const payload = await (context as Response).clone().json() as { error?: unknown };
-        if (typeof payload.error === 'string' && payload.error.trim()) providerMessage = payload.error;
-      } catch { /* Some Supabase errors have no JSON response body. */ }
-      if (providerMessage) throw new Error(providerMessage);
+        const payload = await (context as Response).clone().json();
+        const envelope = structuredFunctionEnvelope(payload);
+        if (envelope) return envelope;
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          const message = (payload as { error?: unknown }).error;
+          if (typeof message === 'string' && message.trim()) throw new Error(message);
+        }
+      } catch (caught) {
+        if (caught instanceof Error && caught !== error) throw caught;
+      }
     }
     throw new Error(error.message || `${name} failed.`);
   }
+  const envelope = structuredFunctionEnvelope(data);
+  if (envelope) return envelope;
   if (data && typeof data === 'object' && 'error' in data) {
     throw new Error(String((data as { error: unknown }).error));
   }

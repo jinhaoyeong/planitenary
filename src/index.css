@@ -2362,6 +2362,15 @@ a.destination-photo-credit:focus-visible {
   word-break: break-word;
 }
 
+.plan-trip-wrap {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.plan-trip-notice {
+  min-width: 0;
+}
+
 .plan-changes-status {
   display: inline-flex;
   align-items: center;

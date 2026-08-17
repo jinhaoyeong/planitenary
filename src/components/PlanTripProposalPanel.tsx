@@ -20,6 +20,12 @@ import {
   undoItineraryChange,
   type StagedChange,
 } from '../lib/itineraryChangeClient';
+import {
+  PLAN_TRIP_WRITE_COPY,
+  presentBlockedPlan,
+  presentPlanTripWriteRefusal,
+  type PlanTripWriteNotice,
+} from '../lib/planTripWritePresentation';
 import type { Itinerary } from '../data';
 
 interface PlanTripProposalPanelProps {
@@ -47,7 +53,22 @@ type WritePhase =
   | { phase: 'applying'; staged: StagedChange }
   | { phase: 'applied'; changeId: string }
   | { phase: 'undoing'; changeId: string }
-  | { phase: 'undone' };
+  | { phase: 'undone' }
+  | { phase: 'stale' }
+  | { phase: 'expired' }
+  | { phase: 'unavailable' }
+  | { phase: 'blocked'; reasons: string[] };
+
+const noticeFromWrite = (write: WritePhase): PlanTripWriteNotice | null => {
+  if (write.phase === 'stale') return { kind: 'stale', ...PLAN_TRIP_WRITE_COPY.stale, reasons: [] };
+  if (write.phase === 'expired') return { kind: 'expired', ...PLAN_TRIP_WRITE_COPY.expired, reasons: [] };
+  if (write.phase === 'unavailable') return { kind: 'unavailable', ...PLAN_TRIP_WRITE_COPY.unavailable, reasons: [] };
+  if (write.phase === 'blocked') return presentBlockedPlan(write.reasons);
+  return null;
+};
+
+const adoptWriteNotice = (notice: PlanTripWriteNotice): WritePhase =>
+  notice.kind === 'blocked' ? { phase: 'blocked', reasons: notice.reasons } : { phase: notice.kind };
 
 const PLANNING_STEPS = [
   'Arranging your saved places',
@@ -161,13 +182,17 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
       materialRevision: proposal.materialRevision,
     });
     if (!staged.ok) {
+      const presented = presentPlanTripWriteRefusal('stage', staged.refusal);
+      if (presented) {
+        setWrite(adoptWriteNotice(presented));
+        return;
+      }
       setWrite({ phase: 'idle' });
       setWriteError(staged.detail);
       return;
     }
     if (!staged.staged.applicable) {
-      setWrite({ phase: 'idle' });
-      setWriteError(staged.staged.blocking[0] ?? 'This plan has unresolved conflicts and cannot be applied.');
+      setWrite(adoptWriteNotice(presentBlockedPlan(staged.staged.blocking)));
       return;
     }
     setWrite({ phase: 'confirm', staged: staged.staged });
@@ -180,6 +205,12 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
     setWrite({ phase: 'applying', staged });
     const applied = await applyItineraryChange(staged.proposalId, itinerary ?? ({} as Itinerary));
     if (!applied.ok) {
+      const presented = presentPlanTripWriteRefusal('apply', applied.refusal);
+      if (presented) {
+        setWrite(adoptWriteNotice(presented));
+        setWriteError(null);
+        return;
+      }
       setWrite({ phase: 'idle' });
       setWriteError(applied.detail);
       return;
@@ -206,6 +237,23 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
     () => proposal?.conflicts.filter((conflict) => conflict.severity === 'error').length ?? 0,
     [proposal],
   );
+  const notice = noticeFromWrite(write);
+  const recovering = notice !== null;
+  const applyLocked = recovering
+    || write.phase === 'confirm'
+    || write.phase === 'applied'
+    || write.phase === 'applying'
+    || write.phase === 'staging';
+
+  const recoverFromNotice = () => {
+    if (!notice || busy) return;
+    if (notice.action === 'review-again') {
+      setWrite({ phase: 'idle' });
+      setWriteError(null);
+      return;
+    }
+    void generate();
+  };
 
   const openPlanner = () => {
     setOpen(true);
@@ -244,7 +292,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="plan-trip-title"
-                className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-white text-slate-950 shadow-[-18px_0_48px_rgba(15,23,42,0.24)] dark:bg-slate-950 dark:text-white"
+                className="flex h-full w-full min-w-0 max-w-3xl flex-col overflow-hidden bg-white text-slate-950 shadow-[-18px_0_48px_rgba(15,23,42,0.24)] dark:bg-slate-950 dark:text-white"
                 initial={{ x: '100%' }}
                 animate={{ x: 0 }}
                 exit={{ x: '100%' }}
@@ -268,7 +316,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                   </button>
                 </header>
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7" data-lenis-prevent>
+                <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-6 sm:px-7" data-lenis-prevent>
                   {loading && (
                     <div className="mx-auto flex min-h-[65vh] max-w-md flex-col justify-center">
                       <div className="relative h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
@@ -310,19 +358,37 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
 
                   {!loading && proposal && (
                     <div className="space-y-8">
-                      {writeError && (
+                      {notice && (
+                        <section role="alert" className="plan-trip-notice rounded-2xl bg-rose-50 p-4 text-rose-950 dark:bg-rose-950/40 dark:text-rose-100">
+                          <div className="flex items-start gap-2 text-sm font-semibold">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                            <h3 className="plan-trip-wrap min-w-0 text-base leading-6">{notice.title}</h3>
+                          </div>
+                          <p className="plan-trip-wrap mt-2 text-sm leading-6">{notice.body}</p>
+                          {notice.reasons.length > 0 && (
+                            <ul className="mt-3 space-y-1.5 text-sm leading-6">
+                              {notice.reasons.map((reason) => (
+                                <li key={reason} className="plan-trip-wrap">{reason}</li>
+                              ))}
+                            </ul>
+                          )}
+                          <button
+                            type="button"
+                            className="mt-4 rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold whitespace-normal text-white disabled:opacity-60"
+                            onClick={recoverFromNotice}
+                            disabled={busy}
+                          >
+                            {notice.actionLabel}
+                          </button>
+                        </section>
+                      )}
+
+                      {writeError && !notice && (
                         <section role="alert" className="rounded-2xl bg-rose-50 p-4 text-rose-950 dark:bg-rose-950/40 dark:text-rose-100">
                           <div className="flex items-center gap-2 text-sm font-semibold">
                             <AlertTriangle className="h-4 w-4" /> Nothing was changed
                           </div>
-                          <p className="mt-2 text-xs leading-5">{writeError}</p>
-                          <button
-                            type="button"
-                            className="mt-3 rounded-full bg-rose-600 px-4 py-2 text-xs font-semibold text-white"
-                            onClick={() => void generate()}
-                          >
-                            Review a fresh plan
-                          </button>
+                          <p className="plan-trip-wrap mt-2 text-xs leading-5">{writeError}</p>
                         </section>
                       )}
 
@@ -338,11 +404,15 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                             This replaces the days below in your saved itinerary. You can undo it straight afterwards.
                           </p>
                           <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-700 dark:text-slate-200">
-                            {changeSummary(write.staged).map((line) => <li key={line}>· {line}</li>)}
+                            {changeSummary(write.staged).map((line) => (
+                              <li key={line} className="plan-trip-wrap">· {line}</li>
+                            ))}
                           </ul>
                           {write.staged.warnings.length > 0 && (
                             <ul className="mt-3 space-y-1 text-xs leading-5 text-amber-700 dark:text-amber-300">
-                              {write.staged.warnings.slice(0, 4).map((warning) => <li key={warning}>{warning}</li>)}
+                              {write.staged.warnings.slice(0, 4).map((warning) => (
+                                <li key={warning} className="plan-trip-wrap">{warning}</li>
+                              ))}
                             </ul>
                           )}
                           <div className="mt-4 flex flex-wrap gap-2">
@@ -431,7 +501,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                           </div>
                           <ul className="mt-3 space-y-2 text-xs leading-5">
                             {proposal.conflicts.slice(0, 8).map((conflict, index) => (
-                              <li key={`${conflict.code}-${index}`}>{conflict.message}</li>
+                              <li key={`${conflict.code}-${index}`} className="plan-trip-wrap">{conflict.message}</li>
                             ))}
                           </ul>
                         </section>
@@ -472,7 +542,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                                       </p>
                                     )}
                                     <div className="flex flex-wrap items-center gap-2">
-                                      <h5 className="font-semibold text-slate-950 dark:text-white">{item.name}</h5>
+                                      <h5 className="plan-trip-wrap font-semibold text-slate-950 dark:text-white">{item.name}</h5>
                                       {item.priority === 'must-do' && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950 dark:text-rose-200">Must do</span>}
                                       {item.locked && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">Locked</span>}
                                     </div>
@@ -494,28 +564,36 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
 
                 <footer className="border-t border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-950 sm:px-7">
                   <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <button type="button" className="rounded-full px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-300 dark:hover:bg-slate-900" onClick={() => setOpen(false)}>
+                    <button type="button" className="rounded-full px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-300 dark:hover:bg-slate-900" onClick={() => setOpen(false)} disabled={busy}>
                       Keep editing manually
                     </button>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <button type="button" className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900" onClick={() => void generate()} disabled={busy}>
-                        Regenerate proposal
-                      </button>
-                      {/*
-                        Never auto-applies. The plan arrives as a proposal, this
-                        button only opens the confirmation, and the confirmation
-                        is where the write is agreed to.
-                      */}
-                      <button
-                        type="button"
-                        onClick={() => void prepare()}
-                        disabled={busy || !proposal || proposal.status !== 'valid' || write.phase === 'confirm' || write.phase === 'applied'}
-                        title={proposal?.status === 'valid' ? 'Review the changes before saving them' : 'Resolve the conflicts above first'}
-                        className="inline-flex items-center justify-center gap-2 rounded-full bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
-                      >
-                        {write.phase === 'staging' ? 'Preparing…' : 'Apply plan…'}
-                        <ArrowRight className="h-4 w-4" />
-                      </button>
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                      {!recovering && (
+                        <button type="button" className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900" onClick={() => void generate()} disabled={busy}>
+                          Regenerate proposal
+                        </button>
+                      )}
+                      {recovering && notice ? (
+                        <button
+                          type="button"
+                          onClick={recoverFromNotice}
+                          disabled={busy}
+                          className="inline-flex items-center justify-center gap-2 whitespace-normal rounded-full bg-rose-600 px-4 py-2.5 text-center text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          {notice.actionLabel}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void prepare()}
+                          disabled={busy || !proposal || proposal.status !== 'valid' || applyLocked}
+                          title={proposal?.status === 'valid' ? 'Review the changes before saving them' : 'Resolve the conflicts above first'}
+                          className="inline-flex items-center justify-center gap-2 rounded-full bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
+                        >
+                          {write.phase === 'staging' ? 'Preparing…' : 'Apply plan…'}
+                          <ArrowRight className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </footer>
