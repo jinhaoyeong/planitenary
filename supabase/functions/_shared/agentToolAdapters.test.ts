@@ -17,13 +17,17 @@ const itinerary = {
   }],
 };
 
-const executor = () => createToolExecutor({
+const executor = (
+  source: Record<string, unknown> = itinerary,
+  routingProviders = { amap: true, openRouteService: true },
+) => createToolExecutor({
   authHeader: 'Bearer user-jwt',
   functionsBaseUrl: 'https://project.supabase.co/functions/v1',
   cache: null,
   tripId: 'trip-1',
   userId: 'user-1',
-  itinerary,
+  itinerary: source,
+  routingProviders,
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -36,6 +40,7 @@ describe('real agent tool adapters', () => {
       expect(body.destinations).toHaveLength(1);
       expect(body.origins[0].placeId).toBe('node/1');
       expect(body.destinations[0].placeId).toBe('way/2');
+      expect(body.provider).toBe('openrouteservice');
       return new Response(JSON.stringify({ matrix: [[{ status: 'ok', durationMinutes: 27 }]] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -46,6 +51,69 @@ describe('real agent tool adapters', () => {
     const result = await executor()({
       tool: 'get_route',
       args: { fromPlaceId: 'hotel', toPlaceId: 'castle', mode: 'walking' },
+    } as AgentToolCall);
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects Amap for China using owned trip geography, not model input', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.provider).toBe('amap');
+      return new Response(JSON.stringify({ matrix: [[{ status: 'ok', durationMinutes: 30 }]] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const chinaTrip = {
+      ...itinerary,
+      tripProfile: { destinations: [{ city: 'Beijing', countryCode: 'CN' }] },
+      days: [{ ...itinerary.days[0], city: 'Beijing' }],
+    };
+
+    const result = await executor(chinaTrip)({
+      tool: 'get_route',
+      args: { fromPlaceId: 'hotel', toPlaceId: 'castle', mode: 'walking' },
+    } as AgentToolCall);
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails with route-unavailable before fetching when non-China ORS is absent', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executor(itinerary, { amap: true, openRouteService: false })({
+      tool: 'get_route',
+      args: { fromPlaceId: 'hotel', toPlaceId: 'castle', mode: 'walking' },
+    } as AgentToolCall);
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      detail: expect.stringContaining('route-unavailable'),
+    }));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps Phase 2A routing as one square batched matrix', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.provider).toBe('openrouteservice');
+      expect(body.origins).toEqual(body.destinations);
+      expect(body.origins).toHaveLength(2);
+      return new Response(JSON.stringify({ matrix: [
+        [{ status: 'ok', durationMinutes: 0 }, { status: 'ok', durationMinutes: 27 }],
+        [{ status: 'ok', durationMinutes: 29 }, { status: 'ok', durationMinutes: 0 }],
+      ] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await executor()({
+      tool: 'get_route_matrix',
+      args: { placeIds: ['hotel', 'castle'], mode: 'walking' },
     } as AgentToolCall);
 
     expect(result.ok).toBe(true);

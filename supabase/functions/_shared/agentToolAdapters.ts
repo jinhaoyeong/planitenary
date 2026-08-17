@@ -35,12 +35,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchJson, secrets } from './providers.ts';
 import { AGENT_TOOLS, type AgentToolCall, type AgentToolName } from './agentContract.ts';
 import type { ToolOutcome } from './agentRuntime.ts';
+import {
+  selectRoutingProvider,
+  type RoutingProviderAvailability,
+} from './routingProvider.ts';
 
 /** A place the trip already knows about, indexed for the tools to resolve. */
 interface KnownPlace {
   id: string;
   name: string;
   city?: string;
+  countryCode?: string;
   coordinates?: [number, number];
   provider?: string;
   providerPlaceId?: string;
@@ -70,6 +75,8 @@ export interface AgentToolContext {
   userId: string;
   /** `itineraries.data` for the trip whose ownership was already proven. */
   itinerary: Record<string, unknown> | null;
+  /** Injected in tests; production resolves only server-side provider secrets. */
+  routingProviders?: RoutingProviderAvailability;
 }
 
 /** Ceiling on any single tool result, so one lookup cannot fill the context. */
@@ -114,6 +121,19 @@ export function buildPlaceIndex(itinerary: Record<string, unknown> | null): Map<
   const index = new Map<string, KnownPlace>();
   if (!itinerary) return index;
 
+  const profile = asRecord(itinerary.tripProfile);
+  const destinations = asArray(profile?.destinations).map(asRecord).filter(Boolean);
+  const countriesByCity = new Map<string, string>();
+  const tripCountries = new Set<string>();
+  for (const destination of destinations) {
+    const city = typeof destination.city === 'string' ? destination.city.trim().toLowerCase() : '';
+    const code = typeof destination.countryCode === 'string' ? destination.countryCode.trim().toUpperCase() : '';
+    if (!/^[A-Z]{2}$/.test(code)) continue;
+    tripCountries.add(code);
+    if (city) countriesByCity.set(city, code);
+  }
+  const soleTripCountry = tripCountries.size === 1 ? [...tripCountries][0] : undefined;
+
   const consider = (raw: unknown, day?: number, city?: string) => {
     const activity = asRecord(raw);
     if (!activity) return;
@@ -122,10 +142,18 @@ export function buildPlaceIndex(itinerary: Record<string, unknown> | null): Map<
     const id = typeof activity.id === 'string' && activity.id
       ? activity.id
       : `${day ?? 0}:${name.toLowerCase()}`;
+    const resolvedCity = typeof activity.city === 'string' ? activity.city : city;
+    const explicitCountry = typeof activity.countryCode === 'string'
+      ? activity.countryCode.trim().toUpperCase()
+      : undefined;
+    const resolvedCountry = explicitCountry && /^[A-Z]{2}$/.test(explicitCountry)
+      ? explicitCountry
+      : resolvedCity ? countriesByCity.get(resolvedCity.trim().toLowerCase()) ?? soleTripCountry : soleTripCountry;
     registerPlace(index, {
       id,
       name,
-      city,
+      city: resolvedCity,
+      countryCode: resolvedCountry,
       coordinates: coordinatesOf(activity.coordinates),
       provider: typeof activity.provider === 'string' ? activity.provider : undefined,
       providerPlaceId: typeof activity.providerPlaceId === 'string' ? activity.providerPlaceId : undefined,
@@ -342,6 +370,10 @@ export async function searchWeb(query: string, cache: SupabaseClient | null = nu
  */
 export function createToolExecutor(context: AgentToolContext): (call: AgentToolCall) => Promise<ToolOutcome> {
   const index = buildPlaceIndex(context.itinerary);
+  const routingProviders = context.routingProviders ?? {
+    amap: Boolean(secrets.amap()),
+    openRouteService: Boolean(secrets.openRouteService()),
+  };
 
   const callFunction = async (name: string, body: unknown): Promise<unknown> => {
     const response = await fetch(`${context.functionsBaseUrl}/${name}`, {
@@ -377,6 +409,13 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
           + 'Do not estimate one.',
       };
     }
+    const selection = selectRoutingProvider(
+      routedPlaces.map((place) => place.countryCode),
+      routingProviders,
+    );
+    if (selection.status === 'route-unavailable') {
+      return { ok: false, detail: `route-unavailable: ${selection.reason}` };
+    }
     /**
      * `walking` is the app's own vocabulary; the matrix function speaks
      * Google's. Transit is passed through even though OpenRouteService has no
@@ -390,6 +429,7 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
         origins: matrix ? points : [points[0]],
         destinations: matrix ? points : [points[1]],
         mode: matrixMode,
+        provider: selection.provider,
       });
       return {
         ok: true,
@@ -498,6 +538,9 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
             id,
             name,
             city: typeof candidate?.city === 'string' ? candidate.city : String(args.city),
+            countryCode: typeof candidate?.countryCode === 'string'
+              ? candidate.countryCode
+              : tripCountryCode(context.itinerary),
             coordinates: coordinatesOf(candidate?.coordinates),
             provider: typeof candidate?.provider === 'string' ? candidate.provider : undefined,
             providerPlaceId: typeof candidate?.providerPlaceId === 'string' ? candidate.providerPlaceId : undefined,

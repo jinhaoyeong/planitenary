@@ -229,6 +229,12 @@ describe('pairsNeedingProvider — the cost gate', () => {
     expect(complete).toBe(true);
   });
 
+  it('allows the caller to distinguish a 1x1 A -> B request from a diagonal', () => {
+    const { complete, missing } = pairsNeedingProvider([A], [B], new Set(), () => false);
+    expect(complete).toBe(false);
+    expect(missing).toEqual([{ i: 0, j: 0 }]);
+  });
+
   it('is complete once both cross pairs are cached (diagonals are free)', () => {
     const cached = new Set([routePairKey(A, B), routePairKey(B, A)]);
     const { missing, complete } = pairsNeedingProvider([A, B], [A, B], cached);

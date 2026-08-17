@@ -149,6 +149,24 @@ describe('Phase 2A deterministic itinerary proposal', () => {
     expect(proposal.routeSummary).toMatchObject({ matrixCalls: 1, confirmedLegs: 1, allDurationsProviderDerived: true });
   });
 
+  it('leaves unavailable routes explicit and never creates an estimated duration', async () => {
+    const proposal = await run(
+      material(),
+      { days: [{ day: 1, placeIds: ['a', 'b'] }, { day: 2, placeIds: [] }] },
+      [],
+    );
+    const second = proposal.days[0].items.find((item) => item.placeId === 'b');
+
+    expect(second?.travelFromPrevious).toMatchObject({
+      status: 'unavailable',
+      source: 'unavailable',
+    });
+    expect(second?.travelFromPrevious?.durationMinutes).toBeUndefined();
+    expect(proposal.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'route-unavailable', placeId: 'b' }),
+    ]));
+  });
+
   it('rejects a place that cannot fit before its verified closing time', async () => {
     const source = material({
       places: [place('a', { durationRangeMinutes: [120, 120], openingHours: [{ opensAt: '09:00', closesAt: '10:00' }] })],

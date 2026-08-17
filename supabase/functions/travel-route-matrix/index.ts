@@ -11,6 +11,7 @@ import { expiryFor, fetchJson, json, preflight, ProviderError, secrets } from '.
 import { parseAmapWalkingRoute, parseBaiduWalkingRoute } from '../_shared/regionalRoutes.ts';
 import { readRouteCache, type RouteCacheRow, serviceClient, writeRouteCache } from '../_shared/cache.ts';
 import { pairsNeedingProvider, routePairKey, routePointKey } from '../_shared/cacheKeys.ts';
+import { sameRoutingPoint } from '../_shared/routingProvider.ts';
 
 interface Point { placeId?: string; coordinates?: [number, number] }
 
@@ -119,6 +120,8 @@ Deno.serve(async (request) => {
   }
 
   const regionalProvider = body.provider === 'amap' || body.provider === 'baidu' ? body.provider : undefined;
+  const requestedOpenRouteService = body.provider === 'openrouteservice';
+  const requestedGoogle = body.provider === 'google';
 
   if (regionalProvider && body.mode && body.mode !== 'walking') {
     return json({ error: 'Regional providers currently support walking routes only; public transit is not assumed.' }, 400);
@@ -126,7 +129,14 @@ Deno.serve(async (request) => {
 
   const key = secrets.google();
   const orsKey = secrets.openRouteService();
-  if (!regionalProvider && !key && !orsKey) return json({ error: 'Routing is not configured.' }, 503);
+  if (requestedOpenRouteService && !orsKey) {
+    return json({ error: 'OpenRouteService routing is not configured.' }, 503);
+  }
+  if (requestedGoogle && !key) return json({ error: 'Google routing is not configured.' }, 503);
+  if (!regionalProvider && !requestedOpenRouteService && !requestedGoogle && !key && !orsKey) {
+    return json({ error: 'Routing is not configured.' }, 503);
+  }
+  const useOpenRouteService = requestedOpenRouteService || (!requestedGoogle && !key && Boolean(orsKey));
 
   // Cache identity for every endpoint. Points without a placeId or coordinates
   // cannot be cached, so they read as permanent misses rather than a bad key.
@@ -156,7 +166,7 @@ Deno.serve(async (request) => {
       const pairs: Array<{ originIndex: number; destinationIndex: number }> = [];
       for (let originIndex = 0; originIndex < origins.length; originIndex += 1) {
         for (let destinationIndex = 0; destinationIndex < destinations.length; destinationIndex += 1) {
-          if (originIndex === destinationIndex) {
+          if (sameRoutingPoint(origins[originIndex], destinations[destinationIndex])) {
             matrix[originIndex][destinationIndex] = { status: 'ok', source: regionalProvider, durationMinutes: 0, distanceMeters: 0 } as never;
             continue;
           }
@@ -217,7 +227,7 @@ Deno.serve(async (request) => {
     origins.forEach((_, i) => destinations.forEach((__, j) => {
       const oKey = originKeys[i];
       const dKey = destinationKeys[j];
-      if (oKey && dKey && oKey === dKey) {
+      if (sameRoutingPoint(origins[i], destinations[j])) {
         matrix[i][j] = { status: 'ok', source: 'cache', durationMinutes: 0, distanceMeters: 0 } as never;
         return;
       }
@@ -226,14 +236,19 @@ Deno.serve(async (request) => {
     }));
 
     const cachedSet = new Set(cachedRoutes.keys());
-    const { complete } = pairsNeedingProvider(originKeys, destinationKeys, cachedSet);
+    const { complete } = pairsNeedingProvider(
+      originKeys,
+      destinationKeys,
+      cachedSet,
+      (originIndex, destinationIndex) => sameRoutingPoint(origins[originIndex], destinations[destinationIndex]),
+    );
     if (complete) {
       return json({ matrix, cached: true, expiresAt: cacheExpiry });
     }
 
     // OpenRouteService: the keyless-adjacent path. Free tier, hard-capped, and
     // it returns 429 rather than an invoice when the cap is reached.
-    if (!key && orsKey) {
+    if (useOpenRouteService && orsKey) {
       const profile = ORS_PROFILES[mode];
       if (!profile) {
         // Transit has no ORS equivalent; leave it honestly unknown.
@@ -250,7 +265,7 @@ Deno.serve(async (request) => {
       const sourceIndices = origins.map((_, index) => index);
       const destinationIndices = destinations.map((_, index) => origins.length + index);
 
-      const orsPayload = await fetchJson(`https://api.openrouteservice.org/v2/matrix/${profile}`, {
+      const orsPayload = await fetchJson(`https://api.heigit.org/openrouteservice/v2/matrix/${profile}`, {
         method: 'POST',
         headers: { Authorization: orsKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({

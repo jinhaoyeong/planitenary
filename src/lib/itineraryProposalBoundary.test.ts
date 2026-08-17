@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const handler = readFileSync(
@@ -13,6 +13,20 @@ const migration = readFileSync(
   new URL('../../supabase/migrations/20260816081502_add_itinerary_proposal_cache.sql', import.meta.url),
   'utf8',
 );
+const routeFunction = readFileSync(
+  new URL('../../supabase/functions/travel-route-matrix/index.ts', import.meta.url),
+  'utf8',
+);
+const providers = readFileSync(
+  new URL('../../supabase/functions/_shared/providers.ts', import.meta.url),
+  'utf8',
+);
+
+const sourceFiles = (url: URL): URL[] => readdirSync(url, { withFileTypes: true }).flatMap((entry) => {
+  const child = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, url);
+  if (entry.isDirectory()) return sourceFiles(child);
+  return /\.(?:ts|tsx|js|jsx)$/.test(entry.name) && !entry.name.includes('.test.') ? [child] : [];
+});
 
 describe('Phase 2A server boundary', () => {
   it('meters build-itinerary through the one existing provider door', () => {
@@ -44,5 +58,21 @@ describe('Phase 2A server boundary', () => {
     expect(migration).toContain('references public.trip_registry(id) on delete cascade');
     expect(migration).not.toMatch(/\bdrop\s+(?:table|column)\b/i);
     expect(migration).not.toMatch(/\bdelete\s+from\b/i);
+  });
+
+  it('uses the current HeiGIT ORS endpoint and keeps its credential server-only', () => {
+    expect(routeFunction).toContain('https://api.heigit.org/openrouteservice/v2/matrix/');
+    expect(routeFunction).not.toContain('api.openrouteservice.org');
+    expect(providers).toContain("env('OPENROUTESERVICE_API_KEY')");
+
+    const publicSources = sourceFiles(new URL('../', import.meta.url));
+    for (const file of publicSources) {
+      expect(readFileSync(file, 'utf8'), file.pathname).not.toContain('OPENROUTESERVICE_API_KEY');
+    }
+  });
+
+  it('does not use matching array indexes as route identity', () => {
+    expect(routeFunction).not.toContain('if (originIndex === destinationIndex)');
+    expect(routeFunction).toContain('sameRoutingPoint(origins[originIndex], destinations[destinationIndex])');
   });
 });

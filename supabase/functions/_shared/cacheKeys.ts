@@ -217,13 +217,18 @@ export function pairsNeedingProvider(
   originKeys: Array<string | null>,
   destinationKeys: Array<string | null>,
   cached: Set<string>,
+  samePair: (originIndex: number, destinationIndex: number) => boolean = (originIndex, destinationIndex) => {
+    const originKey = originKeys[originIndex];
+    const destinationKey = destinationKeys[destinationIndex];
+    return Boolean(originKey && destinationKey && originKey === destinationKey);
+  },
 ): { missing: Array<{ i: number; j: number }>; complete: boolean } {
   const missing: Array<{ i: number; j: number }> = [];
   for (let i = 0; i < originKeys.length; i += 1) {
     for (let j = 0; j < destinationKeys.length; j += 1) {
       const oKey = originKeys[i];
       const dKey = destinationKeys[j];
-      if (oKey && dKey && oKey === dKey) continue; // self pair, distance 0
+      if (samePair(i, j)) continue; // same logical place, distance 0
       if (oKey && dKey && cached.has(routePairKey(oKey, dKey))) continue;
       missing.push({ i, j });
     }
