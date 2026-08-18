@@ -305,6 +305,52 @@ describe('Skip / Visited planning eligibility', () => {
     expect(proposal.conflicts.some((conflict) => conflict.code === 'must-do-omitted')).toBe(false);
   });
 
+  it('excludes a production-shaped manual saved activity after a canonical Skip write', async () => {
+    const saved = {
+      id: 'activity-legacy-iwbmuz',
+      time: '09:00',
+      name: 'Kushida Shrine',
+      description: 'Added manually',
+      type: 'sight',
+      source: 'manual',
+      coordinates: [33.59307, 130.4106837],
+      locked: false,
+      lockedFields: [],
+    };
+    const trip = sanitizeItinerary({
+      ...emptyItinerary,
+      id: 'trip-f5262604-cb74-4d39-af90-0d8a233c9906',
+      name: 'Flight Acceptance Test',
+      cities: ['Fukuoka'],
+      revision: 9,
+      tripProfile: { destinations: [{ id: 'fukuoka', city: 'Fukuoka', countryCode: 'JP' }], styles: [], transport: [] },
+      days: [{
+        day: 1,
+        date: '2026-08-20',
+        city: 'Fukuoka',
+        title: 'Arrive in Fukuoka',
+        activities: [saved],
+      }],
+      discoveryState: {
+        city: 'Fukuoka',
+        mode: 'live',
+        candidateIds: ['wikivoyage-Kushida%20Shrine'],
+        decisions: {
+          'wikivoyage-Kushida%20Shrine': 'skip',
+          'activity-legacy-iwbmuz': 'skip',
+        },
+        discoveredAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+        stage: 'reviewing',
+      },
+    } as unknown, emptyItinerary);
+    const material = await buildPlanningMaterial(trip.id, trip);
+
+    expect(material.places.map((place) => place.id)).not.toContain('activity-legacy-iwbmuz');
+    expect(material.places.map((place) => place.name)).not.toContain('Kushida Shrine');
+    expect(trip.days[0].activities.some((activity) => activity.id === 'activity-legacy-iwbmuz')).toBe(true);
+  });
+
   it('still admits a locked Skip/Visited place as fixed schedule', async () => {
     const trip = savedTrip([glico, kuromon], { [glico.id]: 'skip', [kuromon.id]: 'interested' });
     trip.days[0].activities = trip.days[0].activities.map((activity) => (

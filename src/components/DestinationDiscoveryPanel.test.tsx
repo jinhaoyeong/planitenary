@@ -2,7 +2,7 @@
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Itinerary } from '../data';
+import type { Activity, Itinerary } from '../data';
 import { CurrencyProvider } from '../contexts/CurrencyContext';
 import { OSAKA_PLACE_FIXTURE } from '../lib/destinationFixtures';
 import { createEmptyProfile, manualDestination, type TripProfile } from '../lib/tripProfile';
@@ -118,18 +118,18 @@ const profileFor = (over: Partial<TripProfile> = {}): TripProfile => ({
   ...over,
 });
 
-const itineraryFor = (profile: TripProfile): Itinerary => ({
+const itineraryFor = (profile: TripProfile, over: Partial<Itinerary> = {}): Itinerary => ({
   id: 'destination-intelligence-test',
   name: 'Osaka test trip',
   cities: ['Osaka'],
   description: 'A test trip.',
   tripProfile: profile,
   days: [],
+  ...over,
 });
 
-const renderPanel = (initialProfile = profileFor()) => {
+const renderPanel = (initialProfile = profileFor(), initialItinerary = itineraryFor(initialProfile)) => {
   const onItineraryChange = vi.fn();
-  const initialItinerary = itineraryFor(initialProfile);
   const view = render(
     <CurrencyProvider>
       <DestinationDiscoveryPanel
@@ -631,5 +631,244 @@ describe('DestinationDiscoveryPanel intelligence request lifecycle', () => {
     }));
     expect(request.candidates[0]).not.toHaveProperty('matchedInterestTags');
     expect(JSON.stringify(request)).not.toContain('weak-profile-match');
+  });
+});
+
+describe('saved-place decision binding in review UI', () => {
+  const listing: PlaceCandidate = {
+    id: 'wikivoyage-Kushida%20Shrine',
+    provider: 'wikivoyage',
+    providerPlaceId: 'wv:Kushida Shrine',
+    name: 'Kushida Shrine',
+    city: 'Osaka',
+    countryCode: 'JP',
+    categories: ['history'],
+    experienceTags: ['history'],
+    estimatedVisitMinutes: 90,
+    indoorOutdoor: 'outdoor',
+    reservationStatus: 'not-needed',
+    coordinates: [33.5931, 130.4107],
+    sourceReferences: [{ label: 'Wikivoyage', url: 'https://en.wikivoyage.org/wiki/Osaka' }],
+    sourceConfidence: 'medium',
+    lastVerifiedAt: '2026-08-18T00:00:00.000Z',
+  } as PlaceCandidate;
+
+  const otherListing: PlaceCandidate = {
+    ...listing,
+    id: 'wikivoyage-Dotonbori',
+    providerPlaceId: 'wv:Dotonbori',
+    name: 'Dotonbori',
+    coordinates: [34.6687, 135.5013],
+  };
+
+  const savedKushida: Activity = {
+    id: 'activity-legacy-iwbmuz',
+    time: '09:00',
+    name: 'Kushida Shrine',
+    description: 'Added manually',
+    type: 'sight',
+    source: 'manual',
+    coordinates: [33.59307, 130.4106837],
+    locked: false,
+    lockedFields: [],
+  };
+
+  const savedItinerary = (over: Partial<Itinerary> = {}): Itinerary => ({
+    ...itineraryFor(profileFor()),
+    cities: ['Osaka'],
+    days: [{
+      day: 1,
+      date: '2026-08-20',
+      city: 'Osaka',
+      title: 'Day one',
+      activities: [savedKushida],
+    }],
+    ...over,
+  });
+
+  const latestDecisions = (panel: { onItineraryChange: ReturnType<typeof vi.fn> }) => {
+    const calls = panel.onItineraryChange.mock.calls as Array<[Itinerary]>;
+    return calls[calls.length - 1]?.[0]?.discoveryState?.decisions || {};
+  };
+
+  const resetIntelligenceQueue = () => {
+    pendingRequests.length = 0;
+    mocks.invokeTravelReasoning.mockClear();
+  };
+
+  const browseAll = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Browse all' }));
+    await waitFor(() => expect(document.querySelector('.destination-candidate')).not.toBeNull());
+  };
+
+  const startSavedReview = async (itinerary = savedItinerary(), listings: PlaceCandidate[] = [listing, otherListing]) => {
+    discoveryFixture.candidates = listings;
+    const panel = renderPanel(profileFor(), itinerary);
+    await waitForStart();
+    fireEvent.click(screen.getByRole('button', { name: /^Start$/ }));
+    await waitForRequest(1);
+    await resolveEmpty(0);
+    await browseAll();
+    return panel;
+  };
+
+  it('uses the saved activity as the decision target for an unmatched manual place', async () => {
+    const panel = await startSavedReview();
+    const savedCard = document.querySelector('[data-decision-target="activity-legacy-iwbmuz"]');
+    const listingCard = document.querySelector('[data-candidate-id="wikivoyage-Kushida%20Shrine"]');
+    expect(savedCard).not.toBeNull();
+    expect(savedCard?.getAttribute('data-candidate-id')).toBe('activity-legacy-iwbmuz');
+    expect(listingCard?.getAttribute('data-decision-target')).toBe('wikivoyage-Kushida%20Shrine');
+    expect(document.querySelectorAll('[data-candidate-id="activity-legacy-iwbmuz"]')).toHaveLength(1);
+    expect(screen.getAllByText('Must do').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Interested').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Skip').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Visited').length).toBeGreaterThan(0);
+
+    const skip = savedCard?.querySelector('input[value="skip"]') as HTMLInputElement;
+    fireEvent.click(skip);
+    const saved = panel.onItineraryChange.mock.calls.at(-1)?.[0] as Itinerary;
+    expect(latestDecisions(panel)['activity-legacy-iwbmuz']).toBe('skip');
+    expect(saved.days[0].activities.some((activity) => activity.id === 'activity-legacy-iwbmuz')).toBe(true);
+  });
+
+  it('does not write the saved activity when the same-name listing is skipped', async () => {
+    const panel = await startSavedReview();
+    const listingCard = document.querySelector('[data-candidate-id="wikivoyage-Kushida%20Shrine"]');
+    fireEvent.click(listingCard?.querySelector('input[value="skip"]') as HTMLInputElement);
+    const decisions = latestDecisions(panel);
+    expect(decisions['wikivoyage-Kushida%20Shrine']).toBe('skip');
+    expect(decisions['activity-legacy-iwbmuz']).toBeUndefined();
+  });
+
+  it('keeps Must do and Interested working on unsaved listings', async () => {
+    const panel = await startSavedReview();
+    const listingCard = document.querySelector('[data-candidate-id="wikivoyage-Dotonbori"]');
+    fireEvent.click(listingCard?.querySelector('input[value="must-do"]') as HTMLInputElement);
+    expect(latestDecisions(panel)['wikivoyage-Dotonbori']).toBe('must-do');
+    fireEvent.click(listingCard?.querySelector('input[value="interested"]') as HTMLInputElement);
+    expect(latestDecisions(panel)['wikivoyage-Dotonbori']).toBe('interested');
+  });
+
+  it('persists Skip on the saved activity after reload', async () => {
+    const panel = await startSavedReview();
+    fireEvent.click(document.querySelector('[data-decision-target="activity-legacy-iwbmuz"] input[value="skip"]') as HTMLInputElement);
+    const saved = panel.onItineraryChange.mock.calls.at(-1)?.[0] as Itinerary;
+    panel.unmount();
+
+    resetIntelligenceQueue();
+    discoveryFixture.candidates = [listing, otherListing];
+    renderPanel(profileFor(), saved);
+    await waitForStart();
+    fireEvent.click(screen.getByRole('button', { name: /^Start$/ }));
+    await waitForRequest(1);
+    await resolveEmpty(0);
+    await browseAll();
+
+    const skip = document.querySelector('[data-decision-target="activity-legacy-iwbmuz"] input[value="skip"]') as HTMLInputElement;
+    expect(skip?.checked).toBe(true);
+    expect(saved.days[0].activities.some((activity) => activity.id === 'activity-legacy-iwbmuz')).toBe(true);
+  });
+
+  it('persists Visited on the saved activity after reload', async () => {
+    const panel = await startSavedReview();
+    fireEvent.click(document.querySelector('[data-decision-target="activity-legacy-iwbmuz"] input[value="visited"]') as HTMLInputElement);
+    const saved = panel.onItineraryChange.mock.calls.at(-1)?.[0] as Itinerary;
+    panel.unmount();
+
+    resetIntelligenceQueue();
+    discoveryFixture.candidates = [listing, otherListing];
+    renderPanel(profileFor(), saved);
+    await waitForStart();
+    fireEvent.click(screen.getByRole('button', { name: /^Start$/ }));
+    await waitForRequest(1);
+    await resolveEmpty(0);
+    await browseAll();
+
+    expect((document.querySelector('[data-decision-target="activity-legacy-iwbmuz"] input[value="visited"]') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('writes the discovered-* activity id when a listing is canonically linked', async () => {
+    const imported = {
+      ...savedKushida,
+      id: 'discovered-osm-n3507545614',
+      source: 'imported' as const,
+      provider: 'osm' as const,
+      providerPlaceId: 'n3507545614',
+      name: 'Glico Man Sign',
+    };
+    const osmListing: PlaceCandidate = {
+      ...listing,
+      id: 'osm-n3507545614',
+      provider: 'osm',
+      providerPlaceId: 'n3507545614',
+      name: 'Glico Man Sign',
+    };
+    discoveryFixture.candidates = [osmListing, otherListing];
+    const panel = renderPanel(profileFor(), savedItinerary({
+      days: [{ day: 1, date: '2026-08-20', city: 'Osaka', title: 'Day one', activities: [imported] }],
+    }));
+    await waitForStart();
+    fireEvent.click(screen.getByRole('button', { name: /^Start$/ }));
+    await waitForRequest(1);
+    await resolveEmpty(0);
+    await browseAll();
+
+    const card = document.querySelector('[data-candidate-id="osm-n3507545614"]');
+    expect(card?.getAttribute('data-decision-target')).toBe('discovered-osm-n3507545614');
+    expect(document.querySelector('[data-candidate-id="discovered-osm-n3507545614"]')).toBeNull();
+    fireEvent.click(card?.querySelector('input[value="skip"]') as HTMLInputElement);
+    const decisions = latestDecisions(panel);
+    expect(decisions['discovered-osm-n3507545614']).toBe('skip');
+    expect(decisions['osm-n3507545614']).toBe('skip');
+  });
+
+  it('re-clicking an already-showing listing Skip writes the linked saved activity', async () => {
+    const imported = {
+      ...savedKushida,
+      id: 'discovered-osm-n3507545614',
+      source: 'imported' as const,
+      provider: 'osm' as const,
+      providerPlaceId: 'n3507545614',
+      name: 'Glico Man Sign',
+    };
+    const osmListing: PlaceCandidate = {
+      ...listing,
+      id: 'osm-n3507545614',
+      provider: 'osm',
+      providerPlaceId: 'n3507545614',
+      name: 'Glico Man Sign',
+    };
+    const panel = await startSavedReview(savedItinerary({
+      days: [{ day: 1, date: '2026-08-20', city: 'Osaka', title: 'Day one', activities: [imported] }],
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'live',
+        candidateIds: [osmListing.id],
+        decisions: { 'osm-n3507545614': 'skip' },
+        discoveredAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+        stage: 'reviewing',
+      },
+    }), [osmListing, otherListing]);
+
+    const skip = document.querySelector('[data-candidate-id="osm-n3507545614"] input[value="skip"]') as HTMLInputElement;
+    expect(skip.checked).toBe(true);
+    fireEvent.click(skip);
+    expect(latestDecisions(panel)['discovered-osm-n3507545614']).toBe('skip');
+    expect(latestDecisions(panel)['osm-n3507545614']).toBe('skip');
+  });
+
+  it('never writes a same-name sibling saved activity', async () => {
+    const parkA = { ...savedKushida, id: 'activity-park-a', name: 'Central Park' };
+    const parkB = { ...savedKushida, id: 'activity-park-b', name: 'Central Park', time: '11:00' };
+    const panel = await startSavedReview(savedItinerary({
+      days: [{ day: 1, date: '2026-08-20', city: 'Osaka', title: 'Day one', activities: [parkA, parkB] }],
+    }), [otherListing]);
+
+    fireEvent.click(document.querySelector('[data-decision-target="activity-park-a"] input[value="skip"]') as HTMLInputElement);
+    const decisions = latestDecisions(panel);
+    expect(decisions['activity-park-a']).toBe('skip');
+    expect(decisions['activity-park-b']).toBeUndefined();
   });
 });

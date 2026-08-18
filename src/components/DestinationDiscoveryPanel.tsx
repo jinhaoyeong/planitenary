@@ -44,6 +44,14 @@ import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
 import type { RouteLeg, RouteResolver } from '../lib/humanScheduler';
 import {
+  bindSavedActivityIds,
+  cardDecisionWrites,
+  decisionTargetIdOf,
+  resolvedCardDecision,
+  retainedDecisionIdsOf,
+  reviewCandidatesForItinerary,
+} from '../lib/decisionTarget';
+import {
   buildDestinationItinerary,
   defaultDiscoveryDecisions,
   pruneDecisionsToCandidates,
@@ -186,6 +194,8 @@ interface UndoState {
   name: string;
   previous?: CandidateDecision;
   next: CandidateDecision;
+  /** Every key this action wrote, so Undo restores listing and saved-activity keys together. */
+  previousByKey: Record<string, CandidateDecision | undefined>;
 }
 
 /** Extra, honestly-sourced context a card can show when there is room for it. */
@@ -577,7 +587,12 @@ function CandidateCard({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <article className="destination-candidate" data-decision={decision || 'undecided'}>
+    <article
+      className="destination-candidate"
+      data-decision={decision || 'undecided'}
+      data-candidate-id={candidate.id}
+      data-decision-target={decisionTargetIdOf(candidate)}
+    >
       <PlaceMedia candidate={candidate} className="destination-candidate-photo" />
       <div className="destination-candidate-body">
         <div className="destination-candidate-headline">
@@ -621,6 +636,9 @@ function CandidateCard({
                   value={option.id}
                   checked={decision === option.id}
                   onChange={() => onDecision(option.id)}
+                  onClick={() => {
+                    if (decision === option.id) onDecision(option.id);
+                  }}
                 />
                 {decision === option.id && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
                 <span>{option.label}</span>
@@ -1098,6 +1116,16 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
    */
   const candidates = useMemo(() => candidatesByCity[cityLabel] ?? [], [candidatesByCity, cityLabel]);
   /**
+   * Review model: listing identity stays on `candidate.id`, while an explicit
+   * saved-activity link (or an injected saved place) is the decision target.
+   * Discovery `candidates` are left untouched so Build/intelligence keep
+   * listing ids.
+   */
+  const reviewCandidates = useMemo(
+    () => reviewCandidatesForItinerary(candidates, itinerary, { city: cityLabel }),
+    [candidates, itinerary, cityLabel],
+  );
+  /**
    * Personalised advice, keyed by candidate id and held apart from the ranked
    * candidates themselves. Separate on purpose: an answer arriving late must
    * not recreate the ranking data and move the deck under the traveller.
@@ -1236,6 +1264,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     () => rankWithIntelligence(candidates, profile, { evidence: evidenceSummaries, trends }),
     [candidates, profile, evidenceSummaries, trends],
   );
+  const reviewRanked = useMemo(
+    () => rankWithIntelligence(reviewCandidates, profile, { evidence: evidenceSummaries, trends }),
+    [reviewCandidates, profile, evidenceSummaries, trends],
+  );
   /**
    * The whole trip's places, ranked together. The deck reviews one city at a
    * time; the plan is built from all of them at once, which is the only way a
@@ -1281,15 +1313,19 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   );
   const groupedRanked = useMemo(() => {
     const assigned = new Set<string>();
-    return GROUPS.map((group) => {
-      const items = ranked.filter(({ candidate }) => (
+    const groups = GROUPS.map((group) => {
+      const items = reviewRanked.filter(({ candidate }) => (
         !assigned.has(candidate.id)
         && candidate.categories.some((category) => (group.matches as readonly string[]).includes(category))
       ));
       items.forEach(({ candidate }) => assigned.add(candidate.id));
       return { ...group, items };
     });
-  }, [ranked]);
+    const leftover = reviewRanked.filter(({ candidate }) => !assigned.has(candidate.id));
+    return leftover.length === 0
+      ? groups
+      : [...groups, { id: 'also', label: 'Also on this trip', matches: [] as readonly string[], items: leftover }];
+  }, [reviewRanked]);
   const [decisions, setDecisions] = useState<Record<string, CandidateDecision>>(() => (
     savedStateMatchesCity ? itinerary.discoveryState!.decisions : {}
   ));
@@ -1338,12 +1374,14 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
    * one-city deck reads as "45 of 20 reviewed" — the same class of nonsense
    * `d89bbe8` removed, arrived at from the other direction.
    */
-  const activeCandidateIds = useMemo(() => new Set(ranked.map(({ candidate }) => candidate.id)), [ranked]);
   const isSelected = (decision: CandidateDecision | undefined) =>
     decision === 'must-do' || decision === 'interested';
-  const selectedCount = Object.entries(decisions)
-    .filter(([id, decision]) => activeCandidateIds.has(id) && isSelected(decision)).length;
-  const reviewedCount = Object.keys(decisions).filter((id) => activeCandidateIds.has(id)).length;
+  const selectedCount = reviewRanked.filter(({ candidate }) => (
+    isSelected(resolvedCardDecision(decisions, candidate))
+  )).length;
+  const reviewedCount = reviewRanked.filter(({ candidate }) => (
+    Boolean(resolvedCardDecision(decisions, candidate))
+  )).length;
   /** Across every city, which is what the build will actually receive. */
   const tripSelectedCount = Object.values(decisions).filter(isSelected).length;
   /**
@@ -1353,8 +1391,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
    */
   const buildableCount = isMultiCity ? tripSelectedCount : selectedCount;
   const pendingDeck = useMemo(
-    () => ranked.filter(({ candidate }) => !decisions[candidate.id]),
-    [ranked, decisions],
+    () => reviewRanked.filter(({ candidate }) => !resolvedCardDecision(decisions, candidate)),
+    [reviewRanked, decisions],
   );
   const currentDeckCard = (focusedCandidateId
     ? pendingDeck.find(({ candidate }) => candidate.id === focusedCandidateId)
@@ -1531,9 +1569,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   /** Rank position by candidate id, so a card can say what it is ranked. */
   const rankPositions = useMemo(() => {
     const positions = new Map<string, number>();
-    ranked.forEach((entry, index) => positions.set(entry.candidate.id, index + 1));
+    reviewRanked.forEach((entry, index) => positions.set(entry.candidate.id, index + 1));
     return positions;
-  }, [ranked]);
+  }, [reviewRanked]);
 
   const deckContext = useMemo<CandidateContext | undefined>(() => {
     if (!currentDeckCard) return undefined;
@@ -1643,7 +1681,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           .filter(([city]) => city !== targetLabel)
           .flatMap(([, cityCandidates]) => cityCandidates),
       ];
-      const pruned = pruneDecisionsToCandidates(decisionsRef.current, stillOffered);
+      const pruned = pruneDecisionsToCandidates(
+        decisionsRef.current,
+        bindSavedActivityIds(stillOffered, itinerary),
+        retainedDecisionIdsOf(itinerary),
+      );
       setCandidatesByCity((previous) => ({ ...previous, [targetLabel]: discovered }));
       setActiveCityIndex(cityIndex);
       decisionsRef.current = pruned.decisions;
@@ -1753,8 +1795,14 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   );
 
   const updateDecision = (candidateId: string, decision: CandidateDecision, options?: { name?: string; silent?: boolean }) => {
-    const previous = decisionsRef.current[candidateId];
-    const next = { ...decisionsRef.current, [candidateId]: decision };
+    const card = reviewRanked.find((item) => item.candidate.id === candidateId)?.candidate
+      ?? { id: candidateId };
+    const previous = resolvedCardDecision(decisionsRef.current, card);
+    const writes = cardDecisionWrites(card, decision);
+    const previousByKey = Object.fromEntries(
+      Object.keys(writes).map((key) => [key, decisionsRef.current[key]]),
+    ) as Record<string, CandidateDecision | undefined>;
+    const next = { ...decisionsRef.current, ...writes };
     decisionsRef.current = next;
     setDecisions(next);
     persistDecisions(next);
@@ -1763,8 +1811,8 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     if (options?.silent) return;
     if (decision === 'must-do') hapticSuccess();
     else hapticMedium();
-    const name = options?.name || ranked.find((item) => item.candidate.id === candidateId)?.candidate.name || 'Place';
-    const entry: UndoState = { candidateId, name, previous, next: decision };
+    const name = options?.name || reviewRanked.find((item) => item.candidate.id === candidateId)?.candidate.name || 'Place';
+    const entry: UndoState = { candidateId, name, previous, next: decision, previousByKey };
     setDecisionHistory((history) => [...history.filter((item) => item.candidateId !== candidateId), entry]);
     setUndoState(entry);
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
@@ -1774,8 +1822,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   /** Revert one decision and put that place back in front of the traveller. */
   const revert = (entry: UndoState) => {
     const next = { ...decisionsRef.current };
-    if (entry.previous) next[entry.candidateId] = entry.previous;
-    else delete next[entry.candidateId];
+    for (const [key, previous] of Object.entries(entry.previousByKey)) {
+      if (previous) next[key] = previous;
+      else delete next[key];
+    }
     decisionsRef.current = next;
     setDecisions(next);
     persistDecisions(next);
@@ -2441,7 +2491,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
                     <CandidateCard
                       key={item.candidate.id}
                       ranked={item}
-                      decision={decisions[item.candidate.id]}
+                      decision={resolvedCardDecision(decisions, item.candidate)}
                       context={{
                         ...sharedContext,
                         evidence: evidenceSummaries[item.candidate.id],

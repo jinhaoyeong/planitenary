@@ -283,4 +283,49 @@ describe('material revision identity', () => {
     expect(same.revision).toBe(first.revision);
     expect(changed.revision).not.toBe(first.revision);
   });
+
+  it('changes when a saved-activity Skip excludes a place and is stable when that Skip is unchanged', async () => {
+    const activities = [
+      {
+        id: 'activity-legacy-iwbmuz',
+        kind: 'place',
+        time: '09:00',
+        durationMinutes: 90,
+        name: 'Kushida Shrine',
+        type: 'sight',
+        source: 'manual',
+        coordinates: [33.59307, 130.4106837],
+        lockedFields: [],
+      },
+      place('discovered-osm-n2', 'Kuromon Ichiba Market', [34.6653, 135.5062]),
+    ];
+    const days = [{ day: 1, date: '2026-08-20', city: 'Osaka', title: 'Day one', activities }];
+    const interested = trip({
+      revision: 9,
+      days,
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'live',
+        decisions: { 'activity-legacy-iwbmuz': 'interested', 'osm-n2': 'interested' },
+      },
+    });
+    const skipped = trip({
+      revision: 9,
+      days,
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'live',
+        decisions: { 'activity-legacy-iwbmuz': 'skip', 'osm-n2': 'interested' },
+      },
+    });
+
+    const left = await buildPlanningMaterial('trip-1', interested);
+    const right = await buildPlanningMaterial('trip-1', skipped);
+    const again = await buildPlanningMaterial('trip-1', skipped);
+
+    expect(left.places.map((entry) => entry.id)).toContain('activity-legacy-iwbmuz');
+    expect(right.places.map((entry) => entry.id)).not.toContain('activity-legacy-iwbmuz');
+    expect(right.revision).not.toBe(left.revision);
+    expect(again.revision).toBe(right.revision);
+  });
 });

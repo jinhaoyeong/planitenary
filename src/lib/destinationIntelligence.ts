@@ -85,6 +85,13 @@ export interface PlaceCandidate {
   id: string;
   provider: DiscoveryProvider;
   providerPlaceId?: string;
+  /**
+   * When this card is known to represent an already-saved itinerary activity,
+   * planning decisions must target that activity id — not {@link id}.
+   *
+   * Absent for pure discovery candidates. Never inferred from a display name.
+   */
+  savedActivityId?: string;
   name: string;
   localName?: string;
   description?: string;

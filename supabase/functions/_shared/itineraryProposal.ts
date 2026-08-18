@@ -407,8 +407,11 @@ const DISCOVERED_ACTIVITY_PREFIX = 'discovered-';
 /**
  * The identities that name exactly one logical place, most current first, so a
  * live decision always outranks a stale one recorded under an older form.
+ *
+ * Exported so the review UI can attach a saved activity as a decision target
+ * using this same precedence — never a display name.
  */
-const canonicalKeysOf = (activity: Record<string, unknown>): string[] => {
+export const canonicalDecisionKeysOf = (activity: Record<string, unknown>): string[] => {
   const activityId = text(activity.id, 120);
   const providerPlaceId = text(activity.providerPlaceId, 120);
   const provider = text(activity.provider, 40);
@@ -425,6 +428,8 @@ const canonicalKeysOf = (activity: Record<string, unknown>): string[] => {
     activityId,
   ].filter((key): key is string => Boolean(key)))];
 };
+
+const canonicalKeysOf = canonicalDecisionKeysOf;
 
 /**
  * A bare provider place ID such as `n3507545614` is only meaningful next to the

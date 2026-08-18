@@ -167,9 +167,17 @@ export function rankDestinationCandidates(candidates: PlaceCandidate[], profile:
  */
 export function pruneDecisionsToCandidates(
   decisions: Record<string, CandidateDecision>,
-  candidates: readonly Pick<PlaceCandidate, 'id'>[],
+  candidates: readonly Pick<PlaceCandidate, 'id' | 'savedActivityId'>[],
+  retainIds: readonly string[] = [],
 ): { decisions: Record<string, CandidateDecision>; dropped: number } {
-  const offered = new Set(candidates.map((candidate) => candidate.id));
+  const offered = new Set([
+    ...candidates.flatMap((candidate) => (
+      candidate.savedActivityId && candidate.savedActivityId !== candidate.id
+        ? [candidate.id, candidate.savedActivityId]
+        : [candidate.id]
+    )),
+    ...retainIds,
+  ]);
   const kept: Record<string, CandidateDecision> = {};
   let dropped = 0;
 
