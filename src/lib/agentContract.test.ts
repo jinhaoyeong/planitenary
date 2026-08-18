@@ -293,4 +293,31 @@ describe('an answer is held to what the tools returned', () => {
     expect(validated.proposal?.placeNames).toEqual(['Osaka Castle']);
     expect(validated.rejected).toContainEqual({ value: 'The Invented Pagoda', reason: 'invented-place' });
   });
+
+  it('drops a money amount the model invented without budget evidence', () => {
+    const evidence = collectEvidence(emptyEvidence(), 'get_current_itinerary', {
+      days: [{ activities: [{ name: 'Osaka Castle' }] }],
+    });
+    const validated = validateAgentAnswer(
+      { answer: 'You’ll probably spend RM900.', citations: [] },
+      evidence,
+    );
+    expect(validated.rejected).toContainEqual({ value: '900', reason: 'invented-budget-amount' });
+    expect(validated.answer).toMatch(/could not verify that money amount/i);
+  });
+
+  it('keeps a recorded spend a budget tool returned', () => {
+    const evidence = collectEvidence(emptyEvidence(), 'get_budget_summary', {
+      present: true,
+      currency: 'MYR',
+      spent: 420,
+      remainingKnownBudget: 180,
+    });
+    const validated = validateAgentAnswer(
+      { answer: 'Your recorded spending is RM420.', citations: [] },
+      evidence,
+    );
+    expect(validated.rejected).toEqual([]);
+    expect(validated.answer).toBe('Your recorded spending is RM420.');
+  });
 });

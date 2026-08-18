@@ -220,4 +220,133 @@ describe('real agent tool adapters', () => {
     } as AgentToolCall);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('does not treat a missing proposal cache as the current plan', async () => {
+    const result = await executor()({ tool: 'get_current_proposal', args: {} } as AgentToolCall);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({ present: false });
+    expect(JSON.stringify(result.result)).not.toMatch(/revision|sha-256|hash/i);
+  });
+
+  it('returns Skip and Visited as persisted decisions, not recommendations', async () => {
+    const result = await executor({
+      ...itinerary,
+      discoveryState: {
+        decisions: { castle: 'must-do', skipped: 'skip', seen: 'visited' },
+      },
+    })({ tool: 'get_candidate_decisions', args: {} } as AgentToolCall);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({
+      byDecision: {
+        skip: ['skipped'],
+        visited: ['seen'],
+        'must-do': ['castle'],
+      },
+    });
+  });
+
+  it('fits a place after an activity using remaining window, not a model estimate', async () => {
+    const execute = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary: {
+        days: [{
+          day: 1,
+          activities: [
+            { id: 'lunch', name: 'Lunch', time: '12:00', durationMinutes: 60 },
+            { id: 'flight', name: 'HAN → FUK', type: 'flight', time: '18:00', durationMinutes: 120 },
+          ],
+        }],
+      },
+      routingProviders: { amap: true, openRouteService: true },
+    });
+    const result = await execute({
+      tool: 'check_schedule_fit',
+      args: { afterActivityId: 'lunch', visitMinutes: 90 },
+    } as AgentToolCall);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({
+      fitsWithoutTravel: true,
+      remainingMinutes: 90,
+      windowEndsAt: '14:30',
+    });
+  });
+
+  it('does not fit a visit that would run into a flight departure lead', async () => {
+    const execute = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary: {
+        days: [{
+          day: 1,
+          activities: [
+            { id: 'lunch', name: 'Lunch', time: '12:00', durationMinutes: 60 },
+            { id: 'flight', name: 'HAN → FUK', type: 'flight', time: '18:00', durationMinutes: 120 },
+          ],
+        }],
+      },
+      routingProviders: { amap: true, openRouteService: true },
+    });
+    const result = await execute({
+      tool: 'check_schedule_fit',
+      args: { afterActivityId: 'lunch', visitMinutes: 120 },
+    } as AgentToolCall);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({ fitsWithoutTravel: false, remainingMinutes: 90 });
+  });
+
+  it('starts sightseeing after the arrival settling window, not at landing', async () => {
+    const execute = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary: {
+        days: [{
+          day: 1,
+          activities: [
+            { id: 'flight', name: 'HAN → FUK', type: 'flight', time: '10:00', durationMinutes: 120 },
+          ],
+        }],
+      },
+      routingProviders: { amap: true, openRouteService: true },
+      uiFocus: {
+        surface: 'itinerary',
+        dayNumber: 1,
+        selectedActivity: { id: 'flight', name: 'HAN → FUK', time: '10:00', durationMinutes: 120, type: 'flight', day: 1 },
+        note: '',
+      },
+    });
+    const result = await execute({
+      tool: 'check_schedule_fit',
+      args: { afterActivityId: 'flight', visitMinutes: 90 },
+    } as AgentToolCall);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({
+      after: { id: 'flight', endsAt: '12:00' },
+      remainingMinutes: 450,
+      windowEndsAt: '21:30',
+      fitsWithoutTravel: true,
+    });
+  });
+
+  it('reports document metadata without pretending extraction exists', async () => {
+    const result = await executor()({ tool: 'get_document_facts', args: {} } as AgentToolCall);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({ extraction: 'unavailable', documents: [] });
+  });
+
+  it('reports a missing budget as missing, not as an estimate', async () => {
+    const result = await executor()({ tool: 'get_budget_summary', args: {} } as AgentToolCall);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({ present: false });
+    expect(String((result.result as { note?: string }).note)).toMatch(/not estimated/i);
+  });
 });

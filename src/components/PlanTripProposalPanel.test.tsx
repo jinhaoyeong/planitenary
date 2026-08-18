@@ -63,9 +63,11 @@ const stagedOk = {
 };
 
 const openPanel = async (props: Partial<Parameters<typeof PlanTripProposalPanel>[0]> = {}) => {
-  render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" {...props} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Plan my trip' }));
+  const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" {...props} />);
+  fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /^Plan day 1$/ }));
   await screen.findByText('Proposed itinerary');
+  return view;
 };
 
 beforeEach(() => {
@@ -107,6 +109,18 @@ beforeEach(() => {
 });
 
 describe('Plan my trip proposal panel', () => {
+  it('opens Smart plan without generating a proposal', async () => {
+    const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" />);
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Plan day 1$/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Ask anything$/ })).toBeInTheDocument();
+    expect(mockedPlan).not.toHaveBeenCalled();
+    expect(mockedStage).not.toHaveBeenCalled();
+    expect(mockedApply).not.toHaveBeenCalled();
+  });
+
   it('shows a full proposal and writes nothing on its own', async () => {
     await openPanel();
 

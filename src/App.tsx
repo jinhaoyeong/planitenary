@@ -15,6 +15,8 @@ import { ProfilePanel } from './components/ProfilePanel';
 import { AppSettingsPanel } from './components/AppSettingsPanel';
 import { AskPlanitenaryPanel } from './components/AskPlanitenaryPanel';
 import { PlanTripProposalPanel } from './components/PlanTripProposalPanel';
+import { TripIntelligenceUiProvider } from './lib/tripIntelligenceUi';
+import { surfaceFromAppTab } from '../supabase/functions/_shared/intelligenceContext';
 import { TripDashboard } from './components/TripDashboard';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -1027,6 +1029,7 @@ function App() {
   }
 
   return (
+    <TripIntelligenceUiProvider key={activeItineraryId} tripId={activeItineraryId} surface={surfaceFromAppTab(activeTab)}>
     <div
       className="adaptive-handbook-root min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
       data-adaptive-handbook="true"
@@ -1162,6 +1165,7 @@ function App() {
                   tripName={displayItinerary.name}
                   itinerary={customItinerary || activeItinerary}
                   onApplied={adoptWrittenItinerary}
+                  onNavigate={(tab) => handleTabChange(tab)}
                 />
                 <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
               </>
@@ -1728,6 +1732,7 @@ function App() {
         )}
       </AnimatePresence>
     </div>
+    </TripIntelligenceUiProvider>
   );
 }
 

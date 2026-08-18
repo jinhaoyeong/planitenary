@@ -15,6 +15,9 @@ import {
   X,
 } from 'lucide-react';
 import { ASK_SUGGESTIONS, askPlanitenary, type AskResult } from '../lib/askPlanitenary';
+import { askSuggestionsFor } from '../../supabase/functions/_shared/smartPlannerActions';
+import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
+import type { ConversationTurn } from '../../supabase/functions/_shared/intelligenceContext';
 
 interface AskPlanitenaryPanelProps {
   tripId: string;
@@ -46,6 +49,18 @@ const TOOL_LABELS: Record<string, string> = {
   validate_schedule: 'Schedule check',
   calculate_day_timing: 'Day timing',
   find_schedule_conflicts: 'Conflict check',
+  get_current_day: 'This day',
+  get_unassigned_places: 'Unassigned places',
+  get_fixed_events: 'Fixed events',
+  get_flights: 'Flights',
+  get_current_proposal: 'Current proposal',
+  get_change_history: 'Change history',
+  get_budget_summary: 'Budget',
+  get_expenses: 'Expenses',
+  get_trip_documents: 'Documents',
+  get_document_facts: 'Document facts',
+  get_current_ui_context: 'Current view',
+  check_schedule_fit: 'Fit check',
 };
 
 const sourceLabel = (url: string): string => {
@@ -57,13 +72,24 @@ const sourceLabel = (url: string): string => {
 };
 
 export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelProps) {
+  const intelligence = useTripIntelligenceUi();
   const [open, setOpen] = useState(false);
+  const [seenAskNonce, setSeenAskNonce] = useState(0);
   const [question, setQuestion] = useState('');
   const [submittedQuestion, setSubmittedQuestion] = useState('');
   const [result, setResult] = useState<AskResult | null>(null);
+  const [thread, setThread] = useState<ConversationTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const [progressIndex, setProgressIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const askNonce = intelligence?.askNonce ?? 0;
+  if (askNonce > seenAskNonce) {
+    setSeenAskNonce(askNonce);
+    setOpen(true);
+  }
+  const suggestions = intelligence?.envelope.surface
+    ? askSuggestionsFor(intelligence.envelope.surface)
+    : ASK_SUGGESTIONS;
 
   useEffect(() => {
     if (!open) return;
@@ -100,8 +126,16 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
     setProgressIndex(0);
     setResult(null);
     setSubmittedQuestion(trimmed);
-    const next = await askPlanitenary({ tripId, question: trimmed });
+    const next = await askPlanitenary({
+      tripId,
+      question: trimmed,
+      uiContext: intelligence?.envelope,
+      conversation: thread.slice(-4),
+    });
     setResult(next);
+    if (next.answer) {
+      setThread((current) => [...current, { question: trimmed, answer: next.answer! }].slice(-4));
+    }
     setLoading(false);
   };
 
@@ -146,17 +180,34 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
               className="fixed inset-x-0 bottom-0 z-[90] flex max-h-[88dvh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-[0_-18px_55px_rgba(15,23,42,0.24)] dark:bg-slate-950 md:inset-y-0 md:left-auto md:w-[430px] md:max-h-none md:rounded-none md:shadow-[-18px_0_55px_rgba(15,23,42,0.22)]"
             >
               <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800 sm:px-6 sm:py-5">
-                <div>
-                  <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
-                    <Sparkles className="h-4 w-4" aria-hidden="true" />
-                    <h2 id="ask-planitenary-title" className="font-display text-xl font-semibold tracking-[-0.02em] text-slate-950 dark:text-white">
-                      Ask Planitenary
-                    </h2>
+                  <div>
+                    <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                      <Sparkles className="h-4 w-4" aria-hidden="true" />
+                      <h2 id="ask-planitenary-title" className="font-display text-xl font-semibold tracking-[-0.02em] text-slate-950 dark:text-white">
+                        Ask Planitenary
+                      </h2>
+                    </div>
+                    <p className="mt-1 max-w-[34ch] text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      {tripName || 'This trip'}
+                    </p>
+                    <p className="mt-1 max-w-[34ch] text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      A read-only travel assistant. It can research and propose, but cannot change your plan.
+                    </p>
+                    {(intelligence?.envelope.surface || intelligence?.envelope.dayNumber || intelligence?.envelope.selectedActivityId) && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {intelligence.envelope.surface && (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                            {intelligence.envelope.surface}
+                          </span>
+                        )}
+                        {intelligence.envelope.dayNumber && (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                            Day {intelligence.envelope.dayNumber}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-1 max-w-[34ch] text-xs leading-5 text-slate-500 dark:text-slate-400">
-                    A read-only travel assistant for {tripName || 'this trip'}. It can research and propose, but cannot change your plan.
-                  </p>
-                </div>
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
@@ -174,7 +225,7 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
                       Ask about tonight, rain plans, nearby places, real routes, or whether a day feels overloaded.
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
-                      {ASK_SUGGESTIONS.map((suggestion) => (
+                      {suggestions.map((suggestion) => (
                         <button
                           key={suggestion}
                           type="button"

@@ -169,7 +169,7 @@ export const AGENT_MAX_OUTPUT_TOKENS: Record<AgentOperation, number> = {
 export const AGENT_OPENAI_MODEL = 'gpt-5-nano';
 
 /** The JSON protocol spoken over the existing metered model adapter. */
-export const AGENT_SYSTEM_PROMPT = `You are Planitenary's read-only travel orchestrator.
+export const AGENT_SYSTEM_PROMPT = `You are Planitenary's read-only travel orchestrator for one owned trip.
 Return one JSON object and nothing else.
 
 When more facts are needed and tools are available, return:
@@ -178,7 +178,13 @@ When more facts are needed and tools are available, return:
 When you can answer, or finalRound is true, return:
 {"answer":"concise answer","citations":["exact tool URL"],"proposal":{"summary":"optional read-only proposal","day":1,"travelMinutes":27,"placeNames":["exact tool place name"],"replan":{"objective":"make Day 3 easier","affectedDays":[3,4],"moves":[{"placeName":"exact tool place name","fromDay":3,"toDay":4}]}}}
 
-Use only the supplied context and findings. Never invent a place, coordinate, route, travel time, opening hour, price, event, forecast, closure, photograph, licence, or URL. Travel times must be copied from routing findings. Cite only exact URLs in findings. You cannot save, apply, book, or mutate anything. If a tool failed or a fact is unavailable, say so plainly. On finalRound, do not request tools.`;
+A thin focus object names the tab/day/place the traveller is looking at. Use it as the default referent for "this", "here", "today", then load facts with tools. Call only the tools the question needs.
+
+Previous conversation turns are memory only. If they conflict with a tool result or the current itinerary, the current itinerary wins.
+
+Never invent a place, coordinate, route, travel time, opening hour, price, budget remaining, event, forecast, closure, photograph, licence, document fact, or URL. Travel times must be copied from routing findings. Money amounts must be copied from budget/expense findings. Document contents are metadata only unless a tool returned extracted facts.
+
+Cite only exact URLs in findings. Do not mention internal hashes, revisions, ledgers, RPC names, or candidate ids. You cannot save, apply, book, or mutate anything. If a tool failed or a fact is unavailable, say so plainly. On finalRound, do not request tools.`;
 
 /**
  * The planning model chooses composition only. Clock arithmetic, routes,
@@ -224,8 +230,19 @@ export type AgentToolName =
   | 'get_trip'
   | 'get_trip_profile'
   | 'get_current_itinerary'
+  | 'get_current_day'
   | 'get_saved_places'
+  | 'get_unassigned_places'
   | 'get_candidate_decisions'
+  | 'get_fixed_events'
+  | 'get_flights'
+  | 'get_current_proposal'
+  | 'get_change_history'
+  | 'get_budget_summary'
+  | 'get_expenses'
+  | 'get_trip_documents'
+  | 'get_document_facts'
+  | 'get_current_ui_context'
   // Research.
   | 'search_places'
   | 'search_web'
@@ -241,7 +258,8 @@ export type AgentToolName =
   // Planning support, wrapping the deterministic planner.
   | 'validate_schedule'
   | 'calculate_day_timing'
-  | 'find_schedule_conflicts';
+  | 'find_schedule_conflicts'
+  | 'check_schedule_fit';
 
 /** Which budget line a tool draws from. `general` draws only on `maxToolCalls`. */
 export type AgentToolCost = 'general' | 'web-search' | 'route' | 'place-lookup';
@@ -284,6 +302,9 @@ const boundedList = (value: unknown, max: number, itemMax: number): string[] | u
   return items.length > 0 ? items.slice(0, max) : undefined;
 };
 
+const optionalDay = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 60 ? value : undefined;
+
 /** No arguments at all. Used by the trip readers, which are scoped by the server. */
 const noArgs = () => ({});
 
@@ -322,7 +343,79 @@ export const AGENT_TOOLS: Record<AgentToolName, AgentToolSpec> = {
   },
   get_candidate_decisions: {
     name: 'get_candidate_decisions',
-    description: 'What the traveller marked Must do, Interested, Skip or Visited during discovery.',
+    description: 'What the traveller marked Must do, Interested, Skip or Visited. Keys are canonical saved-activity or listing ids, never names.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_current_day: {
+    name: 'get_current_day',
+    description: 'One saved day in detail. Defaults to the day the traveller is looking at.',
+    cost: 'general',
+    parseArgs: (raw) => {
+      const day = optionalDay((raw as { day?: unknown })?.day);
+      return day ? { day } : {};
+    },
+  },
+  get_unassigned_places: {
+    name: 'get_unassigned_places',
+    description: 'Saved places that are not on a day yet.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_fixed_events: {
+    name: 'get_fixed_events',
+    description: 'Timed flights and transport already on the itinerary, with their windows.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_flights: {
+    name: 'get_flights',
+    description: 'Persisted flight activities: time, duration, and arrival/departure role when known.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_current_proposal: {
+    name: 'get_current_proposal',
+    description: 'Whether a current Plan my trip preview exists for the saved itinerary. Not the saved plan unless applied.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_change_history: {
+    name: 'get_change_history',
+    description: 'What the last applied Plan my trip changes did, as a traveller-facing diff. No snapshots.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_budget_summary: {
+    name: 'get_budget_summary',
+    description: 'Recorded trip wallet: spent, planned ceiling, remaining. Missing prices stay unknown.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_expenses: {
+    name: 'get_expenses',
+    description: 'Recorded expense rows from the trip wallet. Does not invent spending.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_trip_documents: {
+    name: 'get_trip_documents',
+    description: 'Metadata for files attached to this trip: titles and types, not extracted booking facts.',
+    cost: 'general',
+    parseArgs: noArgs,
+  },
+  get_document_facts: {
+    name: 'get_document_facts',
+    description: 'Facts extracted from a trip document. Reports when extraction is not available.',
+    cost: 'general',
+    parseArgs: (raw) => {
+      const documentId = text((raw as { documentId?: unknown })?.documentId, 80);
+      return documentId ? { documentId } : {};
+    },
+  },
+  get_current_ui_context: {
+    name: 'get_current_ui_context',
+    description: 'The tab, day, and selected saved place the traveller is looking at, rehydrated from the trip.',
     cost: 'general',
     parseArgs: noArgs,
   },
@@ -480,6 +573,25 @@ export const AGENT_TOOLS: Record<AgentToolName, AgentToolSpec> = {
     description: 'Places the deterministic planner left unscheduled, including its saved reasons.',
     cost: 'general',
     parseArgs: noArgs,
+  },
+  check_schedule_fit: {
+    name: 'check_schedule_fit',
+    description:
+      'Whether a saved place can fit after another activity on a day, using saved times, durations, and flights. '
+      + 'Does not include travel time — call get_route for that.',
+    cost: 'general',
+    parseArgs: (raw) => {
+      const args = raw as { day?: unknown; afterActivityId?: unknown; placeId?: unknown; visitMinutes?: unknown };
+      const visitMinutes = typeof args?.visitMinutes === 'number' && Number.isFinite(args.visitMinutes)
+        ? Math.max(15, Math.min(12 * 60, Math.round(args.visitMinutes)))
+        : undefined;
+      return {
+        day: optionalDay(args?.day),
+        afterActivityId: text(args?.afterActivityId, 120),
+        placeId: text(args?.placeId, 120),
+        visitMinutes,
+      };
+    },
   },
 };
 
@@ -735,19 +847,23 @@ export interface AgentEvidence {
   routeMinutes: Set<number>;
   /** Place names a tool returned, lowercased. */
   knownPlaceNames: Set<string>;
+  /** Wallet/itinerary money amounts a budget tool returned, rounded. */
+  budgetAmounts: Set<number>;
 }
 
 export const emptyEvidence = (): AgentEvidence => ({
   citableUrls: new Set<string>(),
   routeMinutes: new Set<number>(),
   knownPlaceNames: new Set<string>(),
+  budgetAmounts: new Set<number>(),
 });
 
 export type AnswerRejection =
   | 'uncited-url'
   | 'invented-travel-time'
   | 'invented-travel-time-in-answer'
-  | 'invented-place';
+  | 'invented-place'
+  | 'invented-budget-amount';
 
 export interface ValidatedAgentAnswer {
   answer: string;
@@ -828,9 +944,24 @@ export function validateAgentAnswer(
   for (const minutes of unsupportedInAnswer) {
     rejected.push({ value: `${minutes} minutes`, reason: 'invented-travel-time-in-answer' });
   }
-  const visibleAnswer = unsupportedInAnswer.length > 0
+  const visibleTravel = unsupportedInAnswer.length > 0
     ? 'I could not verify the travel time in that answer from the routing results, so I have not shown the estimate.'
     : answer.answer;
+
+  const statedMoney = new Set<number>();
+  const moneyPattern = /\b(?:RM|MYR|USD|EUR|JPY|CNY)\s*\$?\s*(\d{1,7}(?:,\d{3})*)\b|\$\s*(\d{1,7}(?:,\d{3})*)\b/gi;
+  for (const match of visibleTravel.matchAll(moneyPattern)) {
+    const raw = match[1] || match[2];
+    if (!raw) continue;
+    statedMoney.add(Number(raw.replaceAll(',', '')));
+  }
+  const unsupportedMoney = [...statedMoney].filter((amount) => !evidence.budgetAmounts.has(amount));
+  for (const amount of unsupportedMoney) {
+    rejected.push({ value: String(amount), reason: 'invented-budget-amount' });
+  }
+  const visibleAnswer = unsupportedMoney.length > 0
+    ? 'I could not verify that money amount from the trip budget records, so I have not shown an estimate.'
+    : visibleTravel;
 
   return { answer: visibleAnswer, citations, proposal, rejected };
 }
@@ -875,6 +1006,12 @@ export function collectEvidence(
       for (const key of ['durationMinutes', 'travelMinutes', 'minutes']) {
         const value = record[key];
         if (typeof value === 'number' && Number.isFinite(value)) evidence.routeMinutes.add(Math.round(value));
+      }
+    }
+    if (tool === 'get_budget_summary' || tool === 'get_expenses') {
+      for (const key of ['spent', 'plannedCeiling', 'remainingKnownBudget', 'amount', 'amountMYR', 'min', 'max']) {
+        const value = record[key];
+        if (typeof value === 'number' && Number.isFinite(value)) evidence.budgetAmounts.add(Math.round(value));
       }
     }
 

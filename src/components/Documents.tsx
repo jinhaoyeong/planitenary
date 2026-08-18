@@ -19,6 +19,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { SkeletonCard } from './ui/Skeleton';
 import { useAuth } from '../contexts/AuthContext';
 import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
+import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 
 const BUCKET = 'trip-documents';
 
@@ -105,6 +106,7 @@ export function parseDocumentData(row: TripDocumentRow): DocumentData {
 
 export const Documents = ({ itineraryId = 'default' }: { itineraryId?: string }) => {
   const { user, isDemoUser, isLocalTestUser } = useAuth();
+  const intelligenceReport = useTripIntelligenceUi()?.report;
   const [rows, setRows] = useState<TripDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -131,6 +133,12 @@ export const Documents = ({ itineraryId = 'default' }: { itineraryId?: string })
   const configured = isSupabaseConfigured() && Boolean(user) && !localMode;
   const canUseDocuments = configured || localMode;
   const localStorageKey = `documents-${isDemoUser ? 'demo' : user?.id ?? 'local'}-${itineraryId}`;
+
+  useEffect(() => {
+    intelligenceReport?.({
+      selectedDocumentId: viewer?.row.id ?? editingRow?.id,
+    });
+  }, [intelligenceReport, viewer?.row.id, editingRow?.id]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

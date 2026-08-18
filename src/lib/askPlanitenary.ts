@@ -15,6 +15,8 @@
  */
 
 import { invokeTravelFunction } from './supabase';
+import type { IntelligenceUiEnvelope, ConversationTurn } from '../../supabase/functions/_shared/intelligenceContext';
+import { askSuggestionsFor } from '../../supabase/functions/_shared/smartPlannerActions';
 
 export type AskStatus = 'answered' | 'partial' | 'refused';
 
@@ -147,7 +149,13 @@ export function parseAskResult(payload: unknown): AskResult {
  * render as a sentence.
  */
 export async function askPlanitenary(
-  input: { tripId: string; question: string; operation?: 'ask' | 'research-trip' | 'research-place' },
+  input: {
+    tripId: string;
+    question: string;
+    operation?: 'ask' | 'research-trip' | 'research-place';
+    uiContext?: IntelligenceUiEnvelope;
+    conversation?: ConversationTurn[];
+  },
   invoke: (name: string, body: unknown) => Promise<unknown> = invokeTravelFunction,
 ): Promise<AskResult> {
   const question = input.question.trim();
@@ -170,6 +178,8 @@ export async function askPlanitenary(
       operation: input.operation ?? 'ask',
       tripId: input.tripId,
       question,
+      ...(input.uiContext ? { uiContext: input.uiContext } : {}),
+      ...(input.conversation && input.conversation.length > 0 ? { conversation: input.conversation } : {}),
     });
     return parseAskResult(payload);
   } catch (error) {
@@ -191,9 +201,4 @@ export async function askPlanitenary(
  * them asks the assistant to change the trip — which would set an expectation
  * Phase 1 cannot meet.
  */
-export const ASK_SUGGESTIONS = [
-  'What should we do tonight?',
-  'What can we do if it rains tomorrow?',
-  'Is tomorrow too tiring?',
-  'What is nearby after this activity?',
-] as const;
+export const ASK_SUGGESTIONS = askSuggestionsFor('itinerary');

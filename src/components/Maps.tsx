@@ -7,6 +7,7 @@ import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-
 import L from 'leaflet';
 import { lookupCityCenter } from '../lib/destinations';
 import { destinationPoints, sanitizeTripProfile } from '../lib/tripProfile';
+import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 
 // Fix for default marker icons in React Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -165,6 +166,7 @@ const routeStopIcon = (index: number, accent: string) =>
   });
 
 export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
+  const intelligenceReport = useTripIntelligenceUi()?.report;
   const [selectedCity, setSelectedCity] = useState<string>('All Cities');
   const [selectedType, setSelectedType] = useState<string>('All Locations');
   const [searchQuery, setSearchQuery] = useState('');
@@ -335,6 +337,12 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
   };
 
   const openEditModal = (item: LocationItem) => {
+    intelligenceReport?.({
+      dayNumber: item.day,
+      selectedActivityId: item.activity.id,
+      selectedPlaceId: item.activity.id,
+      selectedMapPoint: { lat: item.coords[0], lng: item.coords[1] },
+    });
     setEditingLocation(item);
     setEditActivity({
       name: item.activity.name,
@@ -648,9 +656,19 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
           ))}
 
           {filteredLocations.map((item, idx) => (
-            <Marker 
-              key={idx} 
+            <Marker
+              key={idx}
               position={item.coords}
+              eventHandlers={{
+                click: () => {
+                  intelligenceReport?.({
+                    dayNumber: item.day,
+                    selectedActivityId: item.activity.id,
+                    selectedPlaceId: item.activity.id,
+                    selectedMapPoint: { lat: item.coords[0], lng: item.coords[1] },
+                  });
+                },
+              }}
             >
               <Popup>
                 <div className="min-w-[200px]">

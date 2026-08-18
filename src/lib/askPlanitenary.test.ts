@@ -52,6 +52,25 @@ describe('Ask Planitenary network boundary', () => {
     });
   });
 
+  it('forwards UI hints and conversation without treating them as trip facts', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: 'answered', answer: 'Answer', citations: [], applied: false, transcript: [], rejected: [],
+    });
+    await askPlanitenary({
+      tripId: 'trip-1',
+      question: 'What can I do after this?',
+      uiContext: { tripId: 'trip-1', surface: 'itinerary', dayNumber: 2, selectedActivityId: 'act-1' },
+      conversation: [{ question: 'Can I fit the castle?', answer: 'Yes, after lunch.' }],
+    }, invoke);
+    expect(invoke).toHaveBeenCalledWith('planitenary-agent', {
+      operation: 'ask',
+      tripId: 'trip-1',
+      question: 'What can I do after this?',
+      uiContext: { tripId: 'trip-1', surface: 'itinerary', dayNumber: 2, selectedActivityId: 'act-1' },
+      conversation: [{ question: 'Can I fit the castle?', answer: 'Yes, after lunch.' }],
+    });
+  });
+
   it('degrades invocation failures to a renderable refusal', async () => {
     const invoke = vi.fn().mockRejectedValue(new Error('Daily limit reached.'));
     const result = await askPlanitenary({ tripId: 'trip-1', question: 'Help' }, invoke);

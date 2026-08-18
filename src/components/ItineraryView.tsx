@@ -23,6 +23,7 @@ import { resolveVisualIdentity } from '../lib/visualIdentity';
 import { markManualFieldEdits } from '../lib/identityFields';
 import { applyActivityDuration, durationFieldsFromMinutes, formatFlightDuration } from '../lib/flightDuration';
 import { FlightDurationFields } from './FlightDurationFields';
+import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -1483,6 +1484,18 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
       setEditingActivityIndex(null);
     }
   }, [currentDay, editingActivityIndex]);
+
+  const intelligenceReport = useTripIntelligenceUi()?.report;
+  useEffect(() => {
+    const activity = currentDay && editingActivityIndex !== null
+      ? currentDay.activities[editingActivityIndex]
+      : undefined;
+    intelligenceReport?.({
+      dayNumber: selectedDay ?? undefined,
+      selectedActivityId: activity?.id,
+      selectedPlaceId: activity?.id,
+    });
+  }, [intelligenceReport, selectedDay, editingActivityIndex, currentDay]);
 
   const swipeHandlers = useSwipe({
     onSwipeLeft: () => {

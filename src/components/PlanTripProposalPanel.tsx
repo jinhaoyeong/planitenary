@@ -1,18 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  AlertTriangle,
-  ArrowRight,
-  Check,
-  Clock3,
-  Loader2,
-  MapPin,
-  Route,
-  ShieldCheck,
-  Sparkles,
-  X,
-} from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, Clock3, Loader2, MapPin, Route, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { planTripProposal, type PlanTripResult } from '../lib/planTripProposal';
 import {
   applyItineraryChange,
@@ -26,6 +15,9 @@ import {
   presentPlanTripWriteRefusal,
   type PlanTripWriteNotice,
 } from '../lib/planTripWritePresentation';
+import { deriveSmartActions, type SmartAction } from '../../supabase/functions/_shared/smartPlannerActions';
+import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
+import { tripBudgetHint } from '../lib/tripBudgetHint';
 import type { Itinerary } from '../data';
 
 interface PlanTripProposalPanelProps {
@@ -39,6 +31,8 @@ interface PlanTripProposalPanelProps {
    * than re-deriving it, or the next autosave would write something else over it.
    */
   onApplied?: (itinerary: Itinerary) => void;
+  /** Read-mode Smart Plan actions may switch the active tab. They never write. */
+  onNavigate?: (tab: 'itinerary' | 'budget') => void;
 }
 
 /**
@@ -125,8 +119,10 @@ function changeSummary(staged: StagedChange): string[] {
   return lines.length > 0 ? lines : ['No activity changes — times and details only.'];
 }
 
-export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }: PlanTripProposalPanelProps) {
+export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, onNavigate }: PlanTripProposalPanelProps) {
+  const intelligence = useTripIntelligenceUi();
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<'menu' | 'proposal'>('menu');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<PlanTripResult | null>(null);
@@ -136,6 +132,20 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
   /** No exit, no second click, and no backdrop dismiss while a write is in flight. */
   const busy = loading || write.phase === 'staging' || write.phase === 'applying' || write.phase === 'undoing';
   const proposal = result?.proposal;
+  const surface = intelligence?.envelope.surface ?? 'itinerary';
+  const dayNumber = intelligence?.envelope.dayNumber;
+  const budgetHint = tripBudgetHint(tripId, (itinerary ?? null) as unknown as Record<string, unknown> | null);
+  const smartActions = useMemo(
+    () => deriveSmartActions({
+      itinerary: (itinerary ?? null) as unknown as Record<string, unknown> | null,
+      surface,
+      dayNumber,
+      hasBudget: budgetHint.hasBudget,
+      budgetRemainingKnown: budgetHint.remainingKnown,
+      budgetCeilingKnown: budgetHint.ceilingKnown,
+    }),
+    [itinerary, surface, dayNumber, budgetHint.hasBudget, budgetHint.remainingKnown, budgetHint.ceilingKnown],
+  );
 
   useEffect(() => {
     if (!loading) return;
@@ -252,13 +262,30 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
       setWriteError(null);
       return;
     }
+    setView('proposal');
     void generate();
   };
 
   const openPlanner = () => {
     setOpen(true);
-    if (!result && !loading) void generate();
+    if (result || loading) setView('proposal');
+    else setView('menu');
   };
+
+  const runSmartAction = (action: SmartAction) => {
+    if (action.mode === 'proposal') {
+      setView('proposal');
+      void generate();
+      return;
+    }
+    setOpen(false);
+    if (action.id === 'ask') intelligence?.openAsk();
+    if (action.id === 'organise-saved') onNavigate?.('itinerary');
+    if (action.id === 'review-budget') onNavigate?.('budget');
+  };
+
+  const showingProposal = view === 'proposal';
+  const title = showingProposal ? 'Plan my trip' : 'Smart plan';
 
   return (
     <>
@@ -269,7 +296,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
         style={{ color: 'var(--accent-ink, #fff)', backgroundColor: 'var(--accent)' }}
         whileTap={{ scale: 0.96 }}
         whileHover={{ y: -1 }}
-        aria-label="Plan my trip"
+        aria-label="Smart plan"
         aria-expanded={open}
       >
         <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
@@ -300,9 +327,11 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
               >
                 <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5 dark:border-slate-800 sm:px-7">
                   <div className="min-w-0">
-                    <h2 id="plan-trip-title" className="font-display text-3xl tracking-[-0.025em] sm:text-4xl">Plan my trip</h2>
+                    <h2 id="plan-trip-title" className="font-display text-3xl tracking-[-0.025em] sm:text-4xl">{title}</h2>
                     <p className="mt-1 max-w-xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-                      A complete, route-aware proposal for {tripName || 'this trip'}. Nothing changes until you apply it.
+                      {showingProposal
+                        ? `A complete, route-aware proposal for ${tripName || 'this trip'}. Nothing changes until you apply it.`
+                        : `Based on ${tripName || 'your trip'}. Actions are derived from the saved itinerary — nothing changes until you confirm a proposal.`}
                     </p>
                   </div>
                   <button
@@ -310,14 +339,36 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                     onClick={() => setOpen(false)}
                     disabled={busy}
                     className="rounded-full border border-slate-200 p-2 text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-40 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
-                    aria-label="Close Plan my trip"
+                    aria-label={showingProposal ? 'Close Plan my trip' : 'Close Smart plan'}
                   >
                     <X className="h-4 w-4" />
                   </button>
                 </header>
 
                 <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-6 sm:px-7" data-lenis-prevent>
-                  {loading && (
+                  {!showingProposal && !loading && (
+                    <div className="mx-auto max-w-xl">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                        Based on your trip
+                      </p>
+                      <div className="mt-4 grid gap-2">
+                        {smartActions.map((action) => (
+                          <button
+                            key={action.id}
+                            type="button"
+                            aria-label={action.title}
+                            onClick={() => runSmartAction(action)}
+                            className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-rose-200 hover:bg-rose-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-rose-900 dark:hover:bg-rose-950/20"
+                          >
+                            <span className="block text-sm font-semibold text-slate-950 dark:text-white">{action.title}</span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{action.reason}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {showingProposal && loading && (
                     <div className="mx-auto flex min-h-[65vh] max-w-md flex-col justify-center">
                       <div className="relative h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                         <motion.span
@@ -343,7 +394,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                     </div>
                   )}
 
-                  {!loading && result && !proposal && (
+                  {showingProposal && !loading && result && !proposal && (
                     <div className="mx-auto max-w-lg py-16 text-center">
                       <AlertTriangle className="mx-auto h-7 w-7 text-amber-500" />
                       <h3 className="mt-4 text-lg font-semibold">No proposal was generated</h3>
@@ -356,8 +407,17 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied }
                     </div>
                   )}
 
-                  {!loading && proposal && (
+                  {showingProposal && !loading && proposal && (
                     <div className="space-y-8">
+                      {!busy && write.phase !== 'confirm' && write.phase !== 'applied' && (
+                        <button
+                          type="button"
+                          onClick={() => setView('menu')}
+                          className="text-xs font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400"
+                        >
+                          Back to Smart plan
+                        </button>
+                      )}
                       {notice && (
                         <section role="alert" className="plan-trip-notice rounded-2xl bg-rose-50 p-4 text-rose-950 dark:bg-rose-950/40 dark:text-rose-100">
                           <div className="flex items-start gap-2 text-sm font-semibold">

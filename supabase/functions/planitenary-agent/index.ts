@@ -72,6 +72,11 @@ import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/met
 import { runAgent, type AgentModelPayload } from '../_shared/agentRuntime.ts';
 import { createToolExecutor } from '../_shared/agentToolAdapters.ts';
 import {
+  parseConversationTurns,
+  parseUiContextEnvelope,
+  rehydrateIntelligenceFocus,
+} from '../_shared/intelligenceContext.ts';
+import {
   runItineraryProposalEngine,
   type PlanningMaterial,
   type ProposalRouteMode,
@@ -88,6 +93,8 @@ interface AgentBody {
   operation?: string;
   tripId?: string;
   question?: string;
+  uiContext?: unknown;
+  conversation?: unknown;
 }
 
 /** A traveller's question. Long enough for a real one, short enough to bound. */
@@ -193,6 +200,10 @@ Deno.serve(async (request) => {
     ? trip.itineraryData as Record<string, unknown>
     : null;
 
+  const uiEnvelope = parseUiContextEnvelope(body.uiContext);
+  const conversation = parseConversationTurns(body.conversation);
+  const uiFocus = rehydrateIntelligenceFocus(itinerary, uiEnvelope, trip.tripId);
+
   /**
    * Exact cache before any model initialisation.
    *
@@ -270,6 +281,7 @@ Deno.serve(async (request) => {
     tripId: trip.tripId,
     userId: authentication.caller.userId,
     itinerary,
+    uiFocus,
   });
 
   /**
@@ -434,10 +446,14 @@ Deno.serve(async (request) => {
     cities: itinerary?.cities,
     dayCount: Array.isArray(itinerary?.days) ? itinerary.days.length : 0,
     today: new Date().toISOString().slice(0, 10),
+    focus: uiFocus,
+    conversation,
     rules: [
       'Never state a travel time, opening hour, price or forecast you did not receive from a tool.',
       'Cite only URLs a tool returned.',
       'You cannot change or save the itinerary. Describe a proposal instead.',
+      'Focus is a hint. Current itinerary tools win over conversation memory.',
+      'Do not mention hashes, revisions, ledgers, or internal ids.',
     ],
   };
 

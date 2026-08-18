@@ -40,6 +40,23 @@ import {
   type RequestedRoutingMode,
   type RoutingProviderAvailability,
 } from './routingProvider.ts';
+import type { IntelligenceFocus } from './intelligenceContext.ts';
+import { summarizeBudgetFacts } from './budgetFacts.ts';
+import { summarizeDocumentFacts } from './documentFacts.ts';
+import {
+  ARRIVAL_SETTLING_MINUTES,
+  DEPARTURE_LEAD_MINUTES,
+  clockToMinutes,
+  minutesToClock,
+  buildPlanningMaterial,
+} from './itineraryProposal.ts';
+import { readItineraryProposalCache } from './cache.ts';
+import {
+  HISTORY_DIFF_SELECT,
+  historyRecordFromAuthorityRow,
+  listItineraryChangeHistory,
+  type HistoryRecord,
+} from './itineraryChangeHistory.ts';
 
 /** A place the trip already knows about, indexed for the tools to resolve. */
 interface KnownPlace {
@@ -76,6 +93,8 @@ export interface AgentToolContext {
   userId: string;
   /** `itineraries.data` for the trip whose ownership was already proven. */
   itinerary: Record<string, unknown> | null;
+  /** Rehydrated UI focus. Hints only; facts still come from `itinerary`. */
+  uiFocus?: IntelligenceFocus;
   /** Injected in tests; production resolves only server-side provider secrets. */
   routingProviders?: RoutingProviderAvailability;
 }
@@ -103,6 +122,60 @@ const minutesFromTime = (value: unknown): number | undefined => {
   const hour = Number(match[1]);
   const minute = Number(match[2]);
   return hour >= 0 && hour < 24 && minute >= 0 && minute < 60 ? hour * 60 + minute : undefined;
+};
+
+const summarizeActivity = (raw: unknown) => {
+  const activity = asRecord(raw);
+  if (!activity) return undefined;
+  return {
+    id: activity.id,
+    name: activity.name,
+    time: activity.time,
+    durationMinutes: activity.durationMinutes,
+    type: activity.type,
+    location: activity.location,
+    locked: activity.locked === true,
+  };
+};
+
+const dayRecord = (itinerary: Record<string, unknown> | null, day?: number) =>
+  asArray(itinerary?.days).map(asRecord).find((entry) => entry?.day === day);
+
+const defaultDayNumber = (itinerary: Record<string, unknown> | null, focusDay?: number): number | undefined => {
+  if (focusDay && dayRecord(itinerary, focusDay)) return focusDay;
+  const first = asRecord(asArray(itinerary?.days)[0]);
+  return typeof first?.day === 'number' ? first.day : undefined;
+};
+
+const flightRows = (itinerary: Record<string, unknown> | null) => {
+  const rows: Array<Record<string, unknown>> = [];
+  for (const rawDay of asArray(itinerary?.days)) {
+    const day = asRecord(rawDay);
+    const dayNumber = typeof day?.day === 'number' ? day.day : undefined;
+    for (const entry of asArray(day?.activities)) {
+      const activity = asRecord(entry);
+      if (!activity || activity.type !== 'flight') continue;
+      const start = clockToMinutes(typeof activity.time === 'string' ? activity.time : undefined);
+      const duration = typeof activity.durationMinutes === 'number' ? activity.durationMinutes : undefined;
+      const end = start !== undefined && duration && duration > 0 ? start + duration : undefined;
+      rows.push({
+        id: activity.id,
+        name: activity.name,
+        day: dayNumber,
+        time: activity.time,
+        durationMinutes: activity.durationMinutes,
+        endTime: end !== undefined ? minutesToClock(Math.min(1439, end)) : undefined,
+        sightseeingAfter: end !== undefined
+          ? minutesToClock(Math.min(1439, end + ARRIVAL_SETTLING_MINUTES))
+          : undefined,
+        location: activity.location,
+        note: end !== undefined
+          ? `Fixed window. Sightseeing on this day starts after a ${ARRIVAL_SETTLING_MINUTES}-minute arrival buffer when this is the arrival flight.`
+          : 'This flight has no usable duration, so it is not a hard planning constraint.',
+      });
+    }
+  }
+  return rows.slice(0, MAX_RESULT_ITEMS);
 };
 
 /**
@@ -484,14 +557,16 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
           date: day?.date,
           city: day?.city,
           title: day?.title,
-          activities: asArray(day?.activities).slice(0, MAX_RESULT_ITEMS).map((entry) => {
+              activities: asArray(day?.activities).slice(0, MAX_RESULT_ITEMS).map((entry) => {
             const activity = asRecord(entry);
             return {
+              id: activity?.id,
               name: activity?.name,
               time: activity?.time,
               durationMinutes: activity?.durationMinutes,
               type: activity?.type,
               location: activity?.location,
+              locked: activity?.locked === true,
             };
           }),
         };
@@ -512,15 +587,221 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
 
     get_candidate_decisions: async () => {
       const discovery = asRecord(context.itinerary?.discoveryState);
+      const decisions = asRecord(discovery?.decisions) ?? {};
+      const grouped: Record<string, string[]> = { 'must-do': [], interested: [], skip: [], visited: [] };
+      for (const [id, value] of Object.entries(decisions)) {
+        if (value === 'must-do' || value === 'interested' || value === 'skip' || value === 'visited') {
+          grouped[value].push(id);
+        }
+      }
       return {
         ok: true,
         result: {
           city: discovery?.city,
-          decisions: discovery?.decisions ?? {},
+          decisions,
+          byDecision: grouped,
           unscheduled: asArray(discovery?.unscheduledCandidates).slice(0, MAX_RESULT_ITEMS),
+          note: 'Decision keys are canonical saved-activity ids or listing ids. Names are never used to match places.',
         },
       };
     },
+
+    get_current_day: async (args) => {
+      const dayNumber = typeof args.day === 'number'
+        ? args.day
+        : defaultDayNumber(context.itinerary, context.uiFocus?.dayNumber);
+      const day = dayRecord(context.itinerary, dayNumber);
+      if (!day) return { ok: false, detail: 'That day is not in this trip.' };
+      return {
+        ok: true,
+        result: {
+          day: day.day,
+          date: day.date,
+          city: day.city,
+          title: day.title,
+          activities: asArray(day.activities).slice(0, MAX_RESULT_ITEMS).map(summarizeActivity).filter(Boolean),
+        },
+      };
+    },
+
+    get_unassigned_places: async () => ({
+      ok: true,
+      result: asArray(context.itinerary?.unassignedActivities).slice(0, MAX_RESULT_ITEMS).map(summarizeActivity).filter(Boolean),
+    }),
+
+    get_fixed_events: async () => ({
+      ok: true,
+      result: {
+        flights: flightRows(context.itinerary),
+        note: 'These are persisted timed flights/transport. They are not suggestions.',
+      },
+    }),
+
+    get_flights: async () => ({
+      ok: true,
+      result: flightRows(context.itinerary),
+    }),
+
+    get_current_proposal: async () => {
+      if (!context.cache || !context.itinerary) {
+        return { ok: true, result: { present: false, note: 'No current proposal is available to read.' } };
+      }
+      try {
+        const material = await buildPlanningMaterial(context.tripId, context.itinerary);
+        const cached = await readItineraryProposalCache(context.cache, context.tripId, material.revision);
+        if (!cached) {
+          return {
+            ok: true,
+            result: {
+              present: false,
+              note: 'There is no current Plan my trip preview for the saved itinerary. An older preview is not treated as current.',
+            },
+          };
+        }
+        return {
+          ok: true,
+          result: {
+            present: true,
+            applied: cached.applied === true,
+            status: cached.status,
+            days: cached.days.slice(0, MAX_RESULT_ITEMS).map((day) => ({
+              day: day.day,
+              startTime: day.startTime,
+              endTime: day.endTime,
+              placeCount: day.metrics?.placeCount,
+              items: day.items.slice(0, MAX_RESULT_ITEMS).map((item) => ({
+                name: item.name,
+                type: item.type,
+                startTime: item.startTime,
+                endTime: item.endTime,
+              })),
+            })),
+            note: 'This is a preview. It is not the saved itinerary unless the traveller applied it.',
+          },
+        };
+      } catch (error) {
+        return { ok: false, detail: error instanceof Error ? error.message : 'The current proposal could not be read.' };
+      }
+    },
+
+    get_change_history: async () => {
+      if (!context.cache) {
+        return { ok: true, result: { changes: [], note: 'Plan-change history is unavailable.' } };
+      }
+      const listed = await listItineraryChangeHistory(context.tripId, context.userId, {
+        async readHistory(tripId, userId, limit) {
+          const { data, error } = await context.cache!
+            .from('itinerary_change_history')
+            .select(HISTORY_DIFF_SELECT)
+            .eq('trip_id', tripId)
+            .eq('user_id', userId)
+            .order('applied_at', { ascending: false })
+            .limit(limit);
+          if (error) return null;
+          return (Array.isArray(data) ? data : [])
+            .map(historyRecordFromAuthorityRow)
+            .filter((entry): entry is HistoryRecord => entry !== null);
+        },
+      });
+      if (!listed.ok) return { ok: false, detail: listed.detail };
+      return {
+        ok: true,
+        result: {
+          changes: listed.changes.slice(0, 8).map((change) => ({
+            appliedAt: change.appliedAt,
+            status: change.status,
+            title: change.title,
+            summary: change.summary,
+            diff: change.diff,
+          })),
+        },
+      };
+    },
+
+    get_budget_summary: async () => {
+      if (!context.cache) {
+        return { ok: true, result: summarizeBudgetFacts(null, context.itinerary) };
+      }
+      const { data, error } = await context.cache
+        .from('budgets')
+        .select('data')
+        .eq('id', context.tripId)
+        .eq('user_id', context.userId)
+        .maybeSingle();
+      if (error) return { ok: false, detail: 'The trip budget could not be read.' };
+      return { ok: true, result: summarizeBudgetFacts(asRecord(data)?.data ?? null, context.itinerary) };
+    },
+
+    get_expenses: async () => {
+      if (!context.cache) {
+        return { ok: true, result: { expenses: [], note: 'No expense records are available.' } };
+      }
+      const { data, error } = await context.cache
+        .from('budgets')
+        .select('data')
+        .eq('id', context.tripId)
+        .eq('user_id', context.userId)
+        .maybeSingle();
+      if (error) return { ok: false, detail: 'Expenses could not be read.' };
+      const expenses = asArray(asRecord(asRecord(data)?.data)?.expenses).slice(0, MAX_RESULT_ITEMS).map((entry) => {
+        const row = asRecord(entry);
+        return {
+          description: row?.description,
+          amountMYR: row?.amountMYR,
+          category: row?.category,
+          date: row?.date,
+        };
+      });
+      return {
+        ok: true,
+        result: {
+          expenses,
+          note: expenses.length === 0
+            ? 'No expenses have been recorded yet.'
+            : 'These are recorded expenses in MYR. Missing amounts are not estimated.',
+        },
+      };
+    },
+
+    get_trip_documents: async () => {
+      if (!context.cache) {
+        return { ok: true, result: summarizeDocumentFacts([]) };
+      }
+      const { data, error } = await context.cache
+        .from('trip_documents')
+        .select('id, title, description, file_name, mime_type, storage_path, created_at')
+        .eq('trip_id', context.tripId)
+        .eq('user_id', context.userId)
+        .order('created_at', { ascending: false })
+        .limit(40);
+      if (error) return { ok: false, detail: 'Trip documents could not be read.' };
+      return { ok: true, result: summarizeDocumentFacts(Array.isArray(data) ? data : []) };
+    },
+
+    get_document_facts: async (args) => {
+      if (!context.cache) {
+        return { ok: true, result: summarizeDocumentFacts([], typeof args.documentId === 'string' ? args.documentId : undefined) };
+      }
+      const { data, error } = await context.cache
+        .from('trip_documents')
+        .select('id, title, description, file_name, mime_type, storage_path, created_at')
+        .eq('trip_id', context.tripId)
+        .eq('user_id', context.userId)
+        .limit(40);
+      if (error) return { ok: false, detail: 'Trip documents could not be read.' };
+      const selectedId = typeof args.documentId === 'string'
+        ? args.documentId
+        : context.uiFocus?.selectedDocumentId;
+      return { ok: true, result: summarizeDocumentFacts(Array.isArray(data) ? data : [], selectedId) };
+    },
+
+    get_current_ui_context: async () => ({
+      ok: true,
+      result: context.uiFocus ?? {
+        surface: 'itinerary',
+        note: 'No UI focus was supplied. Use trip tools for facts.',
+      },
+    }),
 
     search_places: async (args) => {
       try {
@@ -776,6 +1057,78 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
         result: {
           unscheduled: asArray(discovery?.unscheduledCandidates).slice(0, MAX_RESULT_ITEMS),
           note: 'These are the places the deterministic planner declined to schedule, with its reasons.',
+        },
+      };
+    },
+
+    check_schedule_fit: async (args) => {
+      const dayNumber = typeof args.day === 'number'
+        ? args.day
+        : defaultDayNumber(context.itinerary, context.uiFocus?.dayNumber);
+      const day = dayRecord(context.itinerary, dayNumber);
+      if (!day) return { ok: false, detail: 'That day is not in this trip.' };
+      const activities = asArray(day.activities).map(asRecord).filter(Boolean) as Record<string, unknown>[];
+      const afterId = typeof args.afterActivityId === 'string'
+        ? args.afterActivityId
+        : context.uiFocus?.selectedActivity?.id;
+      const after = afterId
+        ? activities.find((activity) => activity.id === afterId)
+        : context.uiFocus?.selectedActivity
+          ? activities.find((activity) => activity.id === context.uiFocus?.selectedActivity?.id)
+          : undefined;
+      const afterStart = minutesFromTime(after?.time);
+      const afterDuration = typeof after?.durationMinutes === 'number' ? after.durationMinutes : 0;
+      const afterEnd = afterStart !== undefined ? afterStart + afterDuration : undefined;
+      const flights = flightRows(context.itinerary).filter((row) => row.day === dayNumber);
+      const blocked = flights.flatMap((flight) => {
+        const start = minutesFromTime(flight.time);
+        const duration = typeof flight.durationMinutes === 'number' ? flight.durationMinutes : undefined;
+        if (start === undefined || duration === undefined) return [];
+        const landing = start + duration;
+        const windows = [
+          { name: String(flight.name ?? 'Flight'), start, end: landing },
+          {
+            name: `${String(flight.name ?? 'Flight')} arrival buffer`,
+            start: landing,
+            end: landing + ARRIVAL_SETTLING_MINUTES,
+          },
+        ];
+        if (after?.id !== flight.id) {
+          windows.push({
+            name: `${String(flight.name ?? 'Flight')} departure lead`,
+            start: Math.max(0, start - DEPARTURE_LEAD_MINUTES),
+            end: start,
+          });
+        }
+        return windows;
+      });
+      const dayEnd = 21 * 60 + 30;
+      const occupying = afterEnd !== undefined
+        ? blocked.find((block) => afterEnd >= block.start && afterEnd < block.end)
+        : undefined;
+      const freeFrom = occupying ? occupying.end : afterEnd;
+      const nextBlock = [...blocked]
+        .filter((block) => freeFrom !== undefined && block.start >= freeFrom)
+        .sort((left, right) => left.start - right.start)[0];
+      const windowEnd = nextBlock?.start ?? dayEnd;
+      const remaining = freeFrom !== undefined ? Math.max(0, windowEnd - freeFrom) : undefined;
+      const place = typeof args.placeId === 'string' ? index.get(args.placeId) || index.get(args.placeId.toLowerCase()) : undefined;
+      const visitMinutes = typeof args.visitMinutes === 'number'
+        ? args.visitMinutes
+        : place?.durationMinutes ?? 90;
+      const fitsWithoutTravel = remaining !== undefined ? visitMinutes <= remaining : undefined;
+      return {
+        ok: true,
+        result: {
+          day: day.day,
+          after: after ? { id: after.id, name: after.name, endsAt: afterEnd !== undefined ? minutesToClock(afterEnd) : after.time } : undefined,
+          visitMinutes,
+          remainingMinutes: remaining,
+          windowEndsAt: remaining !== undefined ? minutesToClock(windowEnd) : undefined,
+          blockedBy: blocked.map((block) => ({ name: block.name, start: minutesToClock(block.start), end: minutesToClock(block.end) })),
+          fitsWithoutTravel,
+          place: place ? { id: place.id, name: place.name } : undefined,
+          note: `Travel time is not included. Call get_route for a provider duration before claiming a fit that depends on walking or transit. Arrival sightseeing starts ${ARRIVAL_SETTLING_MINUTES} minutes after landing. Departure lead is ${DEPARTURE_LEAD_MINUTES} minutes before takeoff.`,
         },
       };
     },
