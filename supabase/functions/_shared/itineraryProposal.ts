@@ -758,6 +758,28 @@ export function plannedDayNumbers(itineraryValue: unknown): number[] {
   });
 }
 
+const isLockedPlace = (activity: Record<string, unknown>): boolean =>
+  activity.locked === true
+  || asArray(activity.lockedFields).some((entry) => entry === 'all' || entry === 'schedule');
+
+/**
+ * Discovery Skip / Visited are stored decisions, not planning candidates.
+ * Locked places stay admitted: a fixed schedule is not a regeneration candidate.
+ */
+const isExcludedPlanningDecision = (decision: string | undefined): decision is 'skip' | 'visited' =>
+  decision === 'skip' || decision === 'visited';
+
+const resolvedDecision = (
+  activity: Record<string, unknown>,
+  decisions: Record<string, unknown>,
+  safeLegacyKeys: Set<string>,
+): string | undefined => {
+  const decisionKeys = decisionKeysOf(activity, safeLegacyKeys);
+  return decisionKeys
+    .map((key) => text(decisions[key], 20))
+    .find((entry): entry is string => Boolean(entry));
+};
+
 const activityPlace = (
   activity: Record<string, unknown>,
   options: {
@@ -773,14 +795,12 @@ const activityPlace = (
   const id = placeIdOf(activity, options.day)!;
   const kind = text(activity.kind, 40);
   const type = text(activity.type, 60);
-  const fixed = activity.locked === true
-    || asArray(activity.lockedFields).some((entry) => entry === 'all' || entry === 'schedule');
+  const fixed = isLockedPlace(activity);
   // One canonical identity set for both the traveller's discovery decision and
   // the trip's Must do constraint, so the two can never disagree about a place.
   const decisionKeys = decisionKeysOf(activity, options.safeLegacyKeys);
-  const decision = decisionKeys
-    .map((key) => text(options.decisions[key], 20))
-    .find((entry): entry is string => Boolean(entry));
+  const decision = resolvedDecision(activity, options.decisions, options.safeLegacyKeys);
+  if (!fixed && isExcludedPlanningDecision(decision)) return undefined;
   const requiredByConstraint = decisionKeys.some((key) => options.mustDo.has(key));
   const priority: ProposalPriority = fixed
     ? 'locked'
@@ -844,6 +864,7 @@ export async function buildPlanningMaterial(
   const preferences = { hiddenGems: typeof profile?.hiddenGems === 'boolean' ? profile.hiddenGems : undefined };
   const candidatePlaces: PlanningPlace[] = [];
   const seen = new Set<string>();
+  const excludedPlanningPlaces = new Map<string, 'skip' | 'visited'>();
   // Whether a bare provider ID is safe to read a decision from depends on every
   // other place in the trip, so it has to be settled before any one is judged.
   const safeLegacyKeys = unambiguousLegacyKeys([
@@ -853,6 +874,15 @@ export async function buildPlanningMaterial(
     const activity = asRecord(raw);
     return activity ? [activity] : [];
   }));
+
+  const recordPlanningExclusion = (activity: Record<string, unknown>, day?: number): boolean => {
+    if (!isPlannerPlace(activity, day) || isLockedPlace(activity)) return false;
+    const decision = resolvedDecision(activity, decisions, safeLegacyKeys);
+    if (!isExcludedPlanningDecision(decision)) return false;
+    const id = placeIdOf(activity, day)!;
+    if (!excludedPlanningPlaces.has(id)) excludedPlanningPlaces.set(id, decision);
+    return true;
+  };
 
   const fixedByDay: RawFixedTransport[][] = [];
   const draftDays = rawDays.map((raw, index): PlanningDayMaterial => {
@@ -866,6 +896,7 @@ export async function buildPlanningMaterial(
       if (!activity) continue;
       const fixed = extractFixedTransport(activity, dayNumber);
       if (fixed) events.push(fixed);
+      if (recordPlanningExclusion(activity, dayNumber)) continue;
       const place = activityPlace(activity, { day: dayNumber, city, decisions, mustDo, safeLegacyKeys });
       if (!place || seen.has(place.id)) continue;
       seen.add(place.id);
@@ -909,6 +940,7 @@ export async function buildPlanningMaterial(
   for (const raw of asArray(itinerary.unassignedActivities)) {
     const activity = asRecord(raw);
     if (!activity) continue;
+    if (recordPlanningExclusion(activity)) continue;
     const place = activityPlace(activity, {
       city: text(activity.location, 120) ?? days[0]?.city,
       decisions,
@@ -968,6 +1000,9 @@ export async function buildPlanningMaterial(
     days,
     places,
     excludedRequiredPlaces,
+    excludedPlanningPlaces: [...excludedPlanningPlaces]
+      .map(([id, decision]) => ({ id, decision }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
   })}`;
 
   return {

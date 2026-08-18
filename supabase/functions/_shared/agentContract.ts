@@ -322,7 +322,7 @@ export const AGENT_TOOLS: Record<AgentToolName, AgentToolSpec> = {
   },
   get_candidate_decisions: {
     name: 'get_candidate_decisions',
-    description: 'What the traveller marked must-do, interested or skip during discovery.',
+    description: 'What the traveller marked Must do, Interested, Skip or Visited during discovery.',
     cost: 'general',
     parseArgs: noArgs,
   },

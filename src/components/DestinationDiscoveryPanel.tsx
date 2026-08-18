@@ -98,6 +98,11 @@ const DECISION_LABEL: Record<CandidateDecision, string> = {
   visited: 'Visited',
 };
 
+const DECISION_HINT: Partial<Record<DiscoveryCandidateDecision, string>> = {
+  skip: 'Keep this out of my plan.',
+  visited: "I've already been here.",
+};
+
 const formatDuration = (minutes: number) => minutes >= 120 && minutes % 60 === 0
   ? `${minutes / 60} hr`
   : `${minutes} min`;
@@ -607,6 +612,7 @@ function CandidateCard({
                 key={option.id}
                 className="destination-decision-option"
                 data-active={decision === option.id ? 'true' : 'false'}
+                title={DECISION_HINT[option.id]}
               >
                 <input
                   className="destination-decision-input"
@@ -779,7 +785,7 @@ export function DeckCard({
         {flipped && (
           <>
             <div className="destination-deck-actions">
-              <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
+              <button type="button" className="destination-quick-action is-skip" title={DECISION_HINT.skip} onClick={() => commit('skip')}>Skip</button>
               <button type="button" className="destination-quick-action is-detail" onClick={() => commit('interested')}>Interested</button>
               <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
             </div>
@@ -790,7 +796,7 @@ export function DeckCard({
         {!flipped && (
           <>
             <div className="destination-deck-actions">
-              <button type="button" className="destination-quick-action is-skip" onClick={() => commit('skip')}>Skip</button>
+              <button type="button" className="destination-quick-action is-skip" title={DECISION_HINT.skip} onClick={() => commit('skip')}>Skip</button>
               <button type="button" className="destination-quick-action is-detail" onClick={() => flip(true)}>Details</button>
               <button type="button" className="destination-quick-action is-must" onClick={() => commit('must-do')}>Must do</button>
             </div>
@@ -2473,7 +2479,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       <div className="destination-review-footer">
         <div className="destination-review-footer-copy">
           <strong>{selectedCount} selected</strong>
-          <span>{reviewedCount} reviewed · skip stays out of the plan</span>
+          <span>{reviewedCount} reviewed · skip and visited stay out of the plan</span>
         </div>
         <div className="destination-review-footer-actions">
           {renderCloseReview('labeled')}

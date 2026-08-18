@@ -354,4 +354,50 @@ describe('applying a proposal to an itinerary', () => {
       .toContainEqual({ name: 'Glico Man Sign', from: 1, to: 2 });
     expect(diff.removed).toEqual([]);
   });
+
+  it('moves a skipped planner place to the inbox instead of deleting it', async () => {
+    const source = trip({
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'live',
+        decisions: { 'osm-n1': 'skip', 'osm-n2': 'interested', 'osm-n3': 'interested' },
+      },
+    });
+    const before = JSON.stringify(source);
+    const proposal = await propose(source);
+    const applied = applyProposalToItinerary(source, proposal);
+    const scheduled = (applied.itinerary.days as Array<{ activities: Array<Record<string, unknown>> }>)
+      .flatMap((day) => day.activities);
+    const inbox = applied.itinerary.unassignedActivities as Array<Record<string, unknown>>;
+    const discovery = applied.itinerary.discoveryState as { decisions: Record<string, string> };
+
+    expect(JSON.stringify(source)).toBe(before);
+    expect(proposal.days.flatMap((day) => day.items).some((item) => item.placeId === 'discovered-osm-n1')).toBe(false);
+    expect(scheduled.some((activity) => activity.id === 'discovered-osm-n1')).toBe(false);
+    expect(inbox.map((activity) => activity.id)).toContain('discovered-osm-n1');
+    expect(inbox.find((activity) => activity.id === 'discovered-osm-n1')).toMatchObject({ name: 'Glico Man Sign' });
+    expect(discovery.decisions['osm-n1']).toBe('skip');
+    expect(scheduled.find((activity) => activity.id === 'flight-out')).toEqual(flight);
+  });
+
+  it('moves a visited planner place to the inbox and keeps a flight byte-for-byte', async () => {
+    const source = trip({
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'live',
+        decisions: { 'osm-n1': 'visited', 'osm-n2': 'interested', 'osm-n3': 'interested' },
+      },
+    });
+    const proposal = await propose(source);
+    const applied = applyProposalToItinerary(source, proposal);
+    const scheduled = (applied.itinerary.days as Array<{ activities: Array<Record<string, unknown>> }>)
+      .flatMap((day) => day.activities);
+    const inbox = applied.itinerary.unassignedActivities as Array<Record<string, unknown>>;
+    const discovery = applied.itinerary.discoveryState as { decisions: Record<string, string> };
+
+    expect(proposal.days.flatMap((day) => day.items).some((item) => item.placeId === 'discovered-osm-n1')).toBe(false);
+    expect(inbox.map((activity) => activity.id)).toContain('discovered-osm-n1');
+    expect(discovery.decisions['osm-n1']).toBe('visited');
+    expect(scheduled.find((activity) => activity.id === 'flight-out')).toEqual(flight);
+  });
 });

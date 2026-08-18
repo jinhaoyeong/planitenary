@@ -625,4 +625,36 @@ describe('Flight-Aware Planning V1', () => {
     });
     expect(lookup.kind).toBe('miss');
   });
+
+  it('excludes a skipped sight from composition while keeping the flight constraint', async () => {
+    const source = itinerary({
+      discoveryState: {
+        city: 'Osaka',
+        mode: 'live',
+        decisions: { 'osm-n1': 'skip' },
+      },
+      days: [{
+        day: 1,
+        date: '2026-08-17',
+        city: 'Osaka',
+        activities: [castle, flight({ time: '10:00', durationMinutes: 120 })],
+      }],
+    });
+    const { material, proposal } = await propose(source, {
+      composition: { days: [{ day: 1, placeIds: ['discovered-osm-n1'] }] },
+    });
+    const applied = applyProposalToItinerary(source, proposal);
+    const dayOne = (applied.itinerary.days as Array<{ activities: Array<Record<string, unknown>> }>)[0];
+
+    expect(material.places.map((place) => place.id)).not.toContain('discovered-osm-n1');
+    expect(material.days[0]?.fixedEvents).toEqual([expect.objectContaining({
+      id: 'flight-1', role: 'arrival', transportKind: 'flight', startTime: '10:00', endTime: '12:00',
+    })]);
+    expect(material.days[0]?.startTime).toBe('14:00');
+    expect(placeItems(proposal, 1)).toEqual([]);
+    expect(dayOne.activities.find((activity) => activity.id === 'flight-1')).toEqual(flight({ time: '10:00', durationMinutes: 120 }));
+    expect(dayOne.activities.some((activity) => activity.id === 'discovered-osm-n1')).toBe(false);
+    expect((applied.itinerary.unassignedActivities as Array<Record<string, unknown>>).map((activity) => activity.id))
+      .toContain('discovered-osm-n1');
+  });
 });

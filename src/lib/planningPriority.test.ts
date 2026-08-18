@@ -254,13 +254,16 @@ describe('discovery priorities reach the planner', () => {
     });
   });
 
-  it('never promotes a skipped place, and never drops it silently either', async () => {
+  it('excludes a skipped place from planning candidates without deleting it', async () => {
     const trip = savedTrip([glico, kuromon], { [glico.id]: 'skip', [kuromon.id]: 'must-do' });
+    const before = JSON.stringify(trip);
+    const material = await buildPlanningMaterial('trip-1', trip);
 
-    expect(await priorities(trip)).toEqual({
-      'Kuromon Ichiba Market': 'must-do',
-      'Glico Man Sign': 'optional',
-    });
+    expect(material.places.map((place) => place.name)).toEqual(['Kuromon Ichiba Market']);
+    expect(material.places.map((place) => place.priority)).toEqual(['must-do']);
+    expect(JSON.stringify(trip)).toBe(before);
+    expect(trip.discoveryState?.decisions[glico.id]).toBe('skip');
+    expect(trip.days[0].activities.some((activity) => activity.name === 'Glico Man Sign')).toBe(true);
   });
 
   it('keeps a Must do ahead of optional places when the material is truncated', async () => {
