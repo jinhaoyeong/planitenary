@@ -33,6 +33,8 @@ import { useCurrency } from './contexts/CurrencyContext';
 import { hasAuthCallbackUrl, useAuth } from './contexts/AuthContext';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { loadFromStorage, saveToStorage, writeRawToStorage, getRestorePreview, restoreSelectedTripData, createRestoreSnapshot, restoreLastSnapshot } from './lib/storageResilience';
+import { saveTripBudget } from './lib/tripBudget';
+import { sanitizeBudgetDocument } from '../supabase/functions/_shared/budgetDocument';
 import type { RestoreDatasetId, RestoreDatasetPreview } from './lib/storageResilience';
 import { getAllPhotosForItinerary, restorePhotosForItinerary } from './lib/photoStorage';
 import { Marquee } from './components/ui/Marquee';
@@ -788,8 +790,9 @@ function App() {
     }
     if (datasetIds.includes('budget')) {
       const budgetData = loadFromStorage<Record<string, unknown>>(`budget-${activeItineraryId}`);
-      if (budgetData) {
-        await supabase.from('budgets').upsert({ id: activeItineraryId, user_id: user.id, data: budgetData, updated_at: new Date().toISOString() });
+      const sanitized = sanitizeBudgetDocument(budgetData);
+      if (sanitized) {
+        await saveTripBudget({ tripId: activeItineraryId, budget: sanitized, mode: 'server' });
       }
     }
     if (datasetIds.includes('checklist')) {

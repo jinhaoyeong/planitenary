@@ -446,7 +446,10 @@ export function collectAskGrounding(input: {
     }
     const budgetFacts = summarizeBudgetFacts(input.extras?.budgetStored ?? null, itinerary);
     if (!budgetFacts.present) {
-      return fail('budget', 'I can’t verify a trip budget from the stored records right now.');
+      if (input.extras?.budgetStored != null) {
+        return fail('budget', 'I can’t verify a trip budget from the stored records right now.');
+      }
+      return fail('budget', 'You haven’t set a trip budget yet.');
     }
   }
 

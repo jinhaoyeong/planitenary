@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Plane, Hotel, Train, Utensils, Ticket, CreditCard, DollarSign, Calendar, Edit2, Save, Plus, X, Wallet, Receipt } from 'lucide-react';
 import type { Itinerary } from '../data';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { loadFromStorage, saveToStorage } from '../lib/storageResilience';
 import { clsx } from 'clsx';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,71 +11,27 @@ import { convertCurrency } from '../lib/currency';
 import { currencyMeta } from '../lib/currencyCatalog';
 import { sanitizeTripProfile } from '../lib/tripProfile';
 import { plannedBudgetDays } from '../lib/tripDuration';
+import {
+  categoryRange,
+  parseBudgetItemCost,
+  sanitizeBudgetDocument,
+  type BudgetCategoryKey,
+  type BudgetItem,
+  type CustomBudget,
+  type ExpenseRecord,
+} from '../../supabase/functions/_shared/budgetDocument';
+import {
+  hydrateTripBudget,
+  saveTripBudget,
+  writeBudgetCache,
+} from '../lib/tripBudget';
 
-interface BudgetItem {
-  id: string;
-  label: string;
-  cost: string;
-}
-
-interface BudgetCategory {
-  min: number;
-  max: number;
-  items: BudgetItem[];
-}
+export type { CustomBudget, ExpenseRecord };
 
 interface BudgetRange {
   min: number;
   max: number;
 }
-
-type BudgetCategoryKey = 'flights' | 'accommodation' | 'transportation' | 'food' | 'activities' | 'misc';
-
-export interface ExpenseRecord {
-  id: string;
-  description: string;
-  amountMYR: number;
-  amountCNY: number;
-  paidBy: 'You' | 'Travel partner';
-  category: BudgetCategoryKey | 'general';
-  date: string;
-}
-
-export interface CustomBudget {
-  flights: BudgetCategory;
-  accommodation: BudgetCategory;
-  transportation: BudgetCategory;
-  food: BudgetCategory;
-  activities: BudgetCategory;
-  misc: BudgetCategory;
-  expenses: ExpenseRecord[];
-}
-
-interface BudgetStorageMeta {
-  updatedAt: string;
-}
-
-const getBudgetStorageKey = (itineraryId: string) => `budget-${itineraryId}`;
-
-const getBudgetMetaStorageKey = (itineraryId: string) => `budget-meta-${itineraryId}`;
-
-const getTimestampValue = (value?: string) => {
-  const parsed = value ? Date.parse(value) : Number.NaN;
-  return Number.isNaN(parsed) ? 0 : parsed;
-};
-
-const persistBudgetToStorage = (itineraryId: string, budget: CustomBudget, updatedAt: string) => {
-  saveToStorage(getBudgetStorageKey(itineraryId), budget);
-  saveToStorage(getBudgetMetaStorageKey(itineraryId), { updatedAt });
-};
-
-const normalizeBudget = (budget: CustomBudget | null | undefined): CustomBudget | null => {
-  if (!budget) return null;
-  return {
-    ...budget,
-    expenses: budget.expenses || []
-  };
-};
 
 const createDefaultBudget = (
   transportMYR: number,
@@ -321,8 +276,12 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const [showAddItemModal, setShowAddItemModal] = React.useState(false);
   const [addItemCategory, setAddItemCategory] = React.useState<BudgetCategoryKey | null>(null);
   const [draftItem, setDraftItem] = React.useState({ label: '', cost: '' });
-  const budgetSyncReadyRef = React.useRef(false);
-  const hasLocalBudgetRef = React.useRef(false);
+  const [budgetNotice, setBudgetNotice] = React.useState<string | null>(null);
+  const [budgetSaveError, setBudgetSaveError] = React.useState<string | null>(null);
+  const [budgetLoading, setBudgetLoading] = React.useState(true);
+  const saveReadyRef = React.useRef(false);
+  const lastPersistedRef = React.useRef<string | null>(null);
+  const serverMode = Boolean(isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser);
 
   const costs = React.useMemo(() => {
     let transportCost = 0;
@@ -371,127 +330,107 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const activitiesMYR = Math.ceil(costs.activities.total);
 
   useEffect(() => {
-    budgetSyncReadyRef.current = false;
-    hasLocalBudgetRef.current = false;
-    const storageKey = getBudgetStorageKey(itinerary.id);
-    const saved = normalizeBudget(loadFromStorage<CustomBudget>(storageKey));
-    const savedMeta = loadFromStorage<BudgetStorageMeta>(getBudgetMetaStorageKey(itinerary.id));
-    const localUpdatedAt = savedMeta?.updatedAt;
+    let cancelled = false;
+    saveReadyRef.current = false;
+    lastPersistedRef.current = null;
+    setBudgetLoading(true);
+    setBudgetSaveError(null);
+    setBudgetNotice(null);
     const defaultBudget = createDefaultBudget(transportMYR, foodMYR, activitiesMYR, costs);
-    const initialBudget = saved || defaultBudget;
-    
-    // Set initial budget immediately
-    setCustomBudget(initialBudget);
+    setCustomBudget(defaultBudget);
 
-    const syncBudgetToSupabase = async (budget: CustomBudget, updatedAt: string) => {
-      const { error } = await supabase
-        .from('budgets')
-        .upsert({ id: itinerary.id, user_id: user?.id, data: budget, updated_at: updatedAt });
-      if (error) console.error('Error syncing budget:', error);
+    const applyHydrated = (budget: CustomBudget | null, notice: string | null) => {
+      if (cancelled) return;
+      const next = budget ?? defaultBudget;
+      lastPersistedRef.current = JSON.stringify(next);
+      setCustomBudget(next);
+      setBudgetNotice(notice);
+      saveReadyRef.current = true;
+      setBudgetLoading(false);
     };
 
-    if (saved) {
-      hasLocalBudgetRef.current = true;
-    }
+    const run = async () => {
+      const result = await hydrateTripBudget({
+        tripId: itinerary.id,
+        mode: serverMode ? 'server' : 'local',
+      });
+      if (cancelled) return;
+      if (!result.ok) {
+        applyHydrated(null, result.message);
+        return;
+      }
+      if (result.kind === 'none') {
+        applyHydrated(null, serverMode ? 'No trip budget saved yet. Edit to save it to your trip.' : null);
+        return;
+      }
+      if (result.kind === 'cache-fallback') {
+        applyHydrated(result.budget, 'Showing a saved copy. We couldn’t reach your trip budget just now.');
+        return;
+      }
+      applyHydrated(
+        result.budget,
+        result.imported ? 'Budget saved to your trip.' : null,
+      );
+    };
+    void run();
 
-    if (isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser) {
-      const fetchBudget = async () => {
-        const { data, error } = await supabase
-          .from('budgets')
-          .select('data, updated_at')
-          .eq('user_id', user.id)
-          .eq('id', itinerary.id)
-          .single();
-
-        if (data && data.data) {
-          const remoteBudget = normalizeBudget(data.data as CustomBudget) || defaultBudget;
-          const remoteUpdatedAt = data.updated_at || new Date().toISOString();
-          const shouldPreferLocal = Boolean(saved) && (!localUpdatedAt || getTimestampValue(localUpdatedAt) >= getTimestampValue(remoteUpdatedAt));
-
-          if (shouldPreferLocal && saved) {
-            const localSnapshotUpdatedAt = localUpdatedAt || new Date().toISOString();
-            persistBudgetToStorage(itinerary.id, saved, localSnapshotUpdatedAt);
-            hasLocalBudgetRef.current = true;
-            budgetSyncReadyRef.current = true;
-            await syncBudgetToSupabase(saved, localSnapshotUpdatedAt);
-            return;
-          }
-
-          setCustomBudget(remoteBudget);
-          persistBudgetToStorage(itinerary.id, remoteBudget, remoteUpdatedAt);
-          hasLocalBudgetRef.current = true;
-          budgetSyncReadyRef.current = true;
-        } else if (error && error.code === 'PGRST116') {
-          const fallbackBudget = saved || defaultBudget;
-          const fallbackUpdatedAt = localUpdatedAt || new Date().toISOString();
-          persistBudgetToStorage(itinerary.id, fallbackBudget, fallbackUpdatedAt);
-          hasLocalBudgetRef.current = true;
-          budgetSyncReadyRef.current = true;
-          await syncBudgetToSupabase(fallbackBudget, fallbackUpdatedAt);
-        } else if (error && error.code !== 'PGRST116') {
-          console.error('Error fetching budget:', error);
-          budgetSyncReadyRef.current = true; // allow local saving to proceed
-        }
-      };
-      fetchBudget();
-
-      const subscription = supabase
-        .channel('budgets')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'budgets', filter: `id=eq.${itinerary.id}` }, (payload) => {
-          const nextPayload = payload.new as { data?: CustomBudget } | null;
-          if (nextPayload?.data) {
-            const newData = nextPayload.data;
-            const nextUpdatedAt = payload.commit_timestamp || new Date().toISOString();
-            setCustomBudget(prev => {
-              const isDifferent = JSON.stringify(newData) !== JSON.stringify(prev);
-              if (!isDifferent) return prev;
-              persistBudgetToStorage(itinerary.id, newData, nextUpdatedAt);
-              return newData;
-            });
-          }
-        })
-        .subscribe();
-
+    if (!serverMode) {
       return () => {
-        subscription.unsubscribe();
+        cancelled = true;
       };
     }
-    if (!saved) {
-      persistBudgetToStorage(itinerary.id, defaultBudget, new Date().toISOString());
-      hasLocalBudgetRef.current = true;
-    }
-    // Delay marking ready to prevent the defaultBudget re-triggering the save hook below
-    // before the async loads complete.
-    setTimeout(() => {
-      budgetSyncReadyRef.current = true;
-    }, 100);
-  }, [itinerary.id, transportMYR, foodMYR, activitiesMYR, costs, user?.id, isDemoUser, isLocalTestUser]); // Explicitly include dependencies
+
+    const subscription = supabase
+      .channel(`budgets-${itinerary.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budgets', filter: `id=eq.${itinerary.id}` }, (payload) => {
+        const nextPayload = payload.new as { data?: unknown; updated_at?: string } | null;
+        const incoming = sanitizeBudgetDocument(nextPayload?.data);
+        if (!incoming) return;
+        const nextUpdatedAt = nextPayload?.updated_at || new Date().toISOString();
+        writeBudgetCache(itinerary.id, incoming, { updatedAt: nextUpdatedAt, source: 'server' });
+        lastPersistedRef.current = JSON.stringify(incoming);
+        setCustomBudget((prev) => (JSON.stringify(incoming) === JSON.stringify(prev) ? prev : incoming));
+        setBudgetSaveError(null);
+      })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+    // Draft placeholders read current itinerary cost hints; do not refetch the
+    // server wallet when those derived numbers change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itinerary.id, serverMode]);
 
   useEffect(() => {
-    if (!budgetSyncReadyRef.current) return;
-    const updatedAt = new Date().toISOString();
-    
-    // Prevent overriding real data with defaults just because the initial sync isn't ready
-    if (!hasLocalBudgetRef.current && 
-        JSON.stringify(customBudget.food.items) === '[]' && 
-        JSON.stringify(customBudget.transportation.items) === '[]' && 
-        JSON.stringify(customBudget.activities.items) === '[]') return;
-        
-    persistBudgetToStorage(itinerary.id, customBudget, updatedAt);
-    hasLocalBudgetRef.current = true;
-    
-    if (isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser) {
-      const syncToSupabase = async () => {
-        const { error } = await supabase
-          .from('budgets')
-          .upsert({ id: itinerary.id, user_id: user.id, data: customBudget, updated_at: updatedAt });
-        
-        if (error) console.error('Error syncing budget:', error);
-      };
-      const timeout = setTimeout(syncToSupabase, 1000);
-      return () => clearTimeout(timeout);
-    }
-  }, [customBudget, itinerary.id, user?.id, isDemoUser, isLocalTestUser]);
+    if (!saveReadyRef.current) return;
+    const budget = sanitizeBudgetDocument(customBudget);
+    if (!budget) return;
+    const serialized = JSON.stringify(budget);
+    if (serialized === lastPersistedRef.current) return;
+
+    const timeout = window.setTimeout(async () => {
+      const saved = await saveTripBudget({
+        tripId: itinerary.id,
+        budget,
+        mode: serverMode ? 'server' : 'local',
+      });
+      if (!saved.ok) {
+        setBudgetSaveError(saved.message);
+        return;
+      }
+      lastPersistedRef.current = JSON.stringify(saved.budget);
+      setBudgetSaveError(null);
+      if (saved.conflict) {
+        setBudgetNotice('This trip already had a saved budget, so that version was kept.');
+      }
+      if (JSON.stringify(saved.budget) !== serialized) {
+        setCustomBudget(saved.budget);
+      }
+    }, 1000);
+    return () => window.clearTimeout(timeout);
+  }, [customBudget, itinerary.id, serverMode]);
 
   const updateRange = (category: BudgetCategoryKey, type: 'min' | 'max', value: string) => {
     const numValue = parseInt(value) || 0;
@@ -604,20 +543,6 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
     return customBudget[category]?.items || [];
   };
 
-  const parseBudgetItemCost = (value: string) => {
-    if (!value) return 0;
-    const normalized = value.replace(/,/g, '').trim();
-    if (/^\d+(\.\d+)?$/.test(normalized)) return Number(normalized);
-    if (!/rm/i.test(normalized)) return 0;
-    const match = normalized.match(/(\d+(\.\d+)?)/);
-    if (!match) return 0;
-    return Number(match[1]) || 0;
-  };
-
-  const getItemsTotal = (items: BudgetItem[]) => {
-    return items.reduce((sum, item) => sum + parseBudgetItemCost(item.cost), 0);
-  };
-
   // Helper to convert budget item cost to selected currency for display
   const getDisplayCost = (cost: string): string => {
     const costValue = parseBudgetItemCost(cost);
@@ -639,12 +564,8 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
 
   const getCategoryRange = (category: BudgetCategoryKey, fallbackMin: number, fallbackMax: number): BudgetRange => {
     const categoryData = customBudget[category];
-    const baseMin = categoryData?.min ?? fallbackMin;
-    const baseMax = categoryData?.max ?? fallbackMax;
-    const itemsTotal = getItemsTotal(categoryData?.items || []);
-    const adjustedMax = Math.max(baseMax, itemsTotal);
-    const adjustedMin = Math.min(baseMin, adjustedMax);
-    return { min: adjustedMin, max: adjustedMax };
+    if (!categoryData) return { min: fallbackMin, max: fallbackMax };
+    return categoryRange(categoryData);
   };
 
   const flightsRange = getCategoryRange('flights', customBudget.flights.min, customBudget.flights.max);
@@ -744,11 +665,13 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
             {activeView === 'budget' && (
               <button
                 onClick={() => setIsEditing(!isEditing)}
+                disabled={budgetLoading}
                 className={clsx(
                   "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-xs font-bold transition-all border",
                   isEditing
                     ? "bg-rose-500 text-white shadow-lg shadow-rose-500/30 border-rose-600"
-                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-200 dark:hover:border-emerald-500/50 hover:text-emerald-600 dark:hover:text-emerald-400"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-200 dark:hover:border-emerald-500/50 hover:text-emerald-600 dark:hover:text-emerald-400",
+                  budgetLoading && "opacity-60 pointer-events-none"
                 )}
               >
                 {isEditing ? <Save className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
@@ -756,6 +679,11 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
               </button>
             )}
           </div>
+          {(budgetLoading || budgetNotice || budgetSaveError) && (
+            <div className="mt-4 text-sm" style={{ color: budgetSaveError ? 'var(--accent)' : 'var(--ink-muted)' }}>
+              {budgetLoading ? 'Loading budget…' : budgetSaveError || budgetNotice}
+            </div>
+          )}
         </div>
       </div>
 

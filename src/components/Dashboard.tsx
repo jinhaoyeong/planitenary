@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { Itinerary } from '../data';
 import { itineraries } from '../data';
 import { loadFromStorage, saveToStorage, listLocalTrips, upsertLocalTrip, removeLocalTrip, writeRawToStorage } from '../lib/storageResilience';
+import { invalidateLocalBudget } from '../lib/tripBudget';
 
 interface TripItem {
   id: string;
@@ -125,7 +126,7 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
     try {
       if (!isDemoUser && !isLocalTestUser && isSupabaseConfigured()) {
         await supabase.from('itineraries').delete().eq('id', tripId).eq('user_id', user.id);
-        await supabase.from('budgets').delete().eq('id', tripId);
+        await supabase.from('budgets').delete().eq('id', tripId).eq('user_id', user.id);
         await supabase.from('draft_items').delete().eq('itinerary_id', tripId);
         await supabase.from('itineraries').delete().eq('id', `drafts-${tripId}`);
       }
@@ -134,7 +135,7 @@ export const Dashboard = ({ onSelectTrip }: { onSelectTrip: (id: string) => void
     }
 
     writeRawToStorage(`itinerary-${tripId}`, null, { preserveCurrent: false });
-    writeRawToStorage(`budget-${tripId}`, null, { preserveCurrent: false });
+    invalidateLocalBudget(tripId, undefined, { markCleared: true });
     writeRawToStorage(`drafts-${tripId}`, null, { preserveCurrent: false });
     writeRawToStorage(`trip-settings-${tripId}`, null, { preserveCurrent: false });
     writeRawToStorage(`photos-${tripId}`, null, { preserveCurrent: false });

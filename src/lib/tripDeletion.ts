@@ -12,15 +12,18 @@ export const TRIP_REMOTE_DELETE_TABLES = [
 export const tripStorageKeys = (userId: string, tripId: string) => [
   `itinerary-${userId}-${tripId}`,
   `budget-${tripId}`,
+  `budget-meta-${tripId}`,
   `checklist-data-${tripId}`,
   `drafts-${tripId}`,
   `trip-settings-${tripId}`,
   `photos-${tripId}`,
 ];
 
-export const tripStorageCleanupKeys = (userId: string, tripId: string) =>
-  tripStorageKeys(userId, tripId).flatMap((key) => [
+export const tripStorageCleanupKeys = (userId: string, tripId: string) => [
+  ...tripStorageKeys(userId, tripId).flatMap((key) => [
     key,
     `${key}-backup`,
     `${key}-history`,
-  ]);
+  ]),
+  `budget-${tripId}-cleared`,
+];

@@ -295,7 +295,32 @@ describe('fail-closed extras and write safety', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.missing).toContain('budget');
+    expect(result.detail).toMatch(/haven’t set a trip budget yet/i);
     expect(summarizeBudgetFacts(null).present).toBe(false);
+  });
+
+  it('P. budget questions ground against the server wallet document', () => {
+    const wallet = {
+      flights: { min: 0, max: 1000, items: [] },
+      accommodation: { min: 0, max: 0, items: [] },
+      transportation: { min: 0, max: 0, items: [] },
+      food: { min: 0, max: 0, items: [] },
+      activities: { min: 0, max: 0, items: [] },
+      misc: { min: 0, max: 0, items: [] },
+      expenses: [{ id: 'e1', description: 'Lunch', amountMYR: 42, amountCNY: 0, paidBy: 'You', category: 'food', date: '2026-08-20' }],
+    };
+    const { result } = ground('How much budget is remaining?', productionItinerary(), {
+      extras: { budgetStored: wallet },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.packet) return;
+    expect(result.packet.budget).toMatchObject({
+      present: true,
+      currency: 'MYR',
+      spent: 42,
+      plannedCeiling: 1000,
+      remainingKnownBudget: 958,
+    });
   });
 
   it('O. write-shaped questions still have no mutating tools', () => {

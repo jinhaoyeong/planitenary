@@ -171,7 +171,15 @@ describe('budget and document adapters', () => {
         food: { min: 0, max: 0 },
         activities: { min: 0, max: 0 },
         misc: { min: 0, max: 0 },
-        expenses: [{ amountMYR: 420 }],
+        expenses: [{
+          id: 'exp-1',
+          description: 'Lunch',
+          amountMYR: 420,
+          amountCNY: 0,
+          paidBy: 'You',
+          category: 'food',
+          date: '2026-08-20T00:00:00.000Z',
+        }],
       },
       {
         days: [{

@@ -26,6 +26,9 @@ describe('trip deletion contracts', () => {
       'budget-trip-7',
       'budget-trip-7-backup',
       'budget-trip-7-history',
+      'budget-meta-trip-7',
+      'budget-meta-trip-7-backup',
+      'budget-meta-trip-7-history',
       'checklist-data-trip-7',
       'checklist-data-trip-7-backup',
       'checklist-data-trip-7-history',
@@ -38,6 +41,7 @@ describe('trip deletion contracts', () => {
       'photos-trip-7',
       'photos-trip-7-backup',
       'photos-trip-7-history',
+      'budget-trip-7-cleared',
     ]);
   });
 });

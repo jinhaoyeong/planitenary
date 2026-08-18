@@ -349,4 +349,45 @@ describe('real agent tool adapters', () => {
     expect(result.result).toMatchObject({ present: false });
     expect(String((result.result as { note?: string }).note)).toMatch(/not estimated/i);
   });
+
+  it('summarises the owned public.budgets document, scoped to the verified user', async () => {
+    const { productionShapedBudgetFixture } = await import('./budgetDocument');
+    const filters: Array<[string, unknown]> = [];
+    const cache = {
+      from: (table: string) => {
+        expect(table).toBe('budgets');
+        const chain = {
+          select: () => chain,
+          eq: (column: string, value: unknown) => {
+            filters.push([column, value]);
+            return chain;
+          },
+          maybeSingle: async () => ({
+            data: { data: productionShapedBudgetFixture() },
+            error: null,
+          }),
+        };
+        return chain;
+      },
+    };
+    const execute = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: cache as never,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary,
+      routingProviders: { amap: true, openRouteService: true },
+    });
+    const result = await execute({ tool: 'get_budget_summary', args: {} } as AgentToolCall);
+    expect(filters).toContainEqual(['id', 'trip-1']);
+    expect(filters).toContainEqual(['user_id', 'user-1']);
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({
+      present: true,
+      currency: 'MYR',
+      spent: 85,
+      plannedCeiling: 8200,
+    });
+  });
 });

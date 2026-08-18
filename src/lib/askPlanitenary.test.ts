@@ -90,6 +90,27 @@ describe('Ask Planitenary network boundary', () => {
     });
   });
 
+  it('Q. never attaches browser budget amounts as Ask authority', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: 'answered', answer: 'Answer', citations: [], applied: false, transcript: [], rejected: [],
+    });
+    await askPlanitenary({
+      tripId: 'trip-1',
+      question: 'What’s left in my budget?',
+      uiContext: { tripId: 'trip-1', surface: 'budget' },
+    }, invoke);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const body = invoke.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(body).toEqual({
+      operation: 'ask',
+      tripId: 'trip-1',
+      question: 'What’s left in my budget?',
+      uiContext: { tripId: 'trip-1', surface: 'budget' },
+    });
+    expect(body).not.toHaveProperty('budget');
+    expect(JSON.stringify(body)).not.toMatch(/amountMYR|tripBudget|plannedCeiling/);
+  });
+
   it('degrades invocation failures to a renderable refusal', async () => {
     const invoke = vi.fn().mockRejectedValue(new Error('Daily limit reached.'));
     const result = await askPlanitenary({ tripId: 'trip-1', question: 'Help' }, invoke);
