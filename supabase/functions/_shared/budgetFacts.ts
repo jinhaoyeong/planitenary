@@ -1,9 +1,11 @@
 /**
  * Deterministic wallet facts from the stored `budgets.data` document.
  *
- * The Budget UI stores category ceilings and expenses primarily in MYR. This
- * adapter reports those numbers as stored. It never estimates a missing price
- * and never converts currencies.
+ * The Budget UI currently persists category ceilings and expenses primarily in
+ * browser localStorage (`budget-trip-…-backup`). This adapter reads
+ * `public.budgets` only. Those stores can diverge; Ask must not treat
+ * browser-local numbers as authority. Missing server storage is reported,
+ * never guessed, and never filled from the itinerary as a ceiling.
  */
 
 const CATEGORIES = [

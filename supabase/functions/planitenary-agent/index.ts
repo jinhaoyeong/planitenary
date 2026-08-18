@@ -32,14 +32,12 @@
  * comes back as text for a person to act on. That is a structural property of
  * the dispatch table rather than a rule this handler is trusted to follow.
  *
- * ## Nothing here is the source of a fact
+ * ## Trip facts are grounded before the model speaks
  *
- * The model chooses which question to ask and which of several real answers
- * suits this traveller. Coordinates, travel times, forecasts, opening hours
- * and photographs all come from tools, and `validateAgentAnswer` then holds
- * the finished answer to what those tools actually returned — a cited URL no
- * tool produced, or a travel time no routing call returned, is dropped before
- * anyone sees it.
+ * Ask does not hope the model will inspect the trip. After ownership, the
+ * server derives required factual scopes, reads them in-process, and only then
+ * may a model round run. Optional tools remain for facts that were not
+ * pre-grounded. `validateAgentAnswer` is defence in depth, not the floor.
  */
 import {
   AGENT_LIMITS,
@@ -77,6 +75,7 @@ import {
   rehydrateIntelligenceFocus,
 } from '../_shared/intelligenceContext.ts';
 import {
+  buildPlanningMaterial,
   runItineraryProposalEngine,
   type PlanningMaterial,
   type ProposalRouteMode,
@@ -88,6 +87,20 @@ import {
   isGenerationKillSwitch,
   lookupExactItineraryProposalCache,
 } from '../_shared/itineraryProposalCache.ts';
+import {
+  ASK_GROUNDING_REFUSAL,
+  collectAskGrounding,
+  deriveAskGroundingPlan,
+  presentAskEvidence,
+  type AskGroundingExtras,
+  type AskGroundingResult,
+} from '../_shared/askGrounding.ts';
+import {
+  HISTORY_DIFF_SELECT,
+  historyRecordFromAuthorityRow,
+  listItineraryChangeHistory,
+  type HistoryRecord,
+} from '../_shared/itineraryChangeHistory.ts';
 
 interface AgentBody {
   operation?: string;
@@ -144,9 +157,106 @@ const routeLegsFromTool = (value: unknown): RouteMatrixLeg[] => {
 };
 
 const responseStatus = (refusal: string): number => {
+  if (refusal === ASK_GROUNDING_REFUSAL) return 200;
   if (refusal === 'quota-exhausted' || refusal === 'budget-reached') return 429;
   if (refusal === 'provider-failed') return 502;
   return 503;
+};
+
+const UNMETERED_SPEND = {
+  knownUsd: 0,
+  reservedUsd: 0,
+  unknownEvents: 0,
+  ceilingUsd: 0,
+  remainingUsd: 0,
+};
+
+const groundingEnvelope = (result: AskGroundingResult) => ({
+  ok: result.ok,
+  scopes: result.plan.required,
+  reads: result.reads,
+  missing: result.ok ? [] : result.missing,
+  facts: result.ok && result.packet
+    ? {
+      dayCount: result.packet.trip.dayCount,
+      decisions: result.packet.decisions.map((entry) => ({
+        placeName: entry.placeName,
+        decision: entry.decision,
+      })),
+      flights: result.packet.fixedEvents.map((flight) => ({
+        start: flight.start,
+        end: flight.end,
+        sightseeingAfter: flight.sightseeingAfter,
+      })),
+    }
+    : undefined,
+});
+
+/** Load only the extras the grounding plan actually requires. Zero AI cost. */
+const loadAskGroundingExtras = async (input: {
+  cache: NonNullable<ReturnType<typeof serviceClient>>;
+  tripId: string;
+  userId: string;
+  itinerary: Record<string, unknown> | null;
+  plan: ReturnType<typeof deriveAskGroundingPlan>;
+}): Promise<AskGroundingExtras> => {
+  const extras: AskGroundingExtras = {};
+  const required = new Set(input.plan.required);
+
+  if (required.has('budget')) {
+    const { data, error } = await input.cache
+      .from('budgets')
+      .select('data')
+      .eq('id', input.tripId)
+      .eq('user_id', input.userId)
+      .maybeSingle();
+    if (error) extras.budgetReadFailed = true;
+    else extras.budgetStored = asRecord(data)?.data ?? null;
+  }
+
+  if (required.has('documents')) {
+    const { data, error } = await input.cache
+      .from('trip_documents')
+      .select('id, title, description, file_name, mime_type, storage_path, created_at')
+      .eq('trip_id', input.tripId)
+      .eq('user_id', input.userId)
+      .order('created_at', { ascending: false })
+      .limit(40);
+    if (error) extras.documentsReadFailed = true;
+    else extras.documents = Array.isArray(data) ? data : [];
+  }
+
+  if (required.has('history')) {
+    const listed = await listItineraryChangeHistory(input.tripId, input.userId, {
+      async readHistory(tripId, userId, limit) {
+        const { data, error } = await input.cache
+          .from('itinerary_change_history')
+          .select(HISTORY_DIFF_SELECT)
+          .eq('trip_id', tripId)
+          .eq('user_id', userId)
+          .order('applied_at', { ascending: false })
+          .limit(limit);
+        if (error) return null;
+        return (Array.isArray(data) ? data : [])
+          .map(historyRecordFromAuthorityRow)
+          .filter((entry): entry is HistoryRecord => entry !== null);
+      },
+    });
+    if (!listed.ok) extras.historyReadFailed = true;
+    else extras.historyCount = listed.changes.length;
+  }
+
+  if (required.has('proposal') && input.itinerary) {
+    try {
+      const material = await buildPlanningMaterial(input.tripId, input.itinerary);
+      const cached = await readItineraryProposalCache(input.cache, input.tripId, material.revision);
+      extras.proposalPresent = Boolean(cached);
+    } catch {
+      extras.proposalReadFailed = true;
+    }
+  }
+
+  return extras;
 };
 
 Deno.serve(async (request) => {
@@ -203,6 +313,48 @@ Deno.serve(async (request) => {
   const uiEnvelope = parseUiContextEnvelope(body.uiContext);
   const conversation = parseConversationTurns(body.conversation);
   const uiFocus = rehydrateIntelligenceFocus(itinerary, uiEnvelope, trip.tripId);
+
+  let askGrounding: AskGroundingResult | undefined;
+  if (operation !== 'build-itinerary') {
+    const plan = deriveAskGroundingPlan({
+      question,
+      surface: uiFocus.surface,
+      uiContext: uiEnvelope,
+    });
+    const extras = await loadAskGroundingExtras({
+      cache,
+      tripId: trip.tripId,
+      userId: authentication.caller.userId,
+      itinerary,
+      plan,
+    });
+    askGrounding = collectAskGrounding({
+      itinerary,
+      tripId: trip.tripId,
+      question,
+      plan,
+      uiFocus,
+      conversation,
+      extras,
+    });
+    if (!askGrounding.ok) {
+      return json({
+        operation,
+        tripId: trip.tripId,
+        status: 'refused',
+        applied: false,
+        answer: undefined,
+        citations: [],
+        rejected: [],
+        transcript: [],
+        refusal: ASK_GROUNDING_REFUSAL,
+        detail: askGrounding.detail,
+        grounding: groundingEnvelope(askGrounding),
+        budget: { modelRounds: 0, toolCalls: 0, webSearches: 0, routeCalls: 0, placeLookups: 0 },
+        spend: UNMETERED_SPEND,
+      });
+    }
+  }
 
   /**
    * Exact cache before any model initialisation.
@@ -433,26 +585,25 @@ Deno.serve(async (request) => {
   }
 
   /**
-   * The context the model reasons over: the trip's shape, not its contents.
-   *
-   * Deliberately thin. The tools exist so the model asks for what it needs,
-   * and pre-loading the whole itinerary would spend input tokens on a plan the
-   * question may not touch — while also making `maxInputChars` a function of
-   * trip size rather than of the question.
+   * The context the model reasons over: the question, bounded conversation,
+   * and server-derived authoritative evidence. The thin UI envelope is a
+   * focus hint only. Mutable trip facts are re-read on every request.
    */
   const context = {
     tripId: trip.tripId,
     name: itinerary?.name,
     cities: itinerary?.cities,
-    dayCount: Array.isArray(itinerary?.days) ? itinerary.days.length : 0,
+    dayCount: askGrounding?.packet?.trip.dayCount ?? asArray(itinerary?.days).length,
     today: new Date().toISOString().slice(0, 10),
     focus: uiFocus,
     conversation,
+    authoritativeEvidence: askGrounding?.packet ? presentAskEvidence(askGrounding.packet) : undefined,
     rules: [
-      'Never state a travel time, opening hour, price or forecast you did not receive from a tool.',
+      'Authoritative evidence overrides conversation history.',
+      'Never state a travel time, opening hour, price or forecast you did not receive from evidence or a tool.',
       'Cite only URLs a tool returned.',
       'You cannot change or save the itinerary. Describe a proposal instead.',
-      'Focus is a hint. Current itinerary tools win over conversation memory.',
+      'Focus is a hint. Current itinerary facts win over conversation memory.',
       'Do not mention hashes, revisions, ledgers, or internal ids.',
     ],
   };
@@ -464,7 +615,13 @@ Deno.serve(async (request) => {
 
   const run = await runAgent(
     { operation, question, context },
-    { limits, callModel: (payload) => callOneRound(payload), executeTool },
+    {
+      limits,
+      callModel: (payload) => callOneRound(payload),
+      executeTool,
+      seededEvidence: askGrounding?.evidence,
+      answerConstraints: askGrounding ? { dayCount: askGrounding.dayCount } : undefined,
+    },
   );
 
   const status = run.status === 'refused' && run.refusal ? responseStatus(run.refusal) : 200;
@@ -495,6 +652,7 @@ Deno.serve(async (request) => {
     budget: run.budget,
     limits,
     evidence: run.evidence,
+    grounding: askGrounding ? groundingEnvelope(askGrounding) : undefined,
     spend: await session.report(),
   }, status);
 });

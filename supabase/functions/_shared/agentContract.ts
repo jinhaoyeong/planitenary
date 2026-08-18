@@ -178,9 +178,9 @@ When more facts are needed and tools are available, return:
 When you can answer, or finalRound is true, return:
 {"answer":"concise answer","citations":["exact tool URL"],"proposal":{"summary":"optional read-only proposal","day":1,"travelMinutes":27,"placeNames":["exact tool place name"],"replan":{"objective":"make Day 3 easier","affectedDays":[3,4],"moves":[{"placeName":"exact tool place name","fromDay":3,"toDay":4}]}}}
 
-A thin focus object names the tab/day/place the traveller is looking at. Use it as the default referent for "this", "here", "today", then load facts with tools. Call only the tools the question needs.
+A thin focus object names the tab/day/place the traveller is looking at. Use it as the default referent for "this", "here", "today".
 
-Previous conversation turns are memory only. If they conflict with a tool result or the current itinerary, the current itinerary wins.
+authoritativeEvidence was derived by the server from the owned trip before this round. It overrides conversation history and is the source of Skip/Visited/Must-do, flights, day count, and arrival sightseeing bounds. Do not contradict it. Do not invent a day outside trip.dayCount. You may call extra tools only for facts not already in authoritativeEvidence.
 
 Never invent a place, coordinate, route, travel time, opening hour, price, budget remaining, event, forecast, closure, photograph, licence, document fact, or URL. Travel times must be copied from routing findings. Money amounts must be copied from budget/expense findings. Document contents are metadata only unless a tool returned extracted facts.
 
@@ -863,7 +863,13 @@ export type AnswerRejection =
   | 'invented-travel-time'
   | 'invented-travel-time-in-answer'
   | 'invented-place'
-  | 'invented-budget-amount';
+  | 'invented-budget-amount'
+  | 'impossible-day';
+
+/** Trip-shape facts the validator can hold an answer to, beyond tool findings. */
+export interface AgentAnswerConstraints {
+  dayCount?: number;
+}
 
 export interface ValidatedAgentAnswer {
   answer: string;
@@ -873,9 +879,9 @@ export interface ValidatedAgentAnswer {
 }
 
 /**
- * Hold the answer to what the tools actually established.
+ * Hold the answer to what the tools and pre-model grounding actually established.
  *
- * Three rules, each closing a way the model could state something no tool
+ * Four rules, each closing a way the model could state something no source
  * said:
  *
  * 1. **A citation must be a URL a tool returned.** A plausible-looking link
@@ -883,8 +889,10 @@ export interface ValidatedAgentAnswer {
  * 2. **A travel time must be a number a routing tool returned.** This is the
  *    architecture rule made mechanical — the model may choose between transit
  *    at 27 minutes and walking at 51, and may not offer 18.
- * 3. **A named place must be one a tool returned.** Stops a proposal built
- *    around somewhere that does not exist, or is not in this city.
+ * 3. **A named place must be one a tool or grounding packet returned.** Stops a
+ *    proposal built around somewhere that does not exist, or is not in this city.
+ * 4. **A day number must exist on this trip** when the server supplied a day
+ *    count. Defence in depth; the primary protection is pre-model grounding.
  *
  * A failing structured part is dropped and the rest is kept, because one bad
  * citation is no reason to lose a good answer — and no reason to show the bad
@@ -893,9 +901,18 @@ export interface ValidatedAgentAnswer {
  * language would risk changing its meaning. Every rejection is still returned
  * so a validator that has quietly stopped firing remains visible.
  */
+const statedDayNumbers = (value: string): number[] =>
+  [...value.matchAll(/\b[Dd]ay\s+(\d+)\b/g)].map((match) => Number(match[1]));
+
+const dayAllowed = (day: number | undefined, dayCount: number | undefined): boolean =>
+  day === undefined
+  || dayCount === undefined
+  || (Number.isInteger(day) && day >= 1 && day <= dayCount);
+
 export function validateAgentAnswer(
   answer: RawAgentAnswer,
   evidence: AgentEvidence,
+  constraints: AgentAnswerConstraints = {},
 ): ValidatedAgentAnswer {
   const rejected: ValidatedAgentAnswer['rejected'] = [];
 
@@ -925,6 +942,30 @@ export function validateAgentAnswer(
       return false;
     });
     proposal = { ...proposal, replan: { ...proposal.replan, moves } };
+  }
+  if (proposal && constraints.dayCount !== undefined) {
+    if (!dayAllowed(proposal.day, constraints.dayCount)) {
+      rejected.push({ value: `Day ${proposal.day}`, reason: 'impossible-day' });
+      proposal = { ...proposal, day: undefined };
+    }
+    if (proposal.replan) {
+      const affectedDays = proposal.replan.affectedDays.filter((day) => {
+        if (dayAllowed(day, constraints.dayCount)) return true;
+        rejected.push({ value: `Day ${day}`, reason: 'impossible-day' });
+        return false;
+      });
+      const moves = proposal.replan.moves.filter((move) => {
+        const ok = dayAllowed(move.toDay, constraints.dayCount) && dayAllowed(move.fromDay, constraints.dayCount);
+        if (!ok) rejected.push({ value: `Day ${move.toDay}`, reason: 'impossible-day' });
+        return ok;
+      });
+      proposal = {
+        ...proposal,
+        replan: affectedDays.length > 0
+          ? { ...proposal.replan, affectedDays, moves }
+          : undefined,
+      };
+    }
   }
 
   // Structured validation alone is not enough: the model could omit
@@ -959,9 +1000,19 @@ export function validateAgentAnswer(
   for (const amount of unsupportedMoney) {
     rejected.push({ value: String(amount), reason: 'invented-budget-amount' });
   }
-  const visibleAnswer = unsupportedMoney.length > 0
+  const visibleTravelOrMoney = unsupportedMoney.length > 0
     ? 'I could not verify that money amount from the trip budget records, so I have not shown an estimate.'
     : visibleTravel;
+
+  const impossibleDays = constraints.dayCount !== undefined
+    ? statedDayNumbers(visibleTravelOrMoney).filter((day) => !dayAllowed(day, constraints.dayCount))
+    : [];
+  for (const day of impossibleDays) {
+    rejected.push({ value: `Day ${day}`, reason: 'impossible-day' });
+  }
+  const visibleAnswer = impossibleDays.length > 0
+    ? 'I could not verify that day against this trip, so I have not shown that part of the answer.'
+    : visibleTravelOrMoney;
 
   return { answer: visibleAnswer, citations, proposal, rejected };
 }

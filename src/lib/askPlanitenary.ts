@@ -40,6 +40,12 @@ export interface AskStep {
   detail?: string;
 }
 
+export interface AskGroundingDiagnostics {
+  ok: boolean;
+  scopes: string[];
+  reads: Array<{ scope: string; reader: string }>;
+}
+
 export interface AskResult {
   status: AskStatus;
   answer?: string;
@@ -53,6 +59,8 @@ export interface AskResult {
   refusal?: string;
   /** What the server refused to let the answer claim. Shown in dev surfaces. */
   rejectedClaims: number;
+  /** Authoritative pre-model grounding. Acceptance checks this, not tool count. */
+  grounding?: AskGroundingDiagnostics;
 }
 
 const text = (value: unknown, max = 4_000): string | undefined =>
@@ -119,6 +127,27 @@ export function parseAskResult(payload: unknown): AskResult {
     ? raw.status
     : 'refused';
 
+  const groundingRaw = raw.grounding && typeof raw.grounding === 'object'
+    ? raw.grounding as Record<string, unknown>
+    : undefined;
+  const grounding: AskGroundingDiagnostics | undefined = groundingRaw
+    ? {
+      ok: groundingRaw.ok === true,
+      scopes: Array.isArray(groundingRaw.scopes)
+        ? groundingRaw.scopes.filter((scope): scope is string => typeof scope === 'string').slice(0, 20)
+        : [],
+      reads: Array.isArray(groundingRaw.reads)
+        ? groundingRaw.reads.flatMap((entry) => {
+          if (!entry || typeof entry !== 'object') return [];
+          const row = entry as Record<string, unknown>;
+          const scope = text(row.scope, 40);
+          const reader = text(row.reader, 80);
+          return scope && reader ? [{ scope, reader }] : [];
+        }).slice(0, 40)
+        : [],
+    }
+    : undefined;
+
   return {
     status,
     answer: text(raw.answer),
@@ -137,6 +166,7 @@ export function parseAskResult(payload: unknown): AskResult {
     detail: text(raw.detail, 400),
     refusal: text(raw.refusal, 80),
     rejectedClaims: Array.isArray(raw.rejected) ? raw.rejected.length : 0,
+    grounding,
   };
 }
 

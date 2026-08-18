@@ -46,10 +46,10 @@ import { summarizeDocumentFacts } from './documentFacts.ts';
 import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
-  clockToMinutes,
   minutesToClock,
   buildPlanningMaterial,
 } from './itineraryProposal.ts';
+import { listPersistedFlights } from './askGrounding.ts';
 import { readItineraryProposalCache } from './cache.ts';
 import {
   HISTORY_DIFF_SELECT,
@@ -147,36 +147,7 @@ const defaultDayNumber = (itinerary: Record<string, unknown> | null, focusDay?: 
   return typeof first?.day === 'number' ? first.day : undefined;
 };
 
-const flightRows = (itinerary: Record<string, unknown> | null) => {
-  const rows: Array<Record<string, unknown>> = [];
-  for (const rawDay of asArray(itinerary?.days)) {
-    const day = asRecord(rawDay);
-    const dayNumber = typeof day?.day === 'number' ? day.day : undefined;
-    for (const entry of asArray(day?.activities)) {
-      const activity = asRecord(entry);
-      if (!activity || activity.type !== 'flight') continue;
-      const start = clockToMinutes(typeof activity.time === 'string' ? activity.time : undefined);
-      const duration = typeof activity.durationMinutes === 'number' ? activity.durationMinutes : undefined;
-      const end = start !== undefined && duration && duration > 0 ? start + duration : undefined;
-      rows.push({
-        id: activity.id,
-        name: activity.name,
-        day: dayNumber,
-        time: activity.time,
-        durationMinutes: activity.durationMinutes,
-        endTime: end !== undefined ? minutesToClock(Math.min(1439, end)) : undefined,
-        sightseeingAfter: end !== undefined
-          ? minutesToClock(Math.min(1439, end + ARRIVAL_SETTLING_MINUTES))
-          : undefined,
-        location: activity.location,
-        note: end !== undefined
-          ? `Fixed window. Sightseeing on this day starts after a ${ARRIVAL_SETTLING_MINUTES}-minute arrival buffer when this is the arrival flight.`
-          : 'This flight has no usable duration, so it is not a hard planning constraint.',
-      });
-    }
-  }
-  return rows.slice(0, MAX_RESULT_ITEMS);
-};
+const flightRows = (itinerary: Record<string, unknown> | null) => listPersistedFlights(itinerary);
 
 /**
  * Every place the trip knows about, from the saved plan.

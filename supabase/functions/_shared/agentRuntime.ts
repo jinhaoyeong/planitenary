@@ -31,6 +31,7 @@ import {
   isFinalRound,
   parseAgentTurn,
   validateAgentAnswer,
+  type AgentAnswerConstraints,
   type AgentEvidence,
   type AgentLimits,
   type AgentOperation,
@@ -87,6 +88,13 @@ export interface AgentRunDeps {
   callModel: (payload: AgentModelPayload) => Promise<ModelCallOutcome>;
   /** Execute one validated tool call against the real adapters. */
   executeTool: (call: AgentToolCall) => Promise<ToolOutcome>;
+  /**
+   * Facts already established before the first model round — Ask grounding.
+   * Optional tools may add more; they must not be the only source of trip facts.
+   */
+  seededEvidence?: AgentEvidence;
+  /** Trip-shape constraints such as day count. */
+  answerConstraints?: AgentAnswerConstraints;
 }
 
 /** What one round sends the model. Shape asserted by the tests. */
@@ -144,7 +152,14 @@ export async function runAgent(
   let budget = emptyBudget();
   const transcript: AgentTranscriptEntry[] = [];
   const findings: AgentModelPayload['findings'] = [];
-  const evidence: AgentEvidence = emptyEvidence();
+  const evidence: AgentEvidence = deps.seededEvidence
+    ? {
+      citableUrls: new Set(deps.seededEvidence.citableUrls),
+      routeMinutes: new Set(deps.seededEvidence.routeMinutes),
+      knownPlaceNames: new Set(deps.seededEvidence.knownPlaceNames),
+      budgetAmounts: new Set(deps.seededEvidence.budgetAmounts),
+    }
+    : emptyEvidence();
 
   const summarise = (status: AgentRunStatus, extra: Partial<AgentRunResult> = {}): AgentRunResult => ({
     status,
@@ -202,7 +217,9 @@ export async function runAgent(
     const turn = parseAgentTurn(outcome.value);
 
     if (turn.kind === 'answer') {
-      return summarise('answered', { answer: validateAgentAnswer(turn.answer, evidence) });
+      return summarise('answered', {
+        answer: validateAgentAnswer(turn.answer, evidence, deps.answerConstraints),
+      });
     }
 
     if (turn.kind === 'unusable') {

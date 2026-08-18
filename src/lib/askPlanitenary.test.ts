@@ -20,6 +20,25 @@ describe('Ask Planitenary network boundary', () => {
     expect(result.steps).toEqual([{ tool: 'get_weather', ok: true, detail: undefined }]);
   });
 
+  it('keeps grounding diagnostics so acceptance is not tool-count based', () => {
+    const result = parseAskResult({
+      status: 'answered',
+      answer: 'Kushida Shrine is skipped. Sightseeing can start from 14:00.',
+      applied: false,
+      transcript: [],
+      grounding: {
+        ok: true,
+        scopes: ['trip', 'itinerary', 'day', 'decisions', 'flights', 'schedule'],
+        reads: [{ scope: 'flights', reader: 'get_flights' }],
+      },
+    });
+    expect(result.grounding).toEqual({
+      ok: true,
+      scopes: ['trip', 'itinerary', 'day', 'decisions', 'flights', 'schedule'],
+      reads: [{ scope: 'flights', reader: 'get_flights' }],
+    });
+  });
+
   it('refuses a payload that claims the proposal was applied', () => {
     const result = parseAskResult({
       status: 'answered',

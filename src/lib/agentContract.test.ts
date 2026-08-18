@@ -320,4 +320,29 @@ describe('an answer is held to what the tools returned', () => {
     expect(validated.rejected).toEqual([]);
     expect(validated.answer).toBe('Your recorded spending is RM420.');
   });
+
+  it('rejects a Day 3 claim on a 2-day trip', () => {
+    const evidence = emptyEvidence();
+    const unconstrained = validateAgentAnswer(
+      {
+        answer: 'Move sightseeing to Day 3 after the flight.',
+        citations: [],
+        proposal: { summary: 'Replan', day: 3 },
+      },
+      evidence,
+    );
+    expect(unconstrained.rejected).toEqual([]);
+    const constrained = validateAgentAnswer(
+      {
+        answer: 'Move sightseeing to Day 3 after the flight.',
+        citations: [],
+        proposal: { summary: 'Replan', day: 3 },
+      },
+      evidence,
+      { dayCount: 2 },
+    );
+    expect(constrained.rejected).toContainEqual({ value: 'Day 3', reason: 'impossible-day' });
+    expect(constrained.proposal?.day).toBeUndefined();
+    expect(constrained.answer).toMatch(/could not verify that day/i);
+  });
 });
