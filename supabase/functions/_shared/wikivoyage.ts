@@ -31,6 +31,23 @@ export interface WikivoyageListing {
   hours?: string;
   price?: string;
   url?: string;
+  /**
+   * The listing's own Wikidata item, as the editor wrote it — normally a bare
+   * `Q865839`.
+   */
+  wikidata?: string;
+  /**
+   * The listing's own Wikipedia article, as the editor wrote it. A **bare
+   * title** with no language prefix, because the field names an article on the
+   * wiki the listing was read from. `Shōfuku-ji (Fukuoka)`, not `en:Shōfuku-ji`.
+   */
+  wikipedia?: string;
+  /**
+   * The listing's own photograph, as a **bare Commons file name** —
+   * `Acrosfukuoka02.jpg`. Note this is not the same field as OSM's `image`,
+   * which holds a URL; see {@link wikivoyageImageLeads} in `placeImages.ts`.
+   */
+  image?: string;
 }
 
 /** Listing kind → the app's category vocabulary. */
@@ -107,6 +124,34 @@ const asCoordinate = (value?: string): number | undefined => {
 };
 
 /**
+ * How long an identity field may be before it is ignored.
+ *
+ * These values end up as API query parameters, so an unbounded one is a
+ * request this app would build on a wiki editor's behalf. The same 300 the
+ * client-facing `parseImageLead` uses, applied at the point the value enters
+ * the system rather than only at the point it leaves.
+ */
+const MAX_IDENTITY_LENGTH = 300;
+
+/**
+ * An explicit identity field, trimmed and bounded — and **not** run through
+ * {@link stripWikiMarkup}.
+ *
+ * `name` and `content` are prose written for a reader and have to have their
+ * markup removed. `wikidata`, `wikipedia` and `image` are identifiers written
+ * for a machine: stripping markup from `Shōfuku-ji (Fukuoka)` or from a file
+ * name containing brackets would quietly produce a *different* identifier,
+ * which is the one failure mode worse than not reading the field at all.
+ * Whether the value is well-formed is decided downstream by `parseWikidataId`,
+ * `normaliseCommonsTitle` and `parseWikipediaLead`, which already exist and
+ * already refuse what they cannot recognise.
+ */
+const asIdentity = (value?: string): string | undefined => {
+  const text = value?.trim();
+  return text && text.length <= MAX_IDENTITY_LENGTH ? text : undefined;
+};
+
+/**
  * Every listing on a Wikivoyage city page, in document order.
  *
  * Unnamed listings are skipped: a recommendation the traveller cannot identify
@@ -153,6 +198,17 @@ export function parseWikivoyageListings(wikitext: string, limit = 200): Wikivoya
       hours: values.hours ? stripWikiMarkup(values.hours) : undefined,
       price: values.price ? stripWikiMarkup(values.price) : undefined,
       url: values.url || undefined,
+      /**
+       * The identity fields, which this parser used to build into `values` and
+       * then drop one line below — the same shape as the `price` bug fixed
+       * above it. Wikivoyage editors state a place's Wikidata item, its
+       * Wikipedia article and its photograph directly on the listing, and
+       * without these three lines a Wikivoyage candidate reaches the card with
+       * no way to find a picture of itself.
+       */
+      wikidata: asIdentity(values.wikidata),
+      wikipedia: asIdentity(values.wikipedia),
+      image: asIdentity(values.image),
     });
   }
 

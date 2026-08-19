@@ -24,6 +24,7 @@ import {
   buildPlaceImage,
   commonsFilePage,
   commonsFileTitleFromUrl,
+  heldListingImages,
   isWikimediaImageUrl,
   licenceForDisplay,
   MAX_IMAGES_PER_PLACE,
@@ -37,6 +38,9 @@ import {
   rankPlaceImages,
   stripMarkup,
   wikimediaImageUrl,
+  wikivoyageImageLeads,
+  withholdListingImage,
+  type ImageLead,
   type PlaceImage,
 } from '../../supabase/functions/_shared/placeImages';
 
@@ -160,19 +164,19 @@ describe('leads from OSM tags', () => {
       wikidata: 'Q183395',
       wikipedia: 'en:Osaka Castle',
     });
-    expect(leads[0]).toEqual({ kind: 'commons-file', value: 'File:Osaka Castle 03.jpg' });
+    expect(leads[0]).toEqual({ kind: 'commons-file', value: 'File:Osaka Castle 03.jpg', origin: 'osm-tag' });
     // Strongest first, so a caller taking the first gets the best.
     expect(leads.map((lead) => lead.kind)).toEqual(['commons-file', 'wikidata', 'wikipedia']);
   });
 
   it('recognises a category tag as a category, not a file', () => {
     const leads = osmImageLeads({ wikimedia_commons: 'Category:Osaka Castle' });
-    expect(leads).toEqual([{ kind: 'commons-category', value: 'Category:Osaka Castle' }]);
+    expect(leads).toEqual([{ kind: 'commons-category', value: 'Category:Osaka Castle', origin: 'osm-tag' }]);
   });
 
   it('accepts an image tag only as a Commons file title, never as a URL to load', () => {
     const leads = osmImageLeads({ image: `${UPLOAD}/a/ab/Shrine.jpg` });
-    expect(leads).toEqual([{ kind: 'commons-file', value: 'File:Shrine.jpg' }]);
+    expect(leads).toEqual([{ kind: 'commons-file', value: 'File:Shrine.jpg', origin: 'osm-tag' }]);
   });
 
   it('drops an image tag hosted anywhere else entirely', () => {
@@ -203,6 +207,183 @@ describe('leads from OSM tags', () => {
   it('splits a wikipedia tag into language and title', () => {
     expect(parseWikipediaLead('ja:大阪城')).toEqual({ language: 'ja', title: '大阪城' });
     expect(parseWikipediaLead('Osaka Castle')).toBeUndefined();
+  });
+
+  it('says an OSM tag is an OSM tag', () => {
+    // Provenance, not ranking. The same Q-id can reach us from a map object and
+    // from a guidebook listing, and those are not the same statement.
+    expect(osmImageLeads({ wikidata: 'Q183395' })[0].origin).toBe('osm-tag');
+  });
+});
+
+/**
+ * Leads from a Wikivoyage listing.
+ *
+ * Same union, same resolver, same validator — different source, and it says
+ * so. The fields also *mean* different things from their OSM namesakes, which
+ * is why this is a second gatherer rather than the same one with a different
+ * argument: `image` here is a bare Commons file name where OSM's is a URL, and
+ * `wikipedia` here is a bare title where OSM's carries a language.
+ */
+describe('leads from a Wikivoyage listing', () => {
+  it('reads the listing\'s Wikidata item', () => {
+    expect(wikivoyageImageLeads({ wikidata: 'Q865839' }))
+      .toEqual([{ kind: 'wikidata', value: 'Q865839', origin: 'wikivoyage-listing' }]);
+  });
+
+  it('supplies the language the field omits, because en.wikivoyage means en', () => {
+    // Nothing here consults a locale: the field names an article on the wiki
+    // the listing was read from, and this app reads en.wikivoyage.
+    expect(wikivoyageImageLeads({ wikipedia: 'Fukuoka Tower' }))
+      .toEqual([{ kind: 'wikipedia', value: 'en:Fukuoka Tower', origin: 'wikivoyage-listing' }]);
+  });
+
+  it('does not prefix a language twice when an editor supplied one', () => {
+    expect(wikivoyageImageLeads({ wikipedia: 'en:Fukuoka Tower' })[0].value).toBe('en:Fukuoka Tower');
+  });
+
+  it('reads a title that merely looks prefixed as a title', () => {
+    /**
+     * `parseWikipediaLead` would take `SS` for a wiki code and build a request
+     * to `ss.wikipedia.org` — a hostname chosen by a wiki editor. A missed
+     * photograph is the cheaper mistake, so only the local prefix is honoured.
+     */
+    expect(wikivoyageImageLeads({ wikipedia: 'SS: Great Britain' })[0].value)
+      .toBe('en:SS: Great Britain');
+  });
+
+  it('turns a bare file name into a Commons file lead', () => {
+    // The ACROS case: the listing's only identity is the photograph on it.
+    expect(wikivoyageImageLeads({ image: 'Acrosfukuoka02.jpg' }))
+      .toEqual([{ kind: 'commons-file', value: 'File:Acrosfukuoka02.jpg', origin: 'wikivoyage-listing' }]);
+  });
+
+  it('does not double the File: prefix when the editor already wrote one', () => {
+    expect(wikivoyageImageLeads({ image: 'File:Acrosfukuoka02.jpg' })[0].value)
+      .toBe('File:Acrosfukuoka02.jpg');
+  });
+
+  it('orders a listing that states everything, strongest first, without duplicates', () => {
+    // Maizuru Park states both an item and a file; the file is the editor's
+    // choice for this exact listing, so it leads.
+    const leads = wikivoyageImageLeads({
+      wikidata: 'Q11613685',
+      wikipedia: 'Maizuru Park',
+      image: 'Shimonohashi Gomon.JPG',
+    });
+    expect(leads.map((lead) => lead.kind)).toEqual(['commons-file', 'wikidata', 'wikipedia']);
+    expect(new Set(leads.map((lead) => lead.origin))).toEqual(new Set(['wikivoyage-listing']));
+    expect(new Set(leads.map((lead) => `${lead.kind}|${lead.value}`)).size).toBe(3);
+  });
+
+  it('promotes nothing from a malformed Wikidata field', () => {
+    expect(wikivoyageImageLeads({ wikidata: 'see the article' })).toEqual([]);
+  });
+
+  it('promotes nothing from a file name that is really a URL in the wrong field', () => {
+    // `normaliseCommonsTitle` refuses path and fragment punctuation rather than
+    // guessing at a file that does not exist.
+    expect(wikivoyageImageLeads({ image: 'https://example.com/photos/x.jpg|thumb' })).toEqual([]);
+  });
+
+  it('produces nothing for the ordinary listing that states no identity', () => {
+    // 14 of the 28 Wikivoyage candidates on a Fukuoka deck. They keep the
+    // placard, and that is the honest outcome.
+    expect(wikivoyageImageLeads({})).toEqual([]);
+    expect(wikivoyageImageLeads({ wikidata: '', wikipedia: '  ', image: undefined })).toEqual([]);
+  });
+});
+
+/**
+ * A refused identity must not be able to supply a picture through a second
+ * door.
+ *
+ * v3 established this on the Wikipedia path, after Marui's Wikidata item was
+ * correctly refused as a company and that same company's article then handed a
+ * Fukuoka branch a photograph of a Tokyo head office. A Wikivoyage listing
+ * opens a third door, because one listing can state both an identity and a
+ * photograph.
+ */
+describe('a listing cannot bypass its own refused identity', () => {
+  const listingLead = (kind: ImageLead['kind'], value: string): ImageLead =>
+    ({ kind, value, origin: 'wikivoyage-listing' });
+
+  it('holds a listing photograph back when the same listing also names an entity', () => {
+    // Maizuru Park: `wikidata=Q11613685` and `image=…` on one listing. The
+    // photograph waits for the entity verdict instead of being claimed first.
+    expect(heldListingImages([{
+      placeId: 'wv:Maizuru Park',
+      leads: [listingLead('commons-file', 'File:Shimonohashi Gomon.JPG'), listingLead('wikidata', 'Q11613685')],
+    }])).toEqual([{ placeId: 'wv:Maizuru Park', title: 'File:Shimonohashi Gomon.JPG' }]);
+  });
+
+  it('holds nothing back for a listing whose photograph is its only statement', () => {
+    /**
+     * ACROS. There is no identity to contradict the picture, so there is
+     * nothing to wait for — refusing it here would be refusing evidence for
+     * lacking evidence.
+     */
+    expect(heldListingImages([{
+      placeId: 'wv:ACROS rooftop garden',
+      leads: [listingLead('commons-file', 'File:Acrosfukuoka02.jpg')],
+    }])).toEqual([]);
+  });
+
+  it('never holds a map object\'s photograph back for its own Wikidata tag', () => {
+    /**
+     * The rule is about **one listing** contradicting itself. A mapper's
+     * `wikimedia_commons` tag and an OSM `wikidata` tag are separate statements
+     * by separate people, and this behaviour is unchanged from v3.
+     */
+    expect(heldListingImages([{
+      placeId: 'node/1',
+      leads: [
+        { kind: 'commons-file', value: 'File:Shrine.jpg', origin: 'osm-tag' },
+        { kind: 'wikidata', value: 'Q6777917', origin: 'osm-tag' },
+      ],
+    }])).toEqual([]);
+  });
+
+  it('does not hold a legacy lead back, since every one of those is an OSM tag', () => {
+    // Leads cached before provenance was recorded carry no `origin`.
+    expect(heldListingImages([{
+      placeId: 'node/1',
+      leads: [{ kind: 'commons-file', value: 'File:Shrine.jpg' }, { kind: 'wikidata', value: 'Q1' }],
+    }])).toEqual([]);
+  });
+
+  it('withholds the listing photograph when the listing named the wrong entity', () => {
+    expect(withholdListingImage(['wikidata_non_place_entity'])).toBe(true);
+    expect(withholdListingImage(['wikidata_coordinate_mismatch'])).toBe(true);
+  });
+
+  it('withholds it when the listing\'s article could not be tied to anything', () => {
+    expect(withholdListingImage(['wikipedia_unverified_identity'])).toBe(true);
+    expect(withholdListingImage(['wikipedia_wikidata_identity_mismatch'])).toBe(true);
+  });
+
+  it('keeps it when the identity was fine and simply had no picture', () => {
+    /**
+     * The distinction the whole rule turns on. An item with no `P18` said
+     * nothing wrong about identity — and a listing whose editor supplied a
+     * photograph is exactly the case worth keeping.
+     */
+    expect(withholdListingImage(['wikidata_no_p18'])).toBe(false);
+  });
+
+  it('keeps it when some other candidate photograph was merely a placeholder', () => {
+    // A bad file is not a bad identity.
+    expect(withholdListingImage(['non_photographic_asset'])).toBe(false);
+  });
+
+  it('keeps it when nothing was refused at all', () => {
+    expect(withholdListingImage([])).toBe(false);
+  });
+
+  it('withholds on any refusal, even beside an acceptance', () => {
+    // Deliberately conservative: a listing whose editor named a wrong entity
+    // has shown their hand about that listing.
+    expect(withholdListingImage(['wikidata_no_p18', 'wikidata_coordinate_mismatch'])).toBe(true);
   });
 });
 
@@ -431,5 +612,22 @@ describe('leads arriving from a client are bounded and normalised', () => {
     expect(parseImageLead({ kind: 'wikipedia', value: 'Osaka Castle' })).toBeUndefined();
     expect(parseImageLead({ kind: 'wikipedia', value: 'ja:大阪城' }))
       .toEqual({ kind: 'wikipedia', value: 'ja:大阪城' });
+  });
+
+  it('carries provenance back across the round trip through the client', () => {
+    /**
+     * The server needs this: the rule that a refused listing identity cannot be
+     * bypassed by that same listing's photograph is enforced here, and knowing
+     * which leads came from one listing is how it recognises the case.
+     */
+    expect(parseImageLead({ kind: 'wikidata', value: 'Q865839', origin: 'wikivoyage-listing' }))
+      .toEqual({ kind: 'wikidata', value: 'Q865839', origin: 'wikivoyage-listing' });
+  });
+
+  it('drops an origin it does not recognise rather than trusting it', () => {
+    // This arrives in a request body. Dropping it only loses the *conditional*
+    // treatment, so an invented origin can never grant anything.
+    expect(parseImageLead({ kind: 'wikidata', value: 'Q1', origin: 'trust-me' }))
+      .toEqual({ kind: 'wikidata', value: 'Q1' });
   });
 });

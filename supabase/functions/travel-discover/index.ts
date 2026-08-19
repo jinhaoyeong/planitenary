@@ -45,7 +45,7 @@ import {
   parseOsmOpeningRules,
   type OsmElement,
 } from '../_shared/osmPlaces.ts';
-import { osmImageLeads, type ImageLead } from '../_shared/placeImages.ts';
+import { osmImageLeads, wikivoyageImageLeads, type ImageLead } from '../_shared/placeImages.ts';
 import {
   matchListing,
   WIKIVOYAGE_CATEGORIES,
@@ -698,6 +698,17 @@ async function searchOsm(
       coordinates: listing.coordinates,
       categories,
       experienceTags: categories,
+      /**
+       * The listing's own pointers at a photograph of itself, which cost no
+       * request: they came down with the city page above.
+       *
+       * Until this line every Wikivoyage-sourced candidate reached the card
+       * with no leads at all and therefore always showed the placard — 28 of
+       * the 60 places on a Fukuoka deck, half of which state a Wikidata item,
+       * an article or a file name right there in the listing. Nothing here is
+       * derived from the listing's *name*: only fields an editor wrote.
+       */
+      imageLeads: wikivoyageImageLeads(listing),
       // A hand-written guidebook entry is a strong significance signal on its own.
       notability: 0.6,
       priceLevel: undefined,

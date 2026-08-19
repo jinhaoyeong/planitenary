@@ -58,7 +58,31 @@ export interface ImageLead {
    * {@link normaliseCommonsTitle}.
    */
   value: string;
+  /**
+   * Which source *stated* this pointer.
+   *
+   * An OSM `wikidata` tag and a Wikivoyage listing's `wikidata=` field can name
+   * the same item and resolve to the same photograph, and the resolution path
+   * is deliberately identical — but they are not the same statement by the same
+   * people, and a lead that says otherwise is a lie in the one layer whose
+   * whole job is provenance. Kept truthful here rather than inferred later.
+   *
+   * Optional because a lead written before provenance was recorded carries
+   * none, and every one of those came from an OSM tag.
+   */
+  origin?: ImageLeadOrigin;
 }
+
+/**
+ * Who stated a pointer. Not a ranking — see {@link LEAD_PRIORITY} for that.
+ *
+ * - `osm-tag` — a tag on the OpenStreetMap object, from {@link osmImageLeads}.
+ * - `wikivoyage-listing` — a field on the Wikivoyage listing the candidate was
+ *   built from, from {@link wikivoyageImageLeads}.
+ */
+export type ImageLeadOrigin = 'osm-tag' | 'wikivoyage-listing';
+
+const IMAGE_LEAD_ORIGINS: ReadonlySet<string> = new Set<ImageLeadOrigin>(['osm-tag', 'wikivoyage-listing']);
 
 /** A photograph, with everything needed to display it and credit it. */
 export interface PlaceImage {
@@ -248,6 +272,28 @@ export function parseWikidataId(value: string): string | undefined {
 }
 
 /**
+ * Collect one place's leads, strongest first, without duplicates, stamping each
+ * with the source that stated it.
+ *
+ * Shared by both gatherers below so that an OSM tag and a Wikivoyage listing
+ * field produce the *same* `ImageLead` shape and are told apart by `origin`
+ * rather than by growing a second, parallel vocabulary that the resolver would
+ * then have to learn.
+ */
+function leadCollector(origin: ImageLeadOrigin) {
+  const leads: ImageLead[] = [];
+  const seen = new Set<string>();
+  const add = (kind: ImageLead['kind'], value: string | undefined) => {
+    if (!value) return;
+    const key = `${kind}|${value}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    leads.push({ kind, value, origin });
+  };
+  return { add, leads };
+}
+
+/**
  * Every place in the discovery payload that might have a photograph, from tags
  * Overpass already returned.
  *
@@ -261,15 +307,7 @@ export function parseWikidataId(value: string): string | undefined {
  * one. See {@link rankPlaceImages} for what "strongest" means and why.
  */
 export function osmImageLeads(tags: Record<string, string | undefined>): ImageLead[] {
-  const leads: ImageLead[] = [];
-  const seen = new Set<string>();
-  const add = (kind: ImageLead['kind'], value: string | undefined) => {
-    if (!value) return;
-    const key = `${kind}|${value}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    leads.push({ kind, value });
-  };
+  const { add, leads } = leadCollector('osm-tag');
 
   // A mapper attached this exact photograph to this exact map object. The most
   // specific statement anybody has made about what this place looks like.
@@ -303,6 +341,72 @@ export function osmImageLeads(tags: Record<string, string | undefined>): ImageLe
   }
 
   return leads;
+}
+
+/**
+ * A Wikivoyage listing's own pointers at a photograph of itself.
+ *
+ * The counterpart of {@link osmImageLeads} for candidates that came from a
+ * guidebook listing rather than a map object. Like it, this costs no request:
+ * the fields are already in the city page `travel-discover` fetches once per
+ * city, and were parsed into scope and discarded until now.
+ *
+ * Takes the three fields rather than a `WikivoyageListing`, so this module
+ * keeps its "no imports" property and so the two gatherers stay symmetrical.
+ *
+ * **This is not `osmImageLeads` with different arguments**, and forcing the
+ * listing through it to save these lines would be wrong in two ways. The
+ * fields mean different things — Wikivoyage's `image` is a bare Commons file
+ * name where OSM's is a URL, and Wikivoyage's `wikipedia` is a bare title where
+ * OSM's carries a language — and the leads would come out claiming a
+ * provenance they do not have.
+ */
+export function wikivoyageImageLeads(listing: {
+  wikidata?: string;
+  wikipedia?: string;
+  image?: string;
+}): ImageLead[] {
+  const { add, leads } = leadCollector('wikivoyage-listing');
+
+  /**
+   * `image=Acrosfukuoka02.jpg`. An editor attached this photograph to this
+   * exact listing, which is the same kind of statement a mapper's
+   * `wikimedia_commons` tag makes about a map object — so it takes the same
+   * rank. Unlike OSM's `image`, it is a file name and never a URL, so there is
+   * nothing here that could point at a stranger's server.
+   */
+  add('commons-file', normaliseCommonsTitle(listing.image, 'File'));
+
+  // The encyclopedia's own choice of representative image for the subject.
+  add('wikidata', listing.wikidata ? parseWikidataId(listing.wikidata) : undefined);
+
+  add('wikipedia', wikivoyageArticleLead(listing.wikipedia));
+
+  return leads;
+}
+
+/**
+ * `wikipedia=Fukuoka Tower` on an en.wikivoyage listing, as the `en:Fukuoka
+ * Tower` lead the resolver already understands.
+ *
+ * The field carries no language and needs none: it names an article on the
+ * wiki the listing was read from, and this app reads en.wikivoyage. Nothing
+ * here consults a locale.
+ *
+ * A leading `en:` an editor typed anyway is stripped before the prefix is
+ * added, exactly as {@link normaliseCommonsTitle} strips `File:` before
+ * re-adding it. A leading *other* language is deliberately **not** honoured:
+ * `parseWikipediaLead` would read `SS: Great Britain` as the wiki code `ss`,
+ * and treating a title as a hostname is how this app would end up requesting a
+ * domain a wiki editor chose. The cost of the strict reading is a missed
+ * photograph; the cost of the loose one is an outbound request we did not mean
+ * to make.
+ */
+function wikivoyageArticleLead(value: string | undefined): string | undefined {
+  const title = value?.trim().replace(/^en\s*:\s*/i, '').trim();
+  if (!title) return undefined;
+  const lead = `en:${title}`;
+  return parseWikipediaLead(lead) ? lead : undefined;
 }
 
 /**
@@ -619,7 +723,7 @@ export function parsePlaceImage(value: unknown): PlaceImage | undefined {
 /** Validate a lead that arrived from a client or out of a cached candidate. */
 export function parseImageLead(value: unknown): ImageLead | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const raw = value as { kind?: unknown; value?: unknown };
+  const raw = value as { kind?: unknown; value?: unknown; origin?: unknown };
   const kind = typeof raw.kind === 'string' && raw.kind in LEAD_PRIORITY
     ? (raw.kind as ImageLead['kind'])
     : undefined;
@@ -628,15 +732,28 @@ export function parseImageLead(value: unknown): ImageLead | undefined {
   // client is a request this server would build on somebody else's behalf.
   if (!kind || !text || text.length > 300) return undefined;
 
+  /**
+   * Provenance survives the round trip through the client, because the rule
+   * that a refused listing identity cannot be bypassed by that same listing's
+   * photograph is enforced on the server and needs to know which leads came
+   * from one listing. An unrecognised value is dropped rather than trusted —
+   * this arrives in a request body — and dropping it only loses the
+   * conditional treatment, never grants it.
+   */
+  const origin = typeof raw.origin === 'string' && IMAGE_LEAD_ORIGINS.has(raw.origin)
+    ? (raw.origin as ImageLeadOrigin)
+    : undefined;
+  const withOrigin = (lead: ImageLead): ImageLead => (origin ? { ...lead, origin } : lead);
+
   if (kind === 'wikidata') {
     const id = parseWikidataId(text);
-    return id ? { kind, value: id } : undefined;
+    return id ? withOrigin({ kind, value: id }) : undefined;
   }
   if (kind === 'wikipedia') {
-    return parseWikipediaLead(text) ? { kind, value: text } : undefined;
+    return parseWikipediaLead(text) ? withOrigin({ kind, value: text }) : undefined;
   }
   const title = normaliseCommonsTitle(text, kind === 'commons-file' ? 'File' : 'Category');
-  return title ? { kind, value: title } : undefined;
+  return title ? withOrigin({ kind, value: title }) : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +871,82 @@ export function validateEntityForPlace(
   return facts.instanceOf.some((id) => NON_PLACE_INSTANCE_OF.has(id))
     ? { ok: false, reason: 'wikidata_non_place_entity' }
     : { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// The bypass rule
+//
+// v3's finding was that a refused identity must not be able to supply a picture
+// through a second door: Marui's Wikidata item was correctly refused as a
+// company, and that same company's *article* then handed a Fukuoka branch a
+// photograph of a Tokyo head office. A Wikivoyage listing opens a third door,
+// because it can state both an identity and a photograph — so the same rule has
+// to reach it before it is used, not after it produces the same class of bug.
+// ---------------------------------------------------------------------------
+
+/**
+ * Rejections that mean **"we could not show this is the same place"**, as
+ * opposed to "this place has no picture".
+ *
+ * Only the first kind may suppress a further image path. `wikidata_no_p18` is
+ * deliberately absent: an item with no `P18` said nothing wrong about identity,
+ * it simply had no photograph, and a listing whose editor supplied one is
+ * exactly the case worth keeping. `non_photographic_asset` is absent for the
+ * same reason — a placeholder glyph is a bad file, not a bad identity.
+ */
+export const IDENTITY_REJECTION_REASONS: ReadonlySet<string> = new Set([
+  'wikidata_coordinate_mismatch',
+  'wikidata_non_place_entity',
+  'wikipedia_unverified_identity',
+  'wikipedia_wikidata_identity_mismatch',
+]);
+
+/** Recorded when a listing's own photograph is refused by the rule below. */
+export const LISTING_IMAGE_WITHHELD = 'wikivoyage_listing_image_withheld';
+
+/**
+ * The listing photographs that must wait for their listing's identity verdict.
+ *
+ * A file lead is normally claimed straight away — it needs no lookup, so there
+ * is nothing to wait for. These are the exception: when **one listing** states
+ * both an identity and a photograph, claiming the photograph before the entity
+ * lookup has run would hand the place a picture whatever that lookup concluded,
+ * which is the door v3 closed on the Wikipedia path.
+ *
+ * Only leads from the same listing condition each other. A map object's
+ * `wikimedia_commons` tag is a separate statement by separate people and is
+ * never held, whatever its Wikidata tag turns out to name.
+ */
+export function heldListingImages(
+  places: ReadonlyArray<{ placeId: string; leads: readonly ImageLead[] }>,
+): Array<{ placeId: string; title: string }> {
+  return places.flatMap(({ placeId, leads }) => {
+    const listing = leads.filter((lead) => lead.origin === 'wikivoyage-listing');
+    const statesIdentity = listing.some((lead) => lead.kind === 'wikidata' || lead.kind === 'wikipedia');
+    if (!statesIdentity) return [];
+    return listing
+      .filter((lead) => lead.kind === 'commons-file')
+      .map((lead) => ({ placeId, title: lead.value }));
+  });
+}
+
+/**
+ * Whether a listing's own photograph must be withheld, given what happened to
+ * the identities that *same listing* stated.
+ *
+ * Deliberately conservative: any identity refusal on the listing withholds its
+ * picture, even when another of its identities was accepted. The asymmetry is
+ * intentional — a listing whose editor named the wrong entity has shown their
+ * hand about that listing, and the cost of the strict reading is a photograph
+ * we already had a second source for.
+ *
+ * A listing with **no** entity identity at all is not covered by this and must
+ * not be passed through it: its `image=` is its only statement, there is
+ * nothing to contradict it, and refusing it would be refusing evidence for
+ * lacking evidence.
+ */
+export function withholdListingImage(reasons: readonly string[]): boolean {
+  return reasons.some((reason) => IDENTITY_REJECTION_REASONS.has(reason));
 }
 
 /**

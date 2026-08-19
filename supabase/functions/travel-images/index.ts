@@ -52,12 +52,14 @@ import {
   wikipediaPageFacts,
 } from '../_shared/imageSources.ts';
 import {
+  heldListingImages,
   isNonPhotographicAsset,
   parseImageLead,
   rankPlaceImages,
   validateEntityForPlace,
+  withholdListingImage,
+  LISTING_IMAGE_WITHHELD,
   PLACE_IMAGE_PROBE_SOURCE,
-  PLACE_IMAGE_VALIDATION_VERSION,
   type ImageLead,
   type PlaceImage,
   type WikidataEntityFacts,
@@ -243,10 +245,21 @@ Deno.serve(async (request) => {
     if (owners) owners.push({ placeId, lead }); else titleOwners.set(title, [{ placeId, lead }]);
   };
 
+  /**
+   * Photographs stated by a listing that also stated an identity, held back
+   * until that identity has been judged. See {@link heldListingImages}.
+   */
+  const held = heldListingImages(pending);
+  const isHeld = (placeId: string, title: string) =>
+    held.some((entry) => entry.placeId === placeId && entry.title === title);
+
   // A mapper's own choice of photograph. Already a file title, so no
   // resolution step and no request of its own.
   for (const [title, owners] of grouped.files) {
-    for (const placeId of owners) claimTitle(title, placeId, 'commons-file');
+    for (const placeId of owners) {
+      if (isHeld(placeId, title)) continue;
+      claimTitle(title, placeId, 'commons-file');
+    }
   }
 
   /**
@@ -350,6 +363,26 @@ Deno.serve(async (request) => {
         claimTitle(page.title, placeId, 'wikipedia');
       }
     }
+  }
+
+  /**
+   * The held listing photographs, now that their listing's identity has been
+   * judged.
+   *
+   * A listing whose stated entity was refused does not get to show its picture
+   * anyway. The reasons that count are the ones meaning *"we could not show
+   * this is the same place"* — `withholdListingImage` draws that line, and
+   * deliberately does not draw it at "the item had no `P18`", which says
+   * nothing about identity and is exactly when an editor's own photograph is
+   * most worth having.
+   */
+  for (const { placeId, title } of held) {
+    const reasons = rejections.filter((entry) => entry.placeId === placeId).map((entry) => entry.reason);
+    if (withholdListingImage(reasons)) {
+      rejections.push({ placeId, reason: LISTING_IMAGE_WITHHELD });
+      continue;
+    }
+    claimTitle(title, placeId, 'commons-file');
   }
 
   /**
