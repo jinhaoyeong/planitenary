@@ -1,3 +1,5 @@
+import { safeGetItem, safeSetItem } from './safeLocalStorage';
+
 export type PetDefinition = {
   id: string;
   name: string;
@@ -83,7 +85,7 @@ const notifyPetPackChanged = () => {
 
 export function loadPetPack(): PetDefinition[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = safeGetItem(STORAGE_KEY);
     if (!raw) return DEFAULT_PETS.map((pet) => ({ ...pet }));
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return DEFAULT_PETS.map((pet) => ({ ...pet }));
@@ -96,7 +98,7 @@ export function loadPetPack(): PetDefinition[] {
 
 export function savePetPack(pets: PetDefinition[]) {
   const normalized = pets.map(normalizePet);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  safeSetItem(STORAGE_KEY, JSON.stringify(normalized));
   notifyPetPackChanged();
 }
 

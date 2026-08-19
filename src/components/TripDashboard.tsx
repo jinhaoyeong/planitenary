@@ -10,6 +10,8 @@ import { TripCreateWizard } from './TripCreateWizard';
 import type { TripProfile } from '../lib/tripProfile';
 import type { Itinerary } from '../data';
 import { tripStorageCleanupKeys } from '../lib/tripDeletion';
+import { pruneOrphanTripStorage } from '../lib/tripStorageOrphans';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -20,7 +22,7 @@ const localTripsKey = (userId: string) => `trip-registry-${userId}`;
 
 const readLocalTrips = (userId: string): TripSummary[] => {
   try {
-    const parsed = JSON.parse(localStorage.getItem(localTripsKey(userId)) || '[]');
+    const parsed = JSON.parse(safeGetItem(localTripsKey(userId)) || '[]');
     return Array.isArray(parsed)
       ? parsed.map((trip) => ({ ...trip, status: trip.status === 'archived' ? 'archived' : 'active' }))
       : [];
@@ -44,7 +46,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
 
   const persistLocalTrips = (next: TripSummary[]) => {
     if (!user) return;
-    localStorage.setItem(localTripsKey(user.id), JSON.stringify(next));
+    safeSetItem(localTripsKey(user.id), JSON.stringify(next));
   };
 
   const loadTrips = async () => {
@@ -67,15 +69,22 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       setError('Your trip dashboard could not load. Please try again.');
       console.error('Failed to load trip dashboard:', queryError);
     } else {
-      setTrips((data || []).map((row) => ({
+      const rows = (data || []).map((row) => ({
         id: row.id,
         title: row.title,
         description: row.description,
-        status: row.status === 'archived' ? 'archived' : 'active',
+        status: (row.status === 'archived' ? 'archived' : 'active') as TripSummary['status'],
         updatedAt: row.updated_at,
         dayCount: row.day_count,
         cityCount: row.city_count,
-      })));
+      }));
+      setTrips(rows);
+      // The registry is authoritative here, and it lists archived trips too, so
+      // anything trip-scoped left in this browser for an id outside it belongs
+      // to a trip this account no longer has. Deleting a trip on another device
+      // is what strands those snapshots. Only runs on a successful load — a
+      // failed query must never be mistaken for "owns nothing".
+      pruneOrphanTripStorage(user.id, rows.map((row) => row.id));
     }
     setLoading(false);
   };
@@ -85,7 +94,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
   const openTrip = async (summary: TripSummary) => {
     if (!user) return;
     if (localOnly) {
-      const stored = localStorage.getItem(`itinerary-${user.id}-${summary.id}`);
+      const stored = safeGetItem(`itinerary-${user.id}-${summary.id}`);
       onOpenTrip(stored ? JSON.parse(stored) as Itinerary : createBlankItinerary(summary.id));
       return;
     }
@@ -110,7 +119,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     const summary = toTripSummary(itinerary);
     // Cache locally either way so the handbook opens with its identity intact
     // before any cloud round trip completes.
-    localStorage.setItem(`itinerary-${user.id}-${itinerary.id}`, JSON.stringify(itinerary));
+    safeSetItem(`itinerary-${user.id}-${itinerary.id}`, JSON.stringify(itinerary));
 
     if (localOnly) {
       const next = [summary, ...readLocalTrips(user.id)];
@@ -156,10 +165,10 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     if (localOnly) {
       persistLocalTrips(next);
       const key = `itinerary-${user.id}-${trip.id}`;
-      const raw = localStorage.getItem(key);
+      const raw = safeGetItem(key);
       if (raw) {
         const itinerary = JSON.parse(raw) as Itinerary;
-        localStorage.setItem(key, JSON.stringify({ ...itinerary, name: title }));
+        safeSetItem(key, JSON.stringify({ ...itinerary, name: title }));
       }
       setTrips(next);
       return;
@@ -237,7 +246,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       }
 
       for (const key of tripStorageCleanupKeys(user.id, trip.id)) {
-        localStorage.removeItem(key);
+        safeRemoveItem(key);
       }
       const next = trips.filter((item) => item.id !== trip.id);
       persistLocalTrips(next);

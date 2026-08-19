@@ -1,4 +1,5 @@
 import { CURRENCIES, currencyDecimals, currencyMeta } from './currencyCatalog';
+import { safeGetItem, safeSetItem } from './safeLocalStorage';
 
 const PRIMARY_API_URL = 'https://open.er-api.com/v6/latest/MYR';
 const BACKUP_API_URL = 'https://api.frankfurter.app/latest?from=MYR';
@@ -84,7 +85,7 @@ const readProviderTimestamp = (data: unknown): number | undefined => {
 
 export async function fetchExchangeRates(): Promise<ExchangeRates> {
   const readCache = (): ExchangeRates | null => {
-    const cached = localStorage.getItem(CACHE_KEY);
+    const cached = safeGetItem(CACHE_KEY);
     if (!cached) return null;
     try {
       const data = JSON.parse(cached) as ExchangeRates;
@@ -137,7 +138,7 @@ export async function fetchExchangeRates(): Promise<ExchangeRates> {
       cachedAt: now,
       isLoading: false,
     };
-    localStorage.setItem(CACHE_KEY, JSON.stringify(rates));
+    safeSetItem(CACHE_KEY, JSON.stringify(rates));
     return rates;
   } catch (error) {
     console.error('Failed to fetch exchange rates:', error);

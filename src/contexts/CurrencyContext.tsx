@@ -13,6 +13,7 @@ import { isSupportedCurrency } from '../lib/currencyCatalog';
 import { detectHomeCurrency } from '../lib/locale';
 import { useAuth } from './AuthContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
+import { safeGetItem, safeSetItem } from '../lib/safeLocalStorage';
 
 /**
  * The open trip and the callback that writes a change back into its profile.
@@ -62,7 +63,7 @@ const TRIP_KEY = 'trip-currency';
 const BASE: Currency = 'MYR';
 
 const readCurrency = (key: string, fallback: Currency): Currency => {
-  const saved = localStorage.getItem(key);
+  const saved = safeGetItem(key);
   return saved && isSupportedCurrency(saved) ? saved.toUpperCase() : fallback;
 };
 
@@ -73,7 +74,7 @@ const readCurrency = (key: string, fallback: Currency): Currency => {
  */
 const readDisplayByTrip = (): Record<string, Currency> => {
   try {
-    const raw = localStorage.getItem(DISPLAY_BY_TRIP_KEY);
+    const raw = safeGetItem(DISPLAY_BY_TRIP_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return Object.fromEntries(
@@ -128,13 +129,13 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistDefaults = (home: Currency, trip: Currency) => {
-    localStorage.setItem(HOME_KEY, home);
-    localStorage.setItem(TRIP_KEY, trip);
+    safeSetItem(HOME_KEY, home);
+    safeSetItem(TRIP_KEY, trip);
     setDefaultHome(home);
     setDefaultTrip(trip);
     if (user) {
-      localStorage.setItem(`home-currency-${user.id}`, home);
-      localStorage.setItem(`trip-currency-${user.id}`, trip);
+      safeSetItem(`home-currency-${user.id}`, home);
+      safeSetItem(`trip-currency-${user.id}`, trip);
     }
   };
 
@@ -143,12 +144,12 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     if (binding) {
       const next = { ...displayByTrip, [binding.tripId]: newCurrency };
       setDisplayByTrip(next);
-      localStorage.setItem(DISPLAY_BY_TRIP_KEY, JSON.stringify(next));
+      safeSetItem(DISPLAY_BY_TRIP_KEY, JSON.stringify(next));
       return;
     }
     setDisplayPreference(newCurrency);
-    localStorage.setItem(DISPLAY_KEY, newCurrency);
-    if (user) localStorage.setItem(`selected-currency-${user.id}`, newCurrency);
+    safeSetItem(DISPLAY_KEY, newCurrency);
+    if (user) safeSetItem(`selected-currency-${user.id}`, newCurrency);
   };
 
   const setHomeCurrency = (value: Currency) => {
@@ -217,16 +218,16 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     cloudReadyRef.current = false;
     if (!user) return;
 
-    const accountDisplay = localStorage.getItem(`selected-currency-${user.id}`);
-    const accountHome = localStorage.getItem(`home-currency-${user.id}`);
-    const accountTrip = localStorage.getItem(`trip-currency-${user.id}`);
+    const accountDisplay = safeGetItem(`selected-currency-${user.id}`);
+    const accountHome = safeGetItem(`home-currency-${user.id}`);
+    const accountTrip = safeGetItem(`trip-currency-${user.id}`);
 
     const nextHome = accountHome && isSupportedCurrency(accountHome) ? accountHome.toUpperCase() : defaultHome;
     const nextTrip = accountTrip && isSupportedCurrency(accountTrip) ? accountTrip.toUpperCase() : defaultTrip;
     persistDefaults(nextHome, nextTrip);
     if (accountDisplay && isSupportedCurrency(accountDisplay)) {
       setDisplayPreference(accountDisplay.toUpperCase());
-      localStorage.setItem(DISPLAY_KEY, accountDisplay.toUpperCase());
+      safeSetItem(DISPLAY_KEY, accountDisplay.toUpperCase());
     }
 
     if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) {
@@ -242,8 +243,8 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       // Cloud only stores the display preference; the pair belongs to the trip.
       if (cloudCurrency && isSupportedCurrency(cloudCurrency)) {
         setDisplayPreference(cloudCurrency);
-        localStorage.setItem(DISPLAY_KEY, cloudCurrency);
-        localStorage.setItem(`selected-currency-${user.id}`, cloudCurrency);
+        safeSetItem(DISPLAY_KEY, cloudCurrency);
+        safeSetItem(`selected-currency-${user.id}`, cloudCurrency);
       }
       cloudReadyRef.current = true;
     });
@@ -258,9 +259,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   // profile, and its wallet view lives with the trip.
   useEffect(() => {
     if (!user || !cloudReadyRef.current) return;
-    localStorage.setItem(`selected-currency-${user.id}`, displayPreference);
-    localStorage.setItem(`home-currency-${user.id}`, defaultHome);
-    localStorage.setItem(`trip-currency-${user.id}`, defaultTrip);
+    safeSetItem(`selected-currency-${user.id}`, displayPreference);
+    safeSetItem(`home-currency-${user.id}`, defaultHome);
+    safeSetItem(`trip-currency-${user.id}`, defaultTrip);
     if (!isSupabaseConfigured() || isDemoUser || isLocalTestUser) return;
     const timeoutId = window.setTimeout(async () => {
       const { error } = await supabase.from('user_preferences').upsert({

@@ -73,6 +73,7 @@ import { countryTimezone } from '../lib/destinations';
 import { convertCurrency, formatCurrency, hasRate } from '../lib/currency';
 import { useCurrency } from '../contexts/CurrencyContext';
 import { mergeAdmission } from '../../supabase/functions/_shared/placeCost';
+import { safeGetItem, safeSetItem } from '../lib/safeLocalStorage';
 
 interface DestinationDiscoveryPanelProps {
   itinerary: Itinerary;
@@ -1357,14 +1358,14 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const [desktopMode, setDesktopMode] = useState<'deck' | 'list'>(() => {
     if (typeof window === 'undefined') return 'deck';
     try {
-      return window.localStorage.getItem(DESKTOP_REVIEW_MODE_KEY) === 'list' ? 'list' : 'deck';
+      return safeGetItem(DESKTOP_REVIEW_MODE_KEY) === 'list' ? 'list' : 'deck';
     } catch {
       return 'deck';
     }
   });
   useEffect(() => {
     try {
-      window.localStorage.setItem(DESKTOP_REVIEW_MODE_KEY, desktopMode);
+      safeSetItem(DESKTOP_REVIEW_MODE_KEY, desktopMode);
     } catch {
       // Preference persistence is optional; the in-memory choice still works.
     }

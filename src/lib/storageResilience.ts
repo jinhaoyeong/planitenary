@@ -1,6 +1,20 @@
 import type { DayPhoto, Itinerary } from '../data';
+import {
+  HISTORY_SOFT_LIMIT_BYTES,
+  approximateEntryBytes,
+  safeGetItem,
+  safeRemoveItem,
+  safeSetItem,
+  safeSetItemWithBudget,
+} from './safeLocalStorage';
 
-const HISTORY_LIMIT = 30;
+/**
+ * Recovery history is a convenience, not a record. It used to keep 30 complete
+ * itinerary snapshots per key, which is how a single deleted trip left ~4 MB
+ * behind and exhausted the origin quota. Server Change History is the real
+ * record; this cache stays small and is additionally capped by bytes.
+ */
+const HISTORY_LIMIT = 5;
 
 interface LocalTripEntry {
   id: string;
@@ -11,7 +25,7 @@ const getLocalTripsKey = (userId: string) => `local-trips-${userId}`;
 
 const readLocalTrips = (userId: string): LocalTripEntry[] => {
   try {
-    const parsed = JSON.parse(localStorage.getItem(getLocalTripsKey(userId)) || '[]') as unknown;
+    const parsed = JSON.parse(safeGetItem(getLocalTripsKey(userId)) || '[]') as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((entry): entry is LocalTripEntry =>
       Boolean(entry && typeof entry === 'object' && typeof (entry as LocalTripEntry).id === 'string')
@@ -27,12 +41,12 @@ export const listLocalTrips = (userId: string): LocalTripEntry[] =>
 export const upsertLocalTrip = (userId: string, itinerary: Pick<Itinerary, 'id'>) => {
   const entries = readLocalTrips(userId).filter((entry) => entry.id !== itinerary.id);
   entries.push({ id: itinerary.id, updatedAt: new Date().toISOString() });
-  localStorage.setItem(getLocalTripsKey(userId), JSON.stringify(entries));
+  safeSetItem(getLocalTripsKey(userId), JSON.stringify(entries));
 };
 
 export const removeLocalTrip = (userId: string, tripId: string) => {
   const entries = readLocalTrips(userId).filter((entry) => entry.id !== tripId);
-  localStorage.setItem(getLocalTripsKey(userId), JSON.stringify(entries));
+  safeSetItem(getLocalTripsKey(userId), JSON.stringify(entries));
 };
 
 interface StorageHistoryEntry {
@@ -67,7 +81,7 @@ const scoreRawSnapshot = (raw: string | null): number => {
 };
 
 const parseHistory = (key: string): StorageHistoryEntry[] => {
-  const raw = localStorage.getItem(getHistoryKey(key));
+  const raw = safeGetItem(getHistoryKey(key));
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as StorageHistoryEntry[];
@@ -78,38 +92,31 @@ const parseHistory = (key: string): StorageHistoryEntry[] => {
   }
 };
 
-const isQuotaExceededError = (error: unknown): boolean => {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { name?: unknown; code?: unknown };
-  return candidate.name === 'QuotaExceededError' || candidate.code === 22 || candidate.code === 1014;
-};
-
 const writeHistory = (key: string, entries: StorageHistoryEntry[]) => {
+  const historyKey = getHistoryKey(key);
+
   if (entries.length === 0) {
-    localStorage.removeItem(getHistoryKey(key));
+    safeRemoveItem(historyKey);
     return;
   }
 
-  const historyKey = getHistoryKey(key);
-  // History is a recovery aid, not the primary itinerary. A large itinerary or
-  // photo-rich snapshot must never make the main save operation crash. Retry
-  // with progressively smaller history windows, then drop only this optional
-  // history key if the browser quota is still exhausted.
-  const retrySizes = [HISTORY_LIMIT, 10, 3, 1];
-  for (const size of retrySizes) {
-    try {
-      localStorage.setItem(historyKey, JSON.stringify(entries.slice(0, size)));
-      return;
-    } catch (error) {
-      if (!isQuotaExceededError(error)) throw error;
-    }
+  // History is a recovery aid, not the primary itinerary. It is bounded by
+  // bytes before it is ever offered to the browser, so a photo-rich trip
+  // cannot quietly consume the origin quota one snapshot at a time.
+  const withinByteBudget = (size: number): boolean => {
+    const serialized = JSON.stringify(entries.slice(0, size));
+    return approximateEntryBytes(historyKey, serialized) <= HISTORY_SOFT_LIMIT_BYTES;
+  };
+
+  const sizes = [HISTORY_LIMIT, 3, 1].filter((size) => size <= entries.length);
+  for (const size of sizes) {
+    if (!withinByteBudget(size)) continue;
+    if (safeSetItem(historyKey, JSON.stringify(entries.slice(0, size))).ok) return;
   }
 
-  try {
-    localStorage.removeItem(historyKey);
-  } catch {
-    // Best effort: the primary itinerary remains more important than history.
-  }
+  // Either every window is too large or the browser is full. History is the
+  // first thing Planitenary gives up; the primary value matters more.
+  safeRemoveItem(historyKey);
 };
 
 const pushHistorySnapshot = (key: string, raw: string) => {
@@ -120,7 +127,7 @@ const pushHistorySnapshot = (key: string, raw: string) => {
 };
 
 const getRestoreCandidateRaw = (key: string): string | null => {
-  const backupRaw = localStorage.getItem(`${key}-backup`);
+  const backupRaw = safeGetItem(`${key}-backup`);
   const history = parseHistory(key);
   const candidates = [backupRaw, ...history.map((entry) => entry.raw)].filter((raw): raw is string => typeof raw === 'string');
   if (candidates.length === 0) return null;
@@ -160,7 +167,7 @@ export const loadFromStorage = <T>(key: string, options?: StorageLoadOptions<T>)
     }
   };
 
-  const primary = parse(localStorage.getItem(key));
+  const primary = parse(safeGetItem(key));
   if (primary && !options?.preferRecovery) return primary;
 
   const backupRaw = getRestoreCandidateRaw(key);
@@ -171,69 +178,70 @@ export const loadFromStorage = <T>(key: string, options?: StorageLoadOptions<T>)
   }
   if (!backup) return null;
 
-  localStorage.setItem(key, backupRaw as string);
+  // Reading must never write its way into a crash. Promoting the recovery
+  // snapshot back to the primary slot is an optimisation; on a full origin it
+  // simply does not happen and the caller still receives the recovered value.
+  safeSetItem(key, backupRaw as string);
   return backup;
 };
 
 export const saveToStorage = <T>(key: string, value: T) => {
   const serialized = JSON.stringify(value);
-  const currentRaw = localStorage.getItem(key);
+  const currentRaw = safeGetItem(key);
 
-  try {
-    if (currentRaw && currentRaw !== serialized) {
-      // Preserve the previous good value as the immediate restore target.
-      localStorage.setItem(`${key}-backup`, currentRaw);
-      pushHistorySnapshot(key, currentRaw);
-    } else if (!localStorage.getItem(`${key}-backup`)) {
-      localStorage.setItem(`${key}-backup`, serialized);
-    }
-
-    localStorage.setItem(key, serialized);
-  } catch (error) {
-    if (!isQuotaExceededError(error)) throw error;
-
-    // Recovery metadata is optional. Remove it before retrying the primary
-    // save so a growing itinerary cannot blank the app merely because its
-    // backup/history occupied the remaining browser quota.
-    try {
-      localStorage.removeItem(getHistoryKey(key));
-      localStorage.removeItem(`${key}-backup`);
-      localStorage.setItem(key, serialized);
-      return;
-    } catch (retryError) {
-      if (!isQuotaExceededError(retryError)) throw retryError;
-      // The current itinerary remains available in memory and cloud sync can
-      // still proceed. Persistence is best-effort and must never crash React.
-    }
+  if (currentRaw && currentRaw !== serialized) {
+    // Preserve the previous good value as the immediate restore target.
+    safeSetItem(`${key}-backup`, currentRaw);
+    pushHistorySnapshot(key, currentRaw);
+  } else if (!safeGetItem(`${key}-backup`)) {
+    safeSetItem(`${key}-backup`, serialized);
   }
+
+  if (safeSetItemWithBudget(key, serialized, { protectedKeys: [`${key}-backup`] }).ok) return;
+
+  // Recovery metadata is optional. Drop this key's own backup and history and
+  // retry once, so a growing itinerary cannot fail to save merely because its
+  // recovery data occupied the remaining browser quota.
+  safeRemoveItem(getHistoryKey(key));
+  safeRemoveItem(`${key}-backup`);
+  safeSetItem(key, serialized);
+
+  // If that still failed the value remains in memory and the server stays
+  // authoritative. Persistence is best-effort and never crashes React.
 };
 
 export const writeRawToStorage = (key: string, raw: string | null, options?: { preserveCurrent?: boolean }) => {
   const preserveCurrent = options?.preserveCurrent ?? true;
-  const currentRaw = localStorage.getItem(key);
+  const currentRaw = safeGetItem(key);
 
   if (preserveCurrent && currentRaw && currentRaw !== raw) {
-    localStorage.setItem(`${key}-backup`, currentRaw);
+    safeSetItem(`${key}-backup`, currentRaw);
     pushHistorySnapshot(key, currentRaw);
   }
 
   if (raw === null) {
-    localStorage.removeItem(key);
+    safeRemoveItem(key);
+    // Clearing without preserving the current value is a deletion, not an
+    // edit. Leaving the backup and history behind is exactly what stranded
+    // multi-megabyte snapshots for trips that no longer exist.
+    if (!preserveCurrent) {
+      safeRemoveItem(`${key}-backup`);
+      safeRemoveItem(getHistoryKey(key));
+    }
     return;
   }
 
-  if (!localStorage.getItem(`${key}-backup`)) {
-    localStorage.setItem(`${key}-backup`, raw);
+  if (!safeGetItem(`${key}-backup`)) {
+    safeSetItem(`${key}-backup`, raw);
   }
 
-  localStorage.setItem(key, raw);
+  safeSetItemWithBudget(key, raw, { protectedKeys: [`${key}-backup`] });
 };
 
 export const forceRestoreFromBackup = (key: string) => {
   const backupRaw = getRestoreCandidateRaw(key);
   if (!backupRaw) return false;
-  localStorage.setItem(key, backupRaw);
-  return true;
+  return safeSetItem(key, backupRaw).ok;
 };
 
 export const forceRestoreTripData = (itineraryId: string) => {
@@ -302,11 +310,11 @@ export const createLatestBackup = async (itineraryId: string) => {
   const keyMap = getTripStorageKeyMap(itineraryId);
   for (const [datasetId, key] of Object.entries(keyMap) as [RestoreDatasetId, string][]) {
     if (datasetId === 'photos') continue;
-    const current = localStorage.getItem(key);
+    const current = safeGetItem(key);
     if (current === null) {
-      localStorage.removeItem(`${key}-backup`);
+      safeRemoveItem(`${key}-backup`);
     } else {
-      localStorage.setItem(`${key}-backup`, current);
+      safeSetItem(`${key}-backup`, current);
       pushHistorySnapshot(key, current);
     }
   }
@@ -314,8 +322,8 @@ export const createLatestBackup = async (itineraryId: string) => {
     const { getAllPhotosForItinerary } = await import('./photoStorage');
     const photos = await getAllPhotosForItinerary(itineraryId);
     const serialized = JSON.stringify(photos);
-    localStorage.setItem(keyMap.photos, serialized);
-    localStorage.setItem(`${keyMap.photos}-backup`, serialized);
+    safeSetItem(keyMap.photos, serialized);
+    safeSetItem(`${keyMap.photos}-backup`, serialized);
     pushHistorySnapshot(keyMap.photos, serialized);
     return true;
   } catch {
@@ -334,13 +342,13 @@ export const getRestorePreview = async (itineraryId: string): Promise<RestoreDat
   };
 
   const photosKey = keyMap.photos;
-  const photosPrimaryRaw = localStorage.getItem(photosKey);
+  const photosPrimaryRaw = safeGetItem(photosKey);
   if (!photosPrimaryRaw) {
     try {
       const { getAllPhotosForItinerary } = await import('./photoStorage');
       const photos = await getAllPhotosForItinerary(itineraryId);
       if (Object.keys(photos).length > 0) {
-        localStorage.setItem(photosKey, JSON.stringify(photos));
+        safeSetItem(photosKey, JSON.stringify(photos));
       }
     } catch {
       // keep preview available for non-photo datasets
@@ -349,7 +357,7 @@ export const getRestorePreview = async (itineraryId: string): Promise<RestoreDat
 
   return (Object.keys(keyMap) as RestoreDatasetId[]).map((id) => {
     const key = keyMap[id];
-    const primary = localStorage.getItem(key);
+    const primary = safeGetItem(key);
     const backup = getRestoreCandidateRaw(key);
     const historyCount = parseHistory(key).length;
     const summarizer = id === 'photos' ? summarizePhotosSnapshot : summarizeRaw;
@@ -378,7 +386,7 @@ export const restoreSelectedTripData = async (itineraryId: string, datasets: Res
     const restored = forceRestoreFromBackup(keyMap.photos);
     if (restored) {
       try {
-        const raw = localStorage.getItem(keyMap.photos);
+        const raw = safeGetItem(keyMap.photos);
         const parsed = raw ? (JSON.parse(raw) as Record<number, DayPhoto[]>) : {};
         const { restorePhotosForItinerary } = await import('./photoStorage');
         await restorePhotosForItinerary(itineraryId, parsed);
@@ -397,33 +405,33 @@ export const createRestoreSnapshot = async (itineraryId: string) => {
   try {
     const { getAllPhotosForItinerary } = await import('./photoStorage');
     const photos = await getAllPhotosForItinerary(itineraryId);
-    localStorage.setItem(keyMap.photos, JSON.stringify(photos));
+    safeSetItem(keyMap.photos, JSON.stringify(photos));
   } catch {
     // continue snapshot for non-photo data
   }
   const snapshot: Record<string, string | null> = {};
   for (const key of Object.values(keyMap)) {
-    snapshot[key] = localStorage.getItem(key);
-    snapshot[`${key}-backup`] = localStorage.getItem(`${key}-backup`);
+    snapshot[key] = safeGetItem(key);
+    snapshot[`${key}-backup`] = safeGetItem(`${key}-backup`);
   }
   const snapshotKey = `restore-snapshot-${itineraryId}`;
-  localStorage.setItem(snapshotKey, JSON.stringify({ createdAt: new Date().toISOString(), data: snapshot }));
+  safeSetItem(snapshotKey, JSON.stringify({ createdAt: new Date().toISOString(), data: snapshot }));
   return snapshotKey;
 };
 
 export const restoreLastSnapshot = async (itineraryId: string) => {
   const snapshotKey = `restore-snapshot-${itineraryId}`;
-  const raw = localStorage.getItem(snapshotKey);
+  const raw = safeGetItem(snapshotKey);
   if (!raw) return false;
   try {
     const parsed = JSON.parse(raw) as { data?: Record<string, string | null> };
     const data = parsed.data || {};
     for (const [key, value] of Object.entries(data)) {
-      if (value === null) localStorage.removeItem(key);
-      else localStorage.setItem(key, value);
+      if (value === null) safeRemoveItem(key);
+      else safeSetItem(key, value);
     }
     const photosKey = `photos-${itineraryId}`;
-    const photosRaw = localStorage.getItem(photosKey);
+    const photosRaw = safeGetItem(photosKey);
     if (photosRaw) {
       try {
         const { restorePhotosForItinerary } = await import('./photoStorage');

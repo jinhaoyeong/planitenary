@@ -5,6 +5,7 @@ import {
   mergeTripSettings,
 } from './tripSettings';
 import type { ThemeMode, TripAppSettings, TripThemeSettings } from './tripSettings';
+import { safeGetItem, safeSetItem } from './safeLocalStorage';
 
 export interface ShellThemePalettes {
   light: TripThemeSettings;
@@ -25,17 +26,17 @@ export const saveShellTheme = (userId: string | null | undefined, palettes: Shel
     dark: { ...DEFAULT_DARK_THEME, ...palettes.dark },
   };
   const payload = JSON.stringify(next);
-  localStorage.setItem(shellThemeKey(userId), payload);
+  safeSetItem(shellThemeKey(userId), payload);
   // Always mirror to the anonymous key so Dashboard can load before/without user id.
-  if (userId) localStorage.setItem(shellThemeKey(null), payload);
+  if (userId) safeSetItem(shellThemeKey(null), payload);
   return next;
 };
 
 export const loadShellTheme = (userId?: string | null): ShellThemePalettes => {
   try {
     const raw =
-      localStorage.getItem(shellThemeKey(userId)) ||
-      localStorage.getItem(shellThemeKey(null));
+      safeGetItem(shellThemeKey(userId)) ||
+      safeGetItem(shellThemeKey(null));
     if (!raw) {
       return {
         light: { ...DEFAULT_LIGHT_THEME },

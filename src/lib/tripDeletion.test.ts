@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   TRIP_REMOTE_DELETE_TABLES,
   tripStorageCleanupKeys,
+  tripStorageKeys,
 } from './tripDeletion';
 
 describe('trip deletion contracts', () => {
@@ -18,30 +19,28 @@ describe('trip deletion contracts', () => {
     expect(TRIP_REMOTE_DELETE_TABLES).not.toContain('trip_settings');
   });
 
-  it('cleans the user-scoped itinerary and all resilient local snapshots', () => {
-    expect(tripStorageCleanupKeys('user-1', 'trip-7')).toEqual([
-      'itinerary-user-1-trip-7',
-      'itinerary-user-1-trip-7-backup',
-      'itinerary-user-1-trip-7-history',
-      'budget-trip-7',
-      'budget-trip-7-backup',
-      'budget-trip-7-history',
-      'budget-meta-trip-7',
-      'budget-meta-trip-7-backup',
-      'budget-meta-trip-7-history',
-      'checklist-data-trip-7',
-      'checklist-data-trip-7-backup',
-      'checklist-data-trip-7-history',
-      'drafts-trip-7',
-      'drafts-trip-7-backup',
-      'drafts-trip-7-history',
-      'trip-settings-trip-7',
-      'trip-settings-trip-7-backup',
-      'trip-settings-trip-7-history',
-      'photos-trip-7',
-      'photos-trip-7-backup',
-      'photos-trip-7-history',
-      'budget-trip-7-cleared',
-    ]);
+  it('cleans every itinerary key shape, including the legacy unscoped one', () => {
+    const keys = tripStorageKeys('user-1', 'trip-7');
+    // Handbook still writes the unscoped key; leaving it behind is what
+    // stranded multi-megabyte snapshots for trips that no longer exist.
+    expect(keys).toContain('itinerary-user-1-trip-7');
+    expect(keys).toContain('itinerary-trip-7');
+    expect(keys).toContain('itinerary-demo-trip-7');
+  });
+
+  it('cleans the primary, backup and history slot of every trip-scoped key', () => {
+    const cleanup = tripStorageCleanupKeys('user-1', 'trip-7');
+    for (const base of tripStorageKeys('user-1', 'trip-7')) {
+      expect(cleanup).toContain(base);
+      expect(cleanup).toContain(`${base}-backup`);
+      expect(cleanup).toContain(`${base}-history`);
+    }
+    expect(cleanup).toContain('budget-trip-7-cleared');
+  });
+
+  it('never reaches outside the trip being deleted', () => {
+    const cleanup = tripStorageCleanupKeys('user-1', 'trip-7');
+    expect(cleanup.every((key) => key.includes('trip-7'))).toBe(true);
+    expect(cleanup).not.toContain('itinerary-user-1-trip-8');
   });
 });

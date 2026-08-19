@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import type { Session, User } from '@supabase/supabase-js';
 import { getMfaStatus, verifyTotpCode } from '../lib/authSecurity';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
 
 interface AuthContextType {
   session: Session | null;
@@ -89,7 +90,7 @@ const hasPasswordRecoveryUrl = () => {
 };
 
 const readLocalAuthUsers = (): LocalAuthUser[] => {
-  const raw = localStorage.getItem(LOCAL_AUTH_USERS_KEY);
+  const raw = safeGetItem(LOCAL_AUTH_USERS_KEY);
   if (!raw) return [];
 
   try {
@@ -102,7 +103,7 @@ const readLocalAuthUsers = (): LocalAuthUser[] => {
 };
 
 const writeLocalAuthUsers = (users: LocalAuthUser[]) => {
-  localStorage.setItem(LOCAL_AUTH_USERS_KEY, JSON.stringify(users));
+  safeSetItem(LOCAL_AUTH_USERS_KEY, JSON.stringify(users));
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -166,7 +167,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [applyMfaStatus, session]);
 
   useEffect(() => {
-    const hasDemoSession = localStorage.getItem(DEMO_STORAGE_KEY) === 'true';
+    const hasDemoSession = safeGetItem(DEMO_STORAGE_KEY) === 'true';
     const hasAuthCallback = hasAuthCallbackUrl();
     if (hasDemoSession && !hasAuthCallback) {
       setSession(null);
@@ -182,7 +183,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     if (import.meta.env.DEV && !hasAuthCallback) {
-      const localSessionEmail = localStorage.getItem(LOCAL_AUTH_SESSION_KEY);
+      const localSessionEmail = safeGetItem(LOCAL_AUTH_SESSION_KEY);
       if (localSessionEmail) {
         setSession(null);
         setUser(createLocalTestUser(localSessionEmail));
@@ -197,7 +198,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     } else {
       // Local test sessions are development-only and must never survive into production.
-      localStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
+      safeRemoveItem(LOCAL_AUTH_SESSION_KEY);
     }
 
     if (!isSupabaseConfigured()) {
@@ -249,8 +250,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [applyMfaStatus]);
 
   const signInDemo = () => {
-    localStorage.setItem(DEMO_STORAGE_KEY, 'true');
-    localStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
+    safeSetItem(DEMO_STORAGE_KEY, 'true');
+    safeRemoveItem(LOCAL_AUTH_SESSION_KEY);
     setSession(null);
     setUser(createDemoUser());
     setIsDemoUser(true);
@@ -274,8 +275,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return { success: false, error: 'Incorrect email or password.' };
     }
 
-    localStorage.removeItem(DEMO_STORAGE_KEY);
-    localStorage.setItem(LOCAL_AUTH_SESSION_KEY, matchedUser.email);
+    safeRemoveItem(DEMO_STORAGE_KEY);
+    safeSetItem(LOCAL_AUTH_SESSION_KEY, matchedUser.email);
     setSession(null);
     setUser(createLocalTestUser(matchedUser.email));
     setIsDemoUser(false);
@@ -300,8 +301,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const nextUsers = [...users, { email: normalizedEmail, password }];
     writeLocalAuthUsers(nextUsers);
-    localStorage.removeItem(DEMO_STORAGE_KEY);
-    localStorage.setItem(LOCAL_AUTH_SESSION_KEY, normalizedEmail);
+    safeRemoveItem(DEMO_STORAGE_KEY);
+    safeSetItem(LOCAL_AUTH_SESSION_KEY, normalizedEmail);
     setSession(null);
     setUser(createLocalTestUser(normalizedEmail));
     setIsDemoUser(false);
@@ -333,8 +334,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
-    localStorage.removeItem(DEMO_STORAGE_KEY);
-    localStorage.removeItem(LOCAL_AUTH_SESSION_KEY);
+    safeRemoveItem(DEMO_STORAGE_KEY);
+    safeRemoveItem(LOCAL_AUTH_SESSION_KEY);
     setSession(null);
     setUser(null);
     setIsDemoUser(false);

@@ -51,6 +51,7 @@ import {
   type BudgetTier,
   type TripProfile,
 } from '../lib/tripProfile';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
 
 interface TripCreateWizardProps {
   open: boolean;
@@ -78,8 +79,8 @@ interface WizardDraft {
  */
 const readDraft = (): WizardDraft | null => {
   try {
-    const currentRaw = localStorage.getItem(DRAFT_KEY);
-    const raw = currentRaw ?? localStorage.getItem(LEGACY_DRAFT_KEY);
+    const currentRaw = safeGetItem(DRAFT_KEY);
+    const raw = currentRaw ?? safeGetItem(LEGACY_DRAFT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<WizardDraft>;
     const profile = sanitizeTripProfile(parsed.profile);
@@ -99,7 +100,7 @@ const readDraft = (): WizardDraft | null => {
   }
 };
 
-const clearDraft = () => localStorage.removeItem(DRAFT_KEY);
+const clearDraft = () => safeRemoveItem(DRAFT_KEY);
 
 /** True once the traveller has actually answered something worth keeping. */
 const isWorthSaving = (draft: Omit<WizardDraft, 'savedAt'>) =>
@@ -167,7 +168,7 @@ export function TripCreateWizard({
     if (!open) return;
     const draft = { stepIndex, profile, countryCode, countryName, currencyTouched };
     if (!isWorthSaving(draft)) return;
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+    safeSetItem(DRAFT_KEY, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
   }, [open, stepIndex, profile, countryCode, countryName, currencyTouched]);
 
   const startOver = () => {

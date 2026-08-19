@@ -79,6 +79,7 @@ import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
 import defaultTravelHero from './assets/default-travel-hero.jpg';
+import { safeGetItem, safeSetItem } from './lib/safeLocalStorage';
 
 const heroImages = {
   'cq-cd': cqCdHero
@@ -148,9 +149,9 @@ function App() {
   const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'profile' | 'settings'>('itinerary');
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('hasVisited'));
+  const [showWelcome, setShowWelcome] = useState(() => !safeGetItem('hasVisited'));
   const [showPets, setShowPets] = useState(() => {
-    const stored = localStorage.getItem('showPets');
+    const stored = safeGetItem('showPets');
     return stored !== null ? stored === 'true' : false;
   });
   const [showRestoreModal, setShowRestoreModal] = useState(false);
@@ -235,13 +236,13 @@ function App() {
 
   const handleStart = () => {
     setShowWelcome(false);
-    localStorage.setItem('hasVisited', 'true');
+    safeSetItem('hasVisited', 'true');
   };
 
   const togglePets = () => {
     setShowPets(prev => {
       const next = !prev;
-      localStorage.setItem('showPets', next.toString());
+      safeSetItem('showPets', next.toString());
       return next;
     });
   };
@@ -761,7 +762,7 @@ function App() {
     setRestorePreview(preview);
     setSelectedRestoreIds(preview.filter((item) => item.hasBackup).map((item) => item.id));
     setRestorePushCloud(false);
-    setHasRestoreSnapshot(Boolean(localStorage.getItem(`restore-snapshot-${activeItineraryId}`)));
+    setHasRestoreSnapshot(Boolean(safeGetItem(`restore-snapshot-${activeItineraryId}`)));
     await loadCloudBackupVersions();
     setShowRestoreModal(true);
   };

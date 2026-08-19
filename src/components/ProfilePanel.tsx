@@ -4,6 +4,7 @@ import { ImagePlus, LogOut, Save, Trash2, UserRound, Edit3 } from 'lucide-react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { SecurityPanel } from './SecurityPanel';
+import { safeGetItem, safeSetItem } from '../lib/safeLocalStorage';
 
 interface UserProfileData {
   displayName: string;
@@ -41,7 +42,7 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
 
     const profileKey = `profile-${user.id}`;
     const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-    const savedRaw = localStorage.getItem(profileKey);
+    const savedRaw = safeGetItem(profileKey);
 
     let savedProfile: Partial<UserProfileData> = {};
     if (savedRaw) {
@@ -100,7 +101,7 @@ export function ProfilePanel({ onEditHomeHero }: { onEditHomeHero?: () => void }
       avatarImage: profile.avatarImage,
     };
 
-    localStorage.setItem(profileKey, JSON.stringify(nextProfile));
+    safeSetItem(profileKey, JSON.stringify(nextProfile));
 
     if (!isDemoUser && !isLocalTestUser && isSupabaseConfigured()) {
       const { error } = await supabase.auth.updateUser({

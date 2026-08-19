@@ -4,6 +4,7 @@ import { Plus, Link as LinkIcon, Trash2, CheckCircle2, Edit2, Save, X, ExternalL
 import { supabase, invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { describeImport, recogniseLink } from '../lib/sharedLinks';
+import { safeGetItem, safeSetItem } from '../lib/safeLocalStorage';
 
 type DraftItem = {
   id: string;
@@ -180,17 +181,17 @@ export const Draft = ({
   const storageKey = `drafts-${itinerary.id}`;
   const fallbackDraftStoreId = `drafts-${itinerary.id}`;
   const [drafts, setDrafts] = useState<DraftItem[]>(() => {
-    return safeParseDrafts(localStorage.getItem(storageKey));
+    return safeParseDrafts(safeGetItem(storageKey));
   });
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify(drafts));
+      safeSetItem(storageKey, JSON.stringify(drafts));
     } catch (error) {
       console.error('Failed to persist drafts, retrying with optimized media', error);
       try {
         const withoutInlineMedia = drafts.map(stripInlineMediaFromDraft);
-        localStorage.setItem(storageKey, JSON.stringify(withoutInlineMedia));
+        safeSetItem(storageKey, JSON.stringify(withoutInlineMedia));
       } catch (secondError) {
         console.error('Failed to persist drafts after optimization', secondError);
       }
@@ -657,7 +658,7 @@ export const Draft = ({
       })
     };
     onItineraryChange?.(updatedItinerary);
-    localStorage.setItem(`itinerary-${itinerary.id}`, JSON.stringify(updatedItinerary));
+    safeSetItem(`itinerary-${itinerary.id}`, JSON.stringify(updatedItinerary));
     removeDraft(item.id, { skipConfirm: true });
   };
 
