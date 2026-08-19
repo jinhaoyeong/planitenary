@@ -1,3 +1,7 @@
+// MUST stay the first import. Supabase decides whether localStorage is usable
+// inside createClient and memoises that answer; reclaiming space afterwards is
+// too late and the session silently falls back to an empty memory store.
+import './bootstrap'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource/instrument-sans/400.css';
