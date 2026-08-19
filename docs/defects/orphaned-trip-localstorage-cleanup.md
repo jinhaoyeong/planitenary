@@ -155,3 +155,79 @@ asserts hydration still returns the trip and nothing throws.
 - `src/components/Dashboard.tsx` is dead code (imported nowhere) that duplicates
   trip-deletion logic. It benefits from the `writeRawToStorage` fix but should be
   deleted rather than revived.
+
+---
+
+## Corrections to this record (2026-08-19, from the live frozen profile)
+
+Two things above were wrong and are corrected here rather than edited away.
+
+**1. The sizes were understated 2×.** The original figures were UTF-16 *character*
+counts, not bytes. Measured on the profile:
+
+| key | bytes |
+| --- | --- |
+| `itinerary-<userId>-trip-82522acd…-history` | 7,921,946 |
+| `itinerary-<userId>-trip-b8479169…-history` | 1,061,766 |
+| `itinerary-<userId>-trip-82522acd…-backup` | 307,630 |
+| origin total | 10,485,716 of a ~10,485,760 ceiling (~44 bytes free) |
+
+Chrome's 5 MiB localStorage quota is counted in UTF-16 code units, so the real
+ceiling is ~10.49 MB under the byte accounting this codebase uses. The
+`LOCAL_STORAGE_SOFT_LIMIT_BYTES = 3_000_000` budget is therefore more
+conservative than intended, not less. No code change needed.
+
+**2. The root cause attribution was wrong.** This record blamed the legacy
+unscoped `itinerary-${tripId}` key that `Handbook.tsx` writes. The actual
+production orphans were **user-scoped** — `itinerary-f6c86c71-…-trip-82522acd-…`
+— a shape `tripStorageCleanupKeys` already covered. They were stranded by a
+deletion that predated the history-aware cleanup, or by deletion on another
+device, not by the legacy shape. The legacy-shape gap is real and worth having
+closed, but it did not cause this incident. `trip-82522acd…`, `trip-b8479169…`
+and `trip-7cc6aef2…` were all confirmed absent from `trip_registry`, so they were
+genuine orphans.
+
+## The blank screen and the signed-out session had one shared cause
+
+Confirmed in `@supabase/auth-js`, not in Planitenary. `supportsLocalStorage()`
+(`lib/helpers.js:48-61`) tests writability by *writing* a probe key. On a full
+origin that throws, the answer is memoised for the page, and
+`GoTrueClient.js:167` swaps to an **empty** in-memory store — so a valid
+`sb-*-auth-token` is never read. That is why the profile appeared signed out
+while holding a good session, and it happens inside `createClient` at
+module-import time, before React.
+
+This is what made `6d2a78a` alone insufficient: it stopped the crash, but the
+session would still not restore, so the trip registry would never load and the
+ownership-aware pruner would never run. `c8f9837` adds a pre-auth reclaim
+ordered as `main.tsx`'s first import to break that deadlock.
+
+## Production acceptance — PASSED
+
+Deployed SHA `c8f9837`, bundle `index-OUTkjJwr.js` (verified as the bundle that
+actually executed, not merely the one deployed — the PWA uses
+`registerType: 'autoUpdate'`, so a stale precache could otherwise have produced a
+false negative).
+
+| Gate | Result |
+| --- | --- |
+| App renders | PASS |
+| Auth restores as `f6c86c71…` | PASS |
+| Dashboard lists owned trips | PASS |
+| Orphan history/backup reclaimed | PASS — no `82522acd` / `b8479169` / `7cc6aef2` key remains |
+| Auth token protected | PASS — present and never targeted |
+| Planitenary storage under soft limit | PASS — 180,812 B against a 3,000,000 B budget |
+| Manual site-data clearing required | NONE |
+| Server state unchanged | PASS — 5 trips, Budget `updated_at` 02:26:04.292+00, ledger still 16, 0 open rows |
+
+Origin went from **10,485,716 B / 97 keys** to **191,452 B / 42 keys** with no
+manual intervention.
+
+### Residual, not a blocker
+
+`itinerary-demo-cq-cd-history` (103,712 B) and the `itinerary-account-cq-cd*`
+family survive. They sit in the demo and signed-out (`account`) namespaces, whose
+remainders do not parse as trip ids, so the pruner deliberately leaves them. That
+is the conservative rule working as designed. They are small and bounded; tightening
+them would mean teaching the parser about non-trip namespaces, which is a separate
+change.
