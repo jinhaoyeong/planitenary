@@ -36,6 +36,7 @@ import { expiryFor, json, preflight } from '../_shared/providers.ts';
 import { authenticateRequest } from '../_shared/auth.ts';
 import { shouldFetchEvidence } from '../_shared/cacheKeys.ts';
 import {
+  readCanonicalPlaceCoordinates,
   readCanonicalPlaceIds,
   readImageProbes,
   readPlaceImages,
@@ -47,13 +48,16 @@ import {
   commonsCategoryFileTitles,
   commonsImages,
   groupLeads,
-  wikidataImageTitles,
+  wikidataEntityFacts,
   wikipediaImageTitles,
 } from '../_shared/imageSources.ts';
 import {
+  isNonPhotographicAsset,
   parseImageLead,
   rankPlaceImages,
+  validateEntityForPlace,
   PLACE_IMAGE_PROBE_SOURCE,
+  PLACE_IMAGE_VALIDATION_VERSION,
   type ImageLead,
   type PlaceImage,
 } from '../_shared/placeImages.ts';
@@ -150,6 +154,20 @@ Deno.serve(async (request) => {
     ? await readImageProbes(cache, [...canonicalIds.values()])
     : new Set<string>();
 
+  /**
+   * Where each place actually is, according to our own canonical record rather
+   * than the caller. This is the yardstick the Wikidata entity is measured
+   * against, so it must not be something a request can assert.
+   */
+  const canonicalCoordinates = cache && canonicalIds.size > 0
+    ? await readCanonicalPlaceCoordinates(cache, [...canonicalIds.values()])
+    : new Map<string, { lat: number; lng: number }>();
+  const placeCoordinates = new Map<string, { lat: number; lng: number }>();
+  for (const [placeId, canonicalId] of canonicalIds) {
+    const point = canonicalCoordinates.get(canonicalId);
+    if (point) placeCoordinates.set(placeId, point);
+  }
+
   const images: Record<string, PlaceImage[]> = {};
   /** Places whose lookup we are about to run, and which leads to run for them. */
   const pending: Array<{ placeId: string; canonicalId?: string; leads: ImageLead[] }> = [];
@@ -208,7 +226,18 @@ Deno.serve(async (request) => {
    * is what `rankPlaceImages` orders on.
    */
   const titleOwners = new Map<string, Array<{ placeId: string; lead: ImageLead['kind'] }>>();
+  /** Why a candidate photograph was refused, for the response diagnostics. */
+  const rejections: Array<{ placeId: string; reason: string }> = [];
   const claimTitle = (title: string, placeId: string, lead: ImageLead['kind']) => {
+    /**
+     * A placeholder glyph is a valid, freely licensed file and a broken promise
+     * in a slot that says "this is the place" — two Fukuoka shrines received
+     * `Gthumb.svg`. Refused here so it cannot reach any lead's results.
+     */
+    if (isNonPhotographicAsset(title)) {
+      rejections.push({ placeId, reason: 'non_photographic_asset' });
+      return;
+    }
     const owners = titleOwners.get(title);
     if (owners) owners.push({ placeId, lead }); else titleOwners.set(title, [{ placeId, lead }]);
   };
@@ -222,10 +251,24 @@ Deno.serve(async (request) => {
   // The encyclopedia's representative image, for every item at once.
   if (grouped.wikidata.size > 0) {
     providerCalls += 1;
-    const resolved = await wikidataImageTitles([...grouped.wikidata.keys()]);
+    const resolved = await wikidataEntityFacts([...grouped.wikidata.keys()]);
     if (!resolved.ok) lookupComplete = false;
-    for (const [itemId, title] of resolved.value) {
-      for (const placeId of grouped.wikidata.get(itemId) || []) claimTitle(title, placeId, 'wikidata');
+    for (const [itemId, facts] of resolved.value) {
+      if (!facts.title) continue;
+      for (const placeId of grouped.wikidata.get(itemId) || []) {
+        /**
+         * The tag names an entity, not necessarily this place. Production
+         * produced a Tokyo flagship for a Fukuoka branch and a concert
+         * photograph for a theatre, both correctly licensed. The same response
+         * that carried the picture also carries what is needed to refuse it.
+         */
+        const verdict = validateEntityForPlace(facts, placeCoordinates.get(placeId));
+        if (!verdict.ok) {
+          rejections.push({ placeId, reason: verdict.reason });
+          continue;
+        }
+        claimTitle(facts.title, placeId, 'wikidata');
+      }
     }
   }
 
@@ -380,5 +423,11 @@ Deno.serve(async (request) => {
      * "these places have no pictures" render identically on the cards.
      */
     complete: lookupComplete,
+    /**
+     * Photographs refused because they could not be shown to depict the place.
+     * Reported so a deck full of placards can be told apart from a deck whose
+     * pictures were all rejected — the two look identical to a traveller.
+     */
+    rejected: rejections,
   });
 });

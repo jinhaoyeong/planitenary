@@ -35,6 +35,7 @@ import {
   parseWikipediaLead,
   type ImageLead,
   type PlaceImage,
+  type WikidataEntityFacts,
 } from './placeImages.ts';
 
 /**
@@ -186,10 +187,10 @@ interface WikidataClaim {
  * ordered by rank already, and taking them all would let one heavily
  * photographed subject fill a whole deck's worth of image slots.
  */
-export async function wikidataImageTitles(ids: string[]): Promise<GatherResult<Map<string, string>>> {
-  const titles = new Map<string, string>();
+export async function wikidataEntityFacts(ids: string[]): Promise<GatherResult<Map<string, WikidataEntityFacts>>> {
+  const facts = new Map<string, WikidataEntityFacts>();
   const unique = [...new Set(ids)].filter(Boolean);
-  if (unique.length === 0) return { ok: true, value: titles };
+  if (unique.length === 0) return { ok: true, value: facts };
   let ok = true;
 
   for (const batch of chunk(unique, MAX_TITLES_PER_REQUEST)) {
@@ -211,14 +212,32 @@ export async function wikidataImageTitles(ids: string[]): Promise<GatherResult<M
     const entities = (payload as { entities?: Record<string, { claims?: Record<string, WikidataClaim[]> }> } | null)
       ?.entities || {};
     for (const [id, entity] of Object.entries(entities)) {
-      const claim = entity?.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
-      if (typeof claim !== 'string') continue;
-      const title = normaliseCommonsTitle(claim, 'File');
-      if (title) titles.set(id.toUpperCase(), title);
+      const claims = entity?.claims;
+      const image = claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+      const title = typeof image === 'string' ? normaliseCommonsTitle(image, 'File') : undefined;
+
+      /**
+       * `P625` and `P31` ride along in the response this request already makes.
+       * They are what lets the caller tell "the entity for this place" apart
+       * from "an entity this place's tag happened to name" — a retail company,
+       * an idol group — without a second round trip or a second provider.
+       */
+      const point = claims?.P625?.[0]?.mainsnak?.datavalue?.value as
+        { latitude?: number; longitude?: number } | undefined;
+      const instanceOf = (claims?.P31 || [])
+        .map((claim) => (claim?.mainsnak?.datavalue?.value as { id?: string } | undefined)?.id)
+        .filter((value): value is string => typeof value === 'string');
+
+      facts.set(id.toUpperCase(), {
+        title: title || undefined,
+        lat: typeof point?.latitude === 'number' ? point.latitude : undefined,
+        lng: typeof point?.longitude === 'number' ? point.longitude : undefined,
+        instanceOf,
+      });
     }
   }
 
-  return { ok, value: titles };
+  return { ok, value: facts };
 }
 
 interface WikipediaPage {

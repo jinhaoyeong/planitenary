@@ -638,3 +638,134 @@ export function parseImageLead(value: unknown): ImageLead | undefined {
   const title = normaliseCommonsTitle(text, kind === 'commons-file' ? 'File' : 'Category');
   return title ? { kind, value: title } : undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Identity validation
+//
+// A Wikidata id on an OSM object names *an* entity, not necessarily the place
+// the traveller is looking at. Production produced three shapes of that error:
+// the tag pointed at a retail company and returned its Tokyo flagship for a
+// Fukuoka branch; it pointed at an idol group and returned a concert photo for
+// a theatre; and it pointed at the right place but the entity's picture was a
+// placeholder icon rather than a photograph. All three passed the licence gate,
+// because a correctly licensed photograph of the wrong subject is still
+// correctly licensed.
+//
+// The rules below come from measuring 135 resolved images across six cities
+// rather than from intuition, and each one is tied to a case that occurred.
+// ---------------------------------------------------------------------------
+
+/**
+ * Bumped whenever the rules here change what counts as a valid image.
+ *
+ * Cached rows carry the version they were accepted under, so tightening the
+ * policy retires every decision made under a looser one without deleting
+ * anything. An unstamped legacy row is treated as version 1.
+ */
+export const PLACE_IMAGE_VALIDATION_VERSION = 2;
+
+/**
+ * How far a Wikidata entity may sit from the candidate and still be the same
+ * place.
+ *
+ * Measured: 91 coordinate-bearing entities across five cities put the median at
+ * 20 m, the 95th percentile at 220 m, and the largest legitimate match at
+ * 1.685 km — Bugaksan, a mountain whose entity is a centroid and whose
+ * candidate is a trailhead. The only violation was a Singapore department store
+ * matched to its Tokyo namesake, 4,952 km away. 2 km keeps every legitimate
+ * match observed and rejects the mismatch by three orders of magnitude.
+ */
+export const MAX_ENTITY_DISTANCE_KM = 2;
+
+/**
+ * Direct `P31` values that cannot be a physical destination.
+ *
+ * Deliberately small and deliberately *direct*: no subclass traversal, because
+ * walking Wikidata's ontology to decide "place-ness" would reject far more than
+ * it fixes and would be impossible to reason about from a test. Every id here
+ * is one an actual production mismatch resolved through, and none of them
+ * appear on the legitimate coordinate-less entities in the same sample (a
+ * church building, a kilometre-zero marker), which is what makes the list safe.
+ */
+export const NON_PLACE_INSTANCE_OF: ReadonlySet<string> = new Set([
+  'Q4830453',    // business — Marui, Isetan, Daimaru
+  'Q641066',     // girl group — HKT48, NMB48
+  'Q15056993',   // aircraft family — six War Memorial exhibits
+  'Q18487018',   // missile family — Scud-B
+  'Q18487055',   // surface-to-air missile model — Nike-Hercules
+  'Q100710213',  // tank model — Type 63, SU-100, Type 59, M46
+  'Q100709275',  // self-propelled artillery model — M107
+]);
+
+export type ImageRejectionReason =
+  | 'wikidata_coordinate_mismatch'
+  | 'wikidata_non_place_entity'
+  | 'non_photographic_asset';
+
+export type ImageValidation = { ok: true } | { ok: false; reason: ImageRejectionReason };
+
+/** Facts read from the same `wbgetentities` response that supplies `P18`. */
+export interface WikidataEntityFacts {
+  /** Commons file title from `P18`, when the entity names one. */
+  title?: string;
+  /** `P625` coordinate location, when the entity carries one. */
+  lat?: number;
+  lng?: number;
+  /** Direct `P31` values, unresolved and uncrawled. */
+  instanceOf: string[];
+}
+
+/** Great-circle distance in kilometres. */
+export function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const toRad = Math.PI / 180;
+  const dLat = (bLat - aLat) * toRad;
+  const dLng = (bLng - aLng) * toRad;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(aLat * toRad) * Math.cos(bLat * toRad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Whether a Wikidata entity may speak for this candidate.
+ *
+ * Coordinates decide it whenever the entity has them, because proximity is a
+ * statement about the same physical location and entity type is only a proxy
+ * for one. The type check exists solely for entities that carry no coordinates,
+ * where there is nothing to compare — and it only refuses on a known-bad type,
+ * never on an unrecognised one, so an incomplete entity keeps its photograph.
+ */
+export function validateEntityForPlace(
+  facts: WikidataEntityFacts,
+  candidate: { lat?: number; lng?: number } | undefined,
+): ImageValidation {
+  if (typeof facts.lat === 'number' && typeof facts.lng === 'number') {
+    // Without candidate coordinates there is nothing to compare against, and
+    // refusing here would punish places for a gap in our own record.
+    if (typeof candidate?.lat !== 'number' || typeof candidate?.lng !== 'number') return { ok: true };
+    return distanceKm(candidate.lat, candidate.lng, facts.lat, facts.lng) > MAX_ENTITY_DISTANCE_KM
+      ? { ok: false, reason: 'wikidata_coordinate_mismatch' }
+      : { ok: true };
+  }
+
+  return facts.instanceOf.some((id) => NON_PLACE_INSTANCE_OF.has(id))
+    ? { ok: false, reason: 'wikidata_non_place_entity' }
+    : { ok: true };
+}
+
+/**
+ * Files that are not photographs of anything.
+ *
+ * The card's slot promises a picture of the place, so a placeholder glyph or a
+ * logo is a broken promise even though it is a valid, freely licensed file.
+ * Matched on the file title because that is all this layer holds, and kept to
+ * unambiguous names — `Gthumb.svg` shipped to two Fukuoka shrines.
+ */
+const NON_PHOTOGRAPHIC_TITLE = /(^|[\s_-])(gthumb|no[\s_-]?image|placeholder|blank|icon|logo|flag|coat[\s_-]of[\s_-]arms|wappen|map|diagram|plan)([\s_-]|\.|$)/i;
+
+export function isNonPhotographicAsset(fileTitle: string): boolean {
+  const title = fileTitle.replace(/^File:/i, '').trim();
+  // Vector art is illustration, not photography. Commons photographs are
+  // raster; an SVG in a photo slot has always been a symbol so far.
+  if (/\.svg$/i.test(title)) return true;
+  return NON_PHOTOGRAPHIC_TITLE.test(title);
+}

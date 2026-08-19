@@ -20,7 +20,12 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { aiBriefKey, parseAppliesTo, probeKey, routePairKey } from './cacheKeys.ts';
-import { parsePlaceImage, rankPlaceImages, type PlaceImage } from './placeImages.ts';
+import {
+  parsePlaceImage,
+  rankPlaceImages,
+  PLACE_IMAGE_VALIDATION_VERSION,
+  type PlaceImage,
+} from './placeImages.ts';
 import { summarizeAiSpendRows, type AiSpendSnapshotRow } from './meteredModel.ts';
 import { usableCachedItineraryProposal } from './itineraryProposalCache.ts';
 import type { TripItineraryProposal } from './itineraryProposal.ts';
@@ -466,6 +471,13 @@ export async function readPlaceImages(
       .from('place_images')
       .select('canonical_place_id, image_url, thumbnail_url, width, height, source_page, author, licence, licence_url, lead')
       .in('canonical_place_id', ids)
+      /**
+       * A row accepted under an older identity policy is a cache miss, not a
+       * cheaper answer. Returning it first and revalidating afterwards would
+       * let a known-wrong photograph render at least once more, which is the
+       * whole failure this filter exists to end.
+       */
+      .eq('validation_version', PLACE_IMAGE_VALIDATION_VERSION)
       .gt('expires_at', new Date().toISOString());
     if (error || !data) return result;
     for (const row of data) {
@@ -526,6 +538,7 @@ export async function writePlaceImages(
       licence: image.licence,
       licence_url: image.licenceUrl ?? null,
       lead: image.lead,
+      validation_version: PLACE_IMAGE_VALIDATION_VERSION,
       retrieved_at: new Date().toISOString(),
       expires_at: expiresAt,
     })));
@@ -551,6 +564,13 @@ export async function readImageProbes(
       .from('place_image_probes')
       .select('canonical_place_id, source')
       .in('canonical_place_id', ids)
+      /**
+       * A probe recorded under an older policy answers a question we are no
+       * longer asking. Left unfiltered it would suppress the very re-resolution
+       * a tightened rule requires, and the wrong image would simply persist as
+       * "we already looked".
+       */
+      .eq('validation_version', PLACE_IMAGE_VALIDATION_VERSION)
       .gt('expires_at', new Date().toISOString());
     if (error || !data) return fresh;
     for (const row of data) {
@@ -575,6 +595,7 @@ export async function writeImageProbes(
         probes.map((probe) => ({
           canonical_place_id: probe.canonicalPlaceId,
           source: probe.source,
+          validation_version: PLACE_IMAGE_VALIDATION_VERSION,
           retrieved_at: new Date().toISOString(),
           expires_at: expiresAt,
         })),
@@ -1063,4 +1084,38 @@ export async function writeCandidateIntelligence(
   } catch {
     // Best-effort: a failed write costs a re-ask, never an error.
   }
+}
+
+/**
+ * Canonical coordinates for places already linked, keyed by canonical id.
+ *
+ * Image validation compares a Wikidata entity's location against the place it
+ * claims to depict, and that comparison has to be made against a coordinate the
+ * server trusts. Taking it from the request body would let a caller approve any
+ * photograph for any place simply by sending coordinates that agree with it.
+ */
+export async function readCanonicalPlaceCoordinates(
+  client: SupabaseClient,
+  canonicalPlaceIds: string[],
+): Promise<Map<string, { lat: number; lng: number }>> {
+  const result = new Map<string, { lat: number; lng: number }>();
+  const ids = [...new Set(canonicalPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return result;
+  try {
+    const { data, error } = await client
+      .from('canonical_places')
+      .select('id, latitude, longitude')
+      .in('id', ids);
+    if (error || !data) return result;
+    for (const row of data) {
+      const lat = Number(row.latitude);
+      const lng = Number(row.longitude);
+      if (row.id && Number.isFinite(lat) && Number.isFinite(lng)) {
+        result.set(String(row.id), { lat, lng });
+      }
+    }
+  } catch {
+    // Best effort: without a coordinate the entity check falls back to type.
+  }
+  return result;
 }
