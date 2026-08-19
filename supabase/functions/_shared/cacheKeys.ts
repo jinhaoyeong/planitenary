@@ -57,8 +57,13 @@ export function weatherLocationKey(coordinates: [number, number]): string {
  *
  * - v2: `admission` (structured entry cost, replacing the `priceLevel`-only view)
  * - v3: `imageLeads` (where a real photograph of this place might be found)
+ * - v4: `imageLeads` on **Wikivoyage** candidates, which previously carried
+ *   none at all, plus `origin` on every lead. Caught in production acceptance
+ *   rather than at review: the deploy went out without this bump, and a live
+ *   Fukuoka deck answered from a v3 row with 34 leadless Wikivoyage places —
+ *   the exact month-long silence the paragraph above describes.
  */
-const DISCOVERY_SCHEMA_VERSION = 3;
+const DISCOVERY_SCHEMA_VERSION = 4;
 
 /**
  * Cache key for one city's discovery results. Case and surrounding whitespace
