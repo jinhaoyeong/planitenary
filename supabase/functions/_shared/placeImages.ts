@@ -658,11 +658,15 @@ export function parseImageLead(value: unknown): ImageLead | undefined {
 /**
  * Bumped whenever the rules here change what counts as a valid image.
  *
+ * v2 gated Wikidata leads. v3 extends the same gate to Wikipedia article
+ * images, which were previously trusted implicitly — a hole wide enough that a
+ * refused entity's own article still supplied its picture.
+ *
  * Cached rows carry the version they were accepted under, so tightening the
  * policy retires every decision made under a looser one without deleting
  * anything. An unstamped legacy row is treated as version 1.
  */
-export const PLACE_IMAGE_VALIDATION_VERSION = 2;
+export const PLACE_IMAGE_VALIDATION_VERSION = 3;
 
 /**
  * How far a Wikidata entity may sit from the candidate and still be the same

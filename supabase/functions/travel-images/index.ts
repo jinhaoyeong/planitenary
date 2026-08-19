@@ -49,7 +49,7 @@ import {
   commonsImages,
   groupLeads,
   wikidataEntityFacts,
-  wikipediaImageTitles,
+  wikipediaPageFacts,
 } from '../_shared/imageSources.ts';
 import {
   isNonPhotographicAsset,
@@ -60,6 +60,7 @@ import {
   PLACE_IMAGE_VALIDATION_VERSION,
   type ImageLead,
   type PlaceImage,
+  type WikidataEntityFacts,
 } from '../_shared/placeImages.ts';
 
 interface ImagesBody {
@@ -248,37 +249,106 @@ Deno.serve(async (request) => {
     for (const placeId of owners) claimTitle(title, placeId, 'commons-file');
   }
 
-  // The encyclopedia's representative image, for every item at once.
-  if (grouped.wikidata.size > 0) {
+  /**
+   * Articles first, so both image authorities can be judged by one entity
+   * lookup.
+   *
+   * A Wikipedia lead used to claim its article's lead image with no identity
+   * check at all, which made it a way around the Wikidata gate rather than a
+   * second source: Marui's Wikidata item was correctly refused as a company,
+   * and the article for that same company then supplied its Tokyo head office
+   * to a Fukuoka branch. Resolving articles before the entity batch lets every
+   * path converge on the same validator without a second round trip.
+   */
+  const wikipediaPages = new Map<string, Map<string, { title: string; qid?: string }>>();
+  for (const [language, byTitle] of grouped.wikipedia) {
     providerCalls += 1;
-    const resolved = await wikidataEntityFacts([...grouped.wikidata.keys()]);
+    const resolved = await wikipediaPageFacts(language, [...byTitle.keys()]);
     if (!resolved.ok) lookupComplete = false;
-    for (const [itemId, facts] of resolved.value) {
-      if (!facts.title) continue;
-      for (const placeId of grouped.wikidata.get(itemId) || []) {
+    wikipediaPages.set(language, resolved.value);
+  }
+
+  /**
+   * Every entity either authority points at, asked once. Article items usually
+   * repeat the ids the tags already named, so this normally costs nothing
+   * extra; when it does not, it is still one batched request rather than one
+   * per article.
+   */
+  const entityIds = new Set<string>(grouped.wikidata.keys());
+  for (const pages of wikipediaPages.values()) {
+    for (const page of pages.values()) if (page.qid) entityIds.add(page.qid);
+  }
+
+  let entityFacts = new Map<string, WikidataEntityFacts>();
+  if (entityIds.size > 0) {
+    providerCalls += 1;
+    const resolved = await wikidataEntityFacts([...entityIds]);
+    if (!resolved.ok) lookupComplete = false;
+    entityFacts = resolved.value;
+  }
+
+  // The encyclopedia's representative image, for every item at once.
+  for (const [itemId, placeIds] of grouped.wikidata) {
+    const facts = entityFacts.get(itemId.toUpperCase());
+    if (!facts?.title) continue;
+    for (const placeId of placeIds) {
+      /**
+       * The tag names an entity, not necessarily this place. Production
+       * produced a Tokyo flagship for a Fukuoka branch and a concert
+       * photograph for a theatre, both correctly licensed. The same response
+       * that carried the picture also carries what is needed to refuse it.
+       */
+      const verdict = validateEntityForPlace(facts, placeCoordinates.get(placeId));
+      if (!verdict.ok) {
+        rejections.push({ placeId, reason: verdict.reason });
+        continue;
+      }
+      claimTitle(facts.title, placeId, 'wikidata');
+    }
+  }
+
+  // Article lead images, held to exactly the same standard.
+  for (const [language, byTitle] of grouped.wikipedia) {
+    const pages = wikipediaPages.get(language);
+    if (!pages) continue;
+    for (const [articleTitle, page] of pages) {
+      for (const placeId of byTitle.get(articleTitle) || []) {
         /**
-         * The tag names an entity, not necessarily this place. Production
-         * produced a Tokyo flagship for a Fukuoka branch and a concert
-         * photograph for a theatre, both correctly licensed. The same response
-         * that carried the picture also carries what is needed to refuse it.
+         * An article with no Wikidata item cannot be tied to a physical place
+         * at all, and an unproven identity is exactly what this gate exists to
+         * refuse. A placard beats an article photograph of we-don't-know-what.
          */
+        if (!page.qid) {
+          rejections.push({ placeId, reason: 'wikipedia_unverified_identity' });
+          continue;
+        }
+
+        /**
+         * When the place also carries its own Wikidata tag and the article
+         * disagrees with it, the two sources are describing different things
+         * and neither is evidence for the other. Choosing whichever produced a
+         * picture would be picking the prettier answer, not the true one.
+         */
+        const taggedIds = [...grouped.wikidata.entries()]
+          .filter(([, owners]) => owners.includes(placeId))
+          .map(([id]) => id.toUpperCase());
+        if (taggedIds.length > 0 && !taggedIds.includes(page.qid)) {
+          rejections.push({ placeId, reason: 'wikipedia_wikidata_identity_mismatch' });
+          continue;
+        }
+
+        const facts = entityFacts.get(page.qid);
+        if (!facts) {
+          rejections.push({ placeId, reason: 'wikipedia_unverified_identity' });
+          continue;
+        }
         const verdict = validateEntityForPlace(facts, placeCoordinates.get(placeId));
         if (!verdict.ok) {
           rejections.push({ placeId, reason: verdict.reason });
           continue;
         }
-        claimTitle(facts.title, placeId, 'wikidata');
+        claimTitle(page.title, placeId, 'wikipedia');
       }
-    }
-  }
-
-  // Article lead images, one request per language rather than per article.
-  for (const [language, byTitle] of grouped.wikipedia) {
-    providerCalls += 1;
-    const resolved = await wikipediaImageTitles(language, [...byTitle.keys()]);
-    if (!resolved.ok) lookupComplete = false;
-    for (const [articleTitle, fileTitle] of resolved.value) {
-      for (const placeId of byTitle.get(articleTitle) || []) claimTitle(fileTitle, placeId, 'wikipedia');
     }
   }
 

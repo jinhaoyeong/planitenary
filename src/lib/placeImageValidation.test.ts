@@ -143,3 +143,49 @@ describe('validation version', () => {
     expect(PLACE_IMAGE_VALIDATION_VERSION).toBeGreaterThan(1);
   });
 });
+
+describe('every image authority meets the same gate', () => {
+  /**
+   * The production bypass: Marui's Wikidata item was correctly refused, and the
+   * article for that same company then supplied its Tokyo head office to a
+   * Fukuoka branch. Both paths resolve to Q6777917, so both must refuse it —
+   * the entity is the thing being judged, never the route that reached it.
+   */
+  it('refuses Marui through the Wikidata path and the Wikipedia path alike', () => {
+    const marui = { instanceOf: ['Q4830453', 'Q507619'] };
+
+    // Reached via the OSM wikidata tag.
+    expect(validateEntityForPlace(marui, FUKUOKA)).toEqual({
+      ok: false,
+      reason: 'wikidata_non_place_entity',
+    });
+
+    // Reached via the article's pageprops.wikibase_item — same entity, same verdict.
+    const fromArticle = { ...marui, title: 'File:Marui_head_office_nakano_2009.JPG' };
+    expect(validateEntityForPlace(fromArticle, FUKUOKA)).toEqual({
+      ok: false,
+      reason: 'wikidata_non_place_entity',
+    });
+  });
+
+  it('refuses an article entity that is far from the candidate', () => {
+    // A Wikipedia-only lead gets the identical coordinate treatment.
+    const nihonbashi = { lat: 35.6817, lng: 139.7745, instanceOf: ['Q4830453'] };
+    expect(validateEntityForPlace(nihonbashi, SINGAPORE)).toEqual({
+      ok: false,
+      reason: 'wikidata_coordinate_mismatch',
+    });
+  });
+
+  it('accepts an article entity that sits on the candidate', () => {
+    expect(validateEntityForPlace({ lat: 33.5906, lng: 130.4019, instanceOf: ['Q33506'] }, FUKUOKA).ok).toBe(true);
+  });
+});
+
+describe('validation version retires looser decisions', () => {
+  it('is 3, because v2 did not prove Wikipedia-lead identity', () => {
+    // Every v2 row was accepted under a policy that trusted article images, so
+    // v2 must be a cache miss rather than a cheaper answer.
+    expect(PLACE_IMAGE_VALIDATION_VERSION).toBe(3);
+  });
+});

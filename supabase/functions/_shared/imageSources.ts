@@ -243,6 +243,14 @@ export async function wikidataEntityFacts(ids: string[]): Promise<GatherResult<M
 interface WikipediaPage {
   title?: string;
   pageimage?: string;
+  pageprops?: { wikibase_item?: string };
+}
+
+/** An article's lead image and the Wikidata item the article is about. */
+export interface WikipediaPageFacts {
+  title: string;
+  /** `pageprops.wikibase_item`, when the article has one. */
+  qid?: string;
 }
 
 /**
@@ -253,11 +261,11 @@ interface WikipediaPage {
  * same file Wikidata already named, which costs nothing — the titles are
  * de-duplicated before Commons is asked.
  */
-export async function wikipediaImageTitles(
+export async function wikipediaPageFacts(
   language: string,
   articleTitles: string[],
-): Promise<GatherResult<Map<string, string>>> {
-  const titles = new Map<string, string>();
+): Promise<GatherResult<Map<string, WikipediaPageFacts>>> {
+  const titles = new Map<string, WikipediaPageFacts>();
   const unique = [...new Set(articleTitles)].filter(Boolean);
   // The language came from a community-edited tag, so it is untrusted input
   // being interpolated into a hostname. Anything but a plain wiki code stops
@@ -272,8 +280,17 @@ export async function wikipediaImageTitles(
       action: 'query',
       format: 'json',
       formatversion: '2',
-      prop: 'pageimages',
+      prop: 'pageimages|pageprops',
       piprop: 'name',
+      /**
+       * The article's Wikidata item, in the request that already asks for its
+       * lead image. Without it the Wikipedia path is a second image authority
+       * with no identity check: an OSM `wikipedia` tag naming a company's
+       * article returns that company's head office, which is how a Fukuoka
+       * branch ended up showing a Tokyo building even after the Wikidata lead
+       * for the same entity had been refused.
+       */
+      ppprop: 'wikibase_item',
       titles: batch.join('|'),
     });
     const payload = await fetchJson(
@@ -289,7 +306,12 @@ export async function wikipediaImageTitles(
     for (const page of pages) {
       if (!page.title || !page.pageimage) continue;
       const title = normaliseCommonsTitle(page.pageimage, 'File');
-      if (title) titles.set(page.title, title);
+      if (!title) continue;
+      const qid = page.pageprops?.wikibase_item;
+      titles.set(page.title, {
+        title,
+        qid: typeof qid === 'string' && /^Q\d+$/.test(qid) ? qid.toUpperCase() : undefined,
+      });
     }
   }
 
