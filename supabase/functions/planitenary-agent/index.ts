@@ -687,6 +687,12 @@ Deno.serve(async (request) => {
      * recommendation is worth being able to see working from outside.
      */
     placeDiscovery: run.placeDiscovery,
+    /**
+     * Per-round trace. For acceptance and debugging, not for the traveller:
+     * the Ask panel does not read it, and an older client simply ignores it.
+     * Carries no model prose, no prompt, no argument values, no credentials.
+     */
+    diagnostics: run.diagnostics,
     grounding: askGrounding ? groundingEnvelope(askGrounding) : undefined,
     spend: await session.report(),
   }, status);

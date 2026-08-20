@@ -138,7 +138,7 @@ describe('a discovery question may not be answered until the search has run', ()
     expect(run.detail).toMatch(/could not confirm a real place/i);
   });
 
-  it('fails closed on the final round rather than letting the last answer through', async () => {
+  it('gives up after two wasted rounds instead of paying for six', async () => {
     // A model that never searches, however many times it is asked.
     const { fn: callModel } = scripted([
       () => ({ answer: 'JCII Camera Museum.', placeIds: [FABRICATED_ID] }),
@@ -152,13 +152,99 @@ describe('a discovery question may not be answered until the search has run', ()
       requiresPlaceDiscovery: true,
     });
 
-    expect(callModel).toHaveBeenCalledTimes(AGENT_LIMITS.ask.maxModelRounds);
+    /**
+     * The cost bound, and the reason it exists: one UI Ask is not one metered
+     * call. Production spent all six rounds on exactly this input, and each
+     * round was separately reserved, priced and counted against the daily
+     * quota. Two refusals establish the model will not comply.
+     */
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(callModel.mock.calls.length).toBeLessThan(AGENT_LIMITS.ask.maxModelRounds);
     expect(executeTool).not.toHaveBeenCalled();
-    // The final round withdraws the tool catalogue; that must not become a
-    // licence to accept the unsearched answer it was meant to force.
+
+    // Still fails closed: the unsearched answer never becomes a recommendation.
     expect(run.status).toBe('partial');
     expect(run.answer).toBeUndefined();
     expect(run.placeDiscovery).toEqual({ required: true, attempted: false, succeeded: false });
+    expect(run.detail).toMatch(/could not confirm a real place/i);
+    // Both rounds are visible, and both say why they were refused.
+    expect(run.diagnostics.map((d) => d.answerGate)).toEqual([
+      'place-discovery-required',
+      'place-discovery-required',
+    ]);
+  });
+
+  it('names a malformed search call instead of counting it', async () => {
+    // The hypothesis production could not distinguish: the model *did* ask for
+    // search_places, but omitted the city the tool requires.
+    const { fn: callModel } = scripted([
+      () => ({ answer: 'JCII Camera Museum.', placeIds: [FABRICATED_ID] }),
+      () => ({ tool_calls: [{ tool: 'search_places', args: { query: 'near Shinjuku' } }] }),
+    ]);
+    const executeTool = vi.fn(async (): Promise<ToolOutcome> => searchHit());
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool,
+      requiresPlaceDiscovery: true,
+    });
+
+    // Rejected before dispatch, so the adapter never saw it.
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(run.placeDiscovery).toEqual({ required: true, attempted: false, succeeded: false });
+    expect(run.status).toBe('partial');
+    expect(run.answer).toBeUndefined();
+
+    // The whole point: this is now distinguishable from "never asked at all".
+    const second = run.diagnostics[1];
+    expect(second.turnKind).toBe('tools');
+    expect(second.proposedToolCalls).toBe(1);
+    expect(second.acceptedToolCalls).toBe(0);
+    expect(second.rejectedToolCalls).toEqual([
+      { tool: 'search_places', reason: 'invalid-args', argKeys: ['query'] },
+    ]);
+    // Round one is the other hypothesis, and reads differently.
+    expect(run.diagnostics[0].turnKind).toBe('answer');
+    expect(run.diagnostics[0].answerGate).toBe('place-discovery-required');
+  });
+
+  it('distinguishes a model that never proposes a tool at all', async () => {
+    const { fn: callModel } = scripted([
+      () => ({ answer: 'Somewhere nice.', placeIds: [] }),
+    ]);
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async (): Promise<ToolOutcome> => searchHit()),
+      requiresPlaceDiscovery: true,
+    });
+
+    expect(run.diagnostics.every((d) => d.turnKind === 'answer')).toBe(true);
+    expect(run.diagnostics.every((d) => d.proposedToolCalls === 0)).toBe(true);
+    expect(run.diagnostics.every((d) => d.rejectedToolCalls.length === 0)).toBe(true);
+  });
+
+  it('does not charge the recovery round that actually searches', async () => {
+    // answer -> search -> answer must never be cut short by the cost bound,
+    // because its middle round dispatches a tool.
+    const { fn: callModel } = scripted([
+      () => ({ answer: 'JCII Camera Museum.', placeIds: [FABRICATED_ID] }),
+      () => searchCall(),
+      () => ({ answer: 'Shinjuku Gyoen is worth the detour.', placeIds: [TRUSTED_ID] }),
+    ]);
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async () => searchHit()),
+      requiresPlaceDiscovery: true,
+    });
+
+    expect(callModel).toHaveBeenCalledTimes(3);
+    expect(run.status).toBe('answered');
+    expect(run.answer?.placeIds).toEqual([TRUSTED_ID]);
   });
 
   it('is not satisfied by re-reading the places the trip already holds', async () => {

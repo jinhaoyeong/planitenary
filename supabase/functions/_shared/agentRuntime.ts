@@ -37,6 +37,7 @@ import {
   type AgentOperation,
   type AgentToolCall,
   type AgentToolName,
+  type AgentToolRejection,
   type BudgetState,
   type ValidatedAgentAnswer,
 } from './agentContract.ts';
@@ -77,6 +78,30 @@ export interface AgentRunResult {
    * licence to answer.
    */
   placeDiscovery: { required: boolean; attempted: boolean; succeeded: boolean };
+  /**
+   * Per-round trace, for acceptance and debugging. Carries no model prose, no
+   * prompt, no argument values and no credentials — only shapes and reasons.
+   */
+  diagnostics: AgentRoundDiagnostic[];
+}
+
+/**
+ * One round, as it actually went.
+ *
+ * Everything here was previously visible only to the model. A round that
+ * proposed a malformed tool call and a round that proposed nothing both left
+ * the run with `toolCalls: 0` and an empty transcript, which is what made a
+ * six-round production failure impossible to diagnose without paying for
+ * another one.
+ */
+export interface AgentRoundDiagnostic {
+  round: number;
+  turnKind: 'answer' | 'tools' | 'unusable';
+  proposedToolCalls: number;
+  acceptedToolCalls: number;
+  rejectedToolCalls: AgentToolRejection[];
+  /** Set when the round produced an answer the server declined to accept. */
+  answerGate?: 'place-discovery-required';
 }
 
 export type ModelCallOutcome =
@@ -146,6 +171,13 @@ export interface AgentModelPayload {
 export const toolCatalogue = (): Array<{ name: string; description: string }> =>
   Object.values(AGENT_TOOLS).map((spec) => ({ name: spec.name, description: spec.description }));
 
+/**
+ * What a traveller is told when a discovery question could not be grounded in
+ * a real search. Deliberately the same words whether the model refused to
+ * search or ran out of rounds: from the outside those are the same outcome.
+ */
+const DISCOVERY_UNMET = 'I could not confirm a real place for that request, so I have not recommended one.';
+
 /** One provider result cannot consume the next round's whole input budget. */
 const MAX_TOOL_RESULT_CHARS = 4_000;
 
@@ -200,6 +232,23 @@ export async function runAgent(
   const requiresPlaceDiscovery = deps.requiresPlaceDiscovery === true;
   let placeDiscoveryAttempted = false;
   let placeDiscoverySucceeded = false;
+  const diagnostics: AgentRoundDiagnostic[] = [];
+
+  /**
+   * How many rounds a discovery question may waste before the run gives up.
+   *
+   * Two, because one UI Ask is not one metered call: every round is separately
+   * reserved, priced and counted against the daily quota. The first version of
+   * this gate refused an unsearched answer and let the loop try again up to
+   * the round cap, and production duly spent **six** quota units producing
+   * nothing. Refusing twice is enough to establish the model will not comply.
+   *
+   * A round counts as wasted only when it dispatched no tool at all while the
+   * search was still outstanding — so the intended recovery, answer → search →
+   * answer, is never penalised, because its middle round dispatches.
+   */
+  const MAX_DISCOVERY_NONCOMPLIANCE = 2;
+  let discoveryNoncompliance = 0;
 
   const summarise = (status: AgentRunStatus, extra: Partial<AgentRunResult> = {}): AgentRunResult => ({
     status,
@@ -215,6 +264,7 @@ export async function runAgent(
       attempted: placeDiscoveryAttempted,
       succeeded: placeDiscoverySucceeded,
     },
+    diagnostics,
     ...extra,
   });
 
@@ -262,6 +312,29 @@ export async function runAgent(
 
     const turn = parseAgentTurn(outcome.value);
 
+    const roundDiagnostic: AgentRoundDiagnostic = {
+      round: budget.modelRounds,
+      turnKind: turn.kind,
+      proposedToolCalls: turn.kind === 'tools' ? turn.calls.length + turn.rejections.length : 0,
+      acceptedToolCalls: turn.kind === 'tools' ? turn.calls.length : 0,
+      rejectedToolCalls: turn.kind === 'tools' ? turn.rejections : [],
+    };
+    diagnostics.push(roundDiagnostic);
+
+    /**
+     * Charge a round that cost money without moving the required search
+     * forward, and say whether the run should now stop.
+     *
+     * Only counts while the search is still outstanding, so the intended
+     * recovery — answer, then search, then answer — is never charged: its
+     * middle round dispatches a tool.
+     */
+    const wastedRound = (): boolean => {
+      if (!requiresPlaceDiscovery || placeDiscoverySucceeded) return false;
+      discoveryNoncompliance += 1;
+      return discoveryNoncompliance >= MAX_DISCOVERY_NONCOMPLIANCE;
+    };
+
     if (turn.kind === 'answer') {
       /**
        * The gate this whole flag exists for.
@@ -279,6 +352,7 @@ export async function runAgent(
        * delay. When the rounds run out this falls to the `partial` below.
        */
       if (requiresPlaceDiscovery && !placeDiscoverySucceeded) {
+        roundDiagnostic.answerGate = 'place-discovery-required';
         findings.push({
           tool: 'model',
           ok: false,
@@ -286,6 +360,7 @@ export async function runAgent(
             ? 'The place search did not succeed, so there is no verified place to recommend yet. Call search_places again.'
             : 'This question asks for a place to visit. Call search_places first, then answer using only the places it returns.',
         });
+        if (wastedRound()) return summarise('partial', { detail: DISCOVERY_UNMET });
         continue;
       }
       return summarise('answered', {
@@ -297,15 +372,31 @@ export async function runAgent(
       // A round that produced nothing readable. Recorded as a finding so the
       // next round can see it went wrong, rather than repeating it blindly.
       findings.push({ tool: 'model', ok: false, detail: 'The previous reply was not valid JSON in the expected shape.' });
+      if (wastedRound()) return summarise('partial', { detail: DISCOVERY_UNMET });
       continue;
     }
 
     if (turn.rejected > 0 && turn.calls.length === 0) {
+      /**
+       * Name what was wrong with each call rather than counting them. The
+       * model can act on "search_places, invalid-args, you sent query"; it
+       * cannot act on "1 tool call was rejected".
+       */
+      const why = turn.rejections
+        .map((rejection) => {
+          const tool = rejection.tool ?? 'unknown tool';
+          const sent = rejection.argKeys?.length ? `, arguments sent: ${rejection.argKeys.join(', ')}` : '';
+          return `${tool} (${rejection.reason}${sent})`;
+        })
+        .join('; ');
       findings.push({
         tool: 'model',
         ok: false,
-        detail: `${turn.rejected} tool call(s) named an unknown tool or had invalid arguments.`,
+        detail: why
+          ? `No tool ran. ${why}.`
+          : `${turn.rejected} tool call(s) named an unknown tool or had invalid arguments.`,
       });
+      if (wastedRound()) return summarise('partial', { detail: DISCOVERY_UNMET });
       continue;
     }
 
@@ -351,7 +442,7 @@ export async function runAgent(
   // the sources alone often answer the question a traveller actually had.
   return summarise('partial', {
     detail: requiresPlaceDiscovery && !placeDiscoverySucceeded
-      ? 'I could not confirm a real place for that request, so I have not recommended one.'
+      ? DISCOVERY_UNMET
       : 'The assistant reached its limit for this question before finishing.',
   });
 }

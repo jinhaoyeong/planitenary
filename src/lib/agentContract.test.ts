@@ -52,8 +52,14 @@ describe('the agent cannot write anything', () => {
 
   it('refuses a write tool name the model asks for anyway', () => {
     const turn = parseAgentTurn({ tool_calls: [{ tool: 'save_itinerary', args: { day: 1 } }] });
-    // Recorded as a rejected call, never dispatched.
-    expect(turn).toEqual({ kind: 'tools', calls: [], rejected: 1 });
+    // Recorded as a rejected call, never dispatched. The name is *not* echoed
+    // back: an unrecognised tool string is unvalidated model output.
+    expect(turn).toEqual({
+      kind: 'tools',
+      calls: [],
+      rejected: 1,
+      rejections: [{ reason: 'unknown-tool' }],
+    });
   });
 });
 
@@ -171,7 +177,14 @@ describe('malformed model output fails safely', () => {
 
   it('bounds an unbounded argument rather than passing it to a provider', () => {
     const turn = parseAgentTurn({ tool_calls: [{ tool: 'search_web', args: { query: 'x'.repeat(500) } }] });
-    expect(turn).toEqual({ kind: 'tools', calls: [], rejected: 1 });
+    // The diagnostic names the tool and which argument *keys* were sent — never
+    // the values, which here are 500 characters of model output.
+    expect(turn).toEqual({
+      kind: 'tools',
+      calls: [],
+      rejected: 1,
+      rejections: [{ tool: 'search_web', reason: 'invalid-args', argKeys: ['query'] }],
+    });
   });
 
   it('prefers tool calls over an answer when a turn claims both', () => {

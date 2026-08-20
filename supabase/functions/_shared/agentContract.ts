@@ -714,8 +714,32 @@ export interface AgentToolCall {
  * claims both is treated as tool calls, because acting on a half-informed
  * answer is the worse of the two mistakes.
  */
+/**
+ * Why one proposed tool call did not run.
+ *
+ * A count alone cannot answer the question this exists for. Production spent
+ * six metered rounds on a place-discovery question that dispatched nothing,
+ * and `rejected: 4` cannot distinguish "the model never asked for a tool"
+ * from "the model asked for search_places and got the arguments wrong" — which
+ * are opposite problems with opposite fixes.
+ *
+ * `argKeys` carries argument **names only**. The values are model output and
+ * may contain anything at all, so they are never echoed; the names are enough
+ * to see that a caller sent `query` where `city` was required.
+ */
+export interface AgentToolRejection {
+  /**
+   * The tool asked for, when it was one we recognise. Absent for an unknown
+   * name — that string is unvalidated model text and is not repeated back.
+   */
+  tool?: AgentToolName;
+  reason: 'unknown-tool' | 'invalid-args' | 'malformed-call';
+  /** Argument names the model supplied. Never values. */
+  argKeys?: string[];
+}
+
 export type AgentTurn =
-  | { kind: 'tools'; calls: AgentToolCall[]; rejected: number }
+  | { kind: 'tools'; calls: AgentToolCall[]; rejected: number; rejections: AgentToolRejection[] }
   | { kind: 'answer'; answer: RawAgentAnswer }
   | { kind: 'unusable' };
 
@@ -762,25 +786,45 @@ const MAX_SUMMARY_CHARS = 500;
  * `parseModelJson` takes, for the same reason: an unparseable answer is a
  * missing answer, and every caller already handles that.
  */
+/**
+ * Argument names, for diagnostics. Names only, bounded, and never the values —
+ * those are unvalidated model output.
+ */
+const argNames = (args: unknown): string[] | undefined => {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined;
+  const keys = Object.keys(args as Record<string, unknown>).slice(0, 10).map((key) => key.slice(0, 40));
+  return keys.length > 0 ? keys : undefined;
+};
+
 export function parseAgentTurn(value: unknown): AgentTurn {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { kind: 'unusable' };
   const raw = value as { tool_calls?: unknown; answer?: unknown; citations?: unknown; proposal?: unknown };
 
   if (Array.isArray(raw.tool_calls) && raw.tool_calls.length > 0) {
     const calls: AgentToolCall[] = [];
-    let rejected = 0;
+    const rejections: AgentToolRejection[] = [];
     for (const entry of raw.tool_calls.slice(0, MAX_CALLS_PER_TURN)) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        rejections.push({ reason: 'malformed-call' });
+        continue;
+      }
       const call = entry as { tool?: unknown; args?: unknown };
-      if (!isAgentToolName(call?.tool)) { rejected += 1; continue; }
+      if (!isAgentToolName(call?.tool)) {
+        rejections.push({ reason: 'unknown-tool' });
+        continue;
+      }
       const args = AGENT_TOOLS[call.tool].parseArgs(call?.args ?? {});
-      if (!args) { rejected += 1; continue; }
+      if (!args) {
+        rejections.push({ tool: call.tool, reason: 'invalid-args', argKeys: argNames(call?.args) });
+        continue;
+      }
       calls.push({ tool: call.tool, args });
     }
-    if (calls.length > 0) return { kind: 'tools', calls, rejected };
+    if (calls.length > 0) return { kind: 'tools', calls, rejected: rejections.length, rejections };
     // Every call was rejected. That is still a turn the model took, and
     // reporting it as such lets the runtime tell the model what it got wrong
     // instead of silently looping on the same mistake.
-    return { kind: 'tools', calls: [], rejected: Math.max(1, rejected) };
+    return { kind: 'tools', calls: [], rejected: Math.max(1, rejections.length), rejections };
   }
 
   const answer = text(raw.answer, MAX_ANSWER_CHARS);
