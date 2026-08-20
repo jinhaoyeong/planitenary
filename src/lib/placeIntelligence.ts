@@ -22,6 +22,9 @@ import {
 import type { PlaceEvidenceSummary } from './travelEvidence';
 import type { RecommendationMix, TravelBehaviourProfile } from './travelBehaviour';
 import type { TripProfile } from './tripProfile';
+import { STYLE_TAGS } from '../../supabase/functions/_shared/discoveryPlan';
+
+export { STYLE_TAGS } from '../../supabase/functions/_shared/discoveryPlan';
 
 export interface PlaceIntelligenceScore {
   /** Match against the traveller's stated interests and styles. */
@@ -98,31 +101,6 @@ function weightsFor(mix: RecommendationMix) {
 }
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-
-/**
- * Travel styles → the category and tag vocabulary places are labelled with.
- *
- * Exported because `destinationPlanner` held a verbatim copy of this table and
- * the two had to be edited in lockstep to stay honest. One table, one place.
- */
-export const STYLE_TAGS: Record<string, string[]> = {
-  cafes: ['cafes', 'food'],
-  'street-food': ['street-food', 'food', 'market', 'food-district'],
-  'night-markets': ['market', 'evening', 'nightlife'],
-  temples: ['temples', 'temple', 'shrine', 'history'],
-  museums: ['museums', 'museum', 'art'],
-  history: ['history', 'temple', 'shrine'],
-  architecture: ['architecture', 'view'],
-  shopping: ['shopping', 'market'],
-  mountains: ['nature', 'hiking', 'view'],
-  hiking: ['hiking', 'walk', 'nature'],
-  nature: ['nature', 'park', 'garden'],
-  beaches: ['waterfront', 'nature'],
-  wildlife: ['wildlife', 'aquarium'],
-  'scenic-train': ['view', 'waterfront'],
-  anime: ['anime', 'theme-park'],
-  nightlife: ['nightlife', 'evening', 'view'],
-};
 
 /**
  * Which of the traveller's own stated styles this place actually satisfies.

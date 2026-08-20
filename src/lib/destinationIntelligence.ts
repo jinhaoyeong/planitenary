@@ -20,6 +20,7 @@ import {
 // resolved once, server-side, and the client only ever reads them.
 export type { ImageLead, PlaceImage } from '../../supabase/functions/_shared/placeImages';
 import type { ImageLead } from '../../supabase/functions/_shared/placeImages';
+import type { DiscoveryTrace } from '../../supabase/functions/_shared/discoveryPlan';
 
 /**
  * Declared in `../data` so the persisted `Activity.provider` and the in-flight
@@ -123,6 +124,8 @@ export interface PlaceCandidate {
   photoAttribution?: string;
   /** The Commons file page, where the full licence and author text live. */
   photoSourcePage?: string;
+  /** Internal discovery provenance; deliberately ignored by traveller-facing UI. */
+  discoveryTrace?: DiscoveryTrace;
   /**
    * Where a photograph of this place might be found — pointers derived from
    * OSM tags at discovery time, which costs no request. `travel-images`

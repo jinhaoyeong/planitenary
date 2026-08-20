@@ -52,6 +52,13 @@ describe('discovery city keys', () => {
     // that silently lack it.
     expect(discoveryCityKey('Osaka', 'JP')).toMatch(/^v\d+\|/);
   });
+
+  it('separates discovery cache rows by the selected preference ids', () => {
+    expect(discoveryCityKey('Tokyo', 'JP', ['shopping', 'street-food']))
+      .toBe(discoveryCityKey(' Tokyo ', 'jp', ['street-food', 'shopping']));
+    expect(discoveryCityKey('Tokyo', 'JP', ['shopping']))
+      .not.toBe(discoveryCityKey('Tokyo', 'JP', ['museums']));
+  });
 });
 
 describe('claim scope round trip', () => {

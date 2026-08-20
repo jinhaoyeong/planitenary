@@ -53,12 +53,23 @@ import {
   parseWikivoyageListings,
   type WikivoyageListing,
 } from '../_shared/wikivoyage.ts';
+import {
+  buildDiscoveryQueryPlan,
+  queryMatchesCandidate,
+  selectDiscoveryEntries,
+  type DiscoveryQueryEntry,
+  type DiscoveryQueryPlan,
+  type DiscoveryCandidateLike,
+  type DiscoveryTrace,
+  type PlannedDiscoveryQuery,
+} from '../_shared/discoveryPlan.ts';
 
 interface DiscoverBody {
   city?: string;
   countryCode?: string;
   provider?: 'google' | 'osm' | 'amap' | 'baidu' | 'fixture';
   interests?: string[];
+  hiddenGems?: boolean;
   limit?: number;
   travelStartsInDays?: number;
   /**
@@ -69,16 +80,12 @@ interface DiscoverBody {
   lng?: number;
 }
 
-/** Search phrases that between them cover how people actually plan a trip. */
-const DISCOVERY_QUERIES = [
-  { text: 'top attractions', categories: ['essential'] },
-  { text: 'museums and galleries', categories: ['museum', 'art'] },
-  { text: 'markets and street food', categories: ['market', 'food'] },
-  { text: 'historic sites', categories: ['history'] },
-  { text: 'parks and gardens', categories: ['park', 'nature'] },
-  { text: 'nightlife and evening', categories: ['evening', 'nightlife'] },
-  { text: 'neighbourhoods to walk', categories: ['local-character'] },
-];
+const selectPlannedRecords = <T extends DiscoveryCandidateLike>(
+  entries: readonly DiscoveryQueryEntry<T>[],
+  plan: DiscoveryQueryPlan,
+  limit: number,
+): Array<T & { discoveryTrace: DiscoveryTrace }> => selectDiscoveryEntries(entries, plan, limit)
+  .map(({ candidate, trace }) => ({ ...candidate, discoveryTrace: trace }));
 
 /** Google place types → the app's category vocabulary. */
 const TYPE_CATEGORIES: Record<string, string> = {
@@ -100,6 +107,7 @@ const TYPE_CATEGORIES: Record<string, string> = {
   zoo: 'wildlife',
   aquarium: 'aquarium',
   amusement_park: 'theme-park',
+  performing_arts_theater: 'theatre',
   natural_feature: 'nature',
 };
 
@@ -303,19 +311,22 @@ const FIELD_MASK = [
   'places.addressComponents',
 ].join(',');
 
-async function searchGoogle(city: string, countryCode: string, limit: number, travelStartsInDays?: number) {
+async function searchGoogle(
+  city: string,
+  countryCode: string,
+  limit: number,
+  travelStartsInDays: number | undefined,
+  plan: DiscoveryQueryPlan,
+) {
   const key = secrets.google();
   if (!key) throw new ProviderError('Google Places is not configured.', 503);
 
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
-  const seen = new Map<string, ReturnType<typeof toCandidate>>();
+  const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof toCandidate>>>> = [];
   let lastProviderError: ProviderError | undefined;
 
-  // One request per intent, so the shortlist spans a real trip rather than
-  // returning twenty variations of the single most famous landmark.
-  for (const query of DISCOVERY_QUERIES) {
-    if (seen.size >= limit) break;
+  const run = async (query: PlannedDiscoveryQuery) => {
     const payload = await fetchJson('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
@@ -336,18 +347,28 @@ async function searchGoogle(city: string, countryCode: string, limit: number, tr
     });
 
     for (const place of ((payload as { places?: GooglePlace[] } | null)?.places) || []) {
-      if (seen.size >= limit) break;
       const candidate = toCandidate(place, city, countryCode, retrievedAt, expiresAt);
-      if (candidate && !seen.has(candidate.providerPlaceId)) {
-        seen.set(candidate.providerPlaceId, candidate);
-      }
+      if (candidate) entries.push({ candidate, query });
+    }
+  };
+
+  // Preference queries run first. Once validated and deduped preferred results
+  // fill the target, no generic query is sent at all.
+  for (const query of plan.preferredQueries) {
+    await run(query);
+    if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
+  }
+  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+    for (const query of plan.fallbackQueries) {
+      await run(query);
+      if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
 
   // If every intent failed, preserve the provider failure rather than
   // mislabelling a credentials/API restriction problem as an empty city.
-  if (seen.size === 0 && lastProviderError) throw lastProviderError;
-  return [...seen.values()];
+  if (entries.length === 0 && lastProviderError) throw lastProviderError;
+  return selectPlannedRecords(entries, plan, limit);
 }
 
 function regionalCandidate(
@@ -371,6 +392,8 @@ function regionalCandidate(
     ? (amap.website || `https://www.amap.com/search?query=${encodeURIComponent(name)}`)
     : (baidu.detail_info?.detail_url || `https://map.baidu.com/search/${encodeURIComponent(name)}`);
   const rating = Number(isAmap ? (amap.biz_ext?.rating || amap.rating) : baidu.detail_info?.overall_rating);
+  const providerDescription = String(isAmap ? (amap.type || '') : (baidu.detail_info?.tag || '')).toLowerCase();
+  const categories = providerCategories(providerDescription);
   return {
     id: `${provider}-${id}`,
     provider,
@@ -381,9 +404,10 @@ function regionalCandidate(
     city,
     address: isAmap ? amap.address : baidu.address,
     coordinates: [coordinates[0], coordinates[1]] as [number, number],
-    categories: ['essential'],
-    experienceTags: ['regional-provider'],
+    categories,
+    experienceTags: [...categories, 'regional-provider'],
     rating: Number.isFinite(rating) ? rating : undefined,
+    notability: Number.isFinite(rating) && rating >= 4.5 ? 0.65 : undefined,
     // Both providers publish a typical per-head spend, declared in the
     // interfaces above and never read until now. It is spending, not admission,
     // and it says so — but a source stated it, so it is a fact rather than an
@@ -399,42 +423,87 @@ function regionalCandidate(
   };
 }
 
-async function searchAmap(city: string, countryCode: string, limit: number, travelStartsInDays?: number) {
+/** Regional providers expose free-form type strings instead of Google types. */
+function providerCategories(description: string): string[] {
+  const categories: string[] = [];
+  const add = (test: RegExp, category: string) => { if (test.test(description)) categories.push(category); };
+  add(/food|restaurant|cafe|coffee|market|餐饮|美食|咖啡|市场/, 'food');
+  add(/shop|mall|retail|shopping|商场|购物/, 'shopping');
+  add(/museum|gallery|art|博物馆|美术|艺术/, 'museum');
+  add(/temple|shrine|church|mosque|寺|庙|神社|教堂/, 'temple');
+  add(/history|historic|heritage|historical|历史|古迹/, 'history');
+  add(/park|garden|nature|mountain|hiking|自然|公园|花园|山/, 'nature');
+  add(/beach|waterfront|coast|海滩|海滨/, 'waterfront');
+  add(/night|bar|club|夜|酒吧/, 'nightlife');
+  add(/theatre|theater|opera/, 'theatre');
+  add(/market/, 'market');
+  return [...new Set(categories.length > 0 ? categories : ['essential'])];
+}
+
+async function searchAmap(
+  city: string,
+  countryCode: string,
+  limit: number,
+  travelStartsInDays: number | undefined,
+  plan: DiscoveryQueryPlan,
+) {
   const key = secrets.amap();
   if (!key) throw new ProviderError('Amap is not configured.', 503);
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
-  const results: ReturnType<typeof regionalCandidate>[] = [];
-  for (const query of DISCOVERY_QUERIES) {
-    if (results.length >= limit) break;
+  const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
+  const run = async (query: PlannedDiscoveryQuery) => {
     const params = new URLSearchParams({ key, keywords: query.text, city, citylimit: 'true', offset: '20', page: '1', extensions: 'all' });
     const payload = await fetchJson(`https://restapi.amap.com/v5/place/text?${params}`) as { status?: string; pois?: AmapPoi[] };
     for (const place of payload.pois || []) {
       const candidate = regionalCandidate('amap', place, city, countryCode, retrievedAt, expiresAt);
-      if (candidate && !results.some((item) => item?.providerPlaceId === candidate.providerPlaceId)) results.push(candidate);
-      if (results.length >= limit) break;
+      if (candidate) entries.push({ candidate, query });
+    }
+  };
+  for (const query of plan.preferredQueries) {
+    await run(query);
+    if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
+  }
+  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+    for (const query of plan.fallbackQueries) {
+      await run(query);
+      if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
-  return results.filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+  return selectPlannedRecords(entries, plan, limit);
 }
 
-async function searchBaidu(city: string, countryCode: string, limit: number, travelStartsInDays?: number) {
+async function searchBaidu(
+  city: string,
+  countryCode: string,
+  limit: number,
+  travelStartsInDays: number | undefined,
+  plan: DiscoveryQueryPlan,
+) {
   const key = secrets.baidu();
   if (!key) throw new ProviderError('Baidu Maps is not configured.', 503);
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
-  const results: ReturnType<typeof regionalCandidate>[] = [];
-  for (const query of DISCOVERY_QUERIES) {
-    if (results.length >= limit) break;
+  const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
+  const run = async (query: PlannedDiscoveryQuery) => {
     const params = new URLSearchParams({ query: query.text, region: city, city_limit: 'true', output: 'json', ak: key, scope: '2' });
     const payload = await fetchJson(`https://api.map.baidu.com/place/v3/region?${params}`) as { status?: number; results?: BaiduPoi[] };
     for (const place of payload.results || []) {
       const candidate = regionalCandidate('baidu', place, city, countryCode, retrievedAt, expiresAt);
-      if (candidate && !results.some((item) => item?.providerPlaceId === candidate.providerPlaceId)) results.push(candidate);
-      if (results.length >= limit) break;
+      if (candidate) entries.push({ candidate, query });
+    }
+  };
+  for (const query of plan.preferredQueries) {
+    await run(query);
+    if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
+  }
+  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+    for (const query of plan.fallbackQueries) {
+      await run(query);
+      if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
-  return results.filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+  return selectPlannedRecords(entries, plan, limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -470,13 +539,16 @@ interface OpenCandidate {
   categories: string[];
   experienceTags: string[];
   notability: number;
+  notabilitySignals?: string[];
   /** Pointers to a real photograph, resolved later — see `osmImageLeads`. */
   imageLeads?: ImageLead[];
   dietaryOptions?: string[];
   priceLevel?: number;
+  admission?: PlaceAdmission;
   openingHours?: {
     periods: Array<{ daysOfWeek: number[]; opensAt: string; closesAt: string }>;
     sourceConfidence: 'low';
+    caveats?: string[];
   };
   estimatedVisitMinutes: number;
   indoorOutdoor: 'indoor' | 'outdoor' | 'mixed';
@@ -544,17 +616,46 @@ async function resolveCityArea(city: string, countryCode: string, lat?: number, 
  * unranked list of them is noise; curated food comes from Wikivoyage's `eat`
  * listings instead, which is a better answer than the first 200 by proximity.
  */
-async function fetchOverpassPlaces(area: CityArea): Promise<OsmElement[]> {
+const overpassClausesFor = (categories: readonly string[], scope: string): string[] => {
+  const wanted = new Set(categories);
+  const clauses: string[] = [];
+  const add = (clause: string) => { if (!clauses.includes(clause)) clauses.push(clause); };
+  if (wanted.has('essential') || wanted.has('architecture')) {
+    add(`nwr["tourism"="attraction"]["name"]${scope};`);
+  }
+  if (wanted.has('museum')) add(`nwr["tourism"="museum"]["name"]${scope};`);
+  if (wanted.has('art')) {
+    add(`nwr["tourism"~"^(gallery|artwork)$"]["name"]${scope};`);
+    add(`nwr["amenity"="arts_centre"]["name"]${scope};`);
+  }
+  if (wanted.has('view')) add(`nwr["tourism"="viewpoint"]["name"]${scope};`);
+  if (wanted.has('wildlife')) add(`nwr["tourism"="zoo"]["name"]${scope};`);
+  if (wanted.has('aquarium')) add(`nwr["tourism"="aquarium"]["name"]${scope};`);
+  if (wanted.has('theme-park')) add(`nwr["tourism"="theme_park"]["name"]${scope};`);
+  if (wanted.has('history')) add(`nwr["historic"]["name"]${scope};`);
+  if (wanted.has('temple') || wanted.has('shrine')) add(`nwr["amenity"="place_of_worship"]["name"]${scope};`);
+  if (wanted.has('market') || wanted.has('local-character')) add(`nwr["amenity"="marketplace"]["name"]${scope};`);
+  if (wanted.has('nightlife') || wanted.has('evening')) {
+    add(`nwr["amenity"~"^(nightclub|bar|pub|theatre)$"]["name"]${scope};`);
+  }
+  if (wanted.has('park') || wanted.has('garden') || wanted.has('nature')) {
+    add(`nwr["leisure"~"^(park|garden|nature_reserve)$"]["name"]${scope};`);
+    add(`nwr["natural"~"^(peak|volcano|wood)$"]["name"]${scope};`);
+  }
+  if (wanted.has('beaches')) add(`nwr["natural"="beach"]["name"]${scope};`);
+  if (wanted.has('waterfront')) add(`nwr["natural"~"^(water|bay)$"]["name"]${scope};`);
+  if (wanted.has('shopping')) add(`nwr["shop"~"^(mall|department_store)$"]["name"]${scope};`);
+  return clauses;
+};
+
+async function fetchOverpassPlaces(area: CityArea, categories: readonly string[]): Promise<OsmElement[]> {
   const [lat, lng] = area.centre;
   const scope = `(around:${area.radiusMetres},${lat},${lng})`;
+  const clauses = overpassClausesFor(categories, scope);
+  if (clauses.length === 0) return [];
   const query = `[out:json][timeout:40];
 (
-  nwr["tourism"~"^(attraction|museum|gallery|artwork|viewpoint|zoo|aquarium|theme_park)$"]["name"]${scope};
-  nwr["historic"]["name"]${scope};
-  nwr["amenity"~"^(place_of_worship|marketplace|arts_centre|theatre)$"]["name"]${scope};
-  nwr["leisure"~"^(park|garden|nature_reserve)$"]["name"]${scope};
-  nwr["natural"~"^(beach|peak|volcano)$"]["name"]${scope};
-  nwr["shop"~"^(mall|department_store)$"]["name"]${scope};
+  ${clauses.join('\n  ')}
 );
 out center tags 400;`;
 
@@ -652,37 +753,45 @@ async function searchOsm(
   city: string,
   countryCode: string,
   limit: number,
-  travelStartsInDays?: number,
+  travelStartsInDays: number | undefined,
+  plan: DiscoveryQueryPlan,
   coordinates?: { lat?: number; lng?: number },
 ) {
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const area = await resolveCityArea(city, countryCode, coordinates?.lat, coordinates?.lng);
 
-  // Independent sources, so one being down must not sink the other.
-  const [elements, food, listings] = await Promise.all([
-    fetchOverpassPlaces(area),
-    fetchOverpassFood(area).catch(() => [] as OsmElement[]),
-    fetchWikivoyageListings(city).catch(() => [] as WikivoyageListing[]),
-  ]);
-
-  const byKey = new Map<string, OpenCandidate>();
   const usedListings = new Set<WikivoyageListing>();
+  const listings = await fetchWikivoyageListings(city).catch(() => [] as WikivoyageListing[]);
 
-  for (const element of [...elements, ...food]) {
-    const candidate = buildOsmCandidate(element, city, countryCode, retrievedAt, expiresAt, listings, usedListings);
-    if (!candidate) continue;
-    // OSM often holds the same place as both a node and an enclosing way.
-    const key = `${candidate.name.toLowerCase()}|${candidate.coordinates[0].toFixed(3)},${candidate.coordinates[1].toFixed(3)}`;
-    const existing = byKey.get(key);
-    if (!existing || candidate.notability > existing.notability) byKey.set(key, candidate);
-  }
+  const fetchBatch = async (queries: readonly PlannedDiscoveryQuery[]): Promise<Array<DiscoveryQueryEntry<OpenCandidate>>> => {
+    if (queries.length === 0) return [];
+    const categories = [...new Set(queries.flatMap((query) => query.categories))];
+    const wantsFood = categories.some((category) => FOOD_CATEGORIES.includes(category));
+    // Independent sources, so one being down must not sink the other.
+    const [elements, food] = await Promise.all([
+      fetchOverpassPlaces(area, categories),
+      wantsFood ? fetchOverpassFood(area).catch(() => [] as OsmElement[]) : Promise.resolve([] as OsmElement[]),
+    ]);
+    const byKey = new Map<string, OpenCandidate>();
 
-  // Curated places OSM did not return — most usefully the food listings, which
-  // the Overpass query deliberately skips.
-  for (const listing of listings) {
+    for (const element of [...elements, ...food]) {
+      const candidate = buildOsmCandidate(element, city, countryCode, retrievedAt, expiresAt, listings);
+      if (!candidate || !queries.some((query) => queryMatchesCandidate(candidate, query))) continue;
+      const listing = matchListing({ name: candidate.name, coordinates: candidate.coordinates }, listings);
+      if (listing) usedListings.add(listing);
+      // OSM often holds the same place as both a node and an enclosing way.
+      const key = `${candidate.name.toLowerCase()}|${candidate.coordinates[0].toFixed(3)},${candidate.coordinates[1].toFixed(3)}`;
+      const existing = byKey.get(key);
+      if (!existing || candidate.notability > existing.notability) byKey.set(key, candidate);
+    }
+
+    // Curated places OSM did not return — most usefully the food listings, which
+    // the Overpass query deliberately skips.
+    for (const listing of listings) {
     if (usedListings.has(listing) || !listing.coordinates) continue;
     const categories = WIKIVOYAGE_CATEGORIES[listing.kind];
+    if (!queries.some((query) => queryMatchesCandidate({ categories, experienceTags: categories }, query))) continue;
     // Wikivoyage `hours` is free text written by an editor, but it follows the
     // same shapes often enough ("Tu-Su 10:00-18:00") to be worth reading, and
     // anything unrecognised yields no rule rather than a guess.
@@ -734,23 +843,25 @@ async function searchOsm(
       lastVerifiedAt: retrievedAt,
       expiresAt,
     });
-  }
+    }
 
-  /**
-   * Best documented first, so a truncated list keeps the places that matter —
-   * but sights and food are ranked separately and given their own share.
-   *
-   * Ranked together, food would vanish: a restaurant almost never has a
-   * Wikipedia article, so every one of them sorts below every monument. The
-   * day would then reserve time for lunch with nowhere to eat it.
-   */
-  const isFood = (candidate: OpenCandidate) =>
-    candidate.categories.some((category) => FOOD_CATEGORIES.includes(category));
-  const all = [...byKey.values()].sort((a, b) => b.notability - a.notability);
-  const foodShare = Math.max(6, Math.round(limit * 0.25));
-  const meals = all.filter(isFood).slice(0, foodShare);
-  const sights = all.filter((candidate) => !isFood(candidate)).slice(0, limit - meals.length);
-  return [...sights, ...meals];
+    /**
+     * Preserve the query group that admitted each candidate. The shared selector
+     * applies preference-first ordering, deduplication and bounded fallback
+     * after this provider-specific enrichment is complete.
+     */
+    return [...byKey.values()].flatMap((candidate) => {
+      const query = queries.find((entry) => queryMatchesCandidate(candidate, entry));
+      return query ? [{ candidate, query }] : [];
+    });
+    };
+
+  const preferredEntries = await fetchBatch(plan.preferredQueries);
+  let entries = preferredEntries;
+  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+    entries = [...entries, ...(await fetchBatch(plan.fallbackQueries))];
+  }
+  return selectPlannedRecords(entries, plan, limit);
 }
 
 /** Categories that make a place somewhere to eat rather than somewhere to see. */
@@ -763,7 +874,6 @@ function buildOsmCandidate(
   retrievedAt: string,
   expiresAt: string,
   listings: WikivoyageListing[],
-  usedListings: Set<WikivoyageListing>,
 ): OpenCandidate | null {
   const tags = element.tags || {};
   if (isExcludedOsmPlace(tags)) return null;
@@ -779,7 +889,6 @@ function buildOsmCandidate(
   if (categories.length === 0) return null;
 
   const listing = matchListing({ name, coordinates }, listings);
-  if (listing) usedListings.add(listing);
 
   // "japanese;sushi" → two tags the ranker can match a traveller's styles to.
   const cuisines = (tags.cuisine || '')
@@ -866,6 +975,10 @@ Deno.serve(async (request) => {
 
   const countryCode = (body.countryCode || '').toUpperCase();
   const limit = Math.max(1, Math.min(120, body.limit ?? 60));
+  const interests = Array.isArray(body.interests)
+    ? body.interests.filter((interest): interest is string => typeof interest === 'string')
+    : [];
+  const plan = buildDiscoveryQueryPlan(interests, limit, { hiddenGems: body.hiddenGems === true });
 
   // Mainland China needs a regional provider; say so plainly rather than
   // returning thin Google results that look like a working answer.
@@ -891,7 +1004,7 @@ Deno.serve(async (request) => {
     // holds — 30 days normally, 7 near travel — so this is the single largest
     // reduction in provider calls available.
     const cache = serviceClient();
-    const cityKey = discoveryCityKey(city, countryCode);
+    const cityKey = discoveryCityKey(city, countryCode, plan.selectedStyles);
 
     /**
      * Give every candidate a canonical identity while we hold the full record.
@@ -952,12 +1065,12 @@ Deno.serve(async (request) => {
     }
 
     const candidates = selectedProvider === 'amap'
-      ? await searchAmap(city, countryCode, limit, body.travelStartsInDays)
+      ? await searchAmap(city, countryCode, limit, body.travelStartsInDays, plan)
       : selectedProvider === 'baidu'
-        ? await searchBaidu(city, countryCode, limit, body.travelStartsInDays)
+        ? await searchBaidu(city, countryCode, limit, body.travelStartsInDays, plan)
         : selectedProvider === 'osm'
-          ? await searchOsm(city, countryCode, limit, body.travelStartsInDays, { lat: body.lat, lng: body.lng })
-          : await searchGoogle(city, countryCode, limit, body.travelStartsInDays);
+          ? await searchOsm(city, countryCode, limit, body.travelStartsInDays, plan, { lat: body.lat, lng: body.lng })
+          : await searchGoogle(city, countryCode, limit, body.travelStartsInDays, plan);
     if (candidates.length === 0) {
       return json({ error: `No places were returned for ${city}.` }, 404);
     }

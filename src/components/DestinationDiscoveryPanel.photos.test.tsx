@@ -18,7 +18,7 @@ import { CurrencyProvider } from '../contexts/CurrencyContext';
 import { createEmptyProfile, manualDestination, type TripProfile } from '../lib/tripProfile';
 import type { PlaceCandidate } from '../lib/destinationIntelligence';
 import { resetProviderRuntimeCache } from '../lib/discoveryRuntime';
-import { DestinationDiscoveryPanel } from './DestinationDiscoveryPanel';
+import { DestinationDiscoveryPanel, PlaceMedia } from './DestinationDiscoveryPanel';
 
 const mocks = vi.hoisted(() => ({
   invokeTravelFunction: vi.fn(),
@@ -34,6 +34,8 @@ vi.mock('../lib/supabase', async (importOriginal) => ({
 }));
 
 const PHOTO_URL = 'https://upload.wikimedia.org/wikipedia/commons/9/93/Acrosfukuoka02.jpg';
+const FULL_PHOTO_URL = 'https://upload.wikimedia.org/wikipedia/commons/full-deck.jpg';
+const THUMB_PHOTO_URL = 'https://upload.wikimedia.org/wikipedia/commons/thumb-browse.jpg';
 
 const candidateFor = (index: number): PlaceCandidate => ({
   id: `osm-n${index}`,
@@ -58,10 +60,13 @@ const candidateFor = (index: number): PlaceCandidate => ({
 
 const CANDIDATES = Array.from({ length: 8 }, (_, index) => candidateFor(index + 1));
 
-const imagesPayloadFor = (placeIds: string[]) => ({
+const imagesPayloadFor = (
+  placeIds: string[],
+  renditions: { url?: string; thumbnailUrl?: string } = {},
+) => ({
   images: Object.fromEntries(placeIds.map((placeId) => [placeId, [{
-    url: PHOTO_URL,
-    thumbnailUrl: PHOTO_URL,
+    url: renditions.url ?? PHOTO_URL,
+    thumbnailUrl: renditions.thumbnailUrl ?? renditions.url ?? PHOTO_URL,
     width: 1200,
     height: 800,
     source: 'wikimedia-commons',
@@ -172,6 +177,36 @@ describe('real photographs reach the deck', () => {
     });
   });
 
+  it('keeps the same enriched candidate in the deck and Browse All', async () => {
+    await startReview();
+
+    const firstProviderPlaceId = imageRequests[0].placeIds[0];
+    const expectedCandidateId = CANDIDATES.find((candidate) => candidate.providerPlaceId === firstProviderPlaceId)?.id;
+    expect(expectedCandidateId).toBeTruthy();
+
+    await act(async () => {
+      imagesGate.resolve(imagesPayloadFor(imageRequests[0].placeIds, {
+        url: FULL_PHOTO_URL,
+        thumbnailUrl: THUMB_PHOTO_URL,
+      }));
+      await imagesGate.promise;
+    });
+
+    await waitFor(() => {
+      const deck = document.querySelector('.destination-deck-card');
+      expect(deck?.getAttribute('data-candidate-id')).toBe(expectedCandidateId);
+      expect(deck?.querySelector('.destination-deck-photo img')?.getAttribute('src')).toBe(FULL_PHOTO_URL);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Browse all/i }));
+
+    await waitFor(() => {
+      const browse = document.querySelector(`.destination-candidate[data-candidate-id="${expectedCandidateId}"]`);
+      expect(browse).not.toBeNull();
+      expect(browse?.querySelector('.destination-candidate-photo img')?.getAttribute('src')).toBe(THUMB_PHOTO_URL);
+    });
+  });
+
   it('keeps the photograph when evidence lands while the image request is still in flight', async () => {
     await startReview();
 
@@ -235,5 +270,52 @@ describe('real photographs reach the deck', () => {
     });
     const evidenceCalls = mocks.invokeTravelFunction.mock.calls.filter(([name]) => name === 'travel-evidence');
     expect(evidenceCalls).toHaveLength(1);
+  });
+});
+
+describe('PlaceMedia browse/deck contract', () => {
+  const source = (overrides: Partial<PlaceCandidate> = {}) => ({
+    ...candidateFor(99),
+    ...overrides,
+  });
+
+  it('uses the thumbnail in Browse All and the full image in the deck', () => {
+    const candidate = source({
+      photoUrl: 'https://upload.wikimedia.org/full.jpg',
+      photoThumbnailUrl: 'https://upload.wikimedia.org/thumb.jpg',
+      photoAttribution: 'Author · CC BY-SA 3.0 · Wikimedia Commons',
+      photoSourcePage: 'https://commons.wikimedia.org/wiki/File:full.jpg',
+    });
+    const { rerender } = render(<PlaceMedia candidate={candidate} size="thumb" />);
+
+    expect(document.querySelector('.destination-place-media img')?.getAttribute('src')).toBe(candidate.photoThumbnailUrl);
+
+    rerender(<PlaceMedia candidate={candidate} size="full" />);
+    expect(document.querySelector('.destination-place-media img')?.getAttribute('src')).toBe(candidate.photoUrl);
+  });
+
+  it.each([
+    { label: 'thumbnail only', photoThumbnailUrl: 'https://upload.wikimedia.org/thumb-only.jpg', expected: 'https://upload.wikimedia.org/thumb-only.jpg' },
+    { label: 'full image only', photoUrl: 'https://upload.wikimedia.org/full-only.jpg', expected: 'https://upload.wikimedia.org/full-only.jpg' },
+  ])('uses any verified image in both modes when $label', ({ photoUrl, photoThumbnailUrl, expected }) => {
+    const candidate = source({ photoUrl, photoThumbnailUrl });
+    const { rerender } = render(<PlaceMedia candidate={candidate} size="thumb" />);
+
+    expect(document.querySelector('.destination-place-media img')?.getAttribute('src')).toBe(expected);
+
+    rerender(<PlaceMedia candidate={candidate} size="full" />);
+    expect(document.querySelector('.destination-place-media img')?.getAttribute('src')).toBe(expected);
+  });
+
+  it('shows the labelled placeholder only when neither verified image exists', () => {
+    const candidate = source();
+    const { rerender } = render(<PlaceMedia candidate={candidate} size="thumb" />);
+
+    expect(document.querySelector('.destination-place-media img')).toBeNull();
+    expect(document.querySelector('.destination-place-media')?.getAttribute('data-has-photo')).toBe('false');
+
+    rerender(<PlaceMedia candidate={candidate} size="full" />);
+    expect(document.querySelector('.destination-place-media img')).toBeNull();
+    expect(document.querySelector('.destination-place-media')?.getAttribute('data-has-photo')).toBe('false');
   });
 });

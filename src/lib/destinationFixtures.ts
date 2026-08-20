@@ -7,6 +7,11 @@ import type {
   PlaceCandidateDetails,
   PlaceDiscoveryProvider,
 } from './destinationIntelligence';
+import {
+  buildDiscoveryQueryPlan,
+  queryForCandidate,
+  selectDiscoveryEntries,
+} from '../../supabase/functions/_shared/discoveryPlan';
 
 const VERIFIED_AT = '2026-08-04T00:00:00.000Z';
 const OSAKA_INFO = 'https://osaka-info.jp/en/spot/';
@@ -285,7 +290,18 @@ export class FixturePlaceDiscoveryProvider implements PlaceDiscoveryProvider {
     const city = request.city.trim().toLowerCase();
     const candidates = ALL_DESTINATION_FIXTURES.filter((candidate) => candidate.city.toLowerCase() === city);
     const limit = Math.max(1, request.limit || candidates.length);
-    return candidates.slice(0, limit).map((candidate) => structuredClone(candidate));
+    const plan = buildDiscoveryQueryPlan(request.interests, limit, {
+      hiddenGems: request.interests.includes('hidden-gems'),
+    });
+    const selected = selectDiscoveryEntries(
+      candidates.map((candidate) => ({
+        candidate,
+        query: queryForCandidate(candidate, plan)!,
+      })),
+      plan,
+      limit,
+    );
+    return selected.map(({ candidate, trace }) => structuredClone({ ...candidate, discoveryTrace: trace }));
   }
 
   async details(providerPlaceId: string): Promise<PlaceCandidateDetails> {

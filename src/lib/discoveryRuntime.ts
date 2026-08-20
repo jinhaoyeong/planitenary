@@ -488,7 +488,12 @@ export async function discoverPlaces(
    * which is a flat sixty regardless of how long anybody is staying — the
    * reason a five-day city arrived with sixty places to review.
    */
-  options?: { limit?: number },
+  options?: {
+    limit?: number;
+    /** Exact Trip Setup style ids; sent to the server as query-plan input. */
+    interests?: readonly string[];
+    hiddenGems?: boolean;
+  },
 ): Promise<DiscoveryOutcome> {
   const capability = capabilityFor(destination, runtime);
   let providerError: string | undefined;
@@ -499,6 +504,8 @@ export async function discoverPlaces(
         city: destination.city,
         countryCode: destination.countryCode,
         provider: capability.places.provider,
+        interests: options?.interests,
+        hiddenGems: options?.hiddenGems,
         // Asked for explicitly so the deck is sized by the stay rather than by
         // a server default. `travel-discover` already over-fetches from the
         // provider and trims to this number with its own category balance, so
@@ -532,8 +539,11 @@ export async function discoverPlaces(
       city: library.city,
       countryCode: library.countryCode,
       queries: library.knowledge?.discoveryQueries ?? [],
-      interests: [],
-      limit: 60,
+      interests: [
+        ...(options?.interests || []),
+        ...(options?.hiddenGems ? ['hidden-gems'] : []),
+      ],
+      limit: options?.limit ?? 60,
     });
     return {
       candidates,

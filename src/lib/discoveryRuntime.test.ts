@@ -90,6 +90,23 @@ describe('discovering places', () => {
     expect(invoke).toHaveBeenCalledWith('travel-discover', expect.objectContaining({ city: 'Melbourne' }));
   });
 
+  it('sends the selected Trip Setup values to discovery as query-plan input', async () => {
+    const invoke = vi.fn().mockResolvedValue([{ id: 'live-1', name: 'Live place' }]);
+    await discoverPlaces(
+      { city: 'Tokyo', countryCode: 'JP' },
+      liveRuntime(),
+      invoke,
+      { limit: 25, interests: ['street-food', 'shopping', 'nature'], hiddenGems: true },
+    );
+
+    expect(invoke).toHaveBeenCalledWith('travel-discover', expect.objectContaining({
+      city: 'Tokyo',
+      limit: 25,
+      interests: ['street-food', 'shopping', 'nature'],
+      hiddenGems: true,
+    }));
+  });
+
   it('falls back to the fixture when the live call fails, and says so', async () => {
     const invoke = vi.fn().mockRejectedValue(new Error('provider down'));
     const outcome = await discoverPlaces({ city: 'Osaka', countryCode: 'JP' }, liveRuntime(), invoke);

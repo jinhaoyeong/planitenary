@@ -237,7 +237,7 @@ export interface CandidateContext {
  * neighbourhood placard when it did not. Never a stand-in image of somewhere
  * else — a traveller has to be able to trust that the picture is the place.
  */
-function PlaceMedia({ candidate, className, size = 'full' }: {
+export function PlaceMedia({ candidate, className, size = 'full' }: {
   candidate: PlaceCandidate;
   className?: string;
   /**
@@ -252,7 +252,7 @@ function PlaceMedia({ candidate, className, size = 'full' }: {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const source = size === 'thumb'
     ? candidate.photoThumbnailUrl || candidate.photoUrl
-    : candidate.photoUrl;
+    : candidate.photoUrl || candidate.photoThumbnailUrl;
   const showPhoto = Boolean(source) && failedUrl !== source;
 
   return (
@@ -612,7 +612,7 @@ function CandidateCard({
       data-candidate-id={candidate.id}
       data-decision-target={decisionTargetIdOf(candidate)}
     >
-      <PlaceMedia candidate={candidate} className="destination-candidate-photo" />
+      <PlaceMedia candidate={candidate} className="destination-candidate-photo" size="thumb" />
       <div className="destination-candidate-body">
         <div className="destination-candidate-headline">
           <div className="min-w-0">
@@ -758,6 +758,7 @@ export function DeckCard({
     >
       <motion.article
         className="destination-deck-card"
+        data-candidate-id={candidate.id}
         style={{ x, rotate }}
         drag={flipped || reduceMotion ? false : 'x'}
         dragConstraints={{ left: 0, right: 0 }}
@@ -782,7 +783,7 @@ export function DeckCard({
               onClick={openDetails}
               aria-label={`Show details for ${candidate.name}`}
             >
-              <PlaceMedia candidate={candidate} className="destination-deck-photo" />
+              <PlaceMedia candidate={candidate} className="destination-deck-photo" size="full" />
               <span className="destination-match-score destination-deck-score" aria-label={`${score} percent match`}>{score}</span>
               <div className="destination-deck-front-copy">
                 <p className="destination-candidate-meta-line">
@@ -1733,7 +1734,11 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         isSupabaseConfigured() ? invokeTravelFunction : undefined,
         // Sized for the days spent in *this* city, not the whole trip: four
         // days in Tokyo and three in Osaka are two different decks.
-        { limit: targetDiscoveryTarget.visible },
+        {
+          limit: targetDiscoveryTarget.visible,
+          interests: profile.styles,
+          hiddenGems: profile.hiddenGems,
+        },
       );
       setUsingFixture(outcome.usingFixture);
       // Discovery no longer carries evidence; it arrives per card from the
@@ -1750,10 +1755,13 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           city: targetCapability.destination.city,
           countryCode: targetCapability.destination.countryCode,
           queries: [],
-          interests: profile.styles,
+          interests: [
+            ...profile.styles,
+            ...(profile.hiddenGems ? ['hidden-gems'] : []),
+          ],
           startDate: profile.startDate,
           endDate: profile.endDate,
-          limit: 40,
+          limit: targetDiscoveryTarget.visible,
         });
       if (discovered.length === 0) {
         throw new Error(outcome.providerError

@@ -62,16 +62,28 @@ export function weatherLocationKey(coordinates: [number, number]): string {
  *   rather than at review: the deploy went out without this bump, and a live
  *   Fukuoka deck answered from a v3 row with 34 leadless Wikivoyage places —
  *   the exact month-long silence the paragraph above describes.
+ * - v5: preference-aware discovery query plans, so cached generic results
+ *   cannot be reused for a different Trip Setup profile.
  */
-const DISCOVERY_SCHEMA_VERSION = 4;
+const DISCOVERY_SCHEMA_VERSION = 5;
 
 /**
  * Cache key for one city's discovery results. Case and surrounding whitespace
  * must not split the cache — "osaka" and "Osaka " are the same search — but the
- * country code stays, because city names repeat across the world.
+ * country code stays, because city names repeat across the world. Selected
+ * Trip Setup styles are part of the key so a generic or differently
+ * personalised result cannot satisfy this request.
  */
-export function discoveryCityKey(city: string, countryCode?: string): string {
-  return `v${DISCOVERY_SCHEMA_VERSION}|${city.trim().toLowerCase()}|${(countryCode || '').trim().toUpperCase()}`;
+export function discoveryCityKey(
+  city: string,
+  countryCode?: string,
+  interests: readonly string[] = [],
+): string {
+  const preferenceKey = [...new Set(interests
+    .map((interest) => interest.trim().toLowerCase())
+    .filter(Boolean))].sort().join(',');
+  const base = `v${DISCOVERY_SCHEMA_VERSION}|${city.trim().toLowerCase()}|${(countryCode || '').trim().toUpperCase()}`;
+  return preferenceKey ? `${base}|${preferenceKey}` : base;
 }
 
 /**
