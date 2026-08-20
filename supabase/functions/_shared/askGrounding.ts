@@ -55,6 +55,21 @@ export type AskFactProvenance =
 
 export interface AskGroundingPlan {
   required: AskGroundingScope[];
+  /**
+   * Whether this question may only be answered once a place search has run.
+   *
+   * A sibling of `required` rather than one more scope, because the scopes are
+   * reads of *this traveller's own trip* and discovery is the opposite: it goes
+   * looking for something the trip does not contain. Folding it in would make
+   * every scope consumer ask "is this one actually a read?".
+   *
+   * Enforcement lives in `agentRuntime`, which refuses to accept an answer turn
+   * until the search has actually happened. A sentence in the system prompt is
+   * guidance, and production showed guidance is not enough: asked to "find one
+   * place worth visiting", the model answered from trip prose without searching
+   * and invented an id to cite.
+   */
+  requiresPlaceDiscovery: boolean;
 }
 
 export interface AskGroundingRead {
@@ -195,6 +210,26 @@ const DOCUMENT_RE = /\b(document|documents|booking|ticket|pdf|passport|visa|conf
 const MAP_RE = /\b(near here|nearby|closest|how far|on the map|this pin)\b/;
 
 /**
+ * A question whose central request is a place the traveller does not have yet.
+ *
+ * Deliberately narrower than "mentions a place". "Why is Kushida Shrine not in
+ * my plan?" names a shrine and is *about* the plan that exists; "find one place
+ * worth visiting near Shinjuku" asks for something that does not. Only the
+ * second may be answered out of a search, and only the second is worth paying
+ * for one.
+ *
+ * Two shapes, because English has two. A discovery verb needs a target before
+ * it means discovery at all — "find my booking" does not — while "where should
+ * I go" already carries both halves in the phrasing and offers no noun to match.
+ */
+const DISCOVERY_ASK_RE = /\bwhere (should|can|could) (i|we) (go|eat|visit|stay|drink)\b/;
+
+const DISCOVERY_VERB_RE = /\b(find|recommend|suggest|show me|any good|looking for)\b/;
+
+const DISCOVERY_TARGET_RE =
+  /\b(place|places|spot|spots|somewhere|anywhere|restaurant|restaurants|cafe|cafes|café|bar|bars|attraction|attractions|museum|museums|shrine|shrines|temple|temples|park|parks|market|markets|shop|shops|things? to do|to eat|to visit)\b/;
+
+/**
  * Decide which owned-trip scopes the server must read before a model round.
  *
  * GPT does not participate. Surface hints add context; they never supply facts.
@@ -216,7 +251,10 @@ export function deriveAskGroundingPlan(input: {
   if (DOCUMENT_RE.test(question) || surface === 'documents') required.push('documents');
   if (MAP_RE.test(question) || surface === 'map') required.push('map');
 
-  return { required: uniqueScopes(required) };
+  const requiresPlaceDiscovery = DISCOVERY_ASK_RE.test(question)
+    || (DISCOVERY_VERB_RE.test(question) && DISCOVERY_TARGET_RE.test(question));
+
+  return { required: uniqueScopes(required), requiresPlaceDiscovery };
 }
 
 export interface PersistedFlight {

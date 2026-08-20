@@ -67,6 +67,16 @@ export interface AgentRunResult {
   budget: BudgetState;
   /** Counts rather than the sets themselves, so the payload stays small. */
   evidence: { citableUrls: number; routeMinutes: number; knownPlaceNames: number };
+  /**
+   * Whether this run had to search for a place, and how that went.
+   *
+   * `attempted` and `succeeded` are separate because a search that ran and
+   * found nothing is evidence — the honest answer to "find me somewhere" can
+   * be that there is nowhere — while a search that never ran is the absence of
+   * evidence. Collapsing the two would let the second borrow the first's
+   * licence to answer.
+   */
+  placeDiscovery: { required: boolean; attempted: boolean; succeeded: boolean };
 }
 
 export type ModelCallOutcome =
@@ -95,6 +105,15 @@ export interface AgentRunDeps {
   seededEvidence?: AgentEvidence;
   /** Trip-shape constraints such as day count. */
   answerConstraints?: AgentAnswerConstraints;
+  /**
+   * This question may not be answered until `search_places` has run.
+   *
+   * Set from the Ask grounding plan. The runtime enforces it by declining the
+   * model's answer turn, which is the only enforcement that holds: the model
+   * is asked for tool calls in prose JSON, so nothing in the provider request
+   * can compel one.
+   */
+  requiresPlaceDiscovery?: boolean;
 }
 
 /** What one round sends the model. Shape asserted by the tests. */
@@ -113,6 +132,14 @@ export interface AgentModelPayload {
   /** True when the model must answer now, because no further tools will run. */
   finalRound: boolean;
   round: number;
+  /**
+   * True when this question may not be answered until `search_places` has run.
+   *
+   * Sent per question rather than left to the system prompt alone so the model
+   * can comply on the first round. The runtime enforces it either way; this
+   * only decides whether compliance costs one paid round or three.
+   */
+  requiresPlaceDiscovery: boolean;
 }
 
 /** The catalogue offered to the model, derived from the one dispatch table. */
@@ -162,6 +189,18 @@ export async function runAgent(
     }
     : emptyEvidence();
 
+  /**
+   * Only `search_places` counts.
+   *
+   * `get_saved_places` and `get_place_details` are place-bearing too, but they
+   * report on places this trip already holds. A traveller asking for somewhere
+   * *new* is not answered by re-reading their own list, so neither may satisfy
+   * the requirement.
+   */
+  const requiresPlaceDiscovery = deps.requiresPlaceDiscovery === true;
+  let placeDiscoveryAttempted = false;
+  let placeDiscoverySucceeded = false;
+
   const summarise = (status: AgentRunStatus, extra: Partial<AgentRunResult> = {}): AgentRunResult => ({
     status,
     transcript,
@@ -170,6 +209,11 @@ export async function runAgent(
       citableUrls: evidence.citableUrls.size,
       routeMinutes: evidence.routeMinutes.size,
       knownPlaceNames: evidence.knownPlaceNames.size,
+    },
+    placeDiscovery: {
+      required: requiresPlaceDiscovery,
+      attempted: placeDiscoveryAttempted,
+      succeeded: placeDiscoverySucceeded,
     },
     ...extra,
   });
@@ -186,6 +230,7 @@ export async function runAgent(
       findings,
       finalRound,
       round: budget.modelRounds + 1,
+      requiresPlaceDiscovery,
     };
     let payloadChars: number;
     try {
@@ -218,6 +263,31 @@ export async function runAgent(
     const turn = parseAgentTurn(outcome.value);
 
     if (turn.kind === 'answer') {
+      /**
+       * The gate this whole flag exists for.
+       *
+       * Production asked the model to "find one place worth visiting near
+       * Shinjuku"; it answered on the first round having called nothing, named
+       * a place it knew from the trip's own prose, and invented an id to cite
+       * for it. The id was rejected downstream, so no card was built — but
+       * nothing had required the search in the first place, which left the
+       * card path dependent on the model's mood.
+       *
+       * Note there is no `finalRound` escape here. Letting the last round
+       * through would mean a recommendation with no search behind it is
+       * refused five times and then accepted, which is the same defect with a
+       * delay. When the rounds run out this falls to the `partial` below.
+       */
+      if (requiresPlaceDiscovery && !placeDiscoverySucceeded) {
+        findings.push({
+          tool: 'model',
+          ok: false,
+          detail: placeDiscoveryAttempted
+            ? 'The place search did not succeed, so there is no verified place to recommend yet. Call search_places again.'
+            : 'This question asks for a place to visit. Call search_places first, then answer using only the places it returns.',
+        });
+        continue;
+      }
       return summarise('answered', {
         answer: validateAgentAnswer(turn.answer, evidence, deps.answerConstraints),
       });
@@ -254,6 +324,10 @@ export async function runAgent(
       }
       budget = charge.budget;
 
+      // Attempted the moment it is dispatched: a search that threw was still a
+      // search, and the model should be told so rather than silently retried.
+      if (call.tool === 'search_places') placeDiscoveryAttempted = true;
+
       let result: ToolOutcome;
       try {
         result = await deps.executeTool(call);
@@ -262,6 +336,7 @@ export async function runAgent(
       }
 
       if (result.ok === true) {
+        if (call.tool === 'search_places') placeDiscoverySucceeded = true;
         collectEvidence(evidence, call.tool, result.result);
         transcript.push({ tool: call.tool, ok: true });
         findings.push({ tool: call.tool, ok: true, result: compactToolResult(result.result) });
@@ -275,6 +350,8 @@ export async function runAgent(
   // Rounds exhausted with no answer. Everything gathered is still returned:
   // the sources alone often answer the question a traveller actually had.
   return summarise('partial', {
-    detail: 'The assistant reached its limit for this question before finishing.',
+    detail: requiresPlaceDiscovery && !placeDiscoverySucceeded
+      ? 'I could not confirm a real place for that request, so I have not recommended one.'
+      : 'The assistant reached its limit for this question before finishing.',
   });
 }

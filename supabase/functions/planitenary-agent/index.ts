@@ -315,12 +315,19 @@ Deno.serve(async (request) => {
   const uiFocus = rehydrateIntelligenceFocus(itinerary, uiEnvelope, trip.tripId);
 
   let askGrounding: AskGroundingResult | undefined;
+  /**
+   * Whether this question must search before it may recommend. Derived by the
+   * same deterministic classifier that chooses the grounding reads, and false
+   * for build-itinerary, which has its own place path.
+   */
+  let requiresPlaceDiscovery = false;
   if (operation !== 'build-itinerary') {
     const plan = deriveAskGroundingPlan({
       question,
       surface: uiFocus.surface,
       uiContext: uiEnvelope,
     });
+    requiresPlaceDiscovery = plan.requiresPlaceDiscovery;
     const extras = await loadAskGroundingExtras({
       cache,
       tripId: trip.tripId,
@@ -622,6 +629,7 @@ Deno.serve(async (request) => {
       executeTool,
       seededEvidence: askGrounding?.evidence,
       answerConstraints: askGrounding ? { dayCount: askGrounding.dayCount } : undefined,
+      requiresPlaceDiscovery,
     },
   );
 
@@ -673,6 +681,12 @@ Deno.serve(async (request) => {
     budget: run.budget,
     limits,
     evidence: run.evidence,
+    /**
+     * Whether a place search was required and whether it happened. Reported
+     * for the same reason `rejected` is: the gate that stops an unsearched
+     * recommendation is worth being able to see working from outside.
+     */
+    placeDiscovery: run.placeDiscovery,
     grounding: askGrounding ? groundingEnvelope(askGrounding) : undefined,
     spend: await session.report(),
   }, status);
