@@ -68,7 +68,7 @@ import {
 import { reserveAiReasoningAttempt } from '../_shared/quota.ts';
 import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/meteredModel.ts';
 import { runAgent, type AgentModelPayload } from '../_shared/agentRuntime.ts';
-import { createToolExecutor } from '../_shared/agentToolAdapters.ts';
+import { createToolExecutor, tripPrimaryCity } from '../_shared/agentToolAdapters.ts';
 import {
   parseConversationTurns,
   parseUiContextEnvelope,
@@ -321,6 +321,8 @@ Deno.serve(async (request) => {
    * for build-itinerary, which has its own place path.
    */
   let requiresPlaceDiscovery = false;
+  /** Area text the question named, for the server's own search. Never identity. */
+  let placeDiscoveryArea: string | undefined;
   if (operation !== 'build-itinerary') {
     const plan = deriveAskGroundingPlan({
       question,
@@ -328,6 +330,7 @@ Deno.serve(async (request) => {
       uiContext: uiEnvelope,
     });
     requiresPlaceDiscovery = plan.requiresPlaceDiscovery;
+    placeDiscoveryArea = plan.placeDiscoveryArea;
     const extras = await loadAskGroundingExtras({
       cache,
       tripId: trip.tripId,
@@ -621,6 +624,41 @@ Deno.serve(async (request) => {
     return json({ error: `Request too large: ${contextChars} characters, limit ${limits.maxInputChars}.` }, 413);
   }
 
+  /**
+   * The server searches for places itself.
+   *
+   * Production settled this. Asked to "find one place worth visiting near
+   * Shinjuku", the model spent six metered rounds and dispatched nothing — and
+   * the round before that, it answered from trip prose and invented an id. The
+   * pseudo-tool protocol asks the model to *choose* to start an operation, and
+   * for an operation the product must perform, that is the wrong layer.
+   *
+   * So discovery stops being the model's decision. The search runs here,
+   * before the first round, through the same `search_places` adapter the model
+   * would have called — one implementation, one cache, one quota counter. What
+   * the model gets is a list of real places to choose between, and its job
+   * narrows to the one thing it is good at: picking one and saying why.
+   *
+   * Identity is unaffected. Every id still originates in the provider's own
+   * result, still lands in the server-owned index through `registerPlace`, and
+   * is still validated against that index before it may become a card. The
+   * area text is search input and nothing more — no canonical place is
+   * constructed from "Shinjuku".
+   */
+  const preSearch = requiresPlaceDiscovery && askGrounding
+    ? await (async () => {
+      // The trip's own city is the fallback, so a question naming no area
+      // still searches somewhere real rather than nowhere.
+      const city = placeDiscoveryArea || tripPrimaryCity(itinerary);
+      if (!city) return undefined;
+      const outcome = await executeTool({
+        tool: 'search_places',
+        args: { city, query: question.slice(0, 200), categories: [], limit: 8 },
+      });
+      return outcome;
+    })()
+    : undefined;
+
   const run = await runAgent(
     { operation, question, context },
     {
@@ -630,6 +668,14 @@ Deno.serve(async (request) => {
       seededEvidence: askGrounding?.evidence,
       answerConstraints: askGrounding ? { dayCount: askGrounding.dayCount } : undefined,
       requiresPlaceDiscovery,
+      seededFindings: preSearch
+        ? [preSearch.ok === true
+          ? { tool: 'search_places', ok: true, result: preSearch.result }
+          : { tool: 'search_places', ok: false, detail: preSearch.detail }]
+        : undefined,
+      seededPlaceDiscovery: preSearch
+        ? { attempted: true, succeeded: preSearch.ok === true }
+        : undefined,
     },
   );
 

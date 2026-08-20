@@ -241,6 +241,22 @@ const tripAnchor = (index: Map<string, KnownPlace>): [number, number] | undefine
   return undefined;
 };
 
+/**
+ * The trip's own city, from its saved profile.
+ *
+ * The fallback search area when a discovery question named none, and never
+ * taken from the model: "somewhere to eat" on a Tokyo trip searches Tokyo
+ * because the trip says Tokyo.
+ */
+export const tripPrimaryCity = (itinerary: Record<string, unknown> | null): string | undefined => {
+  const profile = asRecord(itinerary?.tripProfile);
+  for (const raw of asArray(profile?.destinations)) {
+    const city = asRecord(raw)?.city;
+    if (typeof city === 'string' && city.trim()) return city.trim();
+  }
+  return undefined;
+};
+
 const tripCountryCode = (itinerary: Record<string, unknown> | null): string | undefined => {
   const profile = asRecord(itinerary?.tripProfile);
   const destination = asRecord(asArray(profile?.destinations)[0]);

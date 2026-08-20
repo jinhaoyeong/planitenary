@@ -28,6 +28,7 @@ import {
   collectEvidence,
   emptyBudget,
   emptyEvidence,
+  isAgentToolName,
   isFinalRound,
   parseAgentTurn,
   validateAgentAnswer,
@@ -77,7 +78,18 @@ export interface AgentRunResult {
    * evidence. Collapsing the two would let the second borrow the first's
    * licence to answer.
    */
-  placeDiscovery: { required: boolean; attempted: boolean; succeeded: boolean };
+  placeDiscovery: {
+    required: boolean;
+    attempted: boolean;
+    succeeded: boolean;
+    /**
+     * Who ran the search. `server-presearch` is the normal path: the server
+     * searched before the first model round, so the model never had the
+     * chance to skip it. `model-tool` means the model asked for it itself,
+     * which still works and is still validated identically.
+     */
+    source?: 'server-presearch' | 'model-tool';
+  };
   /**
    * Per-round trace, for acceptance and debugging. Carries no model prose, no
    * prompt, no argument values and no credentials — only shapes and reasons.
@@ -139,6 +151,17 @@ export interface AgentRunDeps {
    * can compel one.
    */
   requiresPlaceDiscovery?: boolean;
+  /**
+   * Tool results the server gathered before the first model round.
+   *
+   * The place pre-search arrives here. Passing it as findings rather than as
+   * some new channel means the model reads it exactly as it reads a tool
+   * result it asked for — same shape, same place in the payload, no second
+   * way of describing a tool result.
+   */
+  seededFindings?: AgentModelPayload['findings'];
+  /** Outcome of a server-run place search, when one happened. */
+  seededPlaceDiscovery?: { attempted: boolean; succeeded: boolean };
 }
 
 /** What one round sends the model. Shape asserted by the tests. */
@@ -210,7 +233,7 @@ export async function runAgent(
   const { limits } = deps;
   let budget = emptyBudget();
   const transcript: AgentTranscriptEntry[] = [];
-  const findings: AgentModelPayload['findings'] = [];
+  const findings: AgentModelPayload['findings'] = [...(deps.seededFindings ?? [])];
   const evidence: AgentEvidence = deps.seededEvidence
     ? {
       citableUrls: new Set(deps.seededEvidence.citableUrls),
@@ -229,9 +252,26 @@ export async function runAgent(
    * *new* is not answered by re-reading their own list, so neither may satisfy
    * the requirement.
    */
+  /**
+   * Seeded results count as evidence, not just as something to read.
+   *
+   * The runtime collects them itself rather than trusting the caller to have
+   * done it. A caller that passed the pre-search as findings but forgot the
+   * evidence would show the model a list of real places and then reject every
+   * id it picked from that list — a guaranteed zero-card answer, with nothing
+   * obviously wrong anywhere. Doing it here makes the two consistent by
+   * construction.
+   */
+  for (const finding of deps.seededFindings ?? []) {
+    if (finding.ok && isAgentToolName(finding.tool)) collectEvidence(evidence, finding.tool, finding.result);
+  }
+
   const requiresPlaceDiscovery = deps.requiresPlaceDiscovery === true;
-  let placeDiscoveryAttempted = false;
-  let placeDiscoverySucceeded = false;
+  let placeDiscoveryAttempted = deps.seededPlaceDiscovery?.attempted === true;
+  let placeDiscoverySucceeded = deps.seededPlaceDiscovery?.succeeded === true;
+  let placeDiscoverySource: 'server-presearch' | 'model-tool' | undefined = deps.seededPlaceDiscovery
+    ? 'server-presearch'
+    : undefined;
   const diagnostics: AgentRoundDiagnostic[] = [];
 
   /**
@@ -263,6 +303,7 @@ export async function runAgent(
       required: requiresPlaceDiscovery,
       attempted: placeDiscoveryAttempted,
       succeeded: placeDiscoverySucceeded,
+      source: placeDiscoverySource,
     },
     diagnostics,
     ...extra,
@@ -417,7 +458,10 @@ export async function runAgent(
 
       // Attempted the moment it is dispatched: a search that threw was still a
       // search, and the model should be told so rather than silently retried.
-      if (call.tool === 'search_places') placeDiscoveryAttempted = true;
+      if (call.tool === 'search_places') {
+        placeDiscoveryAttempted = true;
+        placeDiscoverySource ??= 'model-tool';
+      }
 
       let result: ToolOutcome;
       try {

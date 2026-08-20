@@ -40,10 +40,11 @@ const ask = (question = PRODUCTION_QUESTION) => ({
 });
 
 /** What a real `search_places` run returns: records carrying id *and* name. */
-const searchHit = (): ToolOutcome => ({
-  ok: true,
-  result: { places: [{ id: TRUSTED_ID, name: 'Shinjuku Gyoen National Garden', city: 'Tokyo' }] },
-});
+const SEARCH_RESULT = {
+  places: [{ id: TRUSTED_ID, name: 'Shinjuku Gyoen National Garden', city: 'Tokyo' }],
+};
+
+const searchHit = (): ToolOutcome => ({ ok: true, result: SEARCH_RESULT });
 
 const searchEmpty = (): ToolOutcome => ({ ok: true, result: { places: [] } });
 
@@ -85,7 +86,7 @@ describe('a discovery question may not be answered until the search has run', ()
     });
 
     expect(run.status).toBe('answered');
-    expect(run.placeDiscovery).toEqual({ required: true, attempted: true, succeeded: true });
+    expect(run.placeDiscovery).toEqual({ required: true, attempted: true, succeeded: true, source: 'model-tool' });
 
     // The searched id survives; the invented one is still rejected by name.
     expect(run.answer?.placeIds).toEqual([TRUSTED_ID]);
@@ -113,7 +114,7 @@ describe('a discovery question may not be answered until the search has run', ()
     });
 
     expect(run.status).toBe('answered');
-    expect(run.placeDiscovery).toEqual({ required: true, attempted: true, succeeded: true });
+    expect(run.placeDiscovery).toEqual({ required: true, attempted: true, succeeded: true, source: 'model-tool' });
     // Nothing to card, and nothing invented to fill the gap.
     expect(run.answer?.placeIds).toEqual([]);
   });
@@ -133,7 +134,7 @@ describe('a discovery question may not be answered until the search has run', ()
 
     expect(run.status).not.toBe('answered');
     expect(run.status).toBe('partial');
-    expect(run.placeDiscovery).toEqual({ required: true, attempted: true, succeeded: false });
+    expect(run.placeDiscovery).toEqual({ required: true, attempted: true, succeeded: false, source: 'model-tool' });
     expect(run.answer).toBeUndefined();
     expect(run.detail).toMatch(/could not confirm a real place/i);
   });
@@ -165,7 +166,7 @@ describe('a discovery question may not be answered until the search has run', ()
     // Still fails closed: the unsearched answer never becomes a recommendation.
     expect(run.status).toBe('partial');
     expect(run.answer).toBeUndefined();
-    expect(run.placeDiscovery).toEqual({ required: true, attempted: false, succeeded: false });
+    expect(run.placeDiscovery).toEqual({ required: true, attempted: false, succeeded: false, source: undefined });
     expect(run.detail).toMatch(/could not confirm a real place/i);
     // Both rounds are visible, and both say why they were refused.
     expect(run.diagnostics.map((d) => d.answerGate)).toEqual([
@@ -192,7 +193,7 @@ describe('a discovery question may not be answered until the search has run', ()
 
     // Rejected before dispatch, so the adapter never saw it.
     expect(executeTool).not.toHaveBeenCalled();
-    expect(run.placeDiscovery).toEqual({ required: true, attempted: false, succeeded: false });
+    expect(run.placeDiscovery).toEqual({ required: true, attempted: false, succeeded: false, source: undefined });
     expect(run.status).toBe('partial');
     expect(run.answer).toBeUndefined();
 
@@ -282,7 +283,7 @@ describe('a discovery question may not be answered until the search has run', ()
     expect(run.status).toBe('answered');
     expect(callModel).toHaveBeenCalledTimes(1);
     expect(executeTool).not.toHaveBeenCalled();
-    expect(run.placeDiscovery).toEqual({ required: false, attempted: false, succeeded: false });
+    expect(run.placeDiscovery).toEqual({ required: false, attempted: false, succeeded: false, source: undefined });
   });
 });
 
@@ -316,5 +317,169 @@ describe('which questions are discovery questions', () => {
   it('needs a target before a verb counts as discovery', () => {
     // "find" alone is not a request for a place.
     expect(requires('find my booking confirmation')).toBe(false);
+  });
+});
+
+/**
+ * The server-owned pre-search.
+ *
+ * The gate above proves an unsearched recommendation cannot be accepted. It
+ * does not make the search happen, and production showed the model will not
+ * reliably start one: six metered rounds, zero dispatches. So discovery stops
+ * being the model's decision. The server runs the search before the first
+ * round and hands the results in as findings, which is the same channel a
+ * model-requested tool result arrives on.
+ *
+ * Identity is untouched by this. Ids still originate in the provider result and
+ * are still validated against the server-owned index; the only thing that
+ * changed is who decided to look.
+ */
+describe('the server searches before the model speaks', () => {
+  const seeded = (outcome: ToolOutcome) => ({
+    seededFindings: [outcome.ok === true
+      ? { tool: 'search_places', ok: true, result: outcome.result }
+      : { tool: 'search_places', ok: false, detail: outcome.detail }],
+    seededPlaceDiscovery: { attempted: true, succeeded: outcome.ok === true },
+  });
+
+  it('answers the production question in a single model round', async () => {
+    const { fn: callModel, seen } = scripted([
+      () => ({ answer: 'Shinjuku Gyoen is the one I would pick.', placeIds: [TRUSTED_ID] }),
+    ]);
+    const executeTool = vi.fn(async () => searchHit());
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool,
+      requiresPlaceDiscovery: true,
+      ...seeded(searchHit()),
+    });
+
+    // One paid round, where the old flow needed three at best and six at worst.
+    expect(callModel).toHaveBeenCalledTimes(1);
+    expect(run.status).toBe('answered');
+    expect(run.answer?.placeIds).toEqual([TRUSTED_ID]);
+    expect(run.placeDiscovery).toEqual({
+      required: true, attempted: true, succeeded: true, source: 'server-presearch',
+    });
+    // The model saw the results on its very first round.
+    expect(seen[0].findings).toEqual([
+      { tool: 'search_places', ok: true, result: SEARCH_RESULT },
+    ]);
+    // The model never had to ask for the search itself.
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it('still rejects an invented id even with trusted results in hand', async () => {
+    const { fn: callModel } = scripted([
+      () => ({ answer: 'Both of these are good.', placeIds: [FABRICATED_ID, TRUSTED_ID] }),
+    ]);
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async () => searchHit()),
+      requiresPlaceDiscovery: true,
+      ...seeded(searchHit()),
+    });
+
+    expect(run.status).toBe('answered');
+    expect(run.answer?.placeIds).toEqual([TRUSTED_ID]);
+    expect(run.answer?.rejected).toContainEqual({
+      value: FABRICATED_ID, reason: 'unreferenced-place-id',
+    });
+  });
+
+  it('produces no card when the model ignores every trusted result', async () => {
+    const { fn: callModel } = scripted([
+      () => ({ answer: 'I like the Camera Museum.', placeIds: [FABRICATED_ID] }),
+    ]);
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async () => searchHit()),
+      requiresPlaceDiscovery: true,
+      ...seeded(searchHit()),
+    });
+
+    // The search succeeded, so the answer is allowed to stand as prose.
+    expect(run.status).toBe('answered');
+    // But nothing it pointed at was real, so nothing becomes a card.
+    expect(run.answer?.placeIds).toEqual([]);
+  });
+
+  it('lets a pre-search that found nothing finish truthfully', async () => {
+    const { fn: callModel } = scripted([
+      () => ({ answer: 'I could not find a verified place matching that request.' }),
+    ]);
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async () => searchEmpty()),
+      requiresPlaceDiscovery: true,
+      ...seeded(searchEmpty()),
+    });
+
+    expect(callModel).toHaveBeenCalledTimes(1);
+    expect(run.status).toBe('answered');
+    expect(run.answer?.placeIds).toEqual([]);
+    expect(run.placeDiscovery.succeeded).toBe(true);
+  });
+
+  it('will not recommend from memory when the pre-search failed', async () => {
+    const { fn: callModel, seen } = scripted([
+      () => ({ answer: 'The Camera Museum is lovely.', placeIds: [FABRICATED_ID] }),
+    ]);
+
+    const run = await runAgent(ask(), {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async () => searchFailed()),
+      requiresPlaceDiscovery: true,
+      ...seeded(searchFailed()),
+    });
+
+    expect(run.status).toBe('partial');
+    expect(run.answer).toBeUndefined();
+    expect(run.placeDiscovery).toEqual({
+      required: true, attempted: true, succeeded: false, source: 'server-presearch',
+    });
+    // Bounded, not six rounds.
+    expect(callModel.mock.calls.length).toBeLessThanOrEqual(2);
+    // The model was told the search failed rather than left to guess.
+    expect(seen[0].findings[0]).toEqual({
+      tool: 'search_places', ok: false, detail: 'The place search failed.',
+    });
+  });
+});
+
+describe('where the server looks', () => {
+  const areaFor = (question: string) => deriveAskGroundingPlan({ question }).placeDiscoveryArea;
+
+  it('takes the area from the production question', () => {
+    expect(areaFor(PRODUCTION_QUESTION)).toBe('shinjuku');
+  });
+
+  it.each([
+    ['suggest a restaurant around Ginza', 'ginza'],
+    ['find a cafe near Shibuya, please', 'shibuya'],
+    ['recommend somewhere to visit in Asakusa', 'asakusa'],
+  ])('%s', (question, expected) => {
+    expect(areaFor(question)).toBe(expected);
+  });
+
+  it.each([
+    'where should I go near here?',
+    'find one place worth visiting in this trip',
+  ])('refuses a non-place as a search area: %s', (question) => {
+    // Falls back to the trip's own city rather than searching for "here".
+    expect(areaFor(question)).toBeUndefined();
+  });
+
+  it('has no area to offer for a non-discovery question', () => {
+    expect(areaFor('How much budget do I have left?')).toBeUndefined();
   });
 });

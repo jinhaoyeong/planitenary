@@ -70,6 +70,14 @@ export interface AskGroundingPlan {
    * and invented an id to cite.
    */
   requiresPlaceDiscovery: boolean;
+  /**
+   * Area text to search around, when the question named one.
+   *
+   * Search input, never identity — see {@link DISCOVERY_AREA_RE}. Absent when
+   * the question named no area, in which case the caller searches the trip's
+   * own city.
+   */
+  placeDiscoveryArea?: string;
 }
 
 export interface AskGroundingRead {
@@ -226,6 +234,31 @@ const DISCOVERY_ASK_RE = /\bwhere (should|can|could) (i|we) (go|eat|visit|stay|d
 
 const DISCOVERY_VERB_RE = /\b(find|recommend|suggest|show me|any good|looking for)\b/;
 
+/**
+ * The area a discovery question points at, as **search input only**.
+ *
+ * This never becomes an identity. It is handed to the place provider as the
+ * text to look around, and every id, name and coordinate on the resulting card
+ * still comes from what the provider returned. "Shinjuku" here is a query, not
+ * a place the server claims to know.
+ *
+ * Lazy, and stopped by the first clause boundary, because the phrase that
+ * follows an area is usually another sentence: "near Shinjuku **and explain
+ * why it fits this trip**" must search Shinjuku, not the rest of the question.
+ */
+const DISCOVERY_AREA_RE =
+  /\b(?:near|around|close to|next to|in|at)\s+([a-z0-9'’\- ]{2,40}?)(?=\s+(?:and|for|that|which|so|because|but)\b|\s*[,.?!;]|$)/;
+
+/**
+ * Phrases that follow "near" without naming anywhere a provider could find.
+ * Sending one as a search area returns nothing at best, so the trip's own city
+ * is used instead.
+ */
+const AREA_STOPWORDS = new Set([
+  'here', 'there', 'me', 'us', 'my hotel', 'the hotel', 'my place', 'this place',
+  'this trip', 'the trip', 'my trip', 'my plan', 'the plan', 'my itinerary', 'today',
+]);
+
 const DISCOVERY_TARGET_RE =
   /\b(place|places|spot|spots|somewhere|anywhere|restaurant|restaurants|cafe|cafes|café|bar|bars|attraction|attractions|museum|museums|shrine|shrines|temple|temples|park|parks|market|markets|shop|shops|things? to do|to eat|to visit)\b/;
 
@@ -254,7 +287,11 @@ export function deriveAskGroundingPlan(input: {
   const requiresPlaceDiscovery = DISCOVERY_ASK_RE.test(question)
     || (DISCOVERY_VERB_RE.test(question) && DISCOVERY_TARGET_RE.test(question));
 
-  return { required: uniqueScopes(required), requiresPlaceDiscovery };
+  const areaMatch = requiresPlaceDiscovery ? DISCOVERY_AREA_RE.exec(question) : null;
+  const area = areaMatch?.[1]?.trim();
+  const placeDiscoveryArea = area && !AREA_STOPWORDS.has(area) ? area : undefined;
+
+  return { required: uniqueScopes(required), requiresPlaceDiscovery, placeDiscoveryArea };
 }
 
 export interface PersistedFlight {
