@@ -45,19 +45,16 @@ import { invokeTravelFunction, isSupabaseConfigured } from '../lib/supabase';
 import type { CandidateDecision, PlaceCandidate, RankedCandidate } from '../lib/destinationIntelligence';
 import type { RouteLeg, RouteResolver } from '../lib/humanScheduler';
 import {
-  bindSavedActivityIds,
   cardDecisionWrites,
   decisionPlaceRefs,
   decisionTargetIdOf,
   resolvedCardDecision,
-  retainedDecisionIdsOf,
   reviewCandidatesForItinerary,
 } from '../lib/decisionTarget';
 import {
   buildDestinationItinerary,
   defaultDiscoveryDecisions,
   discoveryTarget,
-  pruneDecisionsToCandidates,
   rankWithIntelligence,
   shortlistTarget,
   type DestinationBuildResult,
@@ -1764,37 +1761,27 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           : 'No places were returned for this destination.');
       }
       /**
-       * Decisions survive a re-discovery, but only for places still on offer.
-       * A provider can return a different set for the same city, and keeping
-       * the rest leaves the deck counting choices about cards it does not have.
+       * A decision is the traveller's, and a shorter list is not evidence they
+       * changed their mind.
        *
-       * Pruned against *every* city's candidates rather than this one's. Using
-       * only the active deck would delete the traveller's Kyoto choices the
-       * moment they opened Nara — the failure `d89bbe8` fixed, in a new
-       * disguise.
+       * Discovery used to drop decisions for places the new run did not return,
+       * on the reasoning that the provider had stopped offering them. That
+       * reasoning broke the moment the deck was sized to the stay: asking for
+       * twenty-five instead of sixty returns fewer places for exactly the same
+       * city, and a production trip lost eight decisions and four Must-dos to a
+       * refresh that discovered nothing new about any of them.
+       *
+       * The count that motivated the pruning is already handled where it
+       * belongs: `reviewedCount` measures decisions among the candidates on
+       * offer, so a deck cannot report "45 of 20 reviewed" whether or not the
+       * other twenty-five decisions still exist. Nothing else needs a decision
+       * to disappear, and a decision now only goes when the traveller clears it.
        */
-      const stillOffered = [
-        ...discovered,
-        ...Object.entries(candidatesByCity)
-          .filter(([city]) => city !== targetLabel)
-          .flatMap(([, cityCandidates]) => cityCandidates),
-      ];
-      const pruned = pruneDecisionsToCandidates(
-        decisionsRef.current,
-        bindSavedActivityIds(stillOffered, itinerary),
-        retainedDecisionIdsOf(itinerary),
-      );
       setCandidatesByCity((previous) => ({ ...previous, [targetLabel]: discovered }));
       setActiveCityIndex(cityIndex);
-      decisionsRef.current = pruned.decisions;
-      setDecisions(pruned.decisions);
-      // Nothing is dropped silently: a selection that vanishes between runs is
-      // the traveller's work disappearing, and they get told.
-      setDecisionNotice(pruned.dropped > 0
-        ? `${pruned.dropped} earlier ${pruned.dropped === 1 ? 'choice' : 'choices'} no longer match places on offer here, so ${pruned.dropped === 1 ? 'it was' : 'they were'} cleared.`
-        : null);
+      setDecisionNotice(null);
       setPhase('review');
-      persistDecisions(pruned.decisions, new Date().toISOString());
+      persistDecisions(decisionsRef.current, new Date().toISOString());
     } catch (discoveryError) {
       setError(discoveryError instanceof Error ? discoveryError.message : 'Discovery could not be loaded.');
     } finally {

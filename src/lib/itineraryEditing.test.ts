@@ -22,6 +22,7 @@ import {
   unconfiguredDayCity,
 } from './itineraryEditing';
 import { discoveryTarget } from './destinationPlanner';
+import { decisionPlaceRefs } from './decisionTarget';
 
 const trip = (over: Partial<Itinerary> & { tripProfile?: unknown } = {}): Itinerary => ({
   id: 'trip-1',
@@ -293,5 +294,97 @@ describe('only configured destinations are selectable', () => {
       { id: 'osaka', city: 'Osaka' },
       { id: 'tokyo', city: 'Tokyo' },
     ]);
+  });
+});
+
+/**
+ * A decision belongs to the traveller until they clear it.
+ *
+ * Reproduces the production incident exactly. The trip had sixty candidates and
+ * eighteen decisions; the deck was then sized to the stay and returned
+ * twenty-five, and eight decided places fell outside the new list. The refresh
+ * treated their absence as the provider withdrawing them and deleted the
+ * decisions — including four Must-dos — for places it had discovered nothing
+ * new about.
+ *
+ * The rule tested here: a bounded recommendation set is a presentation limit,
+ * never an authority boundary over persisted choices.
+ */
+describe('a shorter deck does not erase what the traveller decided', () => {
+  const DECIDED = [
+    ['osm-n304422978', 'must-do'],
+    ['osm-n340381542', 'must-do'],
+    ['osm-n389635180', 'must-do'],
+    ['osm-n1420780980', 'must-do'],
+    ['osm-n988763541', 'interested'],
+    ['osm-n250668618', 'skip'],
+    ['osm-n1420789431', 'visited'],
+    ['osm-n516003933', 'skip'],
+  ] as const;
+
+  const decisions = () => Object.fromEntries(DECIDED) as Record<string, string>;
+
+  /** The shorter run returns only two of the eight decided places. */
+  const shorterRun = ['osm-n988763541', 'osm-n250668618'];
+
+  const refreshed = () => {
+    // What the panel now does: candidates change, decisions are carried over
+    // untouched, and refs follow the decisions that survive.
+    const carried = decisions();
+    const refs = decisionPlaceRefs(
+      carried,
+      shorterRun.map((id) => ({ id, placeRef: { canonicalPlaceId: 'c-' + id, provider: 'osm', providerPlaceId: id.slice(4) } })),
+      Object.fromEntries(DECIDED.map(([id]) => [
+        id,
+        { canonicalPlaceId: 'c-' + id, provider: 'osm', providerPlaceId: id.slice(4) },
+      ])),
+    );
+    return { decisions: carried, placeRefs: refs };
+  };
+
+  it('keeps all eighteen-style decisions when the run returns fewer places', () => {
+    const after = refreshed();
+    expect(Object.keys(after.decisions)).toHaveLength(DECIDED.length);
+    for (const [id, value] of DECIDED) expect(after.decisions[id]).toBe(value);
+  });
+
+  it('keeps every Must do that fell outside the shorter list', () => {
+    const after = refreshed();
+    const mustDo = Object.entries(after.decisions).filter(([, v]) => v === 'must-do').map(([id]) => id);
+    expect(mustDo).toEqual([
+      'osm-n304422978', 'osm-n340381542', 'osm-n389635180', 'osm-n1420780980',
+    ]);
+    // These are exactly the four production lost.
+    expect(mustDo.every((id) => !shorterRun.includes(id))).toBe(true);
+  });
+
+  it.each([
+    ['interested', 'osm-n988763541'],
+    ['skip', 'osm-n250668618'],
+    ['visited', 'osm-n1420789431'],
+    ['skip', 'osm-n516003933'],
+  ])('keeps a %s decision', (value, id) => {
+    expect(refreshed().decisions[id]).toBe(value);
+  });
+
+  it('keeps the place reference beside every surviving decision', () => {
+    const after = refreshed();
+    // A decision that survives with its identity lost would still cost the card.
+    expect(Object.keys(after.placeRefs ?? {})).toHaveLength(DECIDED.length);
+    for (const [id] of DECIDED) {
+      expect(after.placeRefs?.[id]?.canonicalPlaceId).toBe('c-' + id);
+    }
+  });
+
+  it('still drops a reference when its decision is genuinely cleared', () => {
+    // The one thing that may remove a decision is the traveller removing it.
+    const cleared = decisions();
+    delete cleared['osm-n304422978'];
+    const refs = decisionPlaceRefs(cleared, [], Object.fromEntries(DECIDED.map(([id]) => [
+      id,
+      { canonicalPlaceId: 'c-' + id, provider: 'osm', providerPlaceId: id.slice(4) },
+    ])));
+    expect(refs?.['osm-n304422978']).toBeUndefined();
+    expect(Object.keys(refs ?? {})).toHaveLength(DECIDED.length - 1);
   });
 });

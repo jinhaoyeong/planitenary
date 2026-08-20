@@ -154,13 +154,24 @@ export function rankDestinationCandidates(candidates: PlaceCandidate[], profile:
 /**
  * Drop decisions about places that are no longer on offer.
  *
- * Decisions are restored by city and survive a re-discovery, but the candidate
- * list does not: a provider can return a different set for the same city, and a
- * cached run can expire into a shorter one. Keeping every prior decision then
- * leaves the deck describing places that are not in it — the reported "45 of 20
- * reviewed" — and, when none of the retained ids appear in the new list, a
- * build that accepts nothing at all while the traveller is looking at a
- * shortlist of 33.
+ * **No longer used when discovery refreshes, and must not be put back there.**
+ *
+ * It was, on the reasoning that a place absent from a new run had stopped
+ * being offered. That reasoning held only while every run asked for the same
+ * sixty candidates. Once the deck was sized to the stay, asking for twenty-five
+ * returned fewer places for exactly the same city — and a production trip lost
+ * eight decisions and four Must-dos to a refresh that had discovered nothing
+ * new about any of them. A shorter list is not evidence anybody changed their
+ * mind, and a decision is the traveller's until they clear it.
+ *
+ * The count that motivated it is handled where it belongs: `reviewedCount`
+ * measures decisions among the candidates actually on offer, so a deck cannot
+ * report "45 of 20 reviewed" whether or not the other decisions still exist.
+ *
+ * Kept because the operation itself is sound for a case that genuinely needs
+ * it — an explicit "clear choices for places this city no longer has" — where
+ * discarding the decisions is what the traveller asked for rather than a side
+ * effect of looking at a shorter list.
  *
  * Keyed on the candidate id rather than the name, because two places in one
  * city genuinely share names.
