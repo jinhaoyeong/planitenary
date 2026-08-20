@@ -1400,6 +1400,32 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     : undefined) || pendingDeck[0] || null;
 
   /**
+   * Whether this panel is still on screen.
+   *
+   * Deliberately *not* a per-run cancellation flag, which is what the two
+   * effects below used to carry. Both depend on the deck window, and the deck
+   * window is rebuilt the moment either answer lands: evidence re-ranks the
+   * list, and a photograph rewrites the candidate it belongs to. A cleanup
+   * that cancelled the previous run would therefore throw away an answer that
+   * had already been paid for — and because both effects keep an "asked
+   * already" ledger, nothing would ever ask again. The deck kept its placards
+   * forever, with the photographs sitting in the cache.
+   *
+   * Applying a late answer is safe: both merge by place id rather than by
+   * position, so a result that arrives after the traveller has moved on
+   * updates the place it was about and nothing else. The only thing that must
+   * stop them is the panel going away.
+   */
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    // Reset on mount as well as clear on unmount: StrictMode mounts, unmounts
+    // and remounts in development, and a flag that only ever went false would
+    // leave the remounted panel unable to accept anything.
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  /**
    * Evidence is gathered for the cards the traveller is actually looking at,
    * never for the whole shortlist. Reviews are the most expensive data the app
    * buys, so a sixty-place list abandoned after four cards must cost four
@@ -1422,14 +1448,13 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     if (unique.length === 0) return;
 
     unique.forEach((candidate) => evidenceRequestedRef.current.add(candidate.id));
-    let active = true;
     void fetchPlaceEvidence(
       { city: capability.destination.city, countryCode: capability.destination.countryCode },
       unique,
       invokeTravelFunction,
       { provider: capability.places.provider },
     ).then((digest) => {
-      if (!active) return;
+      if (!mountedRef.current) return;
       // Merged, not replaced: each batch only carries the places it asked for.
       setQueueEvidence((previous) => ({ ...previous, ...digest.queueEvidence }));
       setEvidenceSummaries((previous) => ({ ...previous, ...digest.evidenceSummaries }));
@@ -1463,7 +1488,6 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         }));
       }
     });
-    return () => { active = false; };
   }, [phase, usingFixture, currentDeckCard, pendingDeck, setCandidates, capability.destination.city, capability.destination.countryCode, capability.places.provider]);
 
   /**
@@ -1498,10 +1522,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     if (unique.length === 0) return;
 
     unique.forEach((candidate) => photosRequestedRef.current.add(candidate.id));
-    let active = true;
     void fetchPlacePhotos(unique, invokeTravelFunction, { provider: capability.places.provider })
       .then((photos) => {
-        if (!active || Object.keys(photos).length === 0) return;
+        if (!mountedRef.current || Object.keys(photos).length === 0) return;
         setCandidates((previous) => previous.map((candidate) => {
           const photo = photos[candidate.id];
           if (!photo) return candidate;
@@ -1513,7 +1536,6 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           };
         }));
       });
-    return () => { active = false; };
   }, [phase, usingFixture, currentDeckCard, pendingDeck, setCandidates, capability.places.provider]);
   /**
    * Context every card shares: the traveller's dates, so a weekly closure can
