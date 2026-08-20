@@ -18,6 +18,7 @@ import type { DiscoveryCandidateDecision, Itinerary } from '../data';
 import { FixturePlaceDiscoveryProvider } from '../lib/destinationFixtures';
 import { EMPTY_PROVIDER_RUNTIME, canDiscover, describeCapability, type ProviderRuntime } from '../lib/destinationCapability';
 import { capabilityFor, discoverPlaces, fetchPlaceEvidence, fetchPlacePhotos, loadProviderRuntime, parseCurrentEvents, parseWeatherRisk } from '../lib/discoveryRuntime';
+import type { PlacePhoto } from '../lib/discoveryRuntime';
 import {
   IntelligenceRequestController,
   foldIntelligenceResults,
@@ -128,6 +129,12 @@ const DESKTOP_REVIEW_MODE_KEY = 'planitenary:destination-review-mode';
 const EVIDENCE_PREFETCH_COUNT = 4;
 
 /**
+ * How many places one image request covers. The deck is bounded to roughly
+ * five per city-day now, so the whole visible set is a few batches.
+ */
+const PHOTO_BATCH_SIZE = 10;
+
+/**
  * Cost and hours used to be two one-line helpers here, and both were wrong in
  * the same way: they printed whatever they had without saying what it meant.
  * `formatPrice` rendered a yen glyph for every country on earth and said "Cost
@@ -233,23 +240,35 @@ export interface CandidateContext {
  * neighbourhood placard when it did not. Never a stand-in image of somewhere
  * else — a traveller has to be able to trust that the picture is the place.
  */
-function PlaceMedia({ candidate, className }: { candidate: PlaceCandidate; className?: string }) {
+function PlaceMedia({ candidate, className, size = 'full' }: {
+  candidate: PlaceCandidate;
+  className?: string;
+  /**
+   * Which rendition to load. A browse row is a thumbnail-sized slot, and
+   * filling it with the 1280px original was costing bandwidth for pixels
+   * nobody could see. The deck card is large enough to want the real thing.
+   */
+  size?: 'full' | 'thumb';
+}) {
   // Remember which URL broke rather than a bare flag, so a new place starts
   // trusted again without an effect to reset it.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const showPhoto = Boolean(candidate.photoUrl) && failedUrl !== candidate.photoUrl;
+  const source = size === 'thumb'
+    ? candidate.photoThumbnailUrl || candidate.photoUrl
+    : candidate.photoUrl;
+  const showPhoto = Boolean(source) && failedUrl !== source;
 
   return (
     <div className={`destination-place-media${className ? ` ${className}` : ''}`} data-has-photo={showPhoto ? 'true' : 'false'}>
       {showPhoto ? (
         <img
-          src={candidate.photoUrl}
+          src={source}
           alt={`${candidate.name}, ${candidate.neighbourhood || candidate.city}`}
           loading="lazy"
           decoding="async"
           // Native image dragging would otherwise hijack a swipe on a mouse.
           draggable={false}
-          onError={() => setFailedUrl(candidate.photoUrl ?? null)}
+          onError={() => setFailedUrl(source ?? null)}
         />
       ) : (
         <div className="destination-place-media-fallback" aria-hidden="true">
@@ -1509,11 +1528,19 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
   const photosRequestedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (phase !== 'review' || usingFixture || !isSupabaseConfigured()) return;
-    const visible = [
-      ...(currentDeckCard ? [currentDeckCard] : []),
-      ...pendingDeck.slice(0, EVIDENCE_PREFETCH_COUNT),
-    ];
-    const wanted = visible
+    /**
+     * Every place the traveller can actually see, not the next few.
+     *
+     * This resolved the active card plus four ahead, which made sense against
+     * sixty candidates and stopped making sense the moment the deck was sized
+     * to the stay. Browse All showed placeholders for places whose verified
+     * photograph was already cached, purely because they sat outside a
+     * prefetch window built for a much longer list.
+     *
+     * Hidden headroom is excluded on purpose: the extra candidates fetched to
+     * survive filtering are not on screen and must not spend a lookup.
+     */
+    const wanted = reviewRanked
       .map(({ candidate }) => candidate)
       // A place with no pointer has nothing to look up, and a place that
       // already has its photograph has nothing to gain.
@@ -1524,21 +1551,42 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     if (unique.length === 0) return;
 
     unique.forEach((candidate) => photosRequestedRef.current.add(candidate.id));
-    void fetchPlacePhotos(unique, invokeTravelFunction, { provider: capability.places.provider })
-      .then((photos) => {
-        if (!mountedRef.current || Object.keys(photos).length === 0) return;
-        setCandidates((previous) => previous.map((candidate) => {
-          const photo = photos[candidate.id];
-          if (!photo) return candidate;
-          return {
-            ...candidate,
-            photoUrl: photo.url,
-            photoAttribution: photo.attribution,
-            photoSourcePage: photo.sourcePage,
-          };
-        }));
-      });
-  }, [phase, usingFixture, currentDeckCard, pendingDeck, setCandidates, capability.places.provider]);
+    /**
+     * Bounded batches rather than one request per card. travel-images groups
+     * its provider lookups per request, so a batch is genuinely cheaper than
+     * the same ids split apart, and forty separate requests would be a burst
+     * the resolver never asked for.
+     */
+    const batches: PlaceCandidate[][] = [];
+    for (let at = 0; at < unique.length; at += PHOTO_BATCH_SIZE) {
+      batches.push(unique.slice(at, at + PHOTO_BATCH_SIZE));
+    }
+
+    const applyPhotos = (photos: Record<string, PlacePhoto>) => {
+      if (!mountedRef.current || Object.keys(photos).length === 0) return;
+      setCandidates((previous) => previous.map((candidate) => {
+        const photo = photos[candidate.id];
+        if (!photo) return candidate;
+        return {
+          ...candidate,
+          photoUrl: photo.url,
+          photoThumbnailUrl: photo.thumbnailUrl,
+          photoAttribution: photo.attribution,
+          photoSourcePage: photo.sourcePage,
+        };
+      }));
+    };
+
+    // Sequential, so each batch paints as it lands rather than the screen
+    // waiting for the slowest.
+    void batches.reduce(
+      (queue, batch) => queue.then(async () => {
+        if (!mountedRef.current) return;
+        applyPhotos(await fetchPlacePhotos(batch, invokeTravelFunction, { provider: capability.places.provider }));
+      }),
+      Promise.resolve(),
+    );
+  }, [phase, usingFixture, reviewRanked, setCandidates, capability.places.provider]);
   /**
    * Context every card shares: the traveller's dates, so a weekly closure can
    * be named as a day of *their* trip, and a conversion for sourced fares. Held

@@ -44,25 +44,44 @@ export interface TripCityOption {
  * its days cannot lose the city it is currently showing — a picker that cannot
  * represent the present value is worse than no picker.
  */
-export function tripCityOptions(itinerary: Pick<Itinerary, 'days'> & { tripProfile?: unknown }): TripCityOption[] {
+export function tripCityOptions(itinerary: { tripProfile?: unknown }): TripCityOption[] {
   const options: TripCityOption[] = [];
   const seen = new Set<string>();
-  const add = (city?: string, id?: string) => {
-    if (!city) return;
-    const key = city.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    options.push(id ? { id, city } : { city });
-  };
 
   const profile = asRecord(itinerary.tripProfile);
   for (const raw of asArray(profile?.destinations)) {
     const destination = asRecord(raw);
-    add(text(destination?.city), text(destination?.id));
+    const city = text(destination?.city);
+    if (!city) continue;
+    const key = city.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const id = text(destination?.id);
+    options.push(id ? { id, city } : { city });
   }
-  for (const day of itinerary.days ?? []) add(text(day.city));
 
   return options;
+}
+
+/**
+ * A city a day is currently in that the trip does not have.
+ *
+ * Older plans hold these, and there are two wrong ways to handle one. Dropping
+ * it loses where the traveller said they were going; offering it as a choice
+ * makes an unconfigured city selectable, so the day could be *moved* somewhere
+ * discovery, routing and budget still know nothing about. It is shown instead
+ * as the current state, unselectable, with adding it properly one step away.
+ */
+export function unconfiguredDayCity(
+  itinerary: { tripProfile?: unknown },
+  city: string | undefined,
+): string | undefined {
+  const current = text(city);
+  if (!current) return undefined;
+  const configured = tripCityOptions(itinerary).some(
+    (option) => option.city.toLowerCase() === current.toLowerCase(),
+  );
+  return configured ? undefined : current;
 }
 
 /** The trip's own first and last day, when it has them. */
@@ -115,6 +134,69 @@ export function tripDateOptions(itinerary: Pick<Itinerary, 'days'> & { tripProfi
   return dates;
 }
 
+const MONTHS = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+];
+
+/**
+ * A stored day label that names a month and a day, in any of the shapes this
+ * app has used: "AUG 12", "Aug 12", "August 12", "12 Aug".
+ */
+const parseMonthDay = (value: string): { month: number; day: number } | undefined => {
+  const tokens = value.trim().toLowerCase().replace(/[,.]/g, ' ').split(' ').filter(Boolean);
+  const month = MONTHS.findIndex((name) => tokens.some((token) => token.startsWith(name)));
+  if (month < 0) return undefined;
+  const day = Number(tokens.find((token) => /^\d{1,2}$/.test(token)));
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? { month: month + 1, day } : undefined;
+};
+
+/**
+ * The real date a day stands for, whatever it happens to be stored as.
+ *
+ * Trips created before dates were kept as `YYYY-MM-DD` carry presentation
+ * labels — the production trip this was built for reads "AUG 12" — and an
+ * earlier version of this module handed those trips back their free-text box.
+ * That was exactly backwards: the itineraries most likely to hold a nonsense
+ * date were the only ones still allowed to receive one.
+ *
+ * Resolution is read-only. Nothing is written merely because the traveller
+ * opened the plan; the canonical date is persisted when they actually choose
+ * one.
+ */
+export function resolveDayDate(
+  itinerary: Pick<Itinerary, 'days'> & { tripProfile?: unknown },
+  dayIndex: number,
+): string | undefined {
+  const { start, end } = tripDateRange(itinerary);
+  const raw = text(itinerary.days?.[dayIndex]?.date);
+  if (!start || !end) return raw && ISO_DATE.test(raw) ? raw : undefined;
+
+  // 1. Already a real date inside the trip. Nothing to work out.
+  if (raw && ISO_DATE.test(raw) && raw >= start && raw <= end) return raw;
+
+  const within = tripDateOptions(itinerary);
+
+  // 2. A month and a day that the trip contains exactly once. "AUG 12" on a
+  //    12–22 August trip can only mean one date; on a trip spanning two
+  //    Augusts it could mean two, and a guess between them is not a resolution.
+  const label = raw ? parseMonthDay(raw) : undefined;
+  if (label) {
+    const matches = within.filter((iso) => {
+      const [, month, day] = iso.split('-').map(Number);
+      return month === label.month && day === label.day;
+    });
+    if (matches.length === 1) return matches[0];
+  }
+
+  /**
+   * 3. Position. Used only when the label said nothing a date could be read
+   *    from, so it cannot contradict something the traveller stored — a day
+   *    labelled "Day 3" genuinely carries no date, and its place in the plan
+   *    is the only fact available about when it happens.
+   */
+  return within[Math.min(Math.max(dayIndex, 0), within.length - 1)];
+}
+
 /** Whether a date is one the trip actually contains. */
 export function isDateWithinTrip(
   itinerary: Pick<Itinerary, 'days'> & { tripProfile?: unknown },
@@ -143,25 +225,20 @@ export function moveDayToDate(itinerary: Itinerary, dayIndex: number, date: stri
   const target = itinerary.days?.[dayIndex];
   if (!target || !isDateWithinTrip(itinerary, date) || target.date === date) return itinerary;
 
-  const moved = itinerary.days.map((day, index) => (index === dayIndex ? { ...day, date } : day));
+  const moved = { ...itinerary, days: itinerary.days.map((day, index) => (index === dayIndex ? { ...day, date } : day)) };
 
   /**
-   * Only reorder when every day can be compared.
+   * Ordered by what each day *means*, not by how it is written.
    *
-   * Trips built before dates were stored as `YYYY-MM-DD` carry things like
-   * "Aug 12" or "Day 3", and sorting those against a real date puts the plan
-   * in an order nobody asked for. Such a trip still accepts the new date — it
-   * simply keeps its existing arrangement, which is the honest outcome when
-   * the app cannot tell which day comes first.
+   * A trip holding "AUG 12" beside a freshly chosen "2026-08-16" cannot be
+   * sorted as strings, but both resolve to real dates, and resolving is what
+   * lets a legacy plan reorder correctly instead of being left alone.
    */
-  if (!moved.every((day) => ISO_DATE.test(String(day.date ?? '')))) {
-    return { ...itinerary, days: moved };
-  }
-
-  const ordered = moved
+  const resolved = moved.days.map((_, index) => resolveDayDate(moved, index) ?? '');
+  const ordered = moved.days
     .map((day, index) => ({ day, index }))
     .sort((a, b) => {
-      const byDate = String(a.day.date ?? '').localeCompare(String(b.day.date ?? ''));
+      const byDate = resolved[a.index].localeCompare(resolved[b.index]);
       return byDate !== 0 ? byDate : a.index - b.index;
     })
     .map(({ day }, position) => (day.day === position + 1 ? day : { ...day, day: position + 1 }));

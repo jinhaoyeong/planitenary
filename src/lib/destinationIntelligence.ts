@@ -113,6 +113,8 @@ export interface PlaceCandidate {
    * landmark is a false claim a traveller cannot check.
    */
   photoUrl?: string;
+  /** The same photograph at card size. Presentation only; identity is unchanged. */
+  photoThumbnailUrl?: string;
   /**
    * The credit line shown under it. Not decoration: CC BY and CC BY-SA both
    * require the author be named, so this is part of the permission to display

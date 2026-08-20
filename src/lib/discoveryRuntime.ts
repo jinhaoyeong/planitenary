@@ -375,6 +375,15 @@ export interface PlacePhoto {
   attribution: string;
   /** The Commons file page, carrying the full licence and author text. */
   sourcePage: string;
+  /**
+   * A small rendition of the same photograph, when the service produced one.
+   *
+   * `travel-images` has always returned this and the client threw it away, so
+   * a browse card the size of a postage stamp was loading the full 1280px
+   * original. Same image, same identity, same credit — just the size the slot
+   * actually needs.
+   */
+  thumbnailUrl?: string;
 }
 
 /**
@@ -408,7 +417,12 @@ function parsePhotos(payload: unknown, candidates: PlaceCandidate[]): Record<str
     for (const entry of list) {
       const image = parsePlaceImage(entry);
       if (!image) continue;
-      photos[candidateId] = { url: image.url, attribution: image.attribution, sourcePage: image.sourcePage };
+      photos[candidateId] = {
+        url: image.url,
+        attribution: image.attribution,
+        sourcePage: image.sourcePage,
+        thumbnailUrl: image.thumbnailUrl,
+      };
       break;
     }
   }

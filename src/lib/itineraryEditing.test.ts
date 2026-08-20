@@ -18,6 +18,8 @@ import {
   tripCityOptions,
   tripDateOptions,
   tripDateRange,
+  resolveDayDate,
+  unconfiguredDayCity,
 } from './itineraryEditing';
 import { discoveryTarget } from './destinationPlanner';
 
@@ -55,17 +57,6 @@ describe('a day may only be in a city the trip is going to', () => {
     const cities = tripCityOptions(trip()).map((option) => option.city);
     expect(cities).not.toContain('Kyoto');
     expect(cities).not.toContain('Toyko');
-  });
-
-  it('keeps a city a day already has, even when the profile has forgotten it', () => {
-    /**
-     * A picker that cannot represent the value currently on screen is worse
-     * than no picker: opening it would silently propose changing the day.
-     */
-    const legacy = trip({
-      days: [{ day: 1, date: '2026-08-12', city: 'Nara', title: 'Day 1', activities: [] }],
-    });
-    expect(tripCityOptions(legacy).map((o) => o.city)).toContain('Nara');
   });
 
   it('does not repeat a city that is both configured and on a day', () => {
@@ -209,5 +200,98 @@ describe('the deck is sized by the days spent in that city', () => {
     // Four days in Tokyo and three in Osaka, not seven days of places twice.
     expect(discoveryTarget(4).visible).toBe(20);
     expect(discoveryTarget(3).visible).toBe(15);
+  });
+});
+
+/**
+ * The trip this was actually built for.
+ *
+ * Its days are stored as presentation labels — "AUG 12" — which an earlier
+ * version of this module answered by handing the trip back its free-text box.
+ * That was backwards: the plans most likely to hold a nonsense date were the
+ * only ones still able to receive one.
+ */
+describe('an existing trip with AUG 12 style dates', () => {
+  const legacy = () => trip({
+    days: [
+      { day: 1, date: 'AUG 12', city: 'Osaka', title: 'Arrival day', activities: [] },
+      { day: 2, date: 'AUG 13', city: 'Osaka', title: 'Day 2', activities: [] },
+      { day: 3, date: 'AUG 18', city: 'Tokyo', title: 'Day 3', activities: [] },
+    ],
+  });
+
+  it('resolves the stored label to the real date inside the trip', () => {
+    expect(resolveDayDate(legacy(), 0)).toBe('2026-08-12');
+    expect(resolveDayDate(legacy(), 2)).toBe('2026-08-18');
+  });
+
+  it.each(['Aug 12', 'August 12', '12 Aug', 'aug 12'])('understands %s', (label) => {
+    const written = trip({ days: [{ day: 1, date: label, city: 'Osaka', title: 'Day 1', activities: [] }] });
+    expect(resolveDayDate(written, 0)).toBe('2026-08-12');
+  });
+
+  it('still offers the whole trip and nothing outside it', () => {
+    const options = tripDateOptions(legacy());
+    expect(options).toHaveLength(11);
+    expect(options).not.toContain('2026-08-11');
+    expect(options).not.toContain('2026-08-23');
+    // The point of the fix: a legacy trip is not left with free text.
+    expect(options.length).toBeGreaterThan(0);
+  });
+
+  it('falls back to position only when the label carries no date', () => {
+    const unlabelled = trip({
+      days: [
+        { day: 1, date: 'Day 1', city: 'Osaka', title: 'Arrival day', activities: [] },
+        { day: 2, date: 'Day 2', city: 'Osaka', title: 'Day 2', activities: [] },
+      ],
+    });
+    expect(resolveDayDate(unlabelled, 0)).toBe('2026-08-12');
+    expect(resolveDayDate(unlabelled, 1)).toBe('2026-08-13');
+  });
+
+  it('moves a legacy day and reorders the plan around it', () => {
+    // AUG 12 -> 16 August puts the arrival day after both other days... except
+    // Day 3 is the 18th, so it lands in the middle.
+    const moved = moveDayToDate(legacy(), 0, '2026-08-16');
+    expect(moved.days.map((day) => [day.day, day.title])).toEqual([
+      [1, 'Day 2'],
+      [2, 'Arrival day'],
+      [3, 'Day 3'],
+    ]);
+    expect(moved.days[1].date).toBe('2026-08-16');
+    // Untouched days keep exactly what they had; nothing is rewritten by a move.
+    expect(moved.days[0].date).toBe('AUG 13');
+  });
+
+  it('refuses to move a legacy day outside the trip', () => {
+    const unchanged = moveDayToDate(legacy(), 0, '2026-08-23');
+    expect(unchanged.days.map((day) => day.date)).toEqual(['AUG 12', 'AUG 13', 'AUG 18']);
+  });
+});
+
+describe('only configured destinations are selectable', () => {
+  it('offers the trip cities and nothing else', () => {
+    const withNara = trip({
+      days: [{ day: 1, date: '2026-08-12', city: 'Nara', title: 'Day 1', activities: [] }],
+    });
+    // Nara is where the day currently is, but the trip was never set up for it.
+    expect(tripCityOptions(withNara).map((o) => o.city)).toEqual(['Osaka', 'Tokyo']);
+  });
+
+  it('names an unconfigured current city so it can be shown, not chosen', () => {
+    const withNara = trip({
+      days: [{ day: 1, date: '2026-08-12', city: 'Nara', title: 'Day 1', activities: [] }],
+    });
+    expect(unconfiguredDayCity(withNara, 'Nara')).toBe('Nara');
+    expect(unconfiguredDayCity(withNara, 'Tokyo')).toBeUndefined();
+    expect(unconfiguredDayCity(withNara, undefined)).toBeUndefined();
+  });
+
+  it('carries the destination id so the name is only presentation', () => {
+    expect(tripCityOptions(trip())).toEqual([
+      { id: 'osaka', city: 'Osaka' },
+      { id: 'tokyo', city: 'Tokyo' },
+    ]);
   });
 });

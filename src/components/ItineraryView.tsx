@@ -1,6 +1,12 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { moveDayToDate, tripCityOptions, tripDateOptions } from '../lib/itineraryEditing';
+import {
+  moveDayToDate,
+  resolveDayDate,
+  tripCityOptions,
+  tripDateOptions,
+  unconfiguredDayCity,
+} from '../lib/itineraryEditing';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Star, Lock, Unlock, Clock } from 'lucide-react';
 import { itineraries } from '../data';
@@ -2079,36 +2085,50 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                                   <select
                                     autoFocus
                                     aria-label="Day date"
-                                    value={dateOptions.includes(editedDate) ? editedDate : ''}
+                                    /*
+                                      Legacy labels such as AUG 12 resolve to
+                                      the real date they stand for, so an older
+                                      trip opens on the right option instead of
+                                      being handed a free-text box - which would
+                                      leave the plans most likely to hold a
+                                      nonsense date as the only ones still able
+                                      to receive one.
+                                    */
+                                    value={resolveDayDate(customItinerary, index) ?? ''}
                                     onChange={(event) => handleDateEdit(index, event.target.value)}
                                     onBlur={() => setEditingDateIndex(null)}
                                     className="editorial-input is-compact w-24 md:w-28"
                                     style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}
                                   >
-                                    {!dateOptions.includes(editedDate) && (
-                                      <option value="">{editedDate || 'Pick a date'}</option>
-                                    )}
                                     {dateOptions.map((option) => (
                                       <option key={option} value={option}>{formatTripDate(option)}</option>
                                     ))}
                                   </select>
                                 ) : (
+                                  /*
+                                    No trip range to bound the choice, so there
+                                    is nothing safe to offer. The stored label
+                                    stays visible and the fix - setting the trip
+                                    dates - is one tap away. A free-text box
+                                    here would be the old unrestricted editor
+                                    under a new name.
+                                  */
                                   <>
-                                    <input
-                                      autoFocus
-                                      type="text"
-                                      value={editedDate}
-                                      onChange={(e) => setEditedDate(e.target.value)}
-                                      onKeyDown={(e) => e.key === 'Enter' && handleDateEdit(index)}
-                                      placeholder="e.g. Apr 23"
-                                      className="editorial-input is-compact w-16 md:w-24" style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}
-                                    />
-                                    <button
-                                      onClick={() => handleDateEdit(index)}
-                                      className="p-1 text-emerald-500 hover:bg-emerald-50 rounded"
-                                    >
-                                      <Save className="w-3 h-3" />
-                                    </button>
+                                    <span className="opacity-70">{day.date}</span>
+                                    {onOpenTripSettings && (
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setEditingDateIndex(null);
+                                          onOpenTripSettings();
+                                        }}
+                                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                                        style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+                                      >
+                                        Edit trip dates
+                                      </button>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -2182,8 +2202,20 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                                   className="editorial-input is-compact w-28"
                                   onClick={(e) => e.stopPropagation()}
                                 >
+                                  {/*
+                                    A city the trip never configured is shown
+                                    as the current state and cannot be chosen:
+                                    it must not become a destination a day can
+                                    be moved *to* without passing through
+                                    settings.
+                                  */}
+                                  {unconfiguredDayCity(customItinerary, day.city) && (
+                                    <option value={day.city} disabled>
+                                      {'Current: ' + day.city + ' — not in trip settings'}
+                                    </option>
+                                  )}
                                   {cityOptions.map((option) => (
-                                    <option key={option.city} value={option.city}>{option.city}</option>
+                                    <option key={option.id ?? option.city} value={option.city}>{option.city}</option>
                                   ))}
                                   {onOpenTripSettings && (
                                     <option value={ADD_CITY_OPTION}>+ Add city…</option>
