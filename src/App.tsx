@@ -1459,6 +1459,10 @@ function App() {
               <ItineraryView 
                 itinerary={customItinerary || activeItinerary} 
                 onItineraryChange={handleItineraryChange}
+                // Adding a destination changes the shape of the trip, so the
+                // day header hands that decision to the settings screen that
+                // already owns it rather than answering it in a dropdown.
+                onOpenTripSettings={() => setActiveTab('settings')}
                 planChanges={!isDemoUser && !isLocalTestUser && user
                   ? { tripId: activeItineraryId, tripName: displayItinerary.name }
                   : undefined}

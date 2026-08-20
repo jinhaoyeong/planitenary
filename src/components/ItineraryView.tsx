@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { moveDayToDate, tripCityOptions, tripDateOptions } from '../lib/itineraryEditing';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, ChevronLeft, Edit2, Plus, Save, Plane, Coffee, ShoppingBag, Music, RefreshCw, Loader2, ExternalLink, X, GripVertical, Image as ImageIcon, Heart, MessageSquare, AlertTriangle, Mic, Square, Trash2, Star, Lock, Unlock, Clock } from 'lucide-react';
 import { itineraries } from '../data';
@@ -1154,10 +1155,27 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
   );
 };
 
-export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, planChanges }: {
+/** Chosen from the city list to leave for settings, never stored as a city. */
+const ADD_CITY_OPTION = '__add-city__';
+
+/** `2026-08-12` as the header already reads it: AUG 12. */
+const formatTripDate = (iso: string): string => {
+  const at = new Date(`${iso}T00:00:00Z`);
+  return Number.isFinite(at.getTime())
+    ? at.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    : iso;
+};
+
+export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, planChanges, onOpenTripSettings }: {
   itinerary: Itinerary;
   onItineraryChange?: (itinerary: Itinerary) => void;
   planChanges?: { tripId: string; tripName?: string };
+  /**
+   * Where "Add city" goes. Adding a destination changes how long the trip is
+   * and which days belong to whom, so it is settled in trip settings rather
+   * than inside a dropdown that has no way to ask about any of that.
+   */
+  onOpenTripSettings?: () => void;
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newActivity, setNewActivity] = useState<Partial<Activity>>({
@@ -1210,6 +1228,14 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
 
   // Use the prop as the source of truth; parent handles persistence and Supabase sync
   const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
+
+  /**
+   * What the day header may offer. Derived from the trip itself so the same
+   * rules hold on every surface that edits a day, mobile or desktop.
+   */
+  const cityOptions = useMemo(() => tripCityOptions(customItinerary), [customItinerary]);
+  const dateOptions = useMemo(() => tripDateOptions(customItinerary), [customItinerary]);
+
   const plannerProfile = useMemo(() => sanitizeTripProfile(customItinerary.tripProfile), [customItinerary.tripProfile]);
   /**
    * The real date a day number falls on. `DayPlan.date` is a display string
@@ -1626,30 +1652,32 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     onItineraryChange?.(updatedItinerary);
   };
 
-  const handleDateEdit = (dayIndex: number) => {
+  /**
+   * Move a day to another date the trip actually contains.
+   *
+   * `moveDayToDate` re-sorts and renumbers, so the day number, the calendar
+   * date and the card's position stay one fact. Previously this changed a label
+   * and left the card where it was, which is how "Day 2" ended up dated after
+   * "Day 5".
+   */
+  const handleDateEdit = (dayIndex: number, nextDate = editedDate) => {
     setEditingDateIndex(null);
-    const targetDay = customItinerary.days[dayIndex];
-    if (!targetDay) return;
-    if (!editedDate.trim()) return;
-    if (targetDay.date === editedDate) return;
-    
-    const updatedDays = customItinerary.days.map((day, idx) => 
-      idx === dayIndex ? { ...day, date: editedDate } : day
-    );
-    const updatedItinerary = { ...customItinerary, days: updatedDays };
+    if (!nextDate.trim()) return;
+    const updatedItinerary = moveDayToDate(customItinerary, dayIndex, nextDate);
+    if (updatedItinerary === customItinerary) return;
     setCustomItinerary(updatedItinerary);
     onItineraryChange?.(updatedItinerary);
   };
 
-  const handleCityEdit = (dayIndex: number) => {
+  const handleCityEdit = (dayIndex: number, nextCity = editedCity) => {
     setEditingCityIndex(null);
     const targetDay = customItinerary.days[dayIndex];
     if (!targetDay) return;
-    if (!editedCity.trim()) return;
-    if (targetDay.city === editedCity) return;
-    
-    const updatedDays = customItinerary.days.map((day, idx) => 
-      idx === dayIndex ? { ...day, city: editedCity } : day
+    if (!nextCity.trim()) return;
+    if (targetDay.city === nextCity) return;
+
+    const updatedDays = customItinerary.days.map((day, idx) =>
+      idx === dayIndex ? { ...day, city: nextCity } : day
     );
     const updatedItinerary = { ...customItinerary, days: updatedDays };
     setCustomItinerary(updatedItinerary);
@@ -1976,6 +2004,15 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                     {(provided, snapshot) => (
                       <motion.div
                         id={index === 0 ? 'itinerary-first-day' : undefined}
+                        /*
+                          Moved, not relabelled. Changing a day date reorders
+                          the list, and `layout` animates the card from where
+                          it was to where it now belongs, using the same
+                          framer-motion this view already uses rather than a
+                          second animation system. Disabled mid-drag so it
+                          cannot fight the drag library for the same element.
+                        */
+                        layout={!snapshot.isDragging}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.05, duration: 0.3, ease: 'easeOut' }}
@@ -2027,21 +2064,53 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                             
                             {isEditingMode && editingDateIndex === index ? (
                               <div className="flex items-center gap-1.5">
-                                <input
-                                  autoFocus
-                                  type="text"
-                                  value={editedDate}
-                                  onChange={(e) => setEditedDate(e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && handleDateEdit(index)}
-                                  placeholder="e.g. Apr 23"
-                                  className="editorial-input is-compact w-16 md:w-24" style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}
-                                />
-                                <button 
-                                  onClick={() => handleDateEdit(index)}
-                                  className="p-1 text-emerald-500 hover:bg-emerald-50 rounded"
-                                >
-                                  <Save className="w-3 h-3" />
-                                </button>
+                                {/*
+                                  Only dates inside the trip. Offering the whole
+                                  calendar and rejecting the answer afterwards
+                                  asks the traveller to guess the rule; a trip
+                                  that runs 12–22 August simply has no 23rd.
+
+                                  A trip whose dates were stored before the
+                                  ISO format keeps the free-text box, because
+                                  there is no range to build options from and
+                                  taking the control away would be worse.
+                                */}
+                                {dateOptions.length > 0 ? (
+                                  <select
+                                    autoFocus
+                                    aria-label="Day date"
+                                    value={dateOptions.includes(editedDate) ? editedDate : ''}
+                                    onChange={(event) => handleDateEdit(index, event.target.value)}
+                                    onBlur={() => setEditingDateIndex(null)}
+                                    className="editorial-input is-compact w-24 md:w-28"
+                                    style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                                  >
+                                    {!dateOptions.includes(editedDate) && (
+                                      <option value="">{editedDate || 'Pick a date'}</option>
+                                    )}
+                                    {dateOptions.map((option) => (
+                                      <option key={option} value={option}>{formatTripDate(option)}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <>
+                                    <input
+                                      autoFocus
+                                      type="text"
+                                      value={editedDate}
+                                      onChange={(e) => setEditedDate(e.target.value)}
+                                      onKeyDown={(e) => e.key === 'Enter' && handleDateEdit(index)}
+                                      placeholder="e.g. Apr 23"
+                                      className="editorial-input is-compact w-16 md:w-24" style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                                    />
+                                    <button
+                                      onClick={() => handleDateEdit(index)}
+                                      className="p-1 text-emerald-500 hover:bg-emerald-50 rounded"
+                                    >
+                                      <Save className="w-3 h-3" />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             ) : (
                               <div 
@@ -2089,21 +2158,37 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                             {isEditingMode && editingCityIndex === index ? (
                               <div className="flex items-center gap-1.5">
                                 <MapPin className="w-4 h-4 text-slate-400" />
-                                <input
+                                {/*
+                                  Only cities this trip is going to. A day in a
+                                  city the trip never configured is a day the
+                                  rest of the app — discovery, routing, budget —
+                                  has no way to reason about.
+                                */}
+                                <select
                                   autoFocus
-                                  type="text"
+                                  aria-label="Day city"
                                   value={editedCity}
-                                  onChange={(e) => setEditedCity(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleCityEdit(index);
+                                  onChange={(event) => {
+                                    const next = event.target.value;
+                                    if (next === ADD_CITY_OPTION) {
+                                      setEditingCityIndex(null);
+                                      onOpenTripSettings?.();
+                                      return;
                                     }
+                                    setEditedCity(next);
+                                    handleCityEdit(index, next);
                                   }}
-                                  onBlur={() => handleCityEdit(index)}
-                                  className="editorial-input is-compact w-24"
+                                  onBlur={() => setEditingCityIndex(null)}
+                                  className="editorial-input is-compact w-28"
                                   onClick={(e) => e.stopPropagation()}
-                                />
+                                >
+                                  {cityOptions.map((option) => (
+                                    <option key={option.city} value={option.city}>{option.city}</option>
+                                  ))}
+                                  {onOpenTripSettings && (
+                                    <option value={ADD_CITY_OPTION}>+ Add city…</option>
+                                  )}
+                                </select>
                               </div>
                             ) : (
                               <div 

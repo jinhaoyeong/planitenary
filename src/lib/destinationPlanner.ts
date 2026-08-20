@@ -276,6 +276,71 @@ const MINIMUM_SHORTLIST = 6;
  */
 const SHORTLIST_CEILING = 100;
 
+/**
+ * How many places to show a traveller who is choosing what to do in one city.
+ *
+ * Five a day. Not because five is optimal — {@link shortlistTarget} models
+ * capacity more carefully, pace and all — but because the deck is a *review*,
+ * and the number that matters is how many a person will actually look at
+ * before giving up. Sixty places for a five-day stay is a search directory
+ * wearing a planner's clothes, and it was what production served: a flat
+ * default that never asked how long anybody was staying.
+ *
+ * Deliberately without {@link SHORTLIST_HEADROOM}. That padding exists so the
+ * *scheduler* has spares when a place turns out to be closed or too far, which
+ * is a real problem it solves invisibly. Applying it to what the traveller sees
+ * just makes the deck 40% longer for a reason they will never observe.
+ */
+const DISCOVERY_PLACES_PER_DAY = 5;
+
+/** Even a single day deserves a real choice rather than five and no options. */
+const MIN_DISCOVERY_PLACES = 10;
+
+/**
+ * The most to show however long the trip. Past roughly this many, another
+ * place is not more choice — it is the same decision fatigue that made sixty
+ * a problem, arrived at more slowly.
+ */
+const MAX_DISCOVERY_PLACES = 40;
+
+/**
+ * Extra to ask the provider for, over what will be shown.
+ *
+ * Candidates are lost between the request and the deck: duplicates collapse,
+ * some fail the schedulable-facts check, some are filtered by category. Asking
+ * for exactly the display count would quietly show fewer than promised
+ * whenever any of that happens. This headroom is internal and never reaches
+ * the traveller.
+ */
+const DISCOVERY_FETCH_HEADROOM = 1.5;
+
+/** The provider ceiling, unchanged; asking beyond it buys nothing. */
+const MAX_DISCOVERY_FETCH = 60;
+
+export interface DiscoveryTarget {
+  /** Places to actually show. Roughly five per day in this city. */
+  visible: number;
+  /** Places to request, with room for what filtering removes. */
+  fetch: number;
+}
+
+/**
+ * The deck size for one city, from the days spent in *that* city.
+ *
+ * Per city, not per trip: four days in Tokyo and three in Osaka are two
+ * different decks, and sizing both from the seven-day total would offer the
+ * same flood the flat default did.
+ */
+export function discoveryTarget(cityDayCount: number): DiscoveryTarget {
+  const days = Math.max(1, Math.round(cityDayCount) || 1);
+  const visible = Math.min(
+    MAX_DISCOVERY_PLACES,
+    Math.max(MIN_DISCOVERY_PLACES, days * DISCOVERY_PLACES_PER_DAY),
+  );
+  const fetch = Math.min(MAX_DISCOVERY_FETCH, Math.ceil(visible * DISCOVERY_FETCH_HEADROOM));
+  return { visible, fetch };
+}
+
 export interface ShortlistTarget {
   /** Main sightseeing stops the trip can physically hold. */
   capacity: number;

@@ -469,6 +469,12 @@ export async function discoverPlaces(
   destination: Pick<TripDestination, 'city' | 'region' | 'countryCode' | 'lat' | 'lng'>,
   runtime: ProviderRuntime = EMPTY_PROVIDER_RUNTIME,
   invoke?: (name: string, body: unknown) => Promise<unknown>,
+  /**
+   * How many places to ask for. Omitted, the provider applies its own default,
+   * which is a flat sixty regardless of how long anybody is staying — the
+   * reason a five-day city arrived with sixty places to review.
+   */
+  options?: { limit?: number },
 ): Promise<DiscoveryOutcome> {
   const capability = capabilityFor(destination, runtime);
   let providerError: string | undefined;
@@ -479,6 +485,11 @@ export async function discoverPlaces(
         city: destination.city,
         countryCode: destination.countryCode,
         provider: capability.places.provider,
+        // Asked for explicitly so the deck is sized by the stay rather than by
+        // a server default. `travel-discover` already over-fetches from the
+        // provider and trims to this number with its own category balance, so
+        // the filtering headroom lives there rather than being padded here.
+        limit: options?.limit,
         // Saves the server a geocoding round trip whenever the destination was
         // chosen from search rather than typed by hand.
         lat: destination.lat,

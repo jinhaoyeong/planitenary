@@ -55,6 +55,7 @@ import {
 import {
   buildDestinationItinerary,
   defaultDiscoveryDecisions,
+  discoveryTarget,
   pruneDecisionsToCandidates,
   rankWithIntelligence,
   shortlistTarget,
@@ -1660,6 +1661,18 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     setError(null);
     try {
       // Live provider first; the captured library is the labelled fallback.
+      /**
+       * The stay this deck is for. `beginDiscovery` can be asked for a city
+       * other than the active one, so the leg is looked up from the city being
+       * discovered rather than from whatever is on screen.
+       */
+      const targetLeg = statedLegs.find(
+        (leg) => leg.city.toLowerCase() === (target?.city || targetLabel).toLowerCase(),
+      );
+      const targetDiscoveryTarget = discoveryTarget(
+        targetLeg?.days
+          ?? Math.max(1, Math.round(tripDayCount / Math.max(1, tripDestinations.length))),
+      );
       const activeRuntime = await loadProviderRuntime(
         isSupabaseConfigured() ? (name) => invokeTravelFunction(name) : undefined,
       );
@@ -1673,6 +1686,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         },
         activeRuntime,
         isSupabaseConfigured() ? invokeTravelFunction : undefined,
+        // Sized for the days spent in *this* city, not the whole trip: four
+        // days in Tokyo and three in Osaka are two different decks.
+        { limit: targetDiscoveryTarget.visible },
       );
       setUsingFixture(outcome.usingFixture);
       // Discovery no longer carries evidence; it arrives per card from the
