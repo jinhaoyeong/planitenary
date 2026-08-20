@@ -426,7 +426,7 @@ Deno.serve(async (request) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
   if (!token || !supabaseUrl) return json({ error: 'The agent tool boundary is not configured.' }, 503);
   const functionsBaseUrl = `${supabaseUrl}/functions/v1`;
-  const executeTool = createToolExecutor({
+  const toolSession = createToolExecutor({
     authHeader: `Bearer ${token}`,
     functionsBaseUrl,
     cache,
@@ -435,6 +435,7 @@ Deno.serve(async (request) => {
     itinerary,
     uiFocus,
   });
+  const executeTool = toolSession.execute;
 
   /**
    * One metered model round.
@@ -624,6 +625,21 @@ Deno.serve(async (request) => {
     },
   );
 
+  /**
+   * Cards for the places the answer pointed at.
+   *
+   * Resolved *after* validation, from the ids that survived it, and entirely
+   * server-side: the model chose which of the places it had been shown to
+   * point at and nothing more. Names, coordinates, photographs and the
+   * traveller's own decision all come from records this server already holds.
+   *
+   * Costs no model round and no image provider call — the photograph is read
+   * from the validated cache by canonical identity.
+   */
+  const places = run.answer?.placeIds?.length
+    ? await toolSession.resolvePlaceCards(run.answer.placeIds)
+    : [];
+
   const status = run.status === 'refused' && run.refusal ? responseStatus(run.refusal) : 200;
 
   return json({
@@ -632,6 +648,11 @@ Deno.serve(async (request) => {
     status: run.status,
     answer: run.answer?.answer,
     citations: run.answer?.citations ?? [],
+    /**
+     * Structured place cards. Absent rather than empty-ish when the answer was
+     * not about specific places — a card is an extra, never the answer.
+     */
+    places,
     /**
      * A suggestion, never an action. Phase 1 has no write path at all, so this
      * is text for a person to act on — which is why the flag is stated rather

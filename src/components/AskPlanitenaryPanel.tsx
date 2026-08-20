@@ -18,6 +18,7 @@ import { ASK_SUGGESTIONS, askPlanitenary, type AskResult } from '../lib/askPlani
 import { askSuggestionsFor } from '../../supabase/functions/_shared/smartPlannerActions';
 import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 import type { ConversationTurn } from '../../supabase/functions/_shared/intelligenceContext';
+import type { StructuredPlaceCard } from '../../supabase/functions/_shared/placeReference';
 
 interface AskPlanitenaryPanelProps {
   tripId: string;
@@ -70,6 +71,70 @@ const sourceLabel = (url: string): string => {
     return 'Source';
   }
 };
+
+/** How an existing decision reads on a card. Status is never colour alone. */
+const DECISION_LABEL: Record<NonNullable<StructuredPlaceCard['decision']>, string> = {
+  'must-do': 'Must do',
+  interested: 'Interested',
+  skip: 'Skipped',
+  visited: 'Visited',
+};
+
+/**
+ * One place the answer was about.
+ *
+ * Compact on purpose: Ask is a drawer, not a second discovery page. The photo
+ * is a real photograph or nothing — a card whose picture failed validation
+ * keeps the place and drops the image, exactly as the deck does, because a
+ * place worth recommending is still worth recommending without a picture.
+ */
+function PlaceCard({ card }: { card: StructuredPlaceCard }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const showPhoto = Boolean(card.image) && !imageFailed;
+  const where = [card.area, card.city].filter(Boolean).join(' · ');
+
+  return (
+    <li className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      {showPhoto && card.image && (
+        <img
+          src={card.image.url}
+          alt={`${card.name}${where ? `, ${where}` : ''}`}
+          loading="lazy"
+          decoding="async"
+          onError={() => setImageFailed(true)}
+          className="h-28 w-full object-cover"
+        />
+      )}
+      <div className="p-3">
+        <p className="text-sm font-semibold leading-5 text-slate-900 dark:text-slate-100">{card.name}</p>
+        {where && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{where}</p>}
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+          {card.decision && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {DECISION_LABEL[card.decision]}
+            </span>
+          )}
+          {card.onDay !== undefined && <span>On day {card.onDay}</span>}
+        </div>
+        {/*
+          The credit is not decoration. CC BY and CC BY-SA both require the
+          author be named, so this line is part of the permission to show the
+          photograph, and it links the file page where the full licence lives.
+        */}
+        {showPhoto && card.image && (
+          <a
+            href={card.image.sourcePage}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="mt-2 block truncate text-[11px] text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-500 dark:hover:text-slate-300"
+          >
+            {card.image.attribution}
+          </a>
+        )}
+      </div>
+    </li>
+  );
+}
 
 export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelProps) {
   const intelligence = useTripIntelligenceUi();
@@ -272,6 +337,24 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
                         <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                         <p className="text-sm leading-6">{result.detail || 'Planitenary could not answer this question safely.'}</p>
                       </div>
+                    )}
+
+                    {/*
+                      Read defensively: a result parsed by an older build
+                      carries no places field at all, and an answer is worth
+                      showing with or without its cards.
+                    */}
+                    {(result.places ?? []).length > 0 && (
+                      <section className="mt-5">
+                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                          Places in this answer
+                        </h3>
+                        <ul className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {(result.places ?? []).map((card) => (
+                            <PlaceCard key={card.ref.canonicalPlaceId} card={card} />
+                          ))}
+                        </ul>
+                      </section>
                     )}
 
                     {result.proposal && (

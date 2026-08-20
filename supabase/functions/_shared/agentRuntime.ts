@@ -157,6 +157,7 @@ export async function runAgent(
       citableUrls: new Set(deps.seededEvidence.citableUrls),
       routeMinutes: new Set(deps.seededEvidence.routeMinutes),
       knownPlaceNames: new Set(deps.seededEvidence.knownPlaceNames),
+      referenceablePlaceIds: new Set(deps.seededEvidence.referenceablePlaceIds),
       budgetAmounts: new Set(deps.seededEvidence.budgetAmounts),
     }
     : emptyEvidence();

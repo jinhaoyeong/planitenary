@@ -50,7 +50,17 @@ import {
   buildPlanningMaterial,
 } from './itineraryProposal.ts';
 import { listPersistedFlights } from './askGrounding.ts';
-import { readItineraryProposalCache } from './cache.ts';
+import {
+  readCanonicalPlaceRecords,
+  readItineraryProposalCache,
+  readPlaceProviderLinks,
+} from './cache.ts';
+import { parsePlaceImage } from './placeImages.ts';
+import {
+  MAX_PLACE_CARDS,
+  type StructuredPlaceCard,
+  type StructuredPlaceRef,
+} from './placeReference.ts';
 import {
   HISTORY_DIFF_SELECT,
   historyRecordFromAuthorityRow,
@@ -413,7 +423,34 @@ export async function searchWeb(query: string, cache: SupabaseClient | null = nu
  * is only sayable if the failure survives as information instead of becoming
  * an exception.
  */
-export function createToolExecutor(context: AgentToolContext): (call: AgentToolCall) => Promise<ToolOutcome> {
+/**
+ * What one agent run can do: run tools, and turn the ids those tools issued
+ * into place cards.
+ *
+ * The two are returned together because the card resolver must read the
+ * *same* index the tools wrote to. A place found by `search_places` this
+ * round exists nowhere else — rebuilding an index from the stored itinerary
+ * would silently be unable to card anything the traveller had not already
+ * saved, which is most of what "what should I visit near here" returns.
+ */
+export interface AgentToolSession {
+  execute: (call: AgentToolCall) => Promise<ToolOutcome>;
+  /**
+   * Ids → cards, strictly.
+   *
+   * Deliberately **not** `resolvePlaces`. That resolver accepts a name where
+   * an id belongs, which is a convenience the routing tools rely on and which
+   * a card must never inherit: a card asserts a photograph, a location and the
+   * traveller's own decision, so it may only be built on an identity the
+   * server issued. An id that resolves only by name is dropped here.
+   *
+   * Returns fewer cards than ids whenever anything is unresolvable, and never
+   * throws. A missing card costs a picture; a wrong one costs the truth.
+   */
+  resolvePlaceCards: (placeIds: string[]) => Promise<StructuredPlaceCard[]>;
+}
+
+export function createToolExecutor(context: AgentToolContext): AgentToolSession {
   const index = buildPlaceIndex(context.itinerary);
   const routingProviders = context.routingProviders ?? {
     amap: Boolean(secrets.amap()),
@@ -1105,7 +1142,7 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
     },
   };
 
-  return async (call: AgentToolCall): Promise<ToolOutcome> => {
+  const execute = async (call: AgentToolCall): Promise<ToolOutcome> => {
     const handler = handlers[call.tool];
     // Unreachable through `parseAgentTurn`, which only admits names in
     // `AGENT_TOOLS` — kept because "the dispatch table and the catalogue agree"
@@ -1119,4 +1156,134 @@ export function createToolExecutor(context: AgentToolContext): (call: AgentToolC
       return { ok: false, detail: error instanceof Error ? error.message : 'The tool failed.' };
     }
   };
+
+  /**
+   * The strict half of place resolution. See {@link AgentToolSession}.
+   *
+   * An id is accepted only when the index entry it lands on *claims* that id —
+   * as its own id or as its provider place id. `registerPlace` also files
+   * every place under its lowercased name, which is what lets a routing call
+   * say "from Tokyo Tower"; here that key is a trapdoor, so a hit that came
+   * through it is discarded.
+   */
+  const strictlyKnown = (placeIds: string[]): KnownPlace[] => {
+    const found: KnownPlace[] = [];
+    for (const id of placeIds.slice(0, MAX_PLACE_CARDS)) {
+      const place = index.get(id);
+      if (!place) continue;
+      if (place.id !== id && place.providerPlaceId !== id) continue;
+      if (!place.providerPlaceId) continue;
+      if (found.some((held) => held.providerPlaceId === place.providerPlaceId)) continue;
+      found.push(place);
+    }
+    return found;
+  };
+
+  /**
+   * The traveller's own decision about this place, read from the one store
+   * that holds decisions. Keys are canonical: a saved activity's id, or the
+   * listing id for a place that is not saved — which is exactly what a
+   * `KnownPlace.id` is, from either source. No second store, and no name.
+   */
+  const decisionFor = (place: KnownPlace): StructuredPlaceCard['decision'] => {
+    const discovery = asRecord(context.itinerary?.discoveryState);
+    const decisions = asRecord(discovery?.decisions);
+    const value = decisions?.[place.id];
+    return value === 'must-do' || value === 'interested' || value === 'skip' || value === 'visited'
+      ? value
+      : undefined;
+  };
+
+  const resolvePlaceCards = async (placeIds: string[]): Promise<StructuredPlaceCard[]> => {
+    const places = strictlyKnown(placeIds);
+    if (places.length === 0 || !context.cache) return [];
+
+    try {
+      /**
+       * The link table decides which provider this place is filed under —
+       * the request does not get to assert it. A Wikivoyage listing found on
+       * an OSM run is linked as OSM, and asking under 'wikivoyage' returns
+       * nothing at all, silently.
+       */
+      const links = await readPlaceProviderLinks(
+        context.cache,
+        places.map((place) => place.providerPlaceId!),
+      );
+      if (links.size === 0) return [];
+      const records = await readCanonicalPlaceRecords(
+        context.cache,
+        [...links.values()].map((link) => link.canonicalPlaceId),
+      );
+
+      /**
+       * Photographs, from the canonical identity alone.
+       *
+       * No leads are sent, which is what makes this free: with nothing to
+       * look up, `travel-images` answers out of the validated cache and
+       * makes zero provider calls. Grouped by link provider because the
+       * function takes one provider per request; in practice that is one
+       * request for the whole answer.
+       */
+      const byProvider = new Map<string, string[]>();
+      for (const place of places) {
+        const link = links.get(place.providerPlaceId!);
+        if (!link) continue;
+        byProvider.set(link.provider, [...(byProvider.get(link.provider) || []), place.providerPlaceId!]);
+      }
+      const photos = new Map<string, { url: string; attribution: string; sourcePage: string }>();
+      for (const [provider, providerPlaceIds] of byProvider) {
+        try {
+          const payload = asRecord(await callFunction('travel-images', { placeIds: providerPlaceIds, provider }));
+          const images = asRecord(payload?.images);
+          for (const providerPlaceId of providerPlaceIds) {
+            const first = asArray(images?.[providerPlaceId])[0];
+            const image = parsePlaceImage(first);
+            // The credit is part of the permission to show the photograph, so
+            // a picture without one is not shown at all.
+            if (image?.attribution) {
+              photos.set(providerPlaceId, {
+                url: image.url,
+                attribution: image.attribution,
+                sourcePage: image.sourcePage,
+              });
+            }
+          }
+        } catch {
+          // A card without a photograph is still a true card.
+        }
+      }
+
+      const cards: StructuredPlaceCard[] = [];
+      for (const place of places) {
+        const link = links.get(place.providerPlaceId!);
+        if (!link) continue;
+        const record = records.get(link.canonicalPlaceId);
+        // No canonical record means nothing authoritative to display. The
+        // place stays in the prose; it does not become a card.
+        if (!record) continue;
+        const ref: StructuredPlaceRef = {
+          canonicalPlaceId: link.canonicalPlaceId,
+          provider: link.provider,
+          providerPlaceId: place.providerPlaceId!,
+        };
+        cards.push({
+          ref,
+          name: record.name,
+          city: record.city ?? place.city,
+          area: record.area ?? place.location,
+          coordinates: record.coordinates ?? place.coordinates,
+          category: place.type,
+          image: photos.get(place.providerPlaceId!),
+          decision: decisionFor(place),
+          onDay: place.day,
+        });
+      }
+      return cards.slice(0, MAX_PLACE_CARDS);
+    } catch {
+      // Cards are an enhancement. An answer without them is still an answer.
+      return [];
+    }
+  };
+
+  return { execute, resolvePlaceCards };
 }

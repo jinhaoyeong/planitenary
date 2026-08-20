@@ -36,6 +36,8 @@
  */
 
 /** Every operation the agent tier will answer. Anything else is refused. */
+import { MAX_PLACE_CARDS } from './placeReference.ts';
+
 export const AGENT_OPERATIONS = ['ask', 'research-trip', 'research-place', 'build-itinerary'] as const;
 
 export type AgentOperation = typeof AGENT_OPERATIONS[number];
@@ -176,7 +178,9 @@ When more facts are needed and tools are available, return:
 {"tool_calls":[{"tool":"tool_name","args":{}}]}
 
 When you can answer, or finalRound is true, return:
-{"answer":"concise answer","citations":["exact tool URL"],"proposal":{"summary":"optional read-only proposal","day":1,"travelMinutes":27,"placeNames":["exact tool place name"],"replan":{"objective":"make Day 3 easier","affectedDays":[3,4],"moves":[{"placeName":"exact tool place name","fromDay":3,"toDay":4}]}}}
+{"answer":"concise answer","citations":["exact tool URL"],"placeIds":["exact id from a tool finding"],"proposal":{"summary":"optional read-only proposal","day":1,"travelMinutes":27,"placeNames":["exact tool place name"],"replan":{"objective":"make Day 3 easier","affectedDays":[3,4],"moves":[{"placeName":"exact tool place name","fromDay":3,"toDay":4}]}}}
+
+placeIds names the places your answer is about, so they can be shown with their real photograph. Copy each id character for character from a tool finding; never compose one, and never put a place name there. A place you only know by name belongs in the answer text, not in placeIds. Leave it out when the question is not about specific places.
 
 A thin focus object names the tab/day/place the traveller is looking at. Use it as the default referent for "this", "here", "today".
 
@@ -717,6 +721,15 @@ export type AgentTurn =
 export interface RawAgentAnswer {
   answer: string;
   citations: string[];
+  /**
+   * Places the answer is about, by the id a tool returned.
+   *
+   * The model's whole part in a place card. It picks *which* of the places it
+   * was shown to point at; it never states what one is, where it is, or what
+   * it looks like. Everything else on the card is resolved from the canonical
+   * record afterwards — see `placeReference.ts`.
+   */
+  placeIds?: string[];
   /** A change the agent suggests. Phase 1 never applies one. */
   proposal?: {
     summary: string;
@@ -775,6 +788,8 @@ export function parseAgentTurn(value: unknown): AgentTurn {
     ? raw.citations.map((entry) => text(entry, 500)).filter((entry): entry is string => Boolean(entry))
     : [];
 
+  const placeIds = boundedList((raw as { placeIds?: unknown }).placeIds, MAX_PLACE_CARDS, 200);
+
   const proposalRaw = raw.proposal as {
     summary?: unknown; day?: unknown; travelMinutes?: unknown; placeNames?: unknown; replan?: unknown;
   } | undefined;
@@ -808,6 +823,7 @@ export function parseAgentTurn(value: unknown): AgentTurn {
     answer: {
       answer,
       citations,
+      placeIds,
       proposal: summary
         ? {
           summary,
@@ -847,6 +863,17 @@ export interface AgentEvidence {
   routeMinutes: Set<number>;
   /** Place names a tool returned, lowercased. */
   knownPlaceNames: Set<string>;
+  /**
+   * Place **ids** a tool returned. Ids only, and deliberately a different set
+   * from {@link knownPlaceNames}.
+   *
+   * Prose may name a place on the strength of its name matching a finding.
+   * A card may not: a card carries a photograph, a location and the
+   * traveller's own decision, and attaching those to the wrong place because
+   * two places share a name is precisely the class of mistake the place-image
+   * work has already had to undo. A name never reaches this set.
+   */
+  referenceablePlaceIds: Set<string>;
   /** Wallet/itinerary money amounts a budget tool returned, rounded. */
   budgetAmounts: Set<number>;
 }
@@ -855,6 +882,7 @@ export const emptyEvidence = (): AgentEvidence => ({
   citableUrls: new Set<string>(),
   routeMinutes: new Set<number>(),
   knownPlaceNames: new Set<string>(),
+  referenceablePlaceIds: new Set<string>(),
   budgetAmounts: new Set<number>(),
 });
 
@@ -863,6 +891,7 @@ export type AnswerRejection =
   | 'invented-travel-time'
   | 'invented-travel-time-in-answer'
   | 'invented-place'
+  | 'unreferenced-place-id'
   | 'invented-budget-amount'
   | 'impossible-day';
 
@@ -874,6 +903,8 @@ export interface AgentAnswerConstraints {
 export interface ValidatedAgentAnswer {
   answer: string;
   citations: string[];
+  /** Ids that a tool actually returned. Never a name, never a composition. */
+  placeIds: string[];
   proposal?: RawAgentAnswer['proposal'];
   rejected: Array<{ value: string; reason: AnswerRejection }>;
 }
@@ -893,6 +924,12 @@ export interface ValidatedAgentAnswer {
  *    proposal built around somewhere that does not exist, or is not in this city.
  * 4. **A day number must exist on this trip** when the server supplied a day
  *    count. Defence in depth; the primary protection is pre-model grounding.
+ * 5. **A referenced place id must be one a tool returned.** This is the
+ *    narrowest rule of the five and the one a card depends on: a card asserts
+ *    a location, a photograph and the traveller's own decision about a place,
+ *    so the identity behind it has to be an identity the server issued. Names
+ *    are not accepted here even when rule 3 would accept the same place in
+ *    prose.
  *
  * A failing structured part is dropped and the rest is kept, because one bad
  * citation is no reason to lose a good answer — and no reason to show the bad
@@ -921,6 +958,19 @@ export function validateAgentAnswer(
     rejected.push({ value: url, reason: 'uncited-url' });
     return false;
   });
+
+  /**
+   * Ids only, and de-duplicated: a model that lists the same place twice
+   * should not produce the same card twice.
+   */
+  const placeIds: string[] = [];
+  for (const id of answer.placeIds ?? []) {
+    if (!evidence.referenceablePlaceIds.has(id)) {
+      rejected.push({ value: id, reason: 'unreferenced-place-id' });
+      continue;
+    }
+    if (!placeIds.includes(id)) placeIds.push(id);
+  }
 
   let proposal = answer.proposal;
   if (proposal?.travelMinutes !== undefined && !evidence.routeMinutes.has(proposal.travelMinutes)) {
@@ -1014,7 +1064,7 @@ export function validateAgentAnswer(
     ? 'I could not verify that day against this trip, so I have not shown that part of the answer.'
     : visibleTravelOrMoney;
 
-  return { answer: visibleAnswer, citations, proposal, rejected };
+  return { answer: visibleAnswer, citations, placeIds, proposal, rejected };
 }
 
 /**
@@ -1026,6 +1076,24 @@ export function validateAgentAnswer(
  * therefore does not need this updated, while a model that invents one of the
  * three still fails.
  */
+/**
+ * Tools whose results carry place identity.
+ *
+ * Only these may contribute a referenceable place id. A search result, an
+ * event and a document all have an `id` too, and none of them is a place — a
+ * generic id harvest would quietly make every one of them card-able. Narrow by
+ * construction, and narrowed again by the resolver, which independently
+ * requires the id to be in the server's own place index.
+ */
+const PLACE_BEARING_TOOLS: ReadonlySet<AgentToolName> = new Set<AgentToolName>([
+  'search_places',
+  'get_place_details',
+  'get_saved_places',
+  'get_unassigned_places',
+  'get_current_itinerary',
+  'get_current_day',
+]);
+
 export function collectEvidence(
   evidence: AgentEvidence,
   tool: AgentToolName,
@@ -1047,6 +1115,18 @@ export function collectEvidence(
     for (const key of ['name', 'title', 'placeName']) {
       const value = record[key];
       if (typeof value === 'string' && value.trim()) evidence.knownPlaceNames.add(value.trim().toLowerCase());
+    }
+    /**
+     * An id is referenceable only when it arrived from a place tool *and* sits
+     * on a record that also names a place. A bare id in some nested envelope
+     * is not a place this answer was shown.
+     */
+    if (PLACE_BEARING_TOOLS.has(tool)) {
+      const id = record.id;
+      const name = record.name;
+      if (typeof id === 'string' && id.trim() && typeof name === 'string' && name.trim()) {
+        evidence.referenceablePlaceIds.add(id.trim());
+      }
     }
     /**
      * Only a routing tool may establish a travel time. A duration that turned

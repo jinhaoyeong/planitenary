@@ -1087,6 +1087,103 @@ export async function writeCandidateIntelligence(
 }
 
 /**
+ * Resolve provider place ids to canonical places **without being told which
+ * provider they belong to**.
+ *
+ * {@link readCanonicalPlaceIds} is the right call whenever the caller knows
+ * the link provider, and every image path does. A place *card* does not: the
+ * reference it is built from may have come from a saved activity, whose
+ * `provider` field records where the listing came from ('wikivoyage') rather
+ * than which run linked it ('osm'). Asking under the wrong label returns
+ * nothing, silently, and the card would simply lose its photograph with no
+ * error anywhere — the exact shape of failure this project has now fixed
+ * twice.
+ *
+ * Ambiguity is refused rather than resolved. If one provider place id is
+ * linked to more than one canonical place across providers, no reference is
+ * produced: provider ids are already namespaced ('n123', 'wv:Name'), so a
+ * collision means something is wrong, and the safe answer to "which place is
+ * this?" being unclear is no card at all.
+ */
+export async function readPlaceProviderLinks(
+  client: SupabaseClient,
+  providerPlaceIds: string[],
+): Promise<Map<string, { canonicalPlaceId: string; provider: string }>> {
+  const result = new Map<string, { canonicalPlaceId: string; provider: string }>();
+  const ids = [...new Set(providerPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return result;
+  try {
+    const { data, error } = await client
+      .from('place_provider_links')
+      .select('provider, provider_place_id, canonical_place_id')
+      .in('provider_place_id', ids);
+    if (error || !data) return result;
+    const ambiguous = new Set<string>();
+    for (const row of data) {
+      const providerPlaceId = String(row.provider_place_id || '');
+      const canonicalPlaceId = String(row.canonical_place_id || '');
+      const provider = String(row.provider || '');
+      if (!providerPlaceId || !canonicalPlaceId || !provider) continue;
+      const held = result.get(providerPlaceId);
+      if (held && held.canonicalPlaceId !== canonicalPlaceId) {
+        ambiguous.add(providerPlaceId);
+        continue;
+      }
+      if (!held) result.set(providerPlaceId, { canonicalPlaceId, provider });
+    }
+    for (const id of ambiguous) result.delete(id);
+  } catch {
+    // Best-effort: an unresolved id simply produces no reference.
+  }
+  return result;
+}
+
+/**
+ * The canonical record behind a place, for presentation.
+ *
+ * This is where a card's name, city and area come from — not from the model,
+ * and not from whatever a candidate happened to be called on the run that
+ * found it. A corrected spelling here shows on every surface at once.
+ */
+export async function readCanonicalPlaceRecords(
+  client: SupabaseClient,
+  canonicalPlaceIds: string[],
+): Promise<Map<string, {
+  name: string;
+  city?: string;
+  area?: string;
+  coordinates?: [number, number];
+}>> {
+  const result = new Map<string, { name: string; city?: string; area?: string; coordinates?: [number, number] }>();
+  const ids = [...new Set(canonicalPlaceIds)].filter(Boolean);
+  if (ids.length === 0) return result;
+  try {
+    const { data, error } = await client
+      .from('canonical_places')
+      .select('id, primary_name, city, neighbourhood, latitude, longitude')
+      .in('id', ids);
+    if (error || !data) return result;
+    for (const row of data) {
+      const name = typeof row.primary_name === 'string' ? row.primary_name.trim() : '';
+      if (!row.id || !name) continue;
+      const lat = Number(row.latitude);
+      const lng = Number(row.longitude);
+      result.set(String(row.id), {
+        name,
+        city: typeof row.city === 'string' && row.city.trim() ? row.city.trim() : undefined,
+        area: typeof row.neighbourhood === 'string' && row.neighbourhood.trim()
+          ? row.neighbourhood.trim()
+          : undefined,
+        coordinates: Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : undefined,
+      });
+    }
+  } catch {
+    // Best-effort: without a record there is no card to render.
+  }
+  return result;
+}
+
+/**
  * Canonical coordinates for places already linked, keyed by canonical id.
  *
  * Image validation compares a Wikidata entity's location against the place it

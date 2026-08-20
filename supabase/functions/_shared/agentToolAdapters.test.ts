@@ -28,7 +28,7 @@ const executor = (
   userId: 'user-1',
   itinerary: source,
   routingProviders,
-});
+}).execute;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -246,7 +246,7 @@ describe('real agent tool adapters', () => {
   });
 
   it('fits a place after an activity using remaining window, not a model estimate', async () => {
-    const execute = createToolExecutor({
+    const session = createToolExecutor({
       authHeader: 'Bearer user-jwt',
       functionsBaseUrl: 'https://project.supabase.co/functions/v1',
       cache: null,
@@ -263,7 +263,7 @@ describe('real agent tool adapters', () => {
       },
       routingProviders: { amap: true, openRouteService: true },
     });
-    const result = await execute({
+    const result = await session.execute({
       tool: 'check_schedule_fit',
       args: { afterActivityId: 'lunch', visitMinutes: 90 },
     } as AgentToolCall);
@@ -276,7 +276,7 @@ describe('real agent tool adapters', () => {
   });
 
   it('does not fit a visit that would run into a flight departure lead', async () => {
-    const execute = createToolExecutor({
+    const session = createToolExecutor({
       authHeader: 'Bearer user-jwt',
       functionsBaseUrl: 'https://project.supabase.co/functions/v1',
       cache: null,
@@ -293,7 +293,7 @@ describe('real agent tool adapters', () => {
       },
       routingProviders: { amap: true, openRouteService: true },
     });
-    const result = await execute({
+    const result = await session.execute({
       tool: 'check_schedule_fit',
       args: { afterActivityId: 'lunch', visitMinutes: 120 },
     } as AgentToolCall);
@@ -302,7 +302,7 @@ describe('real agent tool adapters', () => {
   });
 
   it('starts sightseeing after the arrival settling window, not at landing', async () => {
-    const execute = createToolExecutor({
+    const session = createToolExecutor({
       authHeader: 'Bearer user-jwt',
       functionsBaseUrl: 'https://project.supabase.co/functions/v1',
       cache: null,
@@ -324,7 +324,7 @@ describe('real agent tool adapters', () => {
         note: '',
       },
     });
-    const result = await execute({
+    const result = await session.execute({
       tool: 'check_schedule_fit',
       args: { afterActivityId: 'flight', visitMinutes: 90 },
     } as AgentToolCall);
@@ -370,7 +370,7 @@ describe('real agent tool adapters', () => {
         return chain;
       },
     };
-    const execute = createToolExecutor({
+    const session = createToolExecutor({
       authHeader: 'Bearer user-jwt',
       functionsBaseUrl: 'https://project.supabase.co/functions/v1',
       cache: cache as never,
@@ -379,7 +379,7 @@ describe('real agent tool adapters', () => {
       itinerary,
       routingProviders: { amap: true, openRouteService: true },
     });
-    const result = await execute({ tool: 'get_budget_summary', args: {} } as AgentToolCall);
+    const result = await session.execute({ tool: 'get_budget_summary', args: {} } as AgentToolCall);
     expect(filters).toContainEqual(['id', 'trip-1']);
     expect(filters).toContainEqual(['user_id', 'user-1']);
     expect(result.ok).toBe(true);

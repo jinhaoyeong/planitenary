@@ -17,6 +17,12 @@
 import { invokeTravelFunction } from './supabase';
 import type { IntelligenceUiEnvelope, ConversationTurn } from '../../supabase/functions/_shared/intelligenceContext';
 import { askSuggestionsFor } from '../../supabase/functions/_shared/smartPlannerActions';
+import {
+  MAX_PLACE_CARDS,
+  parseStructuredPlaceCard,
+  type StructuredPlaceCard,
+} from '../../supabase/functions/_shared/placeReference';
+import { isWikimediaImageUrl } from '../../supabase/functions/_shared/placeImages';
 
 export type AskStatus = 'answered' | 'partial' | 'refused';
 
@@ -61,6 +67,14 @@ export interface AskResult {
   rejectedClaims: number;
   /** Authoritative pre-model grounding. Acceptance checks this, not tool count. */
   grounding?: AskGroundingDiagnostics;
+  /**
+   * Places the answer is about, resolved server-side from canonical identity.
+   *
+   * Empty whenever the question was not about specific places, or when nothing
+   * the model pointed at resolved to a place this server can vouch for. A card
+   * is an addition to an answer, never a substitute for one.
+   */
+  places: StructuredPlaceCard[];
 }
 
 const text = (value: unknown, max = 4_000): string | undefined =>
@@ -113,7 +127,7 @@ function parseProposal(value: unknown): AskProposal | undefined {
 }
 
 export function parseAskResult(payload: unknown): AskResult {
-  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0 };
+  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [] };
   if (!payload || typeof payload !== 'object') return empty;
   const raw = payload as Record<string, unknown>;
 
@@ -167,6 +181,18 @@ export function parseAskResult(payload: unknown): AskResult {
     refusal: text(raw.refusal, 80),
     rejectedClaims: Array.isArray(raw.rejected) ? raw.rejected.length : 0,
     grounding,
+    /**
+     * Re-checked for shape on arrival, like everything else here, and the
+     * photograph is re-checked for host: an `<img src>` is loaded by the
+     * traveller's browser, so a URL outside Wikimedia would hand a stranger
+     * the IP address of everyone who sees the card. Same rule the deck applies.
+     */
+    places: Array.isArray(raw.places)
+      ? raw.places
+        .map((entry) => parseStructuredPlaceCard(entry, isWikimediaImageUrl))
+        .filter((card): card is StructuredPlaceCard => Boolean(card))
+        .slice(0, MAX_PLACE_CARDS)
+      : [],
   };
 }
 
@@ -190,7 +216,7 @@ export async function askPlanitenary(
 ): Promise<AskResult> {
   const question = input.question.trim();
   if (!question || !input.tripId) {
-    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, detail: 'A question is required.' };
+    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], detail: 'A question is required.' };
   }
   if (question.length > 600) {
     return {
@@ -199,6 +225,7 @@ export async function askPlanitenary(
       applied: false,
       steps: [],
       rejectedClaims: 0,
+      places: [],
       detail: 'Keep the question under 600 characters.',
     };
   }
@@ -219,6 +246,7 @@ export async function askPlanitenary(
       applied: false,
       steps: [],
       rejectedClaims: 0,
+      places: [],
       detail: error instanceof Error ? error.message : 'The assistant is unavailable right now.',
     };
   }
