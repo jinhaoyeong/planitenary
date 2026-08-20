@@ -89,6 +89,38 @@ export function parseStructuredPlaceRef(value: unknown): StructuredPlaceRef | un
   return { canonicalPlaceId, provider, providerPlaceId };
 }
 
+/**
+ * Attach a reference to every record the link table can account for.
+ *
+ * Pure, and separated from `travel-discover` so the rule it enforces can be
+ * tested rather than inspected: **all three parts or none**. A record whose
+ * provider place id is absent, or which the link table has no canonical id
+ * for, is returned exactly as it arrived.
+ *
+ * `provider` is the caller's *link* provider — the one
+ * `place_provider_links` is keyed by — and is deliberately a parameter rather
+ * than something read off each record. A Wikivoyage listing found on an OSM
+ * discovery run carries `provider: 'wikivoyage'` and is linked under
+ * `'osm'`; copying the record's own value would produce a reference that
+ * resolves to nothing, silently, which is the failure this project has now
+ * fixed twice.
+ */
+export function attachPlaceRefs(
+  records: readonly unknown[],
+  provider: string,
+  canonicalByProviderPlaceId: ReadonlyMap<string, string>,
+): unknown[] {
+  if (!provider || canonicalByProviderPlaceId.size === 0) return [...records];
+  return records.map((record) => {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+    const candidate = record as Record<string, unknown>;
+    const providerPlaceId = typeof candidate.providerPlaceId === 'string' ? candidate.providerPlaceId : '';
+    const canonicalPlaceId = providerPlaceId ? canonicalByProviderPlaceId.get(providerPlaceId) : undefined;
+    if (!providerPlaceId || !canonicalPlaceId) return record;
+    return { ...candidate, placeRef: { canonicalPlaceId, provider, providerPlaceId } };
+  });
+}
+
 /** Stable identity for de-duplicating cards within one response. */
 export const placeRefKey = (ref: StructuredPlaceRef): string => ref.canonicalPlaceId;
 

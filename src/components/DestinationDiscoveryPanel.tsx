@@ -46,6 +46,7 @@ import type { RouteLeg, RouteResolver } from '../lib/humanScheduler';
 import {
   bindSavedActivityIds,
   cardDecisionWrites,
+  decisionPlaceRefs,
   decisionTargetIdOf,
   resolvedCardDecision,
   retainedDecisionIdsOf,
@@ -1627,6 +1628,16 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
         candidateIds: [...allCandidates.map((candidate) => candidate.id), ...candidates.map((candidate) => candidate.id)]
           .filter((id, index, all) => all.indexOf(id) === index),
         decisions: next,
+        /**
+         * Captured, never reconstructed. A candidate the server could prove
+         * contributes its exact reference under the same key the decision was
+         * written to; everything else contributes nothing at all.
+         */
+        placeRefs: decisionPlaceRefs(
+          next,
+          [...allCandidates, ...candidates],
+          itinerary.discoveryState?.placeRefs,
+        ),
         discoveredAt,
         updatedAt: new Date().toISOString(),
         stage: 'reviewing',

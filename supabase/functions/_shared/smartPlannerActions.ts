@@ -13,6 +13,8 @@ import type { IntelligenceSurface } from './intelligenceContext.ts';
 export type SmartActionScope = 'trip' | 'day' | 'activity' | 'place' | 'budget' | 'map' | 'documents';
 export type SmartActionMode = 'read' | 'research' | 'proposal';
 
+import { parseStructuredPlaceRef, type StructuredPlaceRef } from './placeReference.ts';
+
 export type SmartActionIntent =
   | 'plan-trip'
   | 'plan-after-arrival'
@@ -29,6 +31,15 @@ export interface SmartAction {
   reason: string;
   scope: SmartActionScope;
   mode: SmartActionMode;
+  /**
+   * The place this action is about, when its decision was captured with one.
+   *
+   * Present only on `fit-must-do`, and only when the traveller's Must-do was
+   * recorded from a discovery candidate the server could prove. Every older
+   * decision has none, which is why the action reads perfectly well without
+   * it — the reference adds a picture, never the meaning.
+   */
+  placeRef?: StructuredPlaceRef;
 }
 
 export interface SmartActionInput {
@@ -103,7 +114,14 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
       .map(({ activity }) => typeof activity.id === 'string' ? activity.id : '')
       .filter(Boolean),
   );
-  const omittedMustDo = mustDoIds.some((id) => !scheduledIds.has(id));
+  /**
+   * The specific Must-do that is missing, not merely that one is.
+   *
+   * The action text is unchanged, but knowing *which* decision it refers to is
+   * what lets its stored reference be attached — and a reference may only ever
+   * be found by decision key.
+   */
+  const omittedMustDoId = mustDoIds.find((id) => !scheduledIds.has(id));
 
   const interestedCount = Object.values(decisions).filter((value) => value === 'interested').length;
   const eligiblePlaces = rows.filter(({ activity, day }) => isPlannerPlace(activity, day)).length;
@@ -152,13 +170,16 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
     }
   }
 
-  if (omittedMustDo) {
+  if (omittedMustDoId) {
     push({
       id: 'fit-must-do',
       title: 'Fit a Must do',
       reason: 'A place you marked Must do is not on the saved plan yet.',
       scope: 'place',
       mode: 'proposal',
+      // Absent for every decision made before references existed. No lookup,
+      // no reconstruction: this is the ref that was captured, or nothing.
+      placeRef: parseStructuredPlaceRef(asRecord(discovery?.placeRefs)?.[omittedMustDoId]),
     });
   }
 

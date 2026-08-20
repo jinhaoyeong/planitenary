@@ -163,6 +163,8 @@ export type DiscoveryUnscheduledReason =
   /** The trip ran out of days before this place could be placed anywhere. */
   | 'no-viable-day';
 
+import type { StructuredPlaceRef } from '../supabase/functions/_shared/placeReference';
+
 export interface DiscoveryUnscheduledCandidate {
   candidateId: string;
   reason: DiscoveryUnscheduledReason;
@@ -187,6 +189,19 @@ export interface ItineraryDiscoveryState {
   stage?: DiscoveryStage;
   scheduledCandidateIds?: string[];
   unscheduledCandidates?: DiscoveryUnscheduledCandidate[];
+  /**
+   * Trusted place identity for decisions that had one when they were made.
+   *
+   * Parallel to {@link decisions} rather than inside it, because a decision's
+   * value is a bare word and its key is planning identity — neither has room
+   * for a reference, and changing either would move a boundary the whole
+   * discovery path depends on.
+   *
+   * Sparse by design. Only decisions written from a discovery candidate the
+   * server could prove appear here; every older decision simply has no entry,
+   * and nothing tries to work one out afterwards.
+   */
+  placeRefs?: Record<string, StructuredPlaceRef>;
 }
 
 export interface DayPhoto {

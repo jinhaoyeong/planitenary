@@ -81,8 +81,20 @@ export interface DateAwareOpeningHours {
   caveats?: string[];
 }
 
+import type { StructuredPlaceRef } from '../../supabase/functions/_shared/placeReference';
+
 export interface PlaceCandidate {
   id: string;
+  /**
+   * The server's proof of who this place is, when it could prove it.
+   *
+   * Built inside `travel-discover` at the one moment all three parts are
+   * known together, and never assembled here: the browser has no way to learn
+   * a canonical id or which provider the link table is keyed by. Absent
+   * whenever the server could not prove the mapping exactly, which is the
+   * honest outcome and costs only a card.
+   */
+  placeRef?: StructuredPlaceRef;
   provider: DiscoveryProvider;
   providerPlaceId?: string;
   /**

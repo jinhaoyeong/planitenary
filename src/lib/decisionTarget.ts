@@ -12,13 +12,15 @@
 
 import type { Activity, Itinerary } from '../data';
 import type { CandidateDecision, PlaceCandidate } from './destinationIntelligence';
+import type { StructuredPlaceRef } from '../../supabase/functions/_shared/placeReference';
 import {
   canonicalDecisionKeysOf,
   indexPlannerActivities,
   isPlannerPlace,
 } from '../../supabase/functions/_shared/itineraryProposal';
 
-export type DecisionCard = Pick<PlaceCandidate, 'id'> & Partial<Pick<PlaceCandidate, 'savedActivityId' | 'provider' | 'providerPlaceId'>>;
+export type DecisionCard = Pick<PlaceCandidate, 'id'>
+  & Partial<Pick<PlaceCandidate, 'savedActivityId' | 'provider' | 'providerPlaceId' | 'placeRef'>>;
 
 const VALID_DECISIONS: readonly CandidateDecision[] = ['must-do', 'interested', 'skip', 'visited'];
 
@@ -80,6 +82,37 @@ export const cardDecisionWrites = (
   const writes: Record<string, CandidateDecision> = { [target]: decision };
   if (candidate.id !== target) writes[candidate.id] = decision;
   return writes;
+};
+
+/**
+ * The trusted references belonging to the decisions that exist right now.
+ *
+ * Keyed by the same keys `cardDecisionWrites` writes under, so a reference is
+ * found by the decision it was captured with rather than by anything about the
+ * place. Nothing is derived here: a candidate either arrived from the server
+ * carrying a reference or it did not, and a decision made before references
+ * existed simply has no entry — that is the correct, permanent answer for it.
+ *
+ * Refs for keys that no longer have a decision are dropped, so undoing a
+ * decision cannot leave identity behind for a choice the traveller withdrew.
+ */
+export const decisionPlaceRefs = (
+  decisions: Record<string, CandidateDecision | string | undefined>,
+  candidates: readonly DecisionCard[],
+  existing?: Record<string, StructuredPlaceRef>,
+): Record<string, StructuredPlaceRef> | undefined => {
+  const refs: Record<string, StructuredPlaceRef> = {};
+  for (const [key, ref] of Object.entries(existing ?? {})) {
+    if (decisions[key] !== undefined) refs[key] = ref;
+  }
+  for (const candidate of candidates) {
+    const ref = candidate.placeRef;
+    if (!ref) continue;
+    for (const key of new Set([decisionTargetIdOf(candidate), candidate.id])) {
+      if (key && decisions[key] !== undefined) refs[key] = ref;
+    }
+  }
+  return Object.keys(refs).length > 0 ? refs : undefined;
 };
 
 /**

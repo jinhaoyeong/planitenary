@@ -22,6 +22,7 @@ import {
   writeDiscoveryCache,
 } from '../_shared/cache.ts';
 import { discoveryCityKey } from '../_shared/cacheKeys.ts';
+import { attachPlaceRefs } from '../_shared/placeReference.ts';
 import {
   categoryAdmission,
   mergeAdmission,
@@ -902,8 +903,8 @@ Deno.serve(async (request) => {
      * once, leaving it unrepaired would mean paying for that place's reviews on
      * every single run until the discovery cache expires.
      */
-    const ensureCanonicalPlaces = async (records: unknown[]) => {
-      if (!cache) return;
+    const withPlaceRefs = async (records: unknown[]): Promise<unknown[]> => {
+      if (!cache) return records;
       const places: CanonicalPlaceInput[] = records.flatMap((record) => {
         const candidate = record as Partial<CanonicalPlaceInput> & { coordinates?: [number, number] };
         if (!candidate.providerPlaceId || !candidate.name || !candidate.coordinates) return [];
@@ -919,15 +920,34 @@ Deno.serve(async (request) => {
           phone: candidate.phone,
         }];
       });
-      if (places.length > 0) await linkCanonicalPlaces(cache, selectedProvider, places);
+      if (places.length === 0) return records;
+
+      /**
+       * The one moment the server can prove all three parts of a place's
+       * identity at once, so this is where the reference is made.
+       *
+       * `provider` is `selectedProvider` — the provider the link table is
+       * keyed by — and never `candidate.provider`, which records where the
+       * *listing* came from. A Wikivoyage listing found on an OSM run carries
+       * `provider: 'wikivoyage'` and is linked under `'osm'`; the ACROS case
+       * proved those diverge, and asking under the wrong one returns nothing
+       * at all, silently.
+       *
+       * Attached at serve time rather than stored in the discovery cache. That
+       * is deliberate: a stored field would be absent from every row written
+       * before it existed and stay absent for the row's full TTL — the exact
+       * month-long silence `DISCOVERY_SCHEMA_VERSION` v4 was bumped for. A
+       * reference derived on the way out cannot go stale, so cached rows from
+       * before this change serve references from their first request.
+       */
+      const canonical = await linkCanonicalPlaces(cache, selectedProvider, places);
+      return attachPlaceRefs(records, selectedProvider, canonical);
     };
 
     if (cache) {
       const cached = await readDiscoveryCache(cache, cityKey, selectedProvider);
       if (cached && cached.length > 0) {
-        const served = cached.slice(0, limit);
-        await ensureCanonicalPlaces(served);
-        return json(served);
+        return json(await withPlaceRefs(cached.slice(0, limit)));
       }
     }
 
@@ -950,7 +970,7 @@ Deno.serve(async (request) => {
         candidates,
         expiryFor('placeIdentity', body.travelStartsInDays),
       );
-      await ensureCanonicalPlaces(candidates);
+      return json(await withPlaceRefs(candidates));
     }
 
     return json(candidates);

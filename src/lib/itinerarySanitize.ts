@@ -13,6 +13,10 @@
  * payload differs from local state. A non-deterministic id or timestamp here
  * would make every echo look like a change and loop the sync.
  */
+import {
+  parseStructuredPlaceRef,
+  type StructuredPlaceRef,
+} from '../../supabase/functions/_shared/placeReference';
 import type {
   AdmissionClass,
   AdmissionExpectation,
@@ -387,6 +391,28 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
   };
 };
 
+/**
+ * Place references survive a reload only in their exact shape.
+ *
+ * `parseStructuredPlaceRef` is the same validator the Ask card path uses, so
+ * there is one definition of what a trusted reference looks like. A ref whose
+ * key has no decision is dropped rather than kept: identity outlasting the
+ * decision it was captured for is how a withdrawn choice comes back as a card.
+ */
+const sanitizePlaceRefs = (
+  value: unknown,
+  decisions: Record<string, DiscoveryCandidateDecision>,
+): Record<string, StructuredPlaceRef> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const refs: Record<string, StructuredPlaceRef> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!key || decisions[key] === undefined) continue;
+    const ref = parseStructuredPlaceRef(raw);
+    if (ref) refs[key] = ref;
+  }
+  return Object.keys(refs).length > 0 ? refs : undefined;
+};
+
 const sanitizeDiscoveryState = (value: unknown): ItineraryDiscoveryState | undefined => {
   if (!value || typeof value !== 'object') return undefined;
   const source = value as Partial<ItineraryDiscoveryState>;
@@ -407,6 +433,7 @@ const sanitizeDiscoveryState = (value: unknown): ItineraryDiscoveryState | undef
     scheduledCandidateIds: Array.isArray(source.scheduledCandidateIds)
       ? source.scheduledCandidateIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
       : undefined,
+    placeRefs: sanitizePlaceRefs(source.placeRefs, decisions),
     unscheduledCandidates: Array.isArray(source.unscheduledCandidates)
       ? source.unscheduledCandidates.flatMap((item) => {
           if (!item || typeof item !== 'object') return [];
