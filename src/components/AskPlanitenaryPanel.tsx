@@ -75,6 +75,22 @@ const sourceLabel = (url: string): string => {
 export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelProps) {
   const intelligence = useTripIntelligenceUi();
   const [open, setOpen] = useState(false);
+
+  /**
+   * Hold the page still while the panel is open.
+   *
+   * This is a modal dialog, and the plan behind it was staying fully
+   * scrollable: a wheel over the answer scrolled the itinerary underneath
+   * instead, which is indistinguishable from the panel refusing to scroll.
+   * The previous value is restored rather than assumed to be `visible`, so
+   * closing cannot quietly clear an overflow some other surface had set.
+   */
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [open]);
   const [seenAskNonce, setSeenAskNonce] = useState(0);
   const [question, setQuestion] = useState('');
   const [submittedQuestion, setSubmittedQuestion] = useState('');
@@ -219,7 +235,13 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
                 </button>
               </header>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+              {/*
+                `overscroll-contain` stops the wheel handing off to the page
+                behind once this list reaches its end. Without it, reading to
+                the bottom of an answer silently starts scrolling the itinerary
+                underneath, which reads as "the panel will not scroll".
+              */}
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
                 {!loading && !result && (
                   <div>
                     <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
