@@ -68,6 +68,11 @@ import {
 import { reserveAiReasoningAttempt } from '../_shared/quota.ts';
 import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/meteredModel.ts';
 import { runAgent, type AgentModelPayload } from '../_shared/agentRuntime.ts';
+import {
+  resolveStructuredPlaceCards,
+  type PlaceCardRequest,
+} from '../_shared/placeCardResolver.ts';
+import { parseStructuredPlaceRef } from '../_shared/placeReference.ts';
 import { createToolExecutor, tripPrimaryCity } from '../_shared/agentToolAdapters.ts';
 import {
   parseConversationTurns,
@@ -259,6 +264,114 @@ const loadAskGroundingExtras = async (input: {
   return extras;
 };
 
+/** A read-only operation, outside `AGENT_OPERATIONS` because it has no model. */
+const RESOLVE_PLACE_CARDS = 'resolve-place-cards';
+
+/** One screen's worth. Smart Plan asks about a single action today. */
+const MAX_RESOLVE_KEYS = 5;
+
+/**
+ * Resolve place cards for decisions on a trip the caller owns.
+ *
+ * The authority chain is the point of this function:
+ *
+ *   caller identity  → verified from the request's own token
+ *   trip             → read by (tripId, userId) together
+ *   decision         → must exist in the trip's stored discovery state
+ *   reference        → read from that same stored state, never from the body
+ *   canonical place  → re-checked against the provider link table
+ *
+ * A browser that asks about decision A gets the place stored against decision
+ * A, whatever it believes or claims about place B.
+ */
+async function resolvePlaceCardsOperation(
+  body: AgentBody & { decisionKeys?: unknown },
+  userId: string,
+  request: Request,
+): Promise<Response> {
+  const tripId = typeof body.tripId === 'string' ? body.tripId.trim() : '';
+  if (!tripId) return json({ error: 'A tripId is required.' }, 400);
+
+  const decisionKeys = Array.isArray(body.decisionKeys)
+    ? body.decisionKeys
+      .filter((key): key is string => typeof key === 'string' && Boolean(key.trim()))
+      .map((key) => key.trim().slice(0, 200))
+      .slice(0, MAX_RESOLVE_KEYS)
+    : [];
+  if (decisionKeys.length === 0) return json({ cards: [] });
+
+  const cache = serviceClient();
+  if (!cache) return json({ error: 'The place card service is not configured.' }, 503);
+
+  const trip = await readOwnedTrip(cache, tripId, userId);
+  if (trip.kind === 'error') return json({ error: 'The trip could not be read.' }, 503);
+  if (trip.kind === 'missing') return json({ error: 'Trip not found.' }, 404);
+
+  const itinerary = trip.itineraryData && typeof trip.itineraryData === 'object'
+    ? trip.itineraryData as Record<string, unknown>
+    : null;
+  const discovery = asRecord(itinerary?.discoveryState);
+  const decisions = asRecord(discovery?.decisions) ?? {};
+  const storedRefs = asRecord(discovery?.placeRefs) ?? {};
+
+  /**
+   * A reference is only meaningful while the decision it was captured for
+   * still stands. The sanitiser drops orphans on write; this refuses them on
+   * read, because stored JSON can be older than the rule that tidies it.
+   */
+  const wanted: Array<{ decisionKey: string; request: PlaceCardRequest }> = [];
+  for (const decisionKey of new Set(decisionKeys)) {
+    const decision = decisions[decisionKey];
+    if (typeof decision !== 'string' || !decision) continue;
+    const ref = parseStructuredPlaceRef(storedRefs[decisionKey]);
+    if (!ref) continue;
+    wanted.push({
+      decisionKey,
+      request: {
+        providerPlaceId: ref.providerPlaceId,
+        // Stored strings are re-checked against the link table, never assumed.
+        expect: { canonicalPlaceId: ref.canonicalPlaceId, provider: ref.provider },
+        extras: {
+          decision: decision === 'must-do' || decision === 'interested'
+            || decision === 'skip' || decision === 'visited'
+            ? decision
+            : undefined,
+        },
+      },
+    });
+  }
+  if (wanted.length === 0) return json({ cards: [] });
+
+  const token = bearerToken(request);
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
+  if (!token || !supabaseUrl) return json({ error: 'The place card service is not configured.' }, 503);
+  const callFunction = async (name: string, payload: unknown): Promise<unknown> => {
+    const response = await fetch(`${supabaseUrl}/functions/v1/${name}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`${name} responded ${response.status}`);
+    return response.json();
+  };
+
+  const cards = await resolveStructuredPlaceCards(
+    cache,
+    callFunction,
+    wanted.map((entry) => entry.request),
+  );
+
+  // Cards come back only for what could be proved, so they are matched back by
+  // the provider place id they were asked for rather than by position.
+  const byProviderPlaceId = new Map(cards.map((card) => [card.ref.providerPlaceId, card]));
+  return json({
+    cards: wanted.flatMap((entry) => {
+      const place = byProviderPlaceId.get(entry.request.providerPlaceId);
+      return place ? [{ decisionKey: entry.decisionKey, place }] : [];
+    }),
+  });
+}
+
 Deno.serve(async (request) => {
   const early = preflight(request);
   if (early) return early;
@@ -275,6 +388,24 @@ Deno.serve(async (request) => {
   if (authentication.ok === false) return json({ error: authentication.detail }, authentication.status);
 
   const body = (await request.json().catch(() => ({}))) as AgentBody;
+
+  /**
+   * Factual place cards for decisions the traveller already made.
+   *
+   * Deliberately answered here, before `isAgentOperation`, before limits,
+   * before spend and before any model resolution — so that "this operation
+   * cannot reach the AI tier" is a property of the control flow rather than a
+   * promise. Everything below this line is unreachable for it.
+   *
+   * The request names a *decision*, never a place. A browser may say which
+   * decision the traveller is looking at; only the owned trip may say which
+   * place that decision was made about. Accepting a reference from the client
+   * would make every card as trustworthy as its caller, which for a public
+   * endpoint means not at all.
+   */
+  if ((body as { operation?: unknown }).operation === RESOLVE_PLACE_CARDS) {
+    return await resolvePlaceCardsOperation(body, authentication.caller.userId, request);
+  }
 
   if (!isAgentOperation(body.operation)) {
     return json({ error: `Unknown operation. Allowed: ${AGENT_OPERATIONS.join(', ')}.` }, 400);

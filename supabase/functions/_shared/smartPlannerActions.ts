@@ -40,6 +40,16 @@ export interface SmartAction {
    * it — the reference adds a picture, never the meaning.
    */
   placeRef?: StructuredPlaceRef;
+  /**
+   * Which stored decision this action is about.
+   *
+   * Not identity, and deliberately not a place: it names the decision the
+   * server should re-read from the traveller's own trip. The action already
+   * carries `placeRef` for deterministic local reasoning, but a reference that
+   * arrived in a browser is only a claim — the server resolves what the
+   * decision actually points at, from storage it owns.
+   */
+  decisionKey?: string;
 }
 
 export interface SmartActionInput {
@@ -180,6 +190,7 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
       // Absent for every decision made before references existed. No lookup,
       // no reconstruction: this is the ref that was captured, or nothing.
       placeRef: parseStructuredPlaceRef(asRecord(discovery?.placeRefs)?.[omittedMustDoId]),
+      decisionKey: omittedMustDoId,
     });
   }
 

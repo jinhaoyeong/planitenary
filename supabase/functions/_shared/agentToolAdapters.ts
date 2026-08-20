@@ -50,17 +50,9 @@ import {
   buildPlanningMaterial,
 } from './itineraryProposal.ts';
 import { listPersistedFlights } from './askGrounding.ts';
-import {
-  readCanonicalPlaceRecords,
-  readItineraryProposalCache,
-  readPlaceProviderLinks,
-} from './cache.ts';
-import { parsePlaceImage } from './placeImages.ts';
-import {
-  MAX_PLACE_CARDS,
-  type StructuredPlaceCard,
-  type StructuredPlaceRef,
-} from './placeReference.ts';
+import { readItineraryProposalCache } from './cache.ts';
+import { resolveStructuredPlaceCards } from './placeCardResolver.ts';
+import { MAX_PLACE_CARDS, type StructuredPlaceCard } from './placeReference.ts';
 import {
   HISTORY_DIFF_SELECT,
   historyRecordFromAuthorityRow,
@@ -1211,94 +1203,38 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
   };
 
   const resolvePlaceCards = async (placeIds: string[]): Promise<StructuredPlaceCard[]> => {
+    /**
+     * Ask's authority gate, and only that.
+     *
+     * Everything factual — the link check, the canonical record, the
+     * photograph — belongs to the shared resolver, which is the same code Smart
+     * Plan reaches. What is specific to Ask is *how a reference earns trust*:
+     * the id must have been issued by a place-bearing tool during this turn and
+     * must be claimed by the index entry it lands on. That proof is worthless
+     * anywhere else and irreplaceable here, so it stays.
+     *
+     * No `expect` is supplied: the index vouched for the provider place id
+     * this turn, and the link table is the authority on which canonical place
+     * that is. Smart Plan is the caller that has a stored canonical id to
+     * re-check.
+     */
     const places = strictlyKnown(placeIds);
-    if (places.length === 0 || !context.cache) return [];
-
-    try {
-      /**
-       * The link table decides which provider this place is filed under —
-       * the request does not get to assert it. A Wikivoyage listing found on
-       * an OSM run is linked as OSM, and asking under 'wikivoyage' returns
-       * nothing at all, silently.
-       */
-      const links = await readPlaceProviderLinks(
-        context.cache,
-        places.map((place) => place.providerPlaceId!),
-      );
-      if (links.size === 0) return [];
-      const records = await readCanonicalPlaceRecords(
-        context.cache,
-        [...links.values()].map((link) => link.canonicalPlaceId),
-      );
-
-      /**
-       * Photographs, from the canonical identity alone.
-       *
-       * No leads are sent, which is what makes this free: with nothing to
-       * look up, `travel-images` answers out of the validated cache and
-       * makes zero provider calls. Grouped by link provider because the
-       * function takes one provider per request; in practice that is one
-       * request for the whole answer.
-       */
-      const byProvider = new Map<string, string[]>();
-      for (const place of places) {
-        const link = links.get(place.providerPlaceId!);
-        if (!link) continue;
-        byProvider.set(link.provider, [...(byProvider.get(link.provider) || []), place.providerPlaceId!]);
-      }
-      const photos = new Map<string, { url: string; attribution: string; sourcePage: string }>();
-      for (const [provider, providerPlaceIds] of byProvider) {
-        try {
-          const payload = asRecord(await callFunction('travel-images', { placeIds: providerPlaceIds, provider }));
-          const images = asRecord(payload?.images);
-          for (const providerPlaceId of providerPlaceIds) {
-            const first = asArray(images?.[providerPlaceId])[0];
-            const image = parsePlaceImage(first);
-            // The credit is part of the permission to show the photograph, so
-            // a picture without one is not shown at all.
-            if (image?.attribution) {
-              photos.set(providerPlaceId, {
-                url: image.url,
-                attribution: image.attribution,
-                sourcePage: image.sourcePage,
-              });
-            }
-          }
-        } catch {
-          // A card without a photograph is still a true card.
-        }
-      }
-
-      const cards: StructuredPlaceCard[] = [];
-      for (const place of places) {
-        const link = links.get(place.providerPlaceId!);
-        if (!link) continue;
-        const record = records.get(link.canonicalPlaceId);
-        // No canonical record means nothing authoritative to display. The
-        // place stays in the prose; it does not become a card.
-        if (!record) continue;
-        const ref: StructuredPlaceRef = {
-          canonicalPlaceId: link.canonicalPlaceId,
-          provider: link.provider,
-          providerPlaceId: place.providerPlaceId!,
-        };
-        cards.push({
-          ref,
-          name: record.name,
-          city: record.city ?? place.city,
-          area: record.area ?? place.location,
-          coordinates: record.coordinates ?? place.coordinates,
+    if (places.length === 0) return [];
+    return resolveStructuredPlaceCards(
+      context.cache,
+      callFunction,
+      places.map((place) => ({
+        providerPlaceId: place.providerPlaceId!,
+        extras: {
+          city: place.city,
+          area: place.location,
+          coordinates: place.coordinates,
           category: place.type,
-          image: photos.get(place.providerPlaceId!),
           decision: decisionFor(place),
           onDay: place.day,
-        });
-      }
-      return cards.slice(0, MAX_PLACE_CARDS);
-    } catch {
-      // Cards are an enhancement. An answer without them is still an answer.
-      return [];
-    }
+        },
+      })),
+    );
   };
 
   return { execute, resolvePlaceCards };

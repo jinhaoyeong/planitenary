@@ -16,6 +16,9 @@ import {
   type PlanTripWriteNotice,
 } from '../lib/planTripWritePresentation';
 import { deriveSmartActions, type SmartAction } from '../../supabase/functions/_shared/smartPlannerActions';
+import { resolvePlaceCards } from '../lib/placeCards';
+import { PlaceCard } from './PlaceCard';
+import type { StructuredPlaceCard } from '../../supabase/functions/_shared/placeReference';
 import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 import { tripBudgetHint } from '../lib/tripBudgetHint';
 import type { Itinerary } from '../data';
@@ -146,6 +149,41 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
     }),
     [itinerary, surface, dayNumber, budgetHint.hasBudget, budgetHint.remainingKnown, budgetHint.ceilingKnown],
   );
+
+  /**
+   * Factual cards for the actions that have a stored place behind them.
+   *
+   * Keyed by decision, because that is all the server is asked for. The local
+   * placeRef decides only *whether* to ask — a decision made before references
+   * existed has none, and that action simply stays prose, with no request made
+   * on its behalf.
+   *
+   * Costs nothing at the model tier: the operation this calls returns before
+   * any AI code is reachable.
+   */
+  const [placeCards, setPlaceCards] = useState<Map<string, StructuredPlaceCard>>(new Map());
+  const cardDecisionKeys = useMemo(
+    () => smartActions
+      .filter((action) => action.placeRef && action.decisionKey)
+      .map((action) => action.decisionKey as string),
+    [smartActions],
+  );
+  // A stable dependency: the same keys in the same order must not refetch.
+  const cardKeySignature = cardDecisionKeys.join('|');
+
+  useEffect(() => {
+    if (!tripId || cardDecisionKeys.length === 0) {
+      setPlaceCards(new Map());
+      return;
+    }
+    let cancelled = false;
+    resolvePlaceCards({ tripId, decisionKeys: cardDecisionKeys })
+      .then((cards) => { if (!cancelled) setPlaceCards(cards); })
+      // An action without its picture is still the action.
+      .catch(() => { if (!cancelled) setPlaceCards(new Map()); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripId, cardKeySignature]);
 
   useEffect(() => {
     if (!loading) return;
@@ -352,18 +390,28 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                         Based on your trip
                       </p>
                       <div className="mt-4 grid gap-2">
-                        {smartActions.map((action) => (
-                          <button
-                            key={action.id}
-                            type="button"
-                            aria-label={action.title}
-                            onClick={() => runSmartAction(action)}
-                            className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-rose-200 hover:bg-rose-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-rose-900 dark:hover:bg-rose-950/20"
-                          >
-                            <span className="block text-sm font-semibold text-slate-950 dark:text-white">{action.title}</span>
-                            <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{action.reason}</span>
-                          </button>
-                        ))}
+                        {smartActions.map((action) => {
+                          const card = action.decisionKey ? placeCards.get(action.decisionKey) : undefined;
+                          return (
+                            <div key={action.id} className="grid gap-2">
+                              <button
+                                type="button"
+                                aria-label={action.title}
+                                onClick={() => runSmartAction(action)}
+                                className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-rose-200 hover:bg-rose-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-rose-900 dark:hover:bg-rose-950/20"
+                              >
+                                <span className="block text-sm font-semibold text-slate-950 dark:text-white">{action.title}</span>
+                                <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{action.reason}</span>
+                              </button>
+                              {/*
+                                Outside the button, not inside it: the credit is
+                                a link, and a link nested in a button is neither
+                                valid HTML nor reachable by keyboard.
+                              */}
+                              {card && <PlaceCard card={card} as="div" />}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
