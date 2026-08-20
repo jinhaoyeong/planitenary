@@ -531,7 +531,24 @@ Deno.serve(async (request) => {
   )) {
     return json(generationDisabledRefusal(trip.tripId), 503);
   }
-  if (resolution.status === 'misconfigured') return json({ error: resolution.error }, 500);
+  /**
+   * A misconfiguration is an operator's problem, and it was being handed to
+   * travellers verbatim.
+   *
+   * With the kill switch on, somebody asking "can you suggest a place to go"
+   * was answered with: OPENAI_MODEL "disabled" is not approved for the agent
+   * operation ask. Allowed: gpt-5-nano. That sentence names an environment
+   * variable, leaks which models the tier accepts, and tells the person who
+   * read it nothing they can act on.
+   *
+   * The detail still exists — it goes to the log, where the operator who can
+   * fix it will look. The traveller is told the truth at their own level of
+   * the system, in the same words any other outage uses.
+   */
+  if (resolution.status === 'misconfigured') {
+    console.error('[planitenary-agent] reasoning misconfigured:', resolution.error);
+    return json({ error: 'The assistant is unavailable right now.' }, 503);
+  }
   if (resolution.status === 'unconfigured') return json({ error: 'The assistant is not configured.' }, 503);
   const { options } = resolution;
 

@@ -144,3 +144,20 @@ describe('the operation cannot reach the model tier', () => {
     }
   });
 });
+
+describe('an operator’s problem is not shown to a traveller', () => {
+  const agentSource = readFileSync('supabase/functions/planitenary-agent/index.ts', 'utf8');
+
+  it('never returns the reasoning misconfiguration detail to the client', () => {
+    /**
+     * With the kill switch on, production answered "can you suggest a place to
+     * go" with: OPENAI_MODEL "disabled" is not approved for the agent operation
+     * ask. Allowed: gpt-5-nano. That names an environment variable and tells
+     * the reader nothing they can act on.
+     */
+    expect(agentSource).not.toContain('json({ error: resolution.error }');
+    expect(agentSource).toContain("'The assistant is unavailable right now.'");
+    // The detail still reaches the operator who can fix it.
+    expect(agentSource).toContain('reasoning misconfigured:');
+  });
+});

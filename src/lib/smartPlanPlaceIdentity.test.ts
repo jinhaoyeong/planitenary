@@ -233,3 +233,66 @@ describe('the reference validator is the one the Ask card already uses', () => {
     expect(parseStructuredPlaceRef({ canonicalPlaceId: 'c', provider: 'osm' })).toBeUndefined();
   });
 });
+
+/**
+ * Which Must-do the action is actually about.
+ *
+ * Production exposed two faults here at once, and both were invisible until a
+ * real trip was inspected. Five of six Must-dos were already on the plan, and
+ * the action offered to fit every one of them; and the one genuinely missing
+ * place was chosen by insertion order, so a Must-do that could have shown a
+ * card lost to one that could not.
+ */
+describe('the omitted Must do is chosen honestly', () => {
+  const REF_B: StructuredPlaceRef = {
+    canonicalPlaceId: 'c-2222', provider: 'osm', providerPlaceId: 'n1420784678',
+  };
+
+  const trip = (decisions: Record<string, string>, activities: unknown[], placeRefs?: Record<string, StructuredPlaceRef>) => ({
+    days: [{ day: 1, activities }],
+    discoveryState: { decisions, placeRefs },
+  });
+
+  const fitMustDo = (itinerary: unknown) =>
+    deriveSmartActions({ itinerary: itinerary as Record<string, unknown>, surface: 'itinerary' })
+      .find((action) => action.id === 'fit-must-do');
+
+  it('does not offer to fit a place the plan already holds', () => {
+    /**
+     * The saved activity is `discovered-<candidateId>`; the decision is keyed
+     * by the bare candidate id. Comparing those directly never matches, which
+     * is why every Must-do looked missing.
+     */
+    const action = fitMustDo(trip(
+      { 'osm-n1420780980': 'must-do' },
+      [{ id: 'discovered-osm-n1420780980', name: 'Somewhere', type: 'sight', time: '09:00', durationMinutes: 60 }],
+    ));
+    expect(action).toBeUndefined();
+  });
+
+  it('still offers to fit one the plan genuinely lacks', () => {
+    const action = fitMustDo(trip(
+      { 'osm-n304422978': 'must-do' },
+      [{ id: 'discovered-osm-n1420780980', name: 'Elsewhere', type: 'sight', time: '09:00', durationMinutes: 60 }],
+    ));
+    expect(action).toBeDefined();
+  });
+
+  it('prefers the omitted Must do it can actually show', () => {
+    // Two omitted; only the second has a reference. Insertion order would pick
+    // the first and the traveller would see no card at all.
+    const action = fitMustDo(trip(
+      { 'osm-legacy': 'must-do', 'osm-n1420784678': 'must-do' },
+      [],
+      { 'osm-n1420784678': REF_B },
+    ));
+    expect(action?.decisionKey).toBe('osm-n1420784678');
+    expect(action?.placeRef).toEqual(REF_B);
+  });
+
+  it('falls back to insertion order when none can be shown', () => {
+    const action = fitMustDo(trip({ 'osm-legacy': 'must-do', 'osm-other': 'must-do' }, []));
+    expect(action?.decisionKey).toBe('osm-legacy');
+    expect(action?.placeRef).toBeUndefined();
+  });
+});

@@ -7,7 +7,12 @@
  * navigate or open Ask.
  */
 
-import { ARRIVAL_SETTLING_MINUTES, clockToMinutes, isPlannerPlace } from './itineraryProposal.ts';
+import {
+  ARRIVAL_SETTLING_MINUTES,
+  canonicalDecisionKeysOf,
+  clockToMinutes,
+  isPlannerPlace,
+} from './itineraryProposal.ts';
 import type { IntelligenceSurface } from './intelligenceContext.ts';
 
 export type SmartActionScope = 'trip' | 'day' | 'activity' | 'place' | 'budget' | 'map' | 'documents';
@@ -119,19 +124,42 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
   const mustDoIds = Object.entries(decisions)
     .filter(([, value]) => value === 'must-do')
     .map(([id]) => id);
-  const scheduledIds = new Set(
-    rows
-      .map(({ activity }) => typeof activity.id === 'string' ? activity.id : '')
-      .filter(Boolean),
-  );
+  /**
+   * Which places the plan already holds, by the keys a *decision* is written
+   * under.
+   *
+   * A saved activity's id is not its decision key. Discovery stores decisions
+   * against the candidate id — `osm-n1420780980` — while the activity it
+   * becomes is saved as `discovered-osm-n1420780980`. Comparing the two
+   * directly never matches, so every Must-do looked omitted and this action
+   * offered to fit places that were already on the plan. Production had five
+   * of six in exactly that state.
+   *
+   * `canonicalDecisionKeysOf` is the existing answer to "what decision keys
+   * could this activity be known by", already used to bind saved activities to
+   * their review cards, so the two paths agree by construction.
+   */
+  const scheduledKeys = new Set<string>();
+  for (const { activity } of rows) {
+    for (const key of canonicalDecisionKeysOf(activity)) scheduledKeys.add(key);
+  }
   /**
    * The specific Must-do that is missing, not merely that one is.
    *
    * The action text is unchanged, but knowing *which* decision it refers to is
    * what lets its stored reference be attached — and a reference may only ever
    * be found by decision key.
+   *
+   * Among several omitted Must-dos, one that can be shown is worth more than
+   * one that cannot: the first with a stored reference wins, and insertion
+   * order decides only when none of them has one. This is presentation, not
+   * priority — every omitted Must-do is equally missing, and the action says
+   * the same thing either way.
    */
-  const omittedMustDoId = mustDoIds.find((id) => !scheduledIds.has(id));
+  const omittedMustDoIds = mustDoIds.filter((id) => !scheduledKeys.has(id));
+  const storedPlaceRefs = asRecord(discovery?.placeRefs);
+  const omittedMustDoId = omittedMustDoIds.find((id) => parseStructuredPlaceRef(storedPlaceRefs?.[id]))
+    ?? omittedMustDoIds[0];
 
   const interestedCount = Object.values(decisions).filter((value) => value === 'interested').length;
   const eligiblePlaces = rows.filter(({ activity, day }) => isPlannerPlace(activity, day)).length;
@@ -189,7 +217,7 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
       mode: 'proposal',
       // Absent for every decision made before references existed. No lookup,
       // no reconstruction: this is the ref that was captured, or nothing.
-      placeRef: parseStructuredPlaceRef(asRecord(discovery?.placeRefs)?.[omittedMustDoId]),
+      placeRef: parseStructuredPlaceRef(storedPlaceRefs?.[omittedMustDoId]),
       decisionKey: omittedMustDoId,
     });
   }
