@@ -43,6 +43,7 @@ import {
 import type { IntelligenceFocus } from './intelligenceContext.ts';
 import { summarizeBudgetFacts } from './budgetFacts.ts';
 import { summarizeDocumentFacts } from './documentFacts.ts';
+import { researchOfficialAdmissions } from './officialAdmissionResearch.ts';
 import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
@@ -955,6 +956,24 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
           // Named rather than dropped: a place this trip has never heard of is
           // something the model needs to know it got wrong.
           unknown: missing,
+        },
+      };
+    },
+
+    get_admission_prices: async (args) => {
+      const { found, missing } = resolvePlaces(args.placeIds as string[]);
+      const prices = await researchOfficialAdmissions(context.cache, found.map((place) => ({
+        id: place.id,
+        name: place.name,
+        provider: place.provider,
+        providerPlaceId: place.providerPlaceId,
+      })));
+      return {
+        ok: true,
+        result: {
+          places: prices,
+          unknown: missing,
+          note: 'Only fares present on a server-validated operator source are returned. No fare is a planning estimate.',
         },
       };
     },

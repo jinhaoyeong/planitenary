@@ -148,6 +148,8 @@ export function extractJsonLd(html: string): Array<Record<string, unknown>> {
 export interface OfficialPriceClaim {
   summary: string;
   amount?: number;
+  minAmount?: number;
+  maxAmount?: number;
   currency?: string;
   audience?: string;
   excerpt?: string;
@@ -243,11 +245,30 @@ const structuredFare = (
 
   const audience = audienceFromOffer(offer);
   const high = numericValue(offer.highPrice);
-  const note = high !== undefined && high > amount
+  const rangeNote = high !== undefined && high > amount
     ? `from ${amount} to ${high} ${currency}`
     : undefined;
+  const productName = typeof offer.name === 'string' && offer.name.trim()
+    ? offer.name.trim().slice(0, 80)
+    : undefined;
+  const validFrom = typeof offer.validFrom === 'string' && offer.validFrom.trim()
+    ? offer.validFrom.trim().slice(0, 30)
+    : undefined;
+  const validThrough = typeof offer.validThrough === 'string' && offer.validThrough.trim()
+    ? offer.validThrough.trim().slice(0, 30)
+    : undefined;
+  const validity = validFrom || validThrough
+    ? `valid ${validFrom ?? 'now'}${validThrough ? ` to ${validThrough}` : ''}`
+    : undefined;
+  const note = [productName, rangeNote, validity].filter(Boolean).join('; ') || undefined;
   return {
-    fare: { audience, amount, currency, note },
+    fare: {
+      audience,
+      amount,
+      ...(high !== undefined && high > amount ? { minAmount: amount, maxAmount: high } : {}),
+      currency,
+      note,
+    },
   };
 };
 
@@ -269,7 +290,7 @@ export function admissionFromJsonLd(
 
   const addFare = (candidate: StructuredFare | undefined) => {
     if (!candidate) return;
-    const key = `${candidate.fare.audience}|${candidate.fare.currency}|${candidate.fare.amount}`;
+    const key = `${candidate.fare.audience}|${candidate.fare.currency}|${candidate.fare.amount}|${candidate.fare.maxAmount ?? ''}`;
     if (fareKeys.has(key)) return;
     fareKeys.add(key);
     fares.push(candidate.fare);
@@ -336,6 +357,7 @@ export function admissionFromJsonLd(
 export function officialAdmissionClaims(
   nodes: Array<Record<string, unknown>>,
   admission: PlaceAdmission | undefined,
+  fallbackExcerpt?: string,
 ): OfficialPriceClaim[] {
   if (!admission) return [];
   if (admission.class === 'free') {
@@ -356,9 +378,11 @@ export function officialAdmissionClaims(
   return fares.map((fare) => ({
     summary: `The official site lists ${fare.audience} admission at ${fare.currency} ${fare.amount}${fare.note ? ` (${fare.note})` : ''}`,
     amount: fare.amount,
+    minAmount: fare.minAmount,
+    maxAmount: fare.maxAmount,
     currency: fare.currency,
     audience: fare.audience,
-    excerpt: jsonLdExcerpt(nodes, [String(fare.amount), fare.currency]),
+    excerpt: jsonLdExcerpt(nodes, [String(fare.amount), fare.currency]) || fallbackExcerpt,
   }));
 }
 
@@ -433,6 +457,82 @@ export function visibleText(html: string, limit = 20_000): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, limit);
+}
+
+/**
+ * Read a fare from a short, visible fragment of the operator's own page.
+ * A whole homepage contains dates, phone numbers and coordinates, so a
+ * fragment must name a ticket/admission concept and carry an explicit
+ * currency marker before its numbers can be treated as fares.
+ */
+export function admissionFromVisibleText(
+  text: string,
+  countryCode?: string,
+): PlaceAdmission | undefined {
+  if (!text.trim()) return undefined;
+  const fragments = [...text.matchAll(/.{0,180}\b(?:admission|entrance|entry|ticket|tickets|passport|studio pass|price|料金|チケット)\b.{0,240}/gi)]
+    .map((match) => match[0].trim())
+    .slice(0, 12);
+  for (const fragment of fragments) {
+    // Bare prose numbers are too noisy to receive the country fallback that
+    // structured JSON-LD may use. The page must state its currency here.
+    if (!(/[\p{Sc}]|\b(?:JPY|CNY|KRW|TWD|HKD|SGD|MYR|USD|AUD|CAD|EUR|GBP|yen|yuan|won|dollars?|ringgit)\b/iu.test(fragment))) continue;
+    const parsed = parseAdmissionText(fragment, countryCode, 'official-website');
+    if (parsed?.fares?.length || parsed?.class === 'free' || parsed?.class === 'ticketed') {
+      return parsed ? { ...parsed, rawText: parsed.rawText || fragment.slice(0, 500) } : parsed;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Candidate ticket/admission pages on the same official origin. Links are
+ * discovered from the retrieved page, capped tightly, and never leave the
+ * origin supplied by the canonical place record.
+ */
+export function officialTicketLinks(html: string, baseUrl: string, max = 3): string[] {
+  let base: URL;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const links = html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+  for (const match of links) {
+    if (found.length >= max) break;
+    const label = visibleText(match[2], 240);
+    const href = match[1].trim();
+    if (!/(ticket|admission|entrance|entry|passport|studio[- ]?pass|price|料金|チケット)/i.test(`${href} ${label}`)) continue;
+    let candidate: URL;
+    try {
+      candidate = new URL(href, base);
+    } catch {
+      continue;
+    }
+    candidate.hash = '';
+    if (candidate.protocol !== 'https:' || candidate.origin !== base.origin || !isSafePublicUrl(candidate.toString())) continue;
+    if (/\.(?:pdf|jpg|jpeg|png|gif|zip)(?:$|\?)/i.test(candidate.pathname)) continue;
+    const normalised = candidate.toString();
+    if (seen.has(normalised)) continue;
+    seen.add(normalised);
+    found.push(normalised);
+  }
+  return found;
+}
+
+/** Known map, guide and reseller hosts are not official operator sources. */
+export function isLikelyResellerUrl(raw: string | undefined): boolean {
+  if (!raw) return false;
+  let host = '';
+  try { host = new URL(raw).hostname.toLowerCase().replace(/^www\./, ''); } catch { return true; }
+  return [
+    'booking.com', 'expedia.com', 'getyourguide.com', 'klook.com', 'viator.com',
+    'tripadvisor.com', 'rakutentravel.com', 'kkday.com', 'traveloka.com',
+    'google.com', 'google.co.jp', 'maps.google.com', 'amap.com', 'baidu.com',
+    'wikivoyage.org', 'wikipedia.org',
+  ].some((blocked) => host === blocked || host.endsWith(`.${blocked}`));
 }
 
 /**

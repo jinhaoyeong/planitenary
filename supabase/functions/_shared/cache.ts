@@ -625,7 +625,15 @@ export interface CachedClaim {
    * whose evidence was cached. The claim looked present; only its meaning was
    * gone.
    */
-  appliesTo?: { start?: string; end?: string; daysOfWeek?: number[]; currency?: string; audience?: string };
+  appliesTo?: {
+    start?: string;
+    end?: string;
+    daysOfWeek?: number[];
+    currency?: string;
+    audience?: string;
+    minAmount?: number;
+    maxAmount?: number;
+  };
   strength: number;
   excerpt?: string;
 }
@@ -1134,6 +1142,77 @@ export async function readPlaceProviderLinks(
     for (const id of ambiguous) result.delete(id);
   } catch {
     // Best-effort: an unresolved id simply produces no reference.
+  }
+  return result;
+}
+
+export interface CanonicalOfficialSource {
+  canonicalPlaceId: string;
+  provider: string;
+  providerPlaceId: string;
+  name: string;
+  city?: string;
+  countryCode?: string;
+  website?: string;
+}
+
+/**
+ * Read the official-site candidate from the canonical place row, keyed by the
+ * provider id the owned itinerary already carries. The request/model never
+ * supplies a URL to this function. Ambiguous provider links are omitted by
+ * {@link readPlaceProviderLinks} rather than guessed through.
+ */
+export async function readCanonicalOfficialSources(
+  client: SupabaseClient,
+  references: Array<{ provider?: string; providerPlaceId?: string }>,
+): Promise<Map<string, CanonicalOfficialSource>> {
+  const result = new Map<string, CanonicalOfficialSource>();
+  const providerIds = [...new Set(references.map((reference) => reference.providerPlaceId).filter((id): id is string => Boolean(id)))];
+  if (providerIds.length === 0) return result;
+  const links = await readPlaceProviderLinks(client, providerIds);
+  const canonicalIds = [...new Set([...links.values()].map((link) => link.canonicalPlaceId))];
+  if (canonicalIds.length === 0) return result;
+
+  try {
+    const { data, error } = await client
+      .from('canonical_places')
+      .select('id, primary_name, city, country_code, website')
+      .in('id', canonicalIds);
+    if (error || !data) return result;
+    const records = new Map<string, {
+      name: string;
+      city?: string;
+      countryCode?: string;
+      website?: string;
+    }>();
+    for (const row of data) {
+      const id = String(row.id || '');
+      const name = typeof row.primary_name === 'string' ? row.primary_name.trim() : '';
+      if (!id || !name) continue;
+      records.set(id, {
+        name,
+        city: typeof row.city === 'string' && row.city.trim() ? row.city.trim() : undefined,
+        countryCode: typeof row.country_code === 'string' ? row.country_code.trim().toUpperCase() : undefined,
+        website: typeof row.website === 'string' && row.website.trim() ? row.website.trim() : undefined,
+      });
+    }
+    for (const reference of references) {
+      const providerPlaceId = reference.providerPlaceId;
+      if (!providerPlaceId) continue;
+      const link = links.get(providerPlaceId);
+      if (!link || (reference.provider && reference.provider !== link.provider)) continue;
+      const record = records.get(link.canonicalPlaceId);
+      if (!record) continue;
+      result.set(`${link.provider}|${providerPlaceId}`, {
+        canonicalPlaceId: link.canonicalPlaceId,
+        provider: link.provider,
+        providerPlaceId,
+        ...record,
+      });
+    }
+  } catch {
+    // An authority lookup failure is an unavailable official source, never a
+    // reason to fall back to a URL supplied by the caller.
   }
   return result;
 }

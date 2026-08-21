@@ -40,7 +40,10 @@ export type AdmissionSource = 'official-website' | 'provider' | 'osm-tag' | 'wik
 export interface AdmissionFare {
   /** As the source labelled it: adult, child, student, senior, concession. */
   audience: string;
+  /** The lower bound when the operator publishes a date/product range. */
   amount: number;
+  minAmount?: number;
+  maxAmount?: number;
   /** ISO 4217. Always explicit — a fare without one is not emitted. */
   currency: string;
   note?: string;
@@ -71,7 +74,7 @@ export interface OfficialAdmissionClaim {
   summary?: string;
   value?: number;
   unit?: string;
-  appliesTo?: { currency?: string; audience?: string };
+  appliesTo?: { currency?: string; audience?: string; minAmount?: number; maxAmount?: number };
 }
 
 /** Validate an admission map before an untrusted Edge response reaches UI state. */
@@ -84,14 +87,22 @@ export function isPlaceAdmission(value: unknown): value is PlaceAdmission {
   if (!classes.includes(entry.class as AdmissionClass)) return false;
   if (!sources.includes(entry.source as AdmissionSource)) return false;
   if (!confidence.includes(String(entry.confidence))) return false;
-  if (entry.fares !== undefined && (!Array.isArray(entry.fares) || entry.fares.some((fare) => (
-    !fare
-    || typeof fare !== 'object'
-    || typeof (fare as Record<string, unknown>).audience !== 'string'
-    || typeof (fare as Record<string, unknown>).currency !== 'string'
-    || typeof (fare as Record<string, unknown>).amount !== 'number'
-    || !Number.isFinite((fare as Record<string, unknown>).amount as number)
-  )))) return false;
+  const validFare = (fare: unknown): boolean => {
+    if (!fare || typeof fare !== 'object') return false;
+    const row = fare as Record<string, unknown>;
+    if (
+      typeof row.audience !== 'string'
+      || typeof row.currency !== 'string'
+      || typeof row.amount !== 'number'
+      || !Number.isFinite(row.amount)
+    ) return false;
+    for (const key of ['minAmount', 'maxAmount']) {
+      if (row[key] !== undefined && (typeof row[key] !== 'number' || !Number.isFinite(row[key] as number))) return false;
+    }
+    if (typeof row.minAmount === 'number' && typeof row.maxAmount === 'number' && row.minAmount > row.maxAmount) return false;
+    return true;
+  };
+  if (entry.fares !== undefined && (!Array.isArray(entry.fares) || entry.fares.some((fare) => !validFare(fare)))) return false;
   if (entry.typicalSpend !== undefined) {
     if (!entry.typicalSpend || typeof entry.typicalSpend !== 'object') return false;
     const spend = entry.typicalSpend as Record<string, unknown>;
@@ -99,8 +110,7 @@ export function isPlaceAdmission(value: unknown): value is PlaceAdmission {
       !spend
       || typeof spend.audience !== 'string'
       || typeof spend.currency !== 'string'
-      || typeof spend.amount !== 'number'
-      || !Number.isFinite(spend.amount as number)
+      || !validFare(spend)
     ) return false;
   }
   return true;
@@ -133,13 +143,20 @@ export function admissionFromOfficialClaims(
       || !claim.appliesTo?.currency
       || !claim.appliesTo.audience
     ) continue;
-    const key = `${claim.appliesTo.audience}|${claim.appliesTo.currency}|${claim.value}`;
+    const key = `${claim.appliesTo.audience}|${claim.appliesTo.currency}|${claim.value}|${claim.appliesTo.maxAmount ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const noteMatch = claim.summary?.match(/\(([^)]+)\)\s*$/);
+    const minAmount = typeof claim.appliesTo.minAmount === 'number' && Number.isFinite(claim.appliesTo.minAmount)
+      ? claim.appliesTo.minAmount
+      : claim.value;
+    const maxAmount = typeof claim.appliesTo.maxAmount === 'number' && Number.isFinite(claim.appliesTo.maxAmount)
+      ? claim.appliesTo.maxAmount
+      : claim.value;
     fares.push({
       audience: claim.appliesTo.audience,
-      amount: claim.value,
+      amount: minAmount,
+      ...(minAmount !== maxAmount ? { minAmount, maxAmount } : {}),
       currency: claim.appliesTo.currency,
       note: noteMatch?.[1],
     });
@@ -337,7 +354,18 @@ export function parseAdmissionText(
     // A range ("¥600–¥1,000") repeats an audience; the first figure is the one
     // a traveller budgets against, and `rawText` still carries the full text.
     if (seenAudiences.has(audience)) {
-      droppedFigure = true;
+      const existing = fares.find((fare) => fare.audience === audience && fare.currency === currency);
+      if (existing) {
+        const minAmount = Math.min(existing.minAmount ?? existing.amount, amount);
+        const maxAmount = Math.max(existing.maxAmount ?? existing.amount, amount);
+        existing.amount = minAmount;
+        existing.minAmount = minAmount;
+        existing.maxAmount = maxAmount;
+        existing.note = `from ${minAmount} to ${maxAmount} ${currency}`;
+        droppedFigure = true;
+      } else {
+        droppedFigure = true;
+      }
       continue;
     }
     seenAudiences.add(audience);

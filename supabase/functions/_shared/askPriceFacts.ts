@@ -10,6 +10,8 @@
 export interface AskPriceFare {
   audience: string;
   amount: number;
+  minAmount?: number;
+  maxAmount?: number;
   currency: string;
   note?: string;
 }
@@ -21,6 +23,7 @@ export interface AskPriceFact {
   fares: AskPriceFare[];
   source?: string;
   sourceUrl?: string;
+  retrievedAt?: string;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -50,9 +53,14 @@ const fareFromUnknown = (value: unknown): AskPriceFare | undefined => {
   const valueAmount = amount(row?.amount);
   const valueCurrency = currency(row?.currency);
   if (!audience || valueAmount === undefined || !valueCurrency) return undefined;
+  const minAmount = amount(row?.minAmount);
+  const maxAmount = amount(row?.maxAmount);
+  if (minAmount !== undefined && maxAmount !== undefined && minAmount > maxAmount) return undefined;
   return {
     audience,
     amount: valueAmount,
+    ...(minAmount !== undefined ? { minAmount } : {}),
+    ...(maxAmount !== undefined ? { maxAmount } : {}),
     currency: valueCurrency,
     ...(text(row?.note, 160) ? { note: text(row?.note, 160) } : {}),
   };
@@ -84,6 +92,9 @@ export const parseAskPriceFact = (value: unknown): AskPriceFact | undefined => {
     : undefined;
   const source = text(row?.source, 60);
   const url = sourceUrl(row?.sourceUrl);
+  const retrievedAt = typeof row?.retrievedAt === 'string' && Number.isFinite(Date.parse(row.retrievedAt))
+    ? row.retrievedAt.trim().slice(0, 80)
+    : undefined;
   return {
     name,
     scheduledDay: day,
@@ -91,6 +102,7 @@ export const parseAskPriceFact = (value: unknown): AskPriceFact | undefined => {
     fares,
     ...(source ? { source } : {}),
     ...(url ? { sourceUrl: url } : {}),
+    ...(retrievedAt ? { retrievedAt } : {}),
   };
 };
 
@@ -120,6 +132,7 @@ const factFromAdmission = (
     fares,
     source: admission.source,
     sourceUrl: admission.sourceUrl,
+    retrievedAt: admission.retrievedAt,
   });
 };
 
@@ -163,7 +176,7 @@ export const priceFactsFromValue = (value: unknown, max = 12): AskPriceFact[] =>
     if (!row) return;
     const fact = priceFactFromRecord(row);
     if (fact) {
-      const key = `${fact.name.toLowerCase()}|${fact.kind}|${fact.fares.map((fare) => `${fare.audience}:${fare.amount}:${fare.currency}`).join(',')}`;
+      const key = `${fact.name.toLowerCase()}|${fact.kind}|${fact.fares.map((fare) => `${fare.audience}:${fare.amount}:${fare.maxAmount ?? ''}:${fare.currency}`).join(',')}`;
       if (!seen.has(key)) {
         seen.add(key);
         found.push(fact);
@@ -177,10 +190,10 @@ export const priceFactsFromValue = (value: unknown, max = 12): AskPriceFact[] =>
 
 export const mergeAskPriceFacts = (target: AskPriceFact[], incoming: AskPriceFact[], max = 12): void => {
   const seen = new Set(target.map((fact) =>
-    `${fact.name.toLowerCase()}|${fact.kind}|${fact.fares.map((fare) => `${fare.audience}:${fare.amount}:${fare.currency}`).join(',')}`));
+    `${fact.name.toLowerCase()}|${fact.kind}|${fact.fares.map((fare) => `${fare.audience}:${fare.amount}:${fare.maxAmount ?? ''}:${fare.currency}`).join(',')}`));
   for (const fact of incoming) {
     if (target.length >= max) break;
-    const key = `${fact.name.toLowerCase()}|${fact.kind}|${fact.fares.map((fare) => `${fare.audience}:${fare.amount}:${fare.currency}`).join(',')}`;
+    const key = `${fact.name.toLowerCase()}|${fact.kind}|${fact.fares.map((fare) => `${fare.audience}:${fare.amount}:${fare.maxAmount ?? ''}:${fare.currency}`).join(',')}`;
     if (seen.has(key)) continue;
     seen.add(key);
     target.push(fact);

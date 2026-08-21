@@ -5,10 +5,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   admissionFromJsonLd,
+  admissionFromVisibleText,
   closureNotices,
   extractJsonLd,
+  isLikelyResellerUrl,
   isSafePublicUrl,
   officialAdmissionClaims,
+  officialTicketLinks,
   openingRulesFromJsonLd,
   visibleText,
 } from '../../supabase/functions/_shared/officialSource';
@@ -128,7 +131,9 @@ describe('reading structured admission offers', () => {
       offers: { '@type': 'AggregateOffer', lowPrice: '600', highPrice: '1000', priceCurrency: 'JPY' },
     })));
     const fare = admissionFromJsonLd(nodes, 'JP')?.fares?.[0];
-    expect(fare).toMatchObject({ audience: 'adult', amount: 600, currency: 'JPY', note: 'from 600 to 1000 JPY' });
+    expect(fare).toMatchObject({
+      audience: 'adult', amount: 600, minAmount: 600, maxAmount: 1000, currency: 'JPY', note: 'from 600 to 1000 JPY',
+    });
   });
 
   it('uses isAccessibleForFree when the operator says entry is free', () => {
@@ -136,6 +141,24 @@ describe('reading structured admission offers', () => {
     const admission = admissionFromJsonLd(nodes, 'JP');
     expect(admission).toMatchObject({ class: 'free', source: 'official-website' });
     expect(officialAdmissionClaims(nodes, admission)[0].summary).toContain('admission is free');
+  });
+
+  it('keeps the operator product and validity conditions beside the fare', () => {
+    const nodes = extractJsonLd(page(JSON.stringify({
+      offers: {
+        '@type': 'Offer',
+        name: '1-Day Passport',
+        price: '7900',
+        priceCurrency: 'JPY',
+        validThrough: '2026-12-31',
+      },
+    })));
+    const admission = admissionFromJsonLd(nodes, 'JP');
+    expect(admission?.fares?.[0]).toMatchObject({
+      amount: 7900,
+      currency: 'JPY',
+      note: '1-Day Passport; valid now to 2026-12-31',
+    });
   });
 
   /**
@@ -185,6 +208,28 @@ describe('reading structured admission offers', () => {
     const admission = admissionFromJsonLd(nodes, 'JP');
     expect(admission?.fares?.[0]).toMatchObject({ amount: 600, currency: 'JPY' });
     expect(admission?.rawText).toContain('¥1,000');
+  });
+
+  it('reads an explicit fare from visible operator text and keeps the excerpt', () => {
+    const admission = admissionFromVisibleText('Tickets: Adults ¥7,900–¥10,900 depending on visit date.', 'JP');
+    expect(admission).toMatchObject({
+      class: 'ticketed',
+      source: 'official-website',
+      fares: [{ audience: 'adult', amount: 7900, minAmount: 7900, maxAmount: 10900, currency: 'JPY' }],
+    });
+    expect(admission?.rawText).toContain('Tickets');
+  });
+});
+
+describe('finding official ticket pages without leaving the operator origin', () => {
+  it('keeps only bounded same-origin ticket links', () => {
+    const html = '<a href="/tickets">Tickets</a><a href="https://reseller.example/tickets">Tickets</a><a href="/map">Map</a>';
+    expect(officialTicketLinks(html, 'https://venue.example/')).toEqual(['https://venue.example/tickets']);
+  });
+
+  it('rejects known map and reseller domains', () => {
+    expect(isLikelyResellerUrl('https://www.klook.com/activity/123')).toBe(true);
+    expect(isLikelyResellerUrl('https://www.usj.co.jp/')).toBe(false);
   });
 });
 

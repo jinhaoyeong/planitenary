@@ -364,6 +364,27 @@ describe('an answer is held to what the tools returned', () => {
     expect(inventedConversion.rejected).toContainEqual({ value: '265', reason: 'invented-budget-amount' });
   });
 
+  it('accepts official fare evidence from the live admission tool', () => {
+    const evidence = collectEvidence(emptyEvidence(), 'get_admission_prices', {
+      places: [{
+        id: 'disney',
+        name: 'Tokyo Disneyland',
+        status: 'verified',
+        admission: {
+          class: 'ticketed',
+          fares: [{ audience: 'adult', amount: 7_900, minAmount: 7_900, maxAmount: 10_900, currency: 'JPY' }],
+          source: 'official-website',
+          sourceUrl: 'https://example.org/tickets',
+          retrievedAt: '2026-08-21T00:00:00.000Z',
+          confidence: 'high',
+        },
+      }],
+    });
+    expect(evidence.priceKeys).toEqual(new Set(['JPY|7900']));
+    expect(evidence.citableUrls).toContain('https://example.org/tickets');
+    expect(evidence.referenceablePlaceIds).toContain('disney');
+  });
+
   it('rejects a Day 3 claim on a 2-day trip', () => {
     const evidence = emptyEvidence();
     const unconstrained = validateAgentAnswer(

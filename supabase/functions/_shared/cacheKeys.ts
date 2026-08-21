@@ -127,11 +127,14 @@ export function parseAppliesTo(value: unknown): {
   daysOfWeek?: number[];
   currency?: string;
   audience?: string;
+  minAmount?: number;
+  maxAmount?: number;
 } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
   const time = (field: unknown) => (typeof field === 'string' && /^\d{2}:\d{2}$/.test(field) ? field : undefined);
   const text = (field: unknown) => (typeof field === 'string' && field.trim() ? field.trim() : undefined);
+  const amount = (field: unknown) => (typeof field === 'number' && Number.isFinite(field) && field >= 0 ? field : undefined);
   const days = Array.isArray(raw.daysOfWeek)
     ? raw.daysOfWeek.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6)
     : undefined;
@@ -142,6 +145,8 @@ export function parseAppliesTo(value: unknown): {
     daysOfWeek: days && days.length > 0 ? days : undefined,
     currency: text(raw.currency),
     audience: text(raw.audience),
+    minAmount: amount(raw.minAmount),
+    maxAmount: amount(raw.maxAmount),
   };
   // An object whose every field failed validation is not a scope, and returning
   // `{}` would make callers think the claim was scoped to nothing at all.

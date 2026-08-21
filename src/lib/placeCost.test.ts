@@ -119,7 +119,9 @@ describe('mixed fares in prose', () => {
     // "¥600–¥1,000" is one audience twice. The lower figure is what a traveller
     // budgets against, and the full text stays available.
     const admission = parseAdmissionText('¥600–¥1,000', 'JP');
-    expect(admission?.fares).toEqual([{ audience: 'adult', amount: 600, currency: 'JPY' }]);
+    expect(admission?.fares).toEqual([{
+      audience: 'adult', amount: 600, minAmount: 600, maxAmount: 1000, currency: 'JPY', note: 'from 600 to 1000 JPY',
+    }]);
     expect(admission?.rawText).toBe('¥600–¥1,000');
   });
 

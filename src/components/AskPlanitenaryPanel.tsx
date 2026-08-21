@@ -99,6 +99,24 @@ const sourceLabel = (url: string): string => {
 const audienceLabel = (audience: string): string =>
   audience.charAt(0).toUpperCase() + audience.slice(1);
 
+const fareRange = (fare: NonNullable<ReturnType<typeof adultFare>>) => ({
+  min: fare.minAmount ?? fare.amount,
+  max: fare.maxAmount ?? fare.amount,
+});
+
+const formatFareRange = (fare: NonNullable<ReturnType<typeof adultFare>>): string => {
+  const range = fareRange(fare);
+  const minimum = formatCurrency(range.min, fare.currency, { exact: true });
+  return range.min === range.max
+    ? minimum
+    : `${minimum}–${formatCurrency(range.max, fare.currency, { exact: true })}`;
+};
+
+const checkedLabel = (retrievedAt?: string): string | undefined => {
+  if (!retrievedAt || !Number.isFinite(Date.parse(retrievedAt))) return undefined;
+  return `Checked ${new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium' }).format(new Date(retrievedAt))}`;
+};
+
 function VerifiedPriceFacts({
   facts,
   selectedCurrency,
@@ -116,21 +134,27 @@ function VerifiedPriceFacts({
   const currencies = new Set(fares.map(({ fare }) => fare.currency));
   const sameSourceCurrency = currencies.size === 1;
   const sourceCurrency = sameSourceCurrency ? fares[0]?.fare.currency : undefined;
-  const sourceTotal = sameSourceCurrency
-    ? fares.reduce((sum, entry) => sum + entry.fare.amount, 0)
+  const sourceRange = sameSourceCurrency
+    ? fares.reduce((range, entry) => {
+      const fare = fareRange(entry.fare);
+      return { min: range.min + fare.min, max: range.max + fare.max };
+    }, { min: 0, max: 0 })
     : undefined;
   const target = selectedCurrency?.toUpperCase();
-  const canConvert = sourceTotal !== undefined && Boolean(target) && Boolean(sourceCurrency)
+  const canConvert = sourceRange !== undefined && Boolean(target) && Boolean(sourceCurrency)
     && sourceCurrency !== target
     && Boolean(rates)
     && ratesAreEstimate !== true
     && hasRate(rates!, sourceCurrency!)
     && hasRate(rates!, target!);
-  const convertedTotal = sourceTotal !== undefined && target && sourceCurrency
+  const convertedRange = sourceRange !== undefined && target && sourceCurrency
     ? sourceCurrency === target
-      ? sourceTotal
+      ? sourceRange
       : canConvert
-        ? convertCurrency(sourceTotal, sourceCurrency, target, rates!)
+        ? {
+          min: convertCurrency(sourceRange.min, sourceCurrency, target, rates!),
+          max: convertCurrency(sourceRange.max, sourceCurrency, target, rates!),
+        }
         : undefined
     : undefined;
 
@@ -146,25 +170,43 @@ function VerifiedPriceFacts({
             <span className="min-w-0 text-slate-700 dark:text-slate-200">
               {fact.kind === 'estimate' ? 'Estimate · ' : ''}{fact.name}
               <span className="block text-xs text-slate-500 dark:text-slate-400">{audienceLabel(fare.audience)}</span>
+              {fare.note && (
+                <span className="block text-[11px] leading-4 text-slate-500 dark:text-slate-400">{fare.note}</span>
+              )}
+              {(fact.sourceUrl || checkedLabel(fact.retrievedAt)) && (
+                <span className="mt-1 block text-[11px] text-slate-500 dark:text-slate-400">
+                  {fact.sourceUrl ? (
+                    <a className="underline decoration-slate-300 underline-offset-2" href={fact.sourceUrl} target="_blank" rel="noreferrer">
+                      {fact.source === 'official-website' ? 'Official source' : sourceLabel(fact.sourceUrl)}
+                    </a>
+                  ) : null}
+                  {fact.sourceUrl && checkedLabel(fact.retrievedAt) ? ' · ' : ''}
+                  {checkedLabel(fact.retrievedAt)}
+                </span>
+              )}
             </span>
             <span className="shrink-0 font-semibold text-slate-900 dark:text-white">
-              {formatCurrency(fare.amount, fare.currency, { exact: true })}
+              {formatFareRange(fare)}
             </span>
           </li>
         ))}
       </ul>
-      {sourceTotal !== undefined && fares.length > 0 && sourceCurrency && (
+      {sourceRange !== undefined && fares.length > 0 && sourceCurrency && (
         <div className="mt-3 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
           <div className="flex items-center justify-between gap-3 font-semibold text-slate-900 dark:text-white">
             <span>{fares.length > 1 ? 'Adult total' : 'Published fare'}</span>
-            <span>{formatCurrency(sourceTotal, sourceCurrency, { exact: true })}</span>
+            <span>{sourceRange.min === sourceRange.max
+              ? formatCurrency(sourceRange.min, sourceCurrency, { exact: true })
+              : `${formatCurrency(sourceRange.min, sourceCurrency, { exact: true })}–${formatCurrency(sourceRange.max, sourceCurrency, { exact: true })}`}</span>
           </div>
-          {target && convertedTotal !== undefined && (
+          {target && convertedRange !== undefined && (
             <p className="mt-1 text-right text-xs text-slate-500 dark:text-slate-400">
-              ≈ {formatCurrency(convertedTotal, target)} in your selected currency
+              ≈ {convertedRange.min === convertedRange.max
+                ? formatCurrency(convertedRange.min, target)
+                : `${formatCurrency(convertedRange.min, target)}–${formatCurrency(convertedRange.max, target)}`} in your selected currency
             </p>
           )}
-          {target && convertedTotal === undefined && sourceCurrency !== target && (
+          {target && convertedRange === undefined && sourceCurrency !== target && (
             <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
               Selected currency: {target}. A current exchange rate was not available, so the source total is shown without an invented conversion.
             </p>

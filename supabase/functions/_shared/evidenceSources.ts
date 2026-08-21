@@ -22,9 +22,12 @@ import { parseOsmOpeningRules } from './osmPlaces.ts';
 import {
   closureNotices,
   admissionFromJsonLd,
+  admissionFromVisibleText,
   officialAdmissionClaims,
   extractJsonLd,
+  isLikelyResellerUrl,
   isSafePublicUrl,
+  officialTicketLinks,
   openingRulesFromJsonLd,
   visibleText,
 } from './officialSource.ts';
@@ -158,21 +161,59 @@ export async function officialEvidence(
   countryCode?: string,
   readAdmission?: AdmissionReader,
 ) {
-  // The address came from a community-edited tag, so it is untrusted input.
-  if (!isSafePublicUrl(website)) return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined };
+  // The address is supplied by a server-owned canonical place record in the
+  // live admission path. Keep the SSRF and reseller guard here as defence in
+  // depth for the existing discovery evidence caller too.
+  if (!isSafePublicUrl(website) || isLikelyResellerUrl(website)) {
+    return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined, fetched: false };
+  }
 
-  const html = await fetchText(website!);
-  if (!html) return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined };
+  const readPage = async (url: string) => {
+    const html = await fetchText(url);
+    if (!html) return undefined;
+    const nodes = extractJsonLd(html);
+    const text = visibleText(html);
+    const structured = admissionFromJsonLd(nodes, countryCode);
+    const admission = structured && (structured.class === 'free' || (structured.fares?.length || 0) > 0)
+      ? structured
+      : admissionFromVisibleText(text, countryCode) || structured;
+    return {
+      url,
+      nodes,
+      text,
+      admission,
+      openingRules: openingRulesFromJsonLd(nodes, parseOsmOpeningRules),
+      notices: closureNotices(text),
+      html,
+    };
+  };
 
-  const nodes = extractJsonLd(html);
-  const openingRules = openingRulesFromJsonLd(nodes, parseOsmOpeningRules);
-  const parsedAdmission = admissionFromJsonLd(nodes, countryCode);
+  const root = await readPage(website!);
+  if (!root) return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined, fetched: false };
+
+  let selected = root;
+  // Operator homepages often link to the ticket page. Follow only a few
+  // same-origin candidates, and only when the homepage did not publish a fare.
+  if (selected.admission?.class !== 'free' && !(selected.admission?.fares?.length)) {
+    for (const link of officialTicketLinks(root.html, root.url)) {
+      const candidate = await readPage(link);
+      if (!candidate) continue;
+      if (candidate.admission?.class === 'free' || (candidate.admission?.fares?.length || 0) > 0) {
+        selected = candidate;
+        break;
+      }
+    }
+  }
+
+  const openingRules = root.openingRules.length > 0 ? root.openingRules : selected.openingRules;
+  const parsedAdmission = selected.admission;
   const retrievedAt = new Date().toISOString();
   const admission = parsedAdmission
-    ? { ...parsedAdmission, sourceUrl: website!, retrievedAt }
+    ? { ...parsedAdmission, sourceUrl: selected.url, retrievedAt }
     : undefined;
-  const text = visibleText(html);
-  const notices = closureNotices(text);
+  const text = selected.text;
+  const notices = [...root.notices, ...selected.notices]
+    .filter((notice, index, all) => all.findIndex((other) => other.type === notice.type && other.excerpt === notice.excerpt) === index);
 
   /**
    * Structured pricing outranks anything read out of prose, always.
@@ -196,11 +237,11 @@ export async function officialEvidence(
   const admissionWithRead = resolveOfficialAdmission({
     structured: admission,
     readFares,
-    sourceUrl: website!,
+    sourceUrl: selected.url,
     retrievedAt,
   }) as PlaceAdmission | undefined;
 
-  const priceClaims = officialAdmissionClaims(nodes, parsedAdmission);
+  const priceClaims = officialAdmissionClaims(selected.nodes, parsedAdmission, parsedAdmission?.rawText);
   const claims = [
     ...notices.map((notice) => ({
       type: notice.type,
@@ -214,7 +255,12 @@ export async function officialEvidence(
       value: claim.amount,
       unit: claim.amount !== undefined ? 'currency' : undefined,
       appliesTo: claim.amount !== undefined && claim.currency && claim.audience
-        ? { currency: claim.currency, audience: claim.audience }
+        ? {
+          currency: claim.currency,
+          audience: claim.audience,
+          ...(claim.minAmount !== undefined ? { minAmount: claim.minAmount } : {}),
+          ...(claim.maxAmount !== undefined ? { maxAmount: claim.maxAmount } : {}),
+        }
         : undefined,
       strength: 1,
       excerpt: claim.excerpt,
@@ -235,7 +281,12 @@ export async function officialEvidence(
       summary: `The official site lists ${fare.audience} admission at ${fare.currency} ${fare.amount}`,
       value: fare.amount,
       unit: 'currency',
-      appliesTo: { currency: fare.currency, audience: fare.audience },
+      appliesTo: {
+        currency: fare.currency,
+        audience: fare.audience,
+        ...(fare.minAmount !== undefined ? { minAmount: fare.minAmount } : {}),
+        ...(fare.maxAmount !== undefined ? { maxAmount: fare.maxAmount } : {}),
+      },
       strength: 1,
       excerpt: undefined as string | undefined,
     })),
@@ -244,16 +295,17 @@ export async function officialEvidence(
   // A page with neither a notice nor structured admission told us nothing
   // claim-worthy. Hours still return separately because they are useful even
   // when the page has no operational notice or price.
-  if (claims.length === 0) return { documents: [], openingRules, admission: admissionWithRead };
+  if (claims.length === 0) return { documents: [], openingRules, admission: admissionWithRead, fetched: true };
 
   return {
     openingRules,
     admission: admissionWithRead,
+    fetched: true,
     documents: [{
       id: `official-${placeId}`,
       canonicalPlaceId: placeId,
       source: 'official-website' as const,
-      sourceUrl: website!,
+      sourceUrl: selected.url,
       sourceItemId: undefined as string | undefined,
       publishedAt: undefined as string | undefined,
       retrievedAt,

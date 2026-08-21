@@ -258,6 +258,7 @@ export type AgentToolName =
   | 'search_places'
   | 'search_web'
   | 'get_place_details'
+  | 'get_admission_prices'
   | 'get_opening_hours'
   | 'get_events'
   | 'get_weather'
@@ -470,6 +471,18 @@ export const AGENT_TOOLS: Record<AgentToolName, AgentToolSpec> = {
     parseArgs: (raw) => {
       const args = raw as { placeIds?: unknown };
       const placeIds = boundedList(args?.placeIds, 10, 120);
+      return placeIds ? { placeIds } : undefined;
+    },
+  },
+  get_admission_prices: {
+    name: 'get_admission_prices',
+    description:
+      'Current admission fares for specific trusted place ids, read from the canonical operator website. '
+      + 'Returns source URL and retrieval time. A missing fare stays unavailable; saved estimates are not substituted.',
+    cost: 'place-lookup',
+    parseArgs: (raw) => {
+      const args = raw as { placeIds?: unknown };
+      const placeIds = boundedList(args?.placeIds, 6, 120);
       return placeIds ? { placeIds } : undefined;
     },
   },
@@ -1159,6 +1172,7 @@ export function validateAgentAnswer(
 const PLACE_BEARING_TOOLS: ReadonlySet<AgentToolName> = new Set<AgentToolName>([
   'search_places',
   'get_place_details',
+  'get_admission_prices',
   'get_saved_places',
   'get_unassigned_places',
   'get_current_itinerary',
@@ -1226,7 +1240,7 @@ export function collectEvidence(
       }
     }
 
-    if (tool === 'get_place_details' || tool === 'search_places') {
+    if (tool === 'get_place_details' || tool === 'search_places' || tool === 'get_admission_prices') {
       const facts = priceFactsFromValue(result);
       mergeAskPriceFacts(evidence.priceFacts, facts);
       for (const fact of facts) {
