@@ -25,16 +25,15 @@
  * verifying rather than starting to lie. The browser carries a reference it
  * cannot read; only the server that signed it can turn it back into a place.
  *
+ * One conversation, not the traveller's whole chat history: `askChatHistory`
+ * holds many of these per trip and owns the stored entry. This module owns a
+ * single thread's shape, its bounds and what may leave it for the wire.
+ *
  * No React and no direct `localStorage` access: every touch goes through the
  * safe wrappers, and the logic stays testable without a DOM.
  */
 
-import {
-  approximateEntryBytes,
-  safeGetItem,
-  safeRemoveItem,
-  safeSetItemWithBudget,
-} from './safeLocalStorage';
+import { approximateEntryBytes } from './safeLocalStorage';
 import type { ConversationTurn } from '../../supabase/functions/_shared/intelligenceContext';
 import {
   MAX_PLACE_CARDS,
@@ -56,7 +55,8 @@ export type AskChatStatus = 'answered' | 'partial' | 'refused';
  * Deliberately smaller than `AskResult`. What an answer *said* and what it
  * *pointed at* is conversation; how it was produced is diagnostics, and
  * diagnostics do not belong in a store the traveller cannot see or clear
- * field-by-field. See {@link serialiseAskChat} for what is left out and why.
+ * field-by-field. See {@link askChatMessagesForStorage} for what is left out
+ * and why.
  */
 export interface AskChatMessage {
   id: string;
@@ -140,11 +140,15 @@ export const askChatStorageScope = (input: { userId?: string; isDemoUser?: boole
 };
 
 /**
- * Where one trip's conversation lives.
+ * Where one trip's chat history lives.
  *
  * `ask-chat-<scope>-<tripId>`, so `parseTripIdFromKey` can attribute it and
  * the orphan sweep can reclaim it when the trip is gone. Trip id is last for
  * that reason — the parser reads the scope off the front.
+ *
+ * Unchanged when history arrived, so existing browsers keep their entry and
+ * the cleanup already written for it goes on working; the shape *inside*
+ * migrates on read. See `askChatHistory`.
  */
 export const askChatStorageKey = (input: {
   tripId: string;
@@ -319,8 +323,12 @@ export function trimAskChat(messages: AskChatMessage[]): AskChatMessage[] {
  *
  * Nothing here has ever held a prompt, a tool argument, a credential, or the
  * accounting ledger — those live server-side and never reach this type.
+ *
+ * Archiving a conversation into chat history relaxes none of it. An old thread
+ * is a record of what was said, not a plan preview that can be acted on weeks
+ * later.
  */
-const serialiseAskChat = (messages: AskChatMessage[]): string => JSON.stringify(
+export const askChatMessagesForStorage = (messages: AskChatMessage[]): unknown[] =>
   messages.map((message) => ({
     id: message.id,
     role: message.role,
@@ -333,45 +341,25 @@ const serialiseAskChat = (messages: AskChatMessage[]): string => JSON.stringify(
     ...(message.priceFacts?.length ? { priceFacts: message.priceFacts } : {}),
     ...(message.currency ? { currency: message.currency } : {}),
     ...(message.budgetStatus ? { budgetStatus: message.budgetStatus } : {}),
-  })),
-);
-
-/** Every stored message, re-checked. Unreadable storage reads as no history. */
-export function parseAskChat(raw: string | null): AskChatMessage[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return trimAskChat(
-      parsed
-        .map(parseAskChatMessage)
-        .filter((message): message is AskChatMessage => Boolean(message)),
-    );
-  } catch {
-    // A truncated or hand-edited entry is not a reason to break the panel.
-    return [];
-  }
-}
-
-export const readAskChat = (key: string): AskChatMessage[] => parseAskChat(safeGetItem(key));
+  }));
 
 /**
- * Persist one trip's conversation.
+ * One already-parsed array of stored entries, re-checked and bounded.
  *
- * An empty conversation removes the key rather than storing `[]`, so "New
- * chat" leaves nothing behind and a browser that never used Ask carries no
- * entry per trip. Failure is silent by design: this is a cache, and a
- * traveller mid-question must not be interrupted because the origin is full.
+ * Takes the parsed value rather than the raw entry, because a conversation is
+ * no longer the whole entry: `askChatHistory` reads many of these out of one
+ * stored object, and every one of them must go through the same checks. A
+ * second, laxer path into `AskChatMessage[]` is exactly how a restored card
+ * would start meaning something it has not earned.
  */
-export const writeAskChat = (key: string, messages: AskChatMessage[]): void => {
-  if (messages.length === 0) {
-    safeRemoveItem(key);
-    return;
-  }
-  safeSetItemWithBudget(key, serialiseAskChat(trimAskChat(messages)));
+export const parseAskChatMessages = (value: unknown): AskChatMessage[] => {
+  if (!Array.isArray(value)) return [];
+  return trimAskChat(
+    value
+      .map(parseAskChatMessage)
+      .filter((message): message is AskChatMessage => Boolean(message)),
+  );
 };
-
-export const clearAskChat = (key: string): void => { safeRemoveItem(key); };
 
 /**
  * The bounded context a follow-up carries, newest turns last.

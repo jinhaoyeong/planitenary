@@ -268,7 +268,43 @@ describe('New chat', () => {
     localStorage.clear();
   });
 
-  it('clears this trip only, and asks first', async () => {
+  /**
+   * The change this whole feature turns on. "New chat" used to be the only way
+   * to ask about something else, and it cost you the conversation you already
+   * had — so a traveller had to choose between keeping the ticket prices they
+   * worked out and asking about dinner.
+   */
+  it('archives the current conversation instead of deleting it', async () => {
+    askPlanitenary
+      .mockResolvedValueOnce(answer('Golden Gai is lively.'))
+      .mockResolvedValueOnce(answer('The garden opens at nine.'));
+    const user = userEvent.setup();
+    render(<AskPlanitenaryPanel tripId="trip-tokyo" />);
+    await openPanel(user);
+    await ask(user, 'Where tonight?');
+    await screen.findByText('Golden Gai is lively.');
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+
+    // A blank thread, with the starter examples back — and nothing destroyed.
+    expect(screen.queryByText('Golden Gai is lively.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'What should we do tonight?' })).toBeInTheDocument();
+    expect(localStorage.getItem(askChatStorageKey({ tripId: 'trip-tokyo' }))).toContain('Where tonight?');
+
+    await ask(user, 'And in the morning?');
+    await screen.findByText('The garden opens at nine.');
+
+    // Both threads are in history, newest first, titled from their questions.
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
+    const rows = within(screen.getByRole('dialog', { name: 'Chat history' }))
+      .getAllByRole('listitem')
+      .map((row) => row.textContent ?? '');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('And in the morning?');
+    expect(rows[1]).toContain('Where tonight?');
+  });
+
+  it('touches nothing belonging to another trip', async () => {
     askPlanitenary
       .mockResolvedValueOnce(answer('Tokyo answer.'))
       .mockResolvedValueOnce(answer('Osaka answer.'));
@@ -282,45 +318,37 @@ describe('New chat', () => {
     await ask(user, 'Osaka question');
     await screen.findByText('Osaka answer.');
 
-    await user.click(screen.getByRole('button', { name: /New chat/ }));
-    // A conversation exists, so it confirms rather than discarding on a stray click.
-    expect(screen.getByText(/clears this trip/i)).toBeInTheDocument();
-    expect(screen.getByText('Osaka answer.')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Start new chat' }));
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
 
     expect(screen.queryByText('Osaka answer.')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'What should we do tonight?' })).toBeInTheDocument();
-    expect(localStorage.getItem(askChatStorageKey({ tripId: 'trip-osaka' }))).toBeNull();
-    // Tokyo is untouched.
     expect(localStorage.getItem(askChatStorageKey({ tripId: 'trip-tokyo' }))).toContain('Tokyo question');
 
     rerender(<AskPlanitenaryPanel tripId="trip-tokyo" />);
     expect(await screen.findByText('Tokyo answer.')).toBeInTheDocument();
   });
 
-  it('keeps the conversation when the confirmation is declined', async () => {
+  /**
+   * Pressing it twice on a blank panel must not stack blank rows: a history
+   * full of empty chats is worse than no history at all.
+   */
+  it('does not stack empty chats', async () => {
     askPlanitenary.mockResolvedValue(answer('Golden Gai is lively.'));
     const user = userEvent.setup();
     render(<AskPlanitenaryPanel tripId="trip-42" />);
     await openPanel(user);
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(askPlanitenary).not.toHaveBeenCalled();
+
     await ask(user, 'Where tonight?');
     await screen.findByText('Golden Gai is lively.');
 
-    await user.click(screen.getByRole('button', { name: /New chat/ }));
-    await user.click(screen.getByRole('button', { name: 'Keep it' }));
-
-    expect(screen.getByText('Golden Gai is lively.')).toBeInTheDocument();
-  });
-
-  it('does not confirm when there is nothing to lose', async () => {
-    const user = userEvent.setup();
-    render(<AskPlanitenaryPanel tripId="trip-42" />);
-    await openPanel(user);
-
-    await user.click(screen.getByRole('button', { name: /New chat/ }));
-    expect(screen.queryByText(/clears this trip/i)).not.toBeInTheDocument();
-    expect(askPlanitenary).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
+    expect(
+      within(screen.getByRole('dialog', { name: 'Chat history' })).getAllByRole('listitem'),
+    ).toHaveLength(1);
   });
 });
 
@@ -420,7 +448,7 @@ describe('restoring a conversation costs nothing', () => {
    * Every Ask is an independently metered server request. Reading a
    * conversation back is a `localStorage` parse, and must never look like one.
    */
-  it('makes no model call for open, close, reopen, trip switch, or New chat', async () => {
+  it('makes no model call for open, close, reopen, trip switch, history or New chat', async () => {
     const user = userEvent.setup();
     const { rerender } = render(<AskPlanitenaryPanel tripId="trip-42" />);
 
@@ -432,9 +460,11 @@ describe('restoring a conversation costs nothing', () => {
     rerender(<AskPlanitenaryPanel tripId="trip-other" />);
     rerender(<AskPlanitenaryPanel tripId="trip-42" />);
 
-    await user.click(screen.getByRole('button', { name: /New chat/ }));
-    await user.click(screen.getByRole('button', { name: 'Start new chat' }));
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
+    await user.click(screen.getByRole('button', { name: 'Open Where tonight?' }));
 
+    expect(await screen.findByText('Golden Gai.')).toBeInTheDocument();
     expect(askPlanitenary).not.toHaveBeenCalled();
   });
 

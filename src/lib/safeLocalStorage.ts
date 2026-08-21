@@ -28,9 +28,11 @@ export const HISTORY_SOFT_LIMIT_BYTES = 512_000;
  */
 export const TRIP_SCOPED_KEY_PREFIXES = [
   'itinerary-',
-  // Ask Planitenary conversation, one entry per account+trip. Listed so the
-  // orphan sweep reclaims it when a trip is deleted on another device, the
-  // same way it reclaims that trip’s itinerary and budget caches.
+  // Ask Planitenary chat history, one entry per account+trip holding every
+  // conversation for that trip. Listed so the orphan sweep reclaims it when a
+  // trip is deleted on another device, the same way it reclaims that trip’s
+  // itinerary and budget caches. `askChatHistory` bounds it before it gets
+  // there, so one trip's chats cannot crowd out an auth token on their own.
   'ask-chat-',
   'budget-meta-',
   'budget-',

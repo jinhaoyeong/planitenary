@@ -254,8 +254,16 @@ describe('references are scoped and clearable', () => {
     expect(lastCall().conversation).toEqual([]);
   });
 
-  it('New chat removes the stored references with the messages', async () => {
-    askPlanitenary.mockResolvedValue(twoPlaces());
+  /**
+   * New chat archives rather than deletes, so a reference does not lose its
+   * authority because somebody asked about something else in between. What
+   * ends it is the signature's own expiry, on the server that minted it.
+   */
+  it('New chat keeps the stored references with the chat they belong to', async () => {
+    askPlanitenary
+      .mockResolvedValueOnce(twoPlaces())
+      .mockResolvedValueOnce(plainAnswer('Noted.'))
+      .mockResolvedValueOnce(plainAnswer('It closes at 18:00.'));
     const user = userEvent.setup();
     render(<AskPlanitenaryPanel tripId="trip-tokyo" />);
     await openPanel(user);
@@ -263,9 +271,42 @@ describe('references are scoped and clearable', () => {
     await screen.findByText(/Ameya-Yokocho is lively/);
     expect(localStorage.getItem(askChatStorageKey({ tripId: 'trip-tokyo' }))).toContain('signed-ameya');
 
-    await user.click(screen.getByRole('button', { name: /New chat/ }));
-    await user.click(screen.getByRole('button', { name: 'Start new chat' }));
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    await ask(user, 'Something else entirely');
+    await screen.findByText('Noted.');
 
-    expect(localStorage.getItem(askChatStorageKey({ tripId: 'trip-tokyo' }))).toBeNull();
+    // The new thread starts clean: the archived chat's references are not its.
+    expect(lastCall().conversation.at(-1)?.trustedPlaceTokens).toBeUndefined();
+    expect(localStorage.getItem(askChatStorageKey({ tripId: 'trip-tokyo' }))).toContain('signed-ameya');
+
+    // Reopening the old chat restores its cards and its follow-up capability.
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
+    await user.click(screen.getByRole('button', { name: /^Open Suggest two places/ }));
+    expect(await screen.findByText('Ameya-Yokocho')).toBeInTheDocument();
+
+    await ask(user, 'Is the second one open late?');
+    expect(lastCall().conversation[0].trustedPlaceTokens).toEqual(['signed-ameya', 'signed-gyoen']);
+  });
+
+  it('deleting one chat leaves the other trip and the other chat alone', async () => {
+    askPlanitenary
+      .mockResolvedValueOnce(twoPlaces())
+      .mockResolvedValueOnce(plainAnswer('Second thread.'));
+    const user = userEvent.setup();
+    render(<AskPlanitenaryPanel tripId="trip-tokyo" />);
+    await openPanel(user);
+    await ask(user, 'Suggest two places near Shinjuku.');
+    await screen.findByText(/Ameya-Yokocho is lively/);
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    await ask(user, 'Anything else?');
+    await screen.findByText('Second thread.');
+
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
+    await user.click(screen.getByRole('button', { name: /^Delete Suggest two places/ }));
+    await user.click(screen.getByRole('button', { name: 'Delete chat' }));
+
+    const stored = localStorage.getItem(askChatStorageKey({ tripId: 'trip-tokyo' })) ?? '';
+    expect(stored).not.toContain('signed-ameya');
+    expect(stored).toContain('Anything else?');
   });
 });
