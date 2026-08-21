@@ -116,6 +116,12 @@ describe('Plan my trip proposal panel', () => {
     expect(await screen.findByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Plan day 1$/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Ask anything$/ })).toBeInTheDocument();
+    const scrollRegion = screen.getByRole('dialog').querySelector<HTMLElement>('[data-lenis-prevent]');
+    expect(scrollRegion).not.toBeNull();
+    expect(scrollRegion).toHaveAttribute('data-lenis-prevent-wheel');
+    expect(scrollRegion).toHaveAttribute('data-lenis-prevent-touch');
+    expect(scrollRegion).toHaveStyle({ touchAction: 'pan-y' });
+    expect(document.body.style.overflow).toBe('hidden');
     expect(mockedPlan).not.toHaveBeenCalled();
     expect(mockedStage).not.toHaveBeenCalled();
     expect(mockedApply).not.toHaveBeenCalled();

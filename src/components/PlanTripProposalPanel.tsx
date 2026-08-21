@@ -132,6 +132,15 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
   const [write, setWrite] = useState<WritePhase>({ phase: 'idle' });
   const [writeError, setWriteError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   /** No exit, no second click, and no backdrop dismiss while a write is in flight. */
   const busy = loading || write.phase === 'staging' || write.phase === 'applying' || write.phase === 'undoing';
   const proposal = result?.proposal;
@@ -346,9 +355,14 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
           {open && (
             <motion.div
               className="fixed inset-0 z-[190] flex justify-end bg-slate-950/50"
+              data-lenis-prevent
+              data-lenis-prevent-wheel
+              data-lenis-prevent-touch
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              onWheel={(event) => event.stopPropagation()}
+              onTouchMove={(event) => event.stopPropagation()}
               onMouseDown={(event) => {
                 if (event.target === event.currentTarget && !busy) setOpen(false);
               }}
@@ -383,7 +397,15 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                   </button>
                 </header>
 
-                <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-6 sm:px-7" data-lenis-prevent>
+                <div
+                  className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-6 sm:px-7"
+                  data-lenis-prevent
+                  data-lenis-prevent-wheel
+                  data-lenis-prevent-touch
+                  onWheel={(event) => event.stopPropagation()}
+                  onTouchMove={(event) => event.stopPropagation()}
+                  style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
+                >
                   {!showingProposal && !loading && (
                     <div className="mx-auto max-w-xl">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
