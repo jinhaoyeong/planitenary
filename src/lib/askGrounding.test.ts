@@ -8,6 +8,7 @@ import {
   bindSavedPlaceDecisions,
   collectAskGrounding,
   deriveAskGroundingPlan,
+  deriveAskCurrencyFacts,
   presentAskEvidence,
 } from '../../supabase/functions/_shared/askGrounding';
 import {
@@ -80,6 +81,7 @@ const ground = (
   extra: {
     surface?: 'itinerary' | 'map' | 'budget' | 'documents';
     dayNumber?: number;
+    selectedCurrency?: string;
     conversation?: Array<{ question: string; answer: string }>;
     extras?: Parameters<typeof collectAskGrounding>[0]['extras'];
   } = {},
@@ -88,6 +90,7 @@ const ground = (
     tripId: String(itinerary.id ?? 'trip-1'),
     surface: extra.surface ?? 'itinerary',
     dayNumber: extra.dayNumber,
+    selectedCurrency: extra.selectedCurrency,
   };
   const uiFocus = rehydrateIntelligenceFocus(itinerary, uiContext, uiContext.tripId);
   const plan = deriveAskGroundingPlan({ question, surface: uiFocus.surface, uiContext });
@@ -96,6 +99,7 @@ const ground = (
     tripId: uiContext.tripId,
     question,
     plan,
+    uiContext,
     uiFocus,
     conversation: extra.conversation,
     extras: extra.extras,
@@ -289,6 +293,106 @@ describe('production-shaped Kushida / Flight Ask', () => {
 });
 
 describe('fail-closed extras and write safety', () => {
+  const ticketTrip = productionItinerary({
+    tripProfile: { homeCurrency: 'MYR', tripCurrency: 'JPY' },
+    days: [{
+      day: 1,
+      date: '2026-08-20',
+      city: 'Tokyo',
+      title: 'Theme parks',
+      activities: [
+        {
+          id: 'usj',
+          name: 'Universal Studios Japan',
+          type: 'sight',
+          time: '09:00',
+          admission: {
+            class: 'ticketed',
+            fares: [{ audience: 'adult', amount: 8_600, currency: 'JPY' }],
+            source: 'official-website',
+            sourceUrl: 'https://example.org/usj',
+            confidence: 'high',
+          },
+        },
+        {
+          id: 'teamlab',
+          name: 'teamLab Borderless',
+          type: 'sight',
+          time: '15:00',
+          admission: {
+            class: 'ticketed',
+            fares: [{ audience: 'adult', amount: 3_800, currency: 'JPY' }],
+            source: 'official-website',
+            sourceUrl: 'https://example.org/teamlab',
+            confidence: 'high',
+          },
+        },
+      ],
+    }],
+  });
+
+  it('price questions do not load or require a missing budget', () => {
+    const { plan, result } = ground(
+      'How much is two of the theme park ticket price?',
+      ticketTrip,
+      {
+        selectedCurrency: 'MYR',
+        conversation: [{
+          question: 'How much are Universal Studios Japan and teamLab Borderless?',
+          answer: 'I found both attractions in your trip context.',
+        }],
+      },
+    );
+    expect(plan.required).not.toContain('budget');
+    expect(plan.required).not.toContain('documents');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packet.currency).toMatchObject({ selected: 'MYR', home: 'MYR', trip: 'JPY' });
+    expect(result.packet.priceFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Universal Studios Japan', kind: 'admission' }),
+      expect.objectContaining({ name: 'teamLab Borderless', kind: 'admission' }),
+    ]));
+    expect(result.evidence.priceAmounts).toEqual(new Set([8_600, 3_800]));
+  });
+
+  it('price-led affordability questions preserve known prices when the budget is absent', () => {
+    const { plan, result } = ground(
+      'Can I afford both tickets?',
+      ticketTrip,
+      {
+        selectedCurrency: 'MYR',
+        conversation: [{
+          question: 'How much are Universal Studios Japan and teamLab Borderless?',
+          answer: 'I found both attractions in your trip context.',
+        }],
+      },
+    );
+    expect(plan.required).toContain('budget');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packet.budget).toMatchObject({ present: false });
+    expect(result.packet.priceFacts).toHaveLength(2);
+  });
+
+  it('keeps an explicit budget question fail-closed when no wallet is saved', () => {
+    const { plan, result } = ground('How much budget is remaining?');
+    expect(plan.required).toContain('budget');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.missing).toContain('budget');
+  });
+
+  it('accepts only the owned trip currency pair as the selected-currency hint', () => {
+    expect(deriveAskCurrencyFacts(ticketTrip, 'MYR')).toMatchObject({
+      selected: 'MYR',
+      source: 'validated-display',
+    });
+    expect(deriveAskCurrencyFacts(ticketTrip, 'USD')).toMatchObject({
+      selected: 'JPY',
+      source: 'trip-profile',
+    });
+  });
+
   it('budget questions fail closed when public.budgets is absent', () => {
     const { plan, result } = ground('How much budget is remaining?');
     expect(plan.required).toContain('budget');

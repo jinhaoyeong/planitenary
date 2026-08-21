@@ -42,6 +42,10 @@ import {
   type StructuredPlaceCard,
 } from '../../supabase/functions/_shared/placeReference';
 import { isWikimediaImageUrl } from '../../supabase/functions/_shared/placeImages';
+import {
+  parseAskPriceFacts,
+  type AskPriceFact,
+} from '../../supabase/functions/_shared/askPriceFacts';
 
 /** How an assistant turn ended, so a refusal can read differently from an answer. */
 export type AskChatStatus = 'answered' | 'partial' | 'refused';
@@ -86,6 +90,10 @@ export interface AskChatMessage {
    * signature, and the server drops it. See {@link conversationTurnsFrom}.
    */
   placeTokens?: Array<{ canonicalPlaceId: string; token: string }>;
+  /** Source price facts kept with the answer for refresh/reopen. */
+  priceFacts?: AskPriceFact[];
+  currency?: { selected?: string; home?: string; trip?: string; source?: string };
+  budgetStatus?: { requested: boolean; present: boolean };
 }
 
 /**
@@ -212,6 +220,27 @@ const parseAskChatMessage = (value: unknown): AskChatMessage | undefined => {
     ...(role === 'assistant' && Array.isArray(raw.citations)
       ? { citations: raw.citations.filter(citable).slice(0, 12) }
       : {}),
+    ...(role === 'assistant' && Array.isArray(raw.priceFacts)
+      ? { priceFacts: parseAskPriceFacts(raw.priceFacts) }
+      : {}),
+    ...(role === 'assistant' && raw.currency && typeof raw.currency === 'object' && !Array.isArray(raw.currency)
+      ? {
+        currency: {
+          selected: text((raw.currency as Record<string, unknown>).selected, 3),
+          home: text((raw.currency as Record<string, unknown>).home, 3),
+          trip: text((raw.currency as Record<string, unknown>).trip, 3),
+          source: text((raw.currency as Record<string, unknown>).source, 40),
+        },
+      }
+      : {}),
+    ...(role === 'assistant' && raw.budgetStatus && typeof raw.budgetStatus === 'object' && !Array.isArray(raw.budgetStatus)
+      ? {
+        budgetStatus: {
+          requested: (raw.budgetStatus as Record<string, unknown>).requested === true,
+          present: (raw.budgetStatus as Record<string, unknown>).present === true,
+        },
+      }
+      : {}),
     ...(role === 'assistant' && Array.isArray(raw.places) && Array.isArray(raw.placeTokens)
       ? {
         placeTokens: raw.placeTokens.flatMap((entry) => {
@@ -301,6 +330,9 @@ const serialiseAskChat = (messages: AskChatMessage[]): string => JSON.stringify(
     ...(message.places?.length ? { places: message.places } : {}),
     ...(message.citations?.length ? { citations: message.citations } : {}),
     ...(message.placeTokens?.length ? { placeTokens: message.placeTokens } : {}),
+    ...(message.priceFacts?.length ? { priceFacts: message.priceFacts } : {}),
+    ...(message.currency ? { currency: message.currency } : {}),
+    ...(message.budgetStatus ? { budgetStatus: message.budgetStatus } : {}),
   })),
 );
 

@@ -115,7 +115,7 @@ describe('Budget UI source of truth', () => {
     });
     saveTripBudget.mockResolvedValue({ ok: false, message: 'Couldn’t save your budget. Try again.' });
     render(<Budget itinerary={itinerary} />);
-    await waitFor(() => expect(screen.getByText(/No trip budget saved yet/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/No saved spending limit yet/)).toBeInTheDocument());
     expect(screen.queryByText(/Couldn’t save your budget/)).toBeNull();
   });
 });

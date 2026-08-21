@@ -103,6 +103,7 @@ import {
   ASK_GROUNDING_REFUSAL,
   collectAskGrounding,
   deriveAskGroundingPlan,
+  isAskPriceQuestion,
   presentAskEvidence,
   type AskGroundingExtras,
   type AskGroundingResult,
@@ -200,6 +201,11 @@ const groundingEnvelope = (result: AskGroundingResult) => ({
         end: flight.end,
         sightseeingAfter: flight.sightseeingAfter,
       })),
+      currency: result.packet.currency,
+      budget: result.packet.budget
+        ? { present: result.packet.budget.present, currency: result.packet.budget.currency }
+        : undefined,
+      priceFacts: result.packet.priceFacts,
     }
     : undefined,
 });
@@ -482,6 +488,7 @@ Deno.serve(async (request) => {
       tripId: trip.tripId,
       question,
       plan,
+      uiContext: uiEnvelope,
       uiFocus,
       conversation,
       extras,
@@ -927,6 +934,13 @@ Deno.serve(async (request) => {
      * not about specific places — a card is an extra, never the answer.
      */
     places,
+    /**
+     * Source prices are returned separately from model prose so the browser
+     * can add a deterministic selected-currency view without asking the model
+     * to invent an exchange rate.
+     */
+    priceFacts: isAskPriceQuestion(question) ? run.evidence.priceFacts : [],
+    currency: askGrounding?.packet?.currency,
     /**
      * Opaque follow-up references, one per card, matched by canonical id.
      *

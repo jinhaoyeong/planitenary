@@ -248,6 +248,29 @@ describe('reading a conversation back', () => {
     ]);
     expect(parseAskChat(stored)[1].citations).toEqual(['https://ok.example']);
   });
+
+  it('persists verified price facts with the visible answer', () => {
+    const restored = parseAskChat(JSON.stringify([
+      { id: 'u1', role: 'user', text: 'How much?', createdAt: '2026-08-21T10:00:00.000Z' },
+      {
+        id: 'a1',
+        role: 'assistant',
+        text: 'Here is the published fare.',
+        createdAt: '2026-08-21T10:00:05.000Z',
+        status: 'answered',
+        priceFacts: [{
+          name: 'Universal Studios Japan',
+          kind: 'admission',
+          fares: [{ audience: 'adult', amount: 8_600, currency: 'JPY' }],
+        }],
+        currency: { selected: 'MYR', source: 'validated-display' },
+      },
+    ]));
+    expect(restored[1].priceFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Universal Studios Japan', kind: 'admission' }),
+    ]));
+    expect(restored[1].currency).toMatchObject({ selected: 'MYR' });
+  });
 });
 
 describe('where a conversation is stored', () => {

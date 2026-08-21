@@ -334,6 +334,36 @@ describe('an answer is held to what the tools returned', () => {
     expect(validated.answer).toBe('Your recorded spending is RM420.');
   });
 
+  it('holds admission prices to place evidence and does not accept invented FX', () => {
+    const evidence = collectEvidence(emptyEvidence(), 'get_place_details', {
+      places: [{
+        id: 'usj',
+        name: 'Universal Studios Japan',
+        admission: {
+          class: 'ticketed',
+          fares: [{ audience: 'adult', amount: 8_600, currency: 'JPY' }],
+          source: 'official-website',
+          sourceUrl: 'https://example.org/usj',
+          confidence: 'high',
+        },
+      }],
+    });
+    expect(evidence.priceAmounts).toEqual(new Set([8_600]));
+    expect(evidence.priceFacts).toHaveLength(1);
+
+    const sourced = validateAgentAnswer(
+      { answer: 'The adult fare is JPY 8,600.', citations: [] },
+      evidence,
+    );
+    expect(sourced.rejected).toEqual([]);
+
+    const inventedConversion = validateAgentAnswer(
+      { answer: 'That is MYR 265.', citations: [] },
+      evidence,
+    );
+    expect(inventedConversion.rejected).toContainEqual({ value: '265', reason: 'invented-budget-amount' });
+  });
+
   it('rejects a Day 3 claim on a 2-day trip', () => {
     const evidence = emptyEvidence();
     const unconstrained = validateAgentAnswer(

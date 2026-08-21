@@ -34,6 +34,8 @@ export interface IntelligenceUiEnvelope {
   selectedActivityId?: string;
   selectedPlaceId?: string;
   selectedDocumentId?: string;
+  /** Display hint only; the server accepts it only if it matches the owned profile pair. */
+  selectedCurrency?: string;
   selectedMapPoint?: { lat: number; lng: number };
 }
 
@@ -105,6 +107,7 @@ export function parseUiContextEnvelope(value: unknown): IntelligenceUiEnvelope |
   const selectedActivityId = text(raw.selectedActivityId, 120);
   const selectedPlaceId = text(raw.selectedPlaceId, 120);
   const selectedDocumentId = text(raw.selectedDocumentId, 80);
+  const selectedCurrency = text(raw.selectedCurrency, 3)?.toUpperCase();
   const point = asRecord(raw.selectedMapPoint);
   const lat = finiteCoord(point?.lat, -90, 90);
   const lng = finiteCoord(point?.lng, -180, 180);
@@ -116,6 +119,7 @@ export function parseUiContextEnvelope(value: unknown): IntelligenceUiEnvelope |
   if (selectedActivityId) envelope.selectedActivityId = selectedActivityId;
   if (selectedPlaceId) envelope.selectedPlaceId = selectedPlaceId;
   if (selectedDocumentId) envelope.selectedDocumentId = selectedDocumentId;
+  if (selectedCurrency && /^[A-Z]{3}$/.test(selectedCurrency)) envelope.selectedCurrency = selectedCurrency;
   if (lat !== undefined && lng !== undefined) envelope.selectedMapPoint = { lat, lng };
   return Object.keys(envelope).length > 0 ? envelope : undefined;
 }

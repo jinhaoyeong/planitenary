@@ -65,6 +65,11 @@ describe('shared trip intelligence context', () => {
     expect(focus.note).toMatch(/did not match the owned trip/i);
   });
 
+  it('keeps a selected currency as a bounded display hint', () => {
+    expect(parseUiContextEnvelope({ selectedCurrency: 'myr', price: 900 })).toEqual({ selectedCurrency: 'MYR' });
+    expect(parseUiContextEnvelope({ selectedCurrency: 'MYR/USD' })).toBeUndefined();
+  });
+
   it('maps app tabs onto intelligence surfaces', () => {
     expect(surfaceFromAppTab('itinerary')).toBe('itinerary');
     expect(surfaceFromAppTab('maps')).toBe('map');

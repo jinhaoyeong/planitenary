@@ -23,6 +23,10 @@ import {
   type StructuredPlaceCard,
 } from '../../supabase/functions/_shared/placeReference';
 import { isWikimediaImageUrl } from '../../supabase/functions/_shared/placeImages';
+import {
+  parseAskPriceFacts,
+  type AskPriceFact,
+} from '../../supabase/functions/_shared/askPriceFacts';
 
 export type AskStatus = 'answered' | 'partial' | 'refused';
 
@@ -50,6 +54,8 @@ export interface AskGroundingDiagnostics {
   ok: boolean;
   scopes: string[];
   reads: Array<{ scope: string; reader: string }>;
+  budget?: { present: boolean; currency?: string };
+  currency?: { selected?: string; home?: string; trip?: string; source?: string };
 }
 
 export interface AskResult {
@@ -85,6 +91,9 @@ export interface AskResult {
    * else.
    */
   placeTokens: Array<{ canonicalPlaceId: string; token: string }>;
+  /** Server-proven admission/estimate facts, separate from model prose. */
+  priceFacts: AskPriceFact[];
+  currency?: { selected?: string; home?: string; trip?: string; source?: string };
 }
 
 const text = (value: unknown, max = 4_000): string | undefined =>
@@ -137,7 +146,7 @@ function parseProposal(value: unknown): AskProposal | undefined {
 }
 
 export function parseAskResult(payload: unknown): AskResult {
-  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [] };
+  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], priceFacts: [] };
   if (!payload || typeof payload !== 'object') return empty;
   const raw = payload as Record<string, unknown>;
 
@@ -169,6 +178,29 @@ export function parseAskResult(payload: unknown): AskResult {
           return scope && reader ? [{ scope, reader }] : [];
         }).slice(0, 40)
         : [],
+      budget: groundingRaw.facts && typeof groundingRaw.facts === 'object'
+        && groundingRaw.facts !== null && !Array.isArray(groundingRaw.facts)
+        && (groundingRaw.facts as Record<string, unknown>).budget
+        && typeof (groundingRaw.facts as Record<string, unknown>).budget === 'object'
+        ? {
+          present: ((groundingRaw.facts as Record<string, unknown>).budget as Record<string, unknown>).present === true,
+          currency: text(((groundingRaw.facts as Record<string, unknown>).budget as Record<string, unknown>).currency, 3),
+        }
+        : undefined,
+      currency: groundingRaw.facts && typeof groundingRaw.facts === 'object'
+        && groundingRaw.facts !== null && !Array.isArray(groundingRaw.facts)
+        && (groundingRaw.facts as Record<string, unknown>).currency
+        && typeof (groundingRaw.facts as Record<string, unknown>).currency === 'object'
+        ? (() => {
+          const row = (groundingRaw.facts as Record<string, unknown>).currency as Record<string, unknown>;
+          return {
+            selected: text(row.selected, 3),
+            home: text(row.home, 3),
+            trip: text(row.trip, 3),
+            source: text(row.source, 40),
+          };
+        })()
+        : undefined,
     }
     : undefined;
 
@@ -191,6 +223,15 @@ export function parseAskResult(payload: unknown): AskResult {
     refusal: text(raw.refusal, 80),
     rejectedClaims: Array.isArray(raw.rejected) ? raw.rejected.length : 0,
     grounding,
+    priceFacts: parseAskPriceFacts(raw.priceFacts),
+    currency: raw.currency && typeof raw.currency === 'object' && !Array.isArray(raw.currency)
+      ? {
+        selected: text((raw.currency as Record<string, unknown>).selected, 3),
+        home: text((raw.currency as Record<string, unknown>).home, 3),
+        trip: text((raw.currency as Record<string, unknown>).trip, 3),
+        source: text((raw.currency as Record<string, unknown>).source, 40),
+      }
+      : undefined,
     /**
      * Re-checked for shape on arrival, like everything else here, and the
      * photograph is re-checked for host: an `<img src>` is loaded by the
@@ -240,7 +281,7 @@ export async function askPlanitenary(
 ): Promise<AskResult> {
   const question = input.question.trim();
   if (!question || !input.tripId) {
-    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], detail: 'A question is required.' };
+    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], priceFacts: [], detail: 'A question is required.' };
   }
   if (question.length > 600) {
     return {
@@ -251,6 +292,7 @@ export async function askPlanitenary(
       rejectedClaims: 0,
       places: [],
       placeTokens: [],
+      priceFacts: [],
       detail: 'Keep the question under 600 characters.',
     };
   }
@@ -273,6 +315,7 @@ export async function askPlanitenary(
       rejectedClaims: 0,
       places: [],
       placeTokens: [],
+      priceFacts: [],
       detail: error instanceof Error ? error.message : 'The assistant is unavailable right now.',
     };
   }

@@ -174,7 +174,7 @@ function App() {
   });
 
   const { theme, toggleTheme } = useTheme();
-  const { bindTrip } = useCurrency();
+  const { bindTrip, currency } = useCurrency();
   const [customItinerary, setCustomItinerary] = useState<Itinerary | null>(null);
   /**
    * Persistence must wait until the current storage key has been read. On an
@@ -1033,7 +1033,7 @@ function App() {
   }
 
   return (
-    <TripIntelligenceUiProvider key={activeItineraryId} tripId={activeItineraryId} surface={surfaceFromAppTab(activeTab)}>
+    <TripIntelligenceUiProvider key={activeItineraryId} tripId={activeItineraryId} surface={surfaceFromAppTab(activeTab)} selectedCurrency={currency}>
     <div
       className="adaptive-handbook-root min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
       data-adaptive-handbook="true"

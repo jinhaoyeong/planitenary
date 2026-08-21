@@ -241,6 +241,13 @@ export async function runAgent(
       knownPlaceNames: new Set(deps.seededEvidence.knownPlaceNames),
       referenceablePlaceIds: new Set(deps.seededEvidence.referenceablePlaceIds),
       budgetAmounts: new Set(deps.seededEvidence.budgetAmounts),
+      budgetKeys: new Set(deps.seededEvidence.budgetKeys),
+      priceAmounts: new Set(deps.seededEvidence.priceAmounts),
+      priceKeys: new Set(deps.seededEvidence.priceKeys),
+      priceFacts: deps.seededEvidence.priceFacts.map((fact) => ({
+        ...fact,
+        fares: fact.fares.map((fare) => ({ ...fare })),
+      })),
     }
     : emptyEvidence();
 

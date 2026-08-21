@@ -37,6 +37,11 @@
 
 /** Every operation the agent tier will answer. Anything else is refused. */
 import { MAX_PLACE_CARDS } from './placeReference.ts';
+import {
+  mergeAskPriceFacts,
+  priceFactsFromValue,
+  type AskPriceFact,
+} from './askPriceFacts.ts';
 
 export const AGENT_OPERATIONS = ['ask', 'research-trip', 'research-place', 'build-itinerary'] as const;
 
@@ -188,7 +193,7 @@ A thin focus object names the tab/day/place the traveller is looking at. Use it 
 
 authoritativeEvidence was derived by the server from the owned trip before this round. It overrides conversation history and is the source of Skip/Visited/Must-do, flights, day count, and arrival sightseeing bounds. Do not contradict it. Do not invent a day outside trip.dayCount. You may call extra tools only for facts not already in authoritativeEvidence.
 
-Never invent a place, coordinate, route, travel time, opening hour, price, budget remaining, event, forecast, closure, photograph, licence, document fact, or URL. Travel times must be copied from routing findings. Money amounts must be copied from budget/expense findings. Document contents are metadata only unless a tool returned extracted facts.
+Never invent a place, coordinate, route, travel time, opening hour, price, budget remaining, event, forecast, closure, photograph, licence, document fact, or URL. Travel times must be copied from routing findings. Money amounts must be copied from budget, expense, admission, or price findings. Do not calculate currency conversions or invent an exchange rate. Document contents are metadata only unless a tool returned extracted facts.
 
 Cite only exact URLs in findings. Do not mention internal hashes, revisions, ledgers, RPC names, or candidate ids. You cannot save, apply, book, or mutate anything. If a tool failed or a fact is unavailable, say so plainly. On finalRound, do not request tools.`;
 
@@ -922,6 +927,14 @@ export interface AgentEvidence {
   referenceablePlaceIds: Set<string>;
   /** Wallet/itinerary money amounts a budget tool returned, rounded. */
   budgetAmounts: Set<number>;
+  /** Budget amounts paired with the currency the finding declared. */
+  budgetKeys: Set<string>;
+  /** Admission/price amounts a place or price finding returned, rounded. */
+  priceAmounts: Set<number>;
+  /** Admission amounts paired with their published currency. */
+  priceKeys: Set<string>;
+  /** Structured source prices available for deterministic UI presentation. */
+  priceFacts: AskPriceFact[];
 }
 
 export const emptyEvidence = (): AgentEvidence => ({
@@ -930,6 +943,10 @@ export const emptyEvidence = (): AgentEvidence => ({
   knownPlaceNames: new Set<string>(),
   referenceablePlaceIds: new Set<string>(),
   budgetAmounts: new Set<number>(),
+  budgetKeys: new Set<string>(),
+  priceAmounts: new Set<number>(),
+  priceKeys: new Set<string>(),
+  priceFacts: [],
 });
 
 export type AnswerRejection =
@@ -1085,19 +1102,27 @@ export function validateAgentAnswer(
     ? 'I could not verify the travel time in that answer from the routing results, so I have not shown the estimate.'
     : answer.answer;
 
-  const statedMoney = new Set<number>();
-  const moneyPattern = /\b(?:RM|MYR|USD|EUR|JPY|CNY)\s*\$?\s*(\d{1,7}(?:,\d{3})*)\b|\$\s*(\d{1,7}(?:,\d{3})*)\b/gi;
+  const statedMoney: Array<{ amount: number; currency?: string }> = [];
+  const moneyPattern = /\b((?:RM|[A-Z]{3}))\s*\$?\s*(\d{1,9}(?:,\d{3})*)\b|([$€£¥₹])\s*(\d{1,9}(?:,\d{3})*)\b/g;
   for (const match of visibleTravel.matchAll(moneyPattern)) {
-    const raw = match[1] || match[2];
+    const raw = match[2] || match[4];
     if (!raw) continue;
-    statedMoney.add(Number(raw.replaceAll(',', '')));
+    const writtenCurrency = match[1]?.toUpperCase();
+    statedMoney.push({
+      amount: Number(raw.replaceAll(',', '')),
+      currency: writtenCurrency === 'RM' ? 'MYR' : writtenCurrency,
+    });
   }
-  const unsupportedMoney = [...statedMoney].filter((amount) => !evidence.budgetAmounts.has(amount));
-  for (const amount of unsupportedMoney) {
+  const knownMoneyAmounts = new Set([...evidence.budgetAmounts, ...evidence.priceAmounts]);
+  const unsupportedMoney = statedMoney.filter(({ amount, currency }) => {
+    if (currency) return !evidence.budgetKeys.has(`${currency}|${amount}`) && !evidence.priceKeys.has(`${currency}|${amount}`);
+    return !knownMoneyAmounts.has(amount);
+  });
+  for (const { amount } of unsupportedMoney) {
     rejected.push({ value: String(amount), reason: 'invented-budget-amount' });
   }
   const visibleTravelOrMoney = unsupportedMoney.length > 0
-    ? 'I could not verify that money amount from the trip budget records, so I have not shown an estimate.'
+    ? 'I could not verify that money amount from the trip evidence, so I have not shown an estimate.'
     : visibleTravel;
 
   const impossibleDays = constraints.dayCount !== undefined
@@ -1186,9 +1211,30 @@ export function collectEvidence(
       }
     }
     if (tool === 'get_budget_summary' || tool === 'get_expenses') {
-      for (const key of ['spent', 'plannedCeiling', 'remainingKnownBudget', 'amount', 'amountMYR', 'min', 'max']) {
+      for (const key of ['spent', 'plannedCeiling', 'remainingKnownBudget', 'amount', 'amountMYR', 'amountCNY', 'min', 'max']) {
         const value = record[key];
-        if (typeof value === 'number' && Number.isFinite(value)) evidence.budgetAmounts.add(Math.round(value));
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          const rounded = Math.round(value);
+          evidence.budgetAmounts.add(rounded);
+          const declaredCurrency = typeof record.currency === 'string'
+            ? record.currency.toUpperCase()
+            : key === 'amountMYR' ? 'MYR' : key === 'amountCNY' ? 'CNY' : undefined;
+          if (declaredCurrency && /^[A-Z]{3}$/.test(declaredCurrency)) {
+            evidence.budgetKeys.add(`${declaredCurrency}|${rounded}`);
+          }
+        }
+      }
+    }
+
+    if (tool === 'get_place_details' || tool === 'search_places') {
+      const facts = priceFactsFromValue(result);
+      mergeAskPriceFacts(evidence.priceFacts, facts);
+      for (const fact of facts) {
+        for (const fare of fact.fares) {
+          const rounded = Math.round(fare.amount);
+          evidence.priceAmounts.add(rounded);
+          evidence.priceKeys.add(`${fare.currency}|${rounded}`);
+        }
       }
     }
 

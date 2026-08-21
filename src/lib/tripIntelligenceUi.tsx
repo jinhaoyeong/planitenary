@@ -49,10 +49,12 @@ const TripIntelligenceUiContext = createContext<TripIntelligenceUiValue | null>(
 export function TripIntelligenceUiProvider({
   tripId,
   surface,
+  selectedCurrency,
   children,
 }: {
   tripId: string;
   surface: IntelligenceSurface;
+  selectedCurrency?: string;
   children: ReactNode;
 }) {
   const [patch, setPatch] = useState<Partial<IntelligenceUiEnvelope>>({});
@@ -78,8 +80,9 @@ export function TripIntelligenceUiProvider({
     selectedActivityId: patch.selectedActivityId,
     selectedPlaceId: patch.selectedPlaceId,
     selectedDocumentId: surface === 'documents' ? patch.selectedDocumentId : undefined,
+    selectedCurrency,
     selectedMapPoint: surface === 'map' ? patch.selectedMapPoint : undefined,
-  }), [tripId, surface, patch]);
+  }), [tripId, surface, selectedCurrency, patch]);
 
   const openAsk = useCallback((prefill?: string) => {
     setAskPrefill(prefill ?? null);

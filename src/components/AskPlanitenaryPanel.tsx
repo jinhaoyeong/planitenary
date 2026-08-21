@@ -20,6 +20,9 @@ import { ASK_SUGGESTIONS, askPlanitenary, type AskResult } from '../lib/askPlani
 import { askSuggestionsFor } from '../../supabase/functions/_shared/smartPlannerActions';
 import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 import { useAuth } from '../contexts/AuthContext';
+import { useOptionalCurrency } from '../contexts/CurrencyContext';
+import { convertCurrency, formatCurrency, hasRate, type ExchangeRates } from '../lib/currency';
+import { adultFare, type AskPriceFact } from '../../supabase/functions/_shared/askPriceFacts';
 import {
   askChatMessageId,
   askChatStorageKey,
@@ -93,6 +96,85 @@ const sourceLabel = (url: string): string => {
   }
 };
 
+const audienceLabel = (audience: string): string =>
+  audience.charAt(0).toUpperCase() + audience.slice(1);
+
+function VerifiedPriceFacts({
+  facts,
+  selectedCurrency,
+  rates,
+  ratesAreEstimate,
+}: {
+  facts: AskPriceFact[];
+  selectedCurrency?: string;
+  rates?: ExchangeRates;
+  ratesAreEstimate?: boolean;
+}) {
+  const fares = facts.map((fact) => ({ fact, fare: adultFare(fact) })).filter(
+    (entry): entry is { fact: AskPriceFact; fare: NonNullable<ReturnType<typeof adultFare>> } => Boolean(entry.fare),
+  );
+  const currencies = new Set(fares.map(({ fare }) => fare.currency));
+  const sameSourceCurrency = currencies.size === 1;
+  const sourceCurrency = sameSourceCurrency ? fares[0]?.fare.currency : undefined;
+  const sourceTotal = sameSourceCurrency
+    ? fares.reduce((sum, entry) => sum + entry.fare.amount, 0)
+    : undefined;
+  const target = selectedCurrency?.toUpperCase();
+  const canConvert = sourceTotal !== undefined && Boolean(target) && Boolean(sourceCurrency)
+    && sourceCurrency !== target
+    && Boolean(rates)
+    && ratesAreEstimate !== true
+    && hasRate(rates!, sourceCurrency!)
+    && hasRate(rates!, target!);
+  const convertedTotal = sourceTotal !== undefined && target && sourceCurrency
+    ? sourceCurrency === target
+      ? sourceTotal
+      : canConvert
+        ? convertCurrency(sourceTotal, sourceCurrency, target, rates!)
+        : undefined
+    : undefined;
+
+  return (
+    <section className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/70" aria-label="Verified prices">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+        Verified prices
+      </div>
+      <ul className="mt-3 space-y-2">
+        {fares.map(({ fact, fare }) => (
+          <li key={`${fact.name}-${fare.audience}-${fare.currency}-${fare.amount}`} className="flex items-start justify-between gap-3 text-sm">
+            <span className="min-w-0 text-slate-700 dark:text-slate-200">
+              {fact.kind === 'estimate' ? 'Estimate · ' : ''}{fact.name}
+              <span className="block text-xs text-slate-500 dark:text-slate-400">{audienceLabel(fare.audience)}</span>
+            </span>
+            <span className="shrink-0 font-semibold text-slate-900 dark:text-white">
+              {formatCurrency(fare.amount, fare.currency, { exact: true })}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {sourceTotal !== undefined && fares.length > 0 && sourceCurrency && (
+        <div className="mt-3 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
+          <div className="flex items-center justify-between gap-3 font-semibold text-slate-900 dark:text-white">
+            <span>{fares.length > 1 ? 'Adult total' : 'Published fare'}</span>
+            <span>{formatCurrency(sourceTotal, sourceCurrency, { exact: true })}</span>
+          </div>
+          {target && convertedTotal !== undefined && (
+            <p className="mt-1 text-right text-xs text-slate-500 dark:text-slate-400">
+              ≈ {formatCurrency(convertedTotal, target)} in your selected currency
+            </p>
+          )}
+          {target && convertedTotal === undefined && sourceCurrency !== target && (
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+              Selected currency: {target}. A current exchange rate was not available, so the source total is shown without an invented conversion.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /**
  * How close to the end counts as "following along".
  *
@@ -111,6 +193,7 @@ interface LatestDiagnostics {
 export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlanitenaryPanelProps) {
   const intelligence = useTripIntelligenceUi();
   const { user, isDemoUser } = useAuth();
+  const currencyContext = useOptionalCurrency();
   const [open, setOpen] = useState(false);
 
   /**
@@ -302,6 +385,9 @@ export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlaniten
      * conversation that led there.
      */
     const answered = Boolean(next.answer);
+    const budgetStatus = next.grounding?.scopes.includes('budget') && next.grounding.budget
+      ? { requested: true, present: next.grounding.budget.present }
+      : undefined;
     const assistantMessage: AskChatMessage = {
       id: askChatMessageId(),
       role: 'assistant',
@@ -317,6 +403,9 @@ export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlaniten
       // Kept beside the answer they belong to, never rendered. This is what a
       // follow-up about an unsaved place is carried by.
       ...((next.placeTokens ?? []).length > 0 ? { placeTokens: next.placeTokens } : {}),
+      ...((next.priceFacts ?? []).length > 0 ? { priceFacts: next.priceFacts } : {}),
+      ...(next.currency ? { currency: next.currency } : {}),
+      ...(budgetStatus ? { budgetStatus } : {}),
     };
 
     setMessages((current) => [...current, assistantMessage]);
@@ -549,6 +638,10 @@ export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlaniten
                       const diagnostics = latest?.messageId === message.id ? latest.result : undefined;
                       const completedSteps = (diagnostics?.steps ?? []).filter((step) => step.ok).slice(0, 6);
                       const refused = message.status === 'refused';
+                      const priceFacts = diagnostics?.priceFacts ?? message.priceFacts ?? [];
+                      const currencyFacts = diagnostics?.currency ?? message.currency;
+                      const budgetMissing = diagnostics?.grounding?.budget?.present === false
+                        || (diagnostics === undefined && message.budgetStatus?.requested === true && message.budgetStatus.present === false);
 
                       return (
                         <li key={message.id}>
@@ -561,6 +654,24 @@ export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlaniten
                             </div>
                           ) : (
                             <p className="mt-1 whitespace-pre-wrap text-[15px] leading-7 text-slate-800 dark:text-slate-100">{message.text}</p>
+                          )}
+
+                          {priceFacts.length > 0 && !refused && (
+                            <VerifiedPriceFacts
+                              facts={priceFacts}
+                              selectedCurrency={currencyFacts?.selected}
+                              rates={currencyContext?.rates}
+                              ratesAreEstimate={currencyContext?.rateFreshness.isEstimate}
+                            />
+                          )}
+
+                          {budgetMissing && !refused && (
+                            <div className="mt-4 flex gap-3 rounded-xl bg-amber-50 p-4 text-amber-950 dark:bg-amber-950/35 dark:text-amber-100">
+                              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                              <p className="text-sm leading-6">
+                                No saved spending limit is available, so I can share verified prices but cannot calculate affordability or remaining budget yet.
+                              </p>
+                            </div>
                           )}
 
                           {/*

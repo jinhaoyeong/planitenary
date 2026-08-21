@@ -279,6 +279,7 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
   const [budgetNotice, setBudgetNotice] = React.useState<string | null>(null);
   const [budgetSaveError, setBudgetSaveError] = React.useState<string | null>(null);
   const [budgetLoading, setBudgetLoading] = React.useState(true);
+  const [budgetSource, setBudgetSource] = React.useState<'estimate' | 'saved' | 'cache' | 'local'>('estimate');
   const saveReadyRef = React.useRef(false);
   const lastPersistedRef = React.useRef<string | null>(null);
   const serverMode = Boolean(isSupabaseConfigured() && user && !isDemoUser && !isLocalTestUser);
@@ -336,15 +337,21 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
     setBudgetLoading(true);
     setBudgetSaveError(null);
     setBudgetNotice(null);
+    setBudgetSource('estimate');
     const defaultBudget = createDefaultBudget(transportMYR, foodMYR, activitiesMYR, costs);
     setCustomBudget(defaultBudget);
 
-    const applyHydrated = (budget: CustomBudget | null, notice: string | null) => {
+    const applyHydrated = (
+      budget: CustomBudget | null,
+      notice: string | null,
+      source: 'estimate' | 'saved' | 'cache' | 'local' = 'estimate',
+    ) => {
       if (cancelled) return;
       const next = budget ?? defaultBudget;
       lastPersistedRef.current = JSON.stringify(next);
       setCustomBudget(next);
       setBudgetNotice(notice);
+      setBudgetSource(source);
       saveReadyRef.current = true;
       setBudgetLoading(false);
     };
@@ -360,16 +367,17 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
         return;
       }
       if (result.kind === 'none') {
-        applyHydrated(null, serverMode ? 'No trip budget saved yet. Edit to save it to your trip.' : null);
+        applyHydrated(null, serverMode ? 'No saved spending limit yet. This is a planning estimate; edit to save a budget for affordability checks.' : null);
         return;
       }
       if (result.kind === 'cache-fallback') {
-        applyHydrated(result.budget, 'Showing a saved copy. We couldn’t reach your trip budget just now.');
+        applyHydrated(result.budget, 'Showing a saved copy. We couldn’t reach your trip budget just now.', 'cache');
         return;
       }
       applyHydrated(
         result.budget,
         result.imported ? 'Budget saved to your trip.' : null,
+        result.source === 'local' ? 'local' : 'saved',
       );
     };
     void run();
@@ -691,7 +699,9 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
       {activeView === 'budget' && (
         <div className="editorial-card p-6 md:p-12 text-center relative overflow-hidden">
           <div className="relative z-10">
-            <div className="eyebrow justify-center mb-4">Total estimate</div>
+            <div className="eyebrow justify-center mb-4">
+              {budgetSource === 'saved' ? 'Saved spending budget' : 'Estimated trip cost'}
+            </div>
             <div
               className="font-display text-5xl sm:text-6xl md:text-[7rem] leading-[0.92] break-words tracking-tight"
               style={{ color: 'var(--ink)' }}
@@ -701,7 +711,9 @@ export const Budget = ({ itinerary }: { itinerary: Itinerary }) => {
               {currencySymbol}{convert(totalMax, 'MYR').toLocaleString()}
             </div>
             <div className="text-base md:text-lg mt-6 mb-8" style={{ color: 'var(--ink-muted)' }}>
-              A flexible range that adapts as you add destinations and plans.
+              {budgetSource === 'saved'
+                ? 'Your saved spending range for this trip.'
+                : 'A planning estimate that adapts as you add destinations and plans. It is not a spending limit until you save a budget.'}
             </div>
 
             <div className="flex flex-col sm:flex-row justify-center gap-3 md:gap-4 text-xs md:text-sm font-medium">

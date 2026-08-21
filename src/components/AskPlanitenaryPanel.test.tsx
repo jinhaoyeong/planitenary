@@ -16,6 +16,13 @@ vi.mock('../lib/planTripProposal', async (importOriginal) => {
   return { ...actual, planTripProposal: vi.fn() };
 });
 
+vi.mock('../contexts/CurrencyContext', () => ({
+  useOptionalCurrency: () => ({
+    rates: { base: 'MYR', rates: { MYR: 1, JPY: 33.2 }, source: 'live', isLoading: false },
+    rateFreshness: { isEstimate: false },
+  }),
+}));
+
 import { AskPlanitenaryPanel } from './AskPlanitenaryPanel';
 import { PlanTripProposalPanel } from './PlanTripProposalPanel';
 import { TripIntelligenceUiProvider } from '../lib/tripIntelligenceUi';
@@ -89,6 +96,32 @@ describe('Ask Planitenary panel', () => {
     expect(screen.queryByText(/Proposal only/)).not.toBeInTheDocument();
   });
 
+  it('renders a deterministic selected-currency total beside source fares', async () => {
+    askPlanitenary.mockResolvedValue({
+      status: 'answered',
+      answer: 'The source fares are verified.',
+      citations: [],
+      applied: false,
+      steps: [{ tool: 'get_place_details', ok: true }],
+      rejectedClaims: 0,
+      priceFacts: [
+        { name: 'Universal Studios Japan', kind: 'admission', fares: [{ audience: 'adult', amount: 8_600, currency: 'JPY' }] },
+        { name: 'teamLab Borderless', kind: 'admission', fares: [{ audience: 'adult', amount: 3_800, currency: 'JPY' }] },
+      ],
+      currency: { selected: 'MYR', source: 'validated-display' },
+    });
+    const user = userEvent.setup();
+    render(<AskPlanitenaryPanel tripId="trip-42" />);
+
+    await user.click(screen.getByRole('button', { name: /ask planitenary/i }));
+    await user.type(screen.getByLabelText('Question for Planitenary'), 'How much are both tickets?');
+    await user.click(screen.getByRole('button', { name: 'Send question' }));
+
+    expect(await screen.findByRole('region', { name: 'Verified prices' })).toHaveTextContent('¥12,400');
+    expect(screen.getByRole('region', { name: 'Verified prices' })).toHaveTextContent(/selected currency/i);
+    expect(screen.queryByText(/No saved spending limit is available/)).not.toBeInTheDocument();
+  });
+
   it('sends the current surface as a hint and keeps follow-up conversation', async () => {
     askPlanitenary
       .mockResolvedValueOnce({
@@ -109,7 +142,7 @@ describe('Ask Planitenary panel', () => {
       });
     const user = userEvent.setup();
     render(
-      <TripIntelligenceUiProvider tripId="trip-42" surface="budget">
+      <TripIntelligenceUiProvider tripId="trip-42" surface="budget" selectedCurrency="MYR">
         <AskPlanitenaryPanel tripId="trip-42" tripName="Flight Acceptance Test" />
       </TripIntelligenceUiProvider>,
     );
@@ -123,7 +156,7 @@ describe('Ask Planitenary panel', () => {
     expect(askPlanitenary).toHaveBeenCalledWith({
       tripId: 'trip-42',
       question: 'Where am I spending most?',
-      uiContext: expect.objectContaining({ tripId: 'trip-42', surface: 'budget' }),
+      uiContext: expect.objectContaining({ tripId: 'trip-42', surface: 'budget', selectedCurrency: 'MYR' }),
       conversation: [],
     });
 

@@ -303,6 +303,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hooks intentionally share this context
 export const useCurrency = () => {
   const context = useContext(CurrencyContext);
   if (context === undefined) {
@@ -310,3 +311,7 @@ export const useCurrency = () => {
   }
   return context;
 };
+
+/** Optional counterpart for isolated read-only surfaces and their unit tests. */
+// eslint-disable-next-line react-refresh/only-export-components -- hook intentionally shares this context
+export const useOptionalCurrency = () => useContext(CurrencyContext);

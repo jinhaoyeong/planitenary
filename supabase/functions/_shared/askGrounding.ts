@@ -21,6 +21,11 @@ import {
 import { summarizeBudgetFacts } from './budgetFacts.ts';
 import { summarizeDocumentFacts } from './documentFacts.ts';
 import { emptyEvidence, type AgentEvidence } from './agentContract.ts';
+import {
+  mergeAskPriceFacts,
+  priceFactFromRecord,
+  type AskPriceFact,
+} from './askPriceFacts.ts';
 import type {
   ConversationTurn,
   IntelligenceFocus,
@@ -101,7 +106,9 @@ export interface AskEvidencePacket {
     type?: string;
     decision?: string;
     onSavedPlan: boolean;
+    priceFacts?: AskPriceFact[];
   }>;
+  priceFacts: AskPriceFact[];
   decisions: Array<{
     placeName: string;
     decision: 'skip' | 'visited' | 'must-do' | 'interested';
@@ -135,6 +142,12 @@ export interface AskEvidencePacket {
     dayNumber?: number;
     selectedPlaceName?: string;
     mapViewHint?: { lat: number; lng: number };
+  };
+  currency?: {
+    selected?: string;
+    home?: string;
+    trip?: string;
+    source: 'validated-display' | 'trip-profile' | 'unavailable';
   };
   budget?: {
     present: boolean;
@@ -211,9 +224,13 @@ const SCHEDULE_RE =
 
 const HISTORY_RE = /\b(what changed|last plan|change history|undo|applied the plan|previous plan)\b/;
 
-const BUDGET_RE = /\b(budget|spent|spending|remaining|how much|wallet|expenses?)\b/;
+const BUDGET_RE = /\b(budget|spent|spending|remaining|wallet|expenses?)\b/;
 
-const DOCUMENT_RE = /\b(document|documents|booking|ticket|pdf|passport|visa|confirmation)\b/;
+const AFFORDABILITY_RE = /\b(afford|over budget|under budget|stay within|spending limit|budget left|budget remaining|remaining budget|how much (?:budget|have|is left|left in my budget))\b/;
+
+const PRICE_RE = /\b(price|prices|cost|costs|ticket|tickets|fare|fares|admission|entry fee|entrance fee)\b/;
+
+const DOCUMENT_RE = /\b(document|documents|booking confirmation|boarding pass|pdf|passport|visa|confirmation)\b/;
 
 const MAP_RE = /\b(near here|nearby|closest|how far|on the map|this pin)\b/;
 
@@ -275,12 +292,15 @@ export function deriveAskGroundingPlan(input: {
   const question = normaliseQuestion(input.question);
   const surface = input.surface ?? input.uiContext?.surface;
   const required: AskGroundingScope[] = ['trip', 'itinerary', 'day'];
+  const priceQuestion = isAskPriceQuestion(question);
 
   if (DECISION_RE.test(question)) required.push('decisions');
   if (FLIGHT_RE.test(question)) required.push('flights', 'schedule');
   if (SCHEDULE_RE.test(question)) required.push('flights', 'schedule');
   if (HISTORY_RE.test(question)) required.push('history');
-  if (BUDGET_RE.test(question) || surface === 'budget') required.push('budget');
+  if (BUDGET_RE.test(question) || AFFORDABILITY_RE.test(question) || (surface === 'budget' && !priceQuestion)) {
+    required.push('budget');
+  }
   if (DOCUMENT_RE.test(question) || surface === 'documents') required.push('documents');
   if (MAP_RE.test(question) || surface === 'map') required.push('map');
 
@@ -293,6 +313,13 @@ export function deriveAskGroundingPlan(input: {
 
   return { required: uniqueScopes(required), requiresPlaceDiscovery, placeDiscoveryArea };
 }
+
+/** Price lookup is allowed to continue when no spending ceiling is saved. */
+export const isAskPriceQuestion = (question: string): boolean => {
+  const normalised = normaliseQuestion(question);
+  return PRICE_RE.test(normalised)
+    || (/\bhow much\b/.test(normalised) && !BUDGET_RE.test(normalised) && !AFFORDABILITY_RE.test(normalised));
+};
 
 export interface PersistedFlight {
   id?: string;
@@ -405,6 +432,7 @@ const questionMentions = (question: string, name: string): boolean => {
 };
 
 const PRONOUN_RE = /\b(it|this|that|this place|that place|this stop|that stop)\b/;
+const PRICE_REFERENCE_RE = /\b(both|two|these two|those two|the two|second one|first one|last one|one of them)\b/;
 const WHY_OMITTED_RE = /\b(why isn'?t|why is it not|not in my plan|omitted|excluded|not included)\b/;
 
 /** Names only — never decisions, times, or other mutable facts from memory. */
@@ -414,9 +442,10 @@ const resolveNamedSavedPlaces = (input: {
   uiFocus?: IntelligenceFocus;
   conversation?: ConversationTurn[];
 }): string[] => {
+  const question = normaliseQuestion(input.question);
   const mentioned = input.savedPlaceNames.filter((name) => questionMentions(input.question, name));
   if (mentioned.length > 0) return mentioned;
-  if (!PRONOUN_RE.test(normaliseQuestion(input.question))) return [];
+  if (!PRONOUN_RE.test(question) && !PRICE_REFERENCE_RE.test(question)) return [];
   const focusName = input.uiFocus?.selectedActivity?.name ?? input.uiFocus?.selectedPlace?.name;
   if (focusName && input.savedPlaceNames.some((name) => name.toLowerCase() === focusName.toLowerCase())) {
     return [focusName];
@@ -425,9 +454,38 @@ const resolveNamedSavedPlaces = (input: {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const text = `${turns[index].question} ${turns[index].answer}`;
     const found = input.savedPlaceNames.filter((name) => questionMentions(text, name));
-    if (found.length > 0) return found;
+    if (found.length > 0) return PRICE_REFERENCE_RE.test(question) ? found.slice(0, 2) : found;
   }
   return [];
+};
+
+const profileCurrency = (itinerary: Record<string, unknown> | null, key: 'homeCurrency' | 'tripCurrency'): string | undefined => {
+  const profile = asRecord(itinerary?.tripProfile);
+  const value = text(profile?.[key], 3)?.toUpperCase();
+  return value && /^[A-Z]{3}$/.test(value) ? value : undefined;
+};
+
+/**
+ * The browser may report which of the profile's two currencies it is showing,
+ * but it may not introduce a third currency or replace the profile pair.
+ */
+export const deriveAskCurrencyFacts = (
+  itinerary: Record<string, unknown> | null,
+  selectedHint?: string,
+): AskEvidencePacket['currency'] => {
+  const home = profileCurrency(itinerary, 'homeCurrency');
+  const trip = profileCurrency(itinerary, 'tripCurrency');
+  const hint = text(selectedHint, 3)?.toUpperCase();
+  const selected = hint && (hint === home || hint === trip)
+    ? hint
+    : trip ?? home;
+  if (!selected && !home && !trip) return { source: 'unavailable' };
+  return {
+    selected,
+    home,
+    trip,
+    source: hint && selected === hint ? 'validated-display' : 'trip-profile',
+  };
 };
 
 export interface AskGroundingExtras {
@@ -461,6 +519,7 @@ export function collectAskGrounding(input: {
   tripId: string;
   question: string;
   plan: AskGroundingPlan;
+  uiContext?: IntelligenceUiEnvelope;
   uiFocus?: IntelligenceFocus;
   conversation?: ConversationTurn[];
   extras?: AskGroundingExtras;
@@ -491,6 +550,7 @@ export function collectAskGrounding(input: {
   pushRead(reads, 'day', 'get_current_day', 'stored-trip');
 
   const required = new Set(input.plan.required);
+  const priceQuestion = isAskPriceQuestion(input.question);
   const flights = listPersistedFlights(itinerary);
   const boundDecisions = bindSavedPlaceDecisions(itinerary);
   const rows = activityRows(itinerary);
@@ -524,7 +584,7 @@ export function collectAskGrounding(input: {
       if (input.extras?.budgetStored != null) {
         return fail('budget', 'I can’t verify a trip budget from the stored records right now.');
       }
-      return fail('budget', 'You haven’t set a trip budget yet.');
+      if (!priceQuestion) return fail('budget', 'You haven’t set a trip budget yet.');
     }
   }
 
@@ -565,6 +625,7 @@ export function collectAskGrounding(input: {
     conversation: input.conversation,
   });
   const namedSet = new Set(namedPlaces.map((name) => name.toLowerCase()));
+  const groundedPriceFacts: AskPriceFact[] = [];
 
   const relevantActivities = rows.flatMap(({ day, activity }) => {
     const name = text(activity.name, 160);
@@ -573,6 +634,8 @@ export function collectAskGrounding(input: {
     const bound = boundDecisions.find((entry) => entry.activityId === activity.id);
     const includeFlight = activity.type === 'flight' && required.has('flights');
     if (!mentioned && !includeFlight) return [];
+    const priceFact = priceQuestion ? priceFactFromRecord(activity, day) : undefined;
+    if (priceFact) mergeAskPriceFacts(groundedPriceFacts, [priceFact]);
     return [{
       name,
       scheduledDay: day,
@@ -580,6 +643,7 @@ export function collectAskGrounding(input: {
       type: text(activity.type, 40),
       decision: bound?.decision,
       onSavedPlan: day !== undefined,
+      ...(priceFact ? { priceFacts: [priceFact] } : {}),
     }];
   }).slice(0, 12);
 
@@ -618,6 +682,7 @@ export function collectAskGrounding(input: {
         decision: entry.decision,
         onSavedPlan: entry.scheduledDay !== undefined,
       })),
+    priceFacts: groundedPriceFacts,
     decisions: boundDecisions.map((entry) => ({
       placeName: entry.name,
       decision: entry.decision,
@@ -655,10 +720,12 @@ export function collectAskGrounding(input: {
         }).slice(0, 8),
       };
     })(),
+    currency: deriveAskCurrencyFacts(input.itinerary, input.uiContext?.selectedCurrency),
     rules: [
       'Authoritative evidence was derived by the server from the owned trip. It overrides conversation history.',
       'Do not invent a day number outside trip.dayCount.',
       'Do not invent a travel time, airport-transfer duration, or budget amount.',
+      'Admission and itinerary price facts are source prices. Do not invent a fare or exchange rate, and do not do currency conversion arithmetic.',
       'Skip / Visited / Must do / Interested come from bound saved-activity decisions, never from listing-name matching.',
       'You may call extra tools only for facts not already in this evidence.',
       'You cannot save, apply, book, or mutate the itinerary. Describe a proposal instead.',
@@ -685,7 +752,19 @@ export function collectAskGrounding(input: {
       currency: facts.currency,
     };
     for (const amount of [facts.spent, facts.plannedCeiling, facts.remainingKnownBudget]) {
-      if (typeof amount === 'number' && Number.isFinite(amount)) evidence.budgetAmounts.add(Math.round(amount));
+      if (typeof amount === 'number' && Number.isFinite(amount)) {
+        const rounded = Math.round(amount);
+        evidence.budgetAmounts.add(rounded);
+        if (facts.currency && /^[A-Z]{3}$/.test(facts.currency)) evidence.budgetKeys.add(`${facts.currency}|${rounded}`);
+      }
+    }
+  }
+
+  for (const fact of groundedPriceFacts) {
+    for (const fare of fact.fares) {
+      const rounded = Math.round(fare.amount);
+      evidence.priceAmounts.add(rounded);
+      evidence.priceKeys.add(`${fare.currency}|${rounded}`);
     }
   }
 
@@ -747,11 +826,14 @@ export function presentAskEvidence(packet: AskEvidencePacket): Record<string, un
       type: activity.type,
       decision: activity.decision,
       onSavedPlan: activity.onSavedPlan,
+      priceFacts: activity.priceFacts,
     })),
+    priceFacts: packet.priceFacts,
     decisions: packet.decisions,
     fixedEvents: packet.fixedEvents,
     scheduleFacts: packet.scheduleFacts,
     focus: packet.focus,
+    currency: packet.currency,
     budget: packet.budget,
     documents: packet.documents,
     history: packet.history,
