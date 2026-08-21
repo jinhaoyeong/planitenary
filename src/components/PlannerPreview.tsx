@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, Clock3, Lock, RefreshCw, Sparkles, Undo2 } from 'lucide-react';
-import type { Activity, Itinerary } from '../data';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Check, Lock, RefreshCw, Sparkles } from 'lucide-react';
+import type { Itinerary } from '../data';
 import type { TripProfile } from '../lib/tripProfile';
 import { declaredTripDays, plannerExistingDaysNotice } from '../lib/tripDuration';
 import {
@@ -15,9 +15,9 @@ import {
   undoPlannerChange,
   type ItineraryProposal,
 } from '../lib/tripIntelligence';
+import { isPlannerPlaceActivity, type PlannerCapabilityId } from '../lib/plannerCapabilities';
+import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 import { profileRevision } from '../lib/identityFields';
-import { canDiscover } from '../lib/destinationCapability';
-import { capabilityFor } from '../lib/discoveryRuntime';
 import { DestinationDiscoveryPanel } from './DestinationDiscoveryPanel';
 
 interface PlannerPreviewProps {
@@ -53,84 +53,40 @@ const actionLabel = (proposal: ItineraryProposal) => {
   return 'Optimise whole trip';
 };
 
-const isPlaceActivity = (activity: Activity) =>
-  activity.kind !== 'meal-window'
-  && activity.kind !== 'rest-window'
-  && activity.kind !== 'free-time'
-  && activity.kind !== 'transport'
-  && !(activity.source === 'generated' && !activity.providerPlaceId && (activity.type === 'food' || activity.type === 'cafe'));
-
-const timeToMinutes = (value: string) => {
-  const match = value.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  return Number(match[1]) * 60 + Number(match[2]);
-};
-
-const conflictCountFor = (itinerary: Itinerary) => itinerary.days.reduce((total, day) => {
-  const activities = day.activities.filter(isPlaceActivity).sort((left, right) => (timeToMinutes(left.time) ?? 0) - (timeToMinutes(right.time) ?? 0));
-  let conflicts = 0;
-  activities.forEach((activity, index) => {
-    const start = timeToMinutes(activity.time);
-    const end = start === null ? null : start + Math.max(15, activity.durationMinutes || 90);
-    const openingStart = timeToMinutes(activity.openingHours?.opensAt || '');
-    const openingEnd = timeToMinutes(activity.openingHours?.closesAt || '');
-    if (start !== null && end !== null && ((openingStart !== null && start < openingStart) || (openingEnd !== null && end > openingEnd))) conflicts += 1;
-    const previous = activities[index - 1];
-    const previousStart = previous ? timeToMinutes(previous.time) : null;
-    const previousEnd = previousStart === null ? null : previousStart + Math.max(15, previous.durationMinutes || 90);
-    if (previousEnd !== null && start !== null && start < previousEnd) conflicts += 1;
-  });
-  return total + conflicts;
-}, 0);
-
+/**
+ * The deterministic half of the planner, with no surface of its own.
+ *
+ * This component used to carry an "Organise places" panel: a permanent block of
+ * chips on the itinerary page offering nine ways to adjust the plan. It was the
+ * third thing on screen that looked like a planner, beside Smart Plan and Ask,
+ * and a traveller had no way to tell which one to reach for.
+ *
+ * The chips are gone; every engine behind them is not. Smart Plan now names the
+ * capability and asks for it through the shared UI channel, and this component
+ * answers by opening exactly the proposal the chip used to open. The important
+ * property is unchanged and is the reason the work stayed here rather than
+ * moving into Smart Plan: a capability produces a *proposal*, the traveller
+ * reads a per-change diff, and nothing is written until they apply it.
+ */
 export function PlannerPreview({ itinerary, profile, onItineraryChange }: PlannerPreviewProps) {
+  const intelligence = useTripIntelligenceUi();
   const [proposal, setProposal] = useState<ItineraryProposal | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
-  // On a phone this panel is a secondary tool, not the main event: it starts
-  // folded down to its header so the discovery card and the itinerary below it
-  // stay reachable without scrolling past a wall of buttons.
-  const [organiseOpen, setOrganiseOpen] = useState(() => {
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches) return false;
-    return itinerary.discoveryState?.stage !== 'itinerary-built';
-  });
+  const previewRef = useRef<HTMLDivElement>(null);
+
   const currentRevision = profileRevision(profile);
   const isStale = Boolean(proposal && (
     proposal.baseProfileRevision !== currentRevision
     || proposal.baseItineraryRevision !== (itinerary.revision || 0)
   ));
   const lastHistory = itinerary.plannerHistory?.[itinerary.plannerHistory.length - 1];
-  const hasPlaceActivities = itinerary.days.some((day) => day.activities.some(isPlaceActivity));
-  const hasInboxActivities = (itinerary.unassignedActivities?.length || 0) > 0;
-  const discoveryBuilt = itinerary.discoveryState?.stage === 'itinerary-built';
-  // Capability comes from the destination's region and the connected
-  // providers, so this stays correct as live backends come online.
-  const discoveryDestination = profile.destinations[0];
-  const discoveryCityLabel = discoveryDestination?.city || itinerary.cities[0] || '';
-  const discoverySupported = discoveryCityLabel
-    ? canDiscover(capabilityFor({
-        city: discoveryCityLabel,
-        region: discoveryDestination?.region,
-        countryCode: discoveryDestination?.countryCode || '',
-      }))
-    : false;
-  const dayOptions = useMemo(() => itinerary.days.filter((day) => day.activities.some(isPlaceActivity)), [itinerary.days]);
-  const conflictCount = useMemo(() => conflictCountFor(itinerary), [itinerary]);
+  const dayOptions = useMemo(
+    () => itinerary.days.filter((day) => day.activities.some(isPlannerPlaceActivity)),
+    [itinerary.days],
+  );
   const declaredDays = declaredTripDays(profile);
   const existingDaysNotice = plannerExistingDaysNotice(declaredDays, itinerary.days.length);
-  // What the folded header promises. Says what the panel does now, in this
-  // trip's state, rather than naming the section twice.
-  const organiseSummary = (() => {
-    const conflicts = conflictCount > 0
-      ? ` · ${conflictCount} ${conflictCount === 1 ? 'conflict' : 'conflicts'} to fix`
-      : '';
-    if (!hasPlaceActivities && !hasInboxActivities) {
-      return discoverySupported ? 'Add places first' : 'No places yet';
-    }
-    if (!hasPlaceActivities) return 'Place your saved activities into days';
-    if (discoveryBuilt) return `Balance travel, replan a day, undo${conflicts}`;
-    return `Order your places into days${conflicts}`;
-  })();
 
   useEffect(() => {
     document.body.classList.add('planner-intelligence-active');
@@ -158,9 +114,53 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     const dayNumber = dayOptions[0]?.day || itinerary.days[0]?.day || 1;
     openProposal(replanDay(itinerary, profile, dayNumber, disruption));
   };
-  const relaxWholeTrip = () => openProposal(relaxTrip(itinerary, profile));
-  const repairWholeTrip = () => openProposal(repairConflicts(itinerary, profile));
-  const lowerCostWholeTrip = () => openProposal(lowerCostTrip(itinerary, profile));
+
+  const undo = () => {
+    if (!lastHistory) return;
+    onItineraryChange(undoPlannerChange(itinerary, lastHistory.id));
+    setStatus('The last planner change was undone.');
+  };
+
+  /**
+   * One capability, one engine.
+   *
+   * Every arm here calls the function the removed chip called, with the
+   * argument it passed. `ask`-routed capabilities never arrive: Smart Plan
+   * sends those into the conversation instead, so there is no arm for them and
+   * no second implementation to keep in step.
+   */
+  const runCapability = (id: PlannerCapabilityId) => {
+    if (id === 'place-saved') return build();
+    if (id === 'rebalance-travel') return optimiseWholeTrip();
+    if (id === 'more-relaxed') return openProposal(relaxTrip(itinerary, profile));
+    if (id === 'lower-cost') return openProposal(lowerCostTrip(itinerary, profile));
+    if (id === 'fix-conflicts') return openProposal(repairConflicts(itinerary, profile));
+    if (id === 'less-walking') return replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 });
+    if (id === 'rainy-day') return replanSelectedDay({ kind: 'rain' });
+    if (id === 'late-start') return replanSelectedDay({ kind: 'late-start', minutes: 60 });
+    if (id === 'route-delay') return replanSelectedDay({ kind: 'route-delay', minutes: 30 });
+    if (id === 'undo-last') return undo();
+  };
+
+  /**
+   * Answer a capability Smart Plan asked for.
+   *
+   * Keyed on the nonce so the same capability twice in a row is two requests,
+   * and cleared before it runs so a re-render can never replay it.
+   */
+  const requestNonce = intelligence?.plannerRequest?.nonce;
+  useEffect(() => {
+    const request = intelligence?.plannerRequest;
+    if (!request) return;
+    intelligence?.clearPlannerRequest();
+    runCapability(request.id);
+    // The proposal opens below the fold when the drawer closes over it.
+    window.setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    // Only the nonce may re-trigger this. Depending on the itinerary or the
+    // handlers would re-run a capability every time its own proposal changed
+    // the trip, which is the one thing a request channel must never do.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestNonce]);
 
   const toggle = (id: string) => setSelection((current) => {
     const next = new Set(current);
@@ -190,12 +190,6 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
       : 'Nothing selected, so the itinerary is unchanged.');
   };
 
-  const undo = () => {
-    if (!lastHistory) return;
-    onItineraryChange(undoPlannerChange(itinerary, lastHistory.id));
-    setStatus('The last planner change was undone.');
-  };
-
   const changesByDay = useMemo(() => {
     if (!proposal) return [] as Array<[number, ItineraryProposal['changes']]>;
     const grouped = new Map<number, ItineraryProposal['changes']>();
@@ -209,7 +203,7 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
 
   if (proposal) {
     return (
-      <section className="p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-section, var(--card-radius, 1.5rem))' }} aria-live="polite">
+      <section ref={previewRef} className="p-4 sm:p-5 space-y-4" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-section, var(--card-radius, 1.5rem))' }} aria-live="polite">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="eyebrow m-0">Preview before applying</div>
@@ -321,92 +315,23 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     );
   }
 
+  /**
+   * With no proposal open there is nothing for this component to show but
+   * discovery. The outcome of the last capability is worth a line — a repair
+   * that found nothing to repair otherwise looks like a button that did not
+   * work — but it is one line, not a panel.
+   */
   return (
-    <div className="space-y-4">
+    <div ref={previewRef} className="space-y-4">
+      {existingDaysNotice && (
+        <p className="text-xs rounded-2xl px-3 py-2" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
+          {existingDaysNotice}
+        </p>
+      )}
+      {status && (
+        <p className="text-xs font-semibold px-1" style={{ color: 'var(--accent)' }} aria-live="polite">{status}</p>
+      )}
       <DestinationDiscoveryPanel itinerary={itinerary} profile={profile} onItineraryChange={onItineraryChange} />
-      <section
-        className={`planner-organise-panel p-4 sm:p-5 space-y-3 ${organiseOpen ? 'is-open' : 'is-collapsed'}`}
-        style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-section, var(--card-radius, 1.5rem))' }}
-      >
-        <div className="planner-organise-toggle">
-          <button
-            type="button"
-            className="planner-organise-header"
-            aria-expanded={organiseOpen}
-            onClick={() => setOrganiseOpen((open) => !open)}
-          >
-            {/* Folded, the title alone says nothing about what is inside. The
-                subtitle carries that job on a phone, so opening the panel is a
-                decision rather than a guess. */}
-            <span className="planner-organise-heading">
-              <h3 className="font-display planner-organise-title">
-                {discoveryBuilt ? 'Improve plan' : 'Organise places'}
-              </h3>
-              <span className="planner-organise-summary">{organiseSummary}</span>
-            </span>
-            <ChevronDown
-              className={`planner-organise-chevron w-5 h-5 shrink-0 transition-transform ${organiseOpen ? 'rotate-180' : ''}`}
-              style={{ color: 'var(--ink-muted)' }}
-              aria-hidden="true"
-            />
-          </button>
-          <Clock3 className="w-5 h-5 shrink-0 hidden sm:block" style={{ color: 'var(--accent)' }} aria-hidden="true" />
-        </div>
-
-        <div className="planner-organise-body" data-open={organiseOpen ? 'true' : 'false'}>
-          {existingDaysNotice && (
-            <p className="text-xs rounded-2xl px-3 py-2" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
-              {existingDaysNotice}
-            </p>
-          )}
-
-          <div className="planner-action-groups">
-            {!discoveryBuilt && (
-              <div className="planner-action-group">
-                {hasPlaceActivities && <button type="button" className="pill-btn pill-primary planner-primary-action" onClick={optimiseWholeTrip}><Sparkles className="w-4 h-4" /> Organise places</button>}
-                {hasInboxActivities && !hasPlaceActivities && <button type="button" className="pill-btn pill-primary planner-primary-action" onClick={build}><Sparkles className="w-4 h-4" /> Place activities</button>}
-                {!hasPlaceActivities && !hasInboxActivities && (
-                  <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>
-                    {discoverySupported ? `Add places or use ${discoveryCityLabel} discovery above.` : 'Add places to start.'}
-                  </span>
-                )}
-              </div>
-            )}
-            {hasPlaceActivities && (
-              <div className="planner-action-group">
-                <span className="planner-action-label">Adjust the plan</span>
-                {/* One scrollable row instead of a wrapping block plus a "More"
-                    expander: every action stays reachable, and the section costs
-                    one row of height rather than five. */}
-                <div
-                  className="planner-improve-actions"
-                  role="group"
-                  aria-label="Ways to adjust the plan"
-                >
-                  <button type="button" className="pill-btn pill-soft" onClick={optimiseWholeTrip}>Balance travel</button>
-                  <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'late-start', minutes: 60 })}>Late start · 60 min</button>
-                  <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'rain' })}>Rainy-day plan</button>
-                  <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'route-delay', minutes: 30 })}>Route delay · 30 min</button>
-                  <button type="button" className="pill-btn pill-soft" onClick={() => replanSelectedDay({ kind: 'fatigue', walkingMinutes: 90 })}>Less walking</button>
-                  <button type="button" className="pill-btn pill-soft" onClick={relaxWholeTrip}>More relaxed</button>
-                  <button type="button" className="pill-btn pill-soft" onClick={lowerCostWholeTrip}>Lower cost</button>
-                  <button type="button" className="pill-btn pill-soft" disabled={conflictCount === 0} title={conflictCount > 0 ? 'Preview deterministic conflict repair' : 'No opening-hours or overlap conflicts detected'} onClick={repairWholeTrip}>Fix conflicts{conflictCount > 0 ? ` · ${conflictCount}` : ''}</button>
-                  <button type="button" className="pill-btn pill-soft" disabled title="Requires live place discovery and replacement candidates">More local · Soon</button>
-                  {lastHistory && <button type="button" className="pill-btn pill-ghost" onClick={undo}><Undo2 className="w-4 h-4" /> Undo</button>}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {status && <p className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{status}</p>}
-          {!hasPlaceActivities && !hasInboxActivities && !discoverySupported && (
-            <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>No places yet.</p>
-          )}
-          {itinerary.days.length === 0 && (
-            <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Add travel dates first.</p>
-          )}
-        </div>
-      </section>
     </div>
   );
 }

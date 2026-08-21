@@ -32,6 +32,22 @@ const mockedStage = vi.mocked(stageItineraryChange);
 const mockedApply = vi.mocked(applyItineraryChange);
 const mockedUndo = vi.mocked(undoItineraryChange);
 
+/** A trip with two real places, so capability availability has something to read. */
+const plannedTrip: Itinerary = {
+  ...emptyItinerary,
+  id: 'trip-1',
+  name: 'Osaka days',
+  days: [{
+    day: 1,
+    date: '2026-09-01',
+    title: 'Day one',
+    activities: [
+      { id: 'a1', name: 'Osaka Castle', time: '09:00', durationMinutes: 90, type: 'sightseeing', description: '', location: 'Osaka', cost: 0 },
+      { id: 'a2', name: 'Dotonbori', time: '11:00', durationMinutes: 90, type: 'sightseeing', description: '', location: 'Osaka', cost: 0 },
+    ],
+  }],
+} as unknown as Itinerary;
+
 const appliedItinerary: Itinerary = { ...emptyItinerary, id: 'trip-1', name: 'Applied trip', revision: 9 };
 const restoredItinerary: Itinerary = { ...emptyItinerary, id: 'trip-1', name: 'Restored trip', revision: 8 };
 
@@ -115,7 +131,9 @@ describe('Plan my trip proposal panel', () => {
 
     expect(await screen.findByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Plan day 1$/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Ask anything$/ })).toBeInTheDocument();
+    // The full-width Ask card is gone; a link replaces it.
+    expect(screen.queryByRole('button', { name: /^Ask anything$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Ask something else/ })).toBeInTheDocument();
     const scrollRegion = screen.getByRole('dialog').querySelector<HTMLElement>('[data-lenis-prevent]');
     expect(scrollRegion).not.toBeNull();
     expect(scrollRegion).toHaveAttribute('data-lenis-prevent-wheel');
@@ -125,6 +143,47 @@ describe('Plan my trip proposal panel', () => {
     expect(mockedPlan).not.toHaveBeenCalled();
     expect(mockedStage).not.toHaveBeenCalled();
     expect(mockedApply).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The catalogue replaces a row of chips that used to live on the itinerary
+   * page. It must arrive compact: rows and chips, not one card per capability.
+   */
+  it('lists what it can help with, compactly, without spending anything', async () => {
+    const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" itinerary={plannedTrip} />);
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+
+    expect(await screen.findByText('Things I can help with')).toBeInTheDocument();
+    for (const label of [
+      'Rebalance travel', 'Make the trip less rushed', 'Reduce walking',
+      'Make a rainy-day version', 'Lower the cost', 'Find more local places',
+    ]) {
+      expect(screen.getByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
+    }
+
+    // Traveller-facing wording, never the internal vocabulary.
+    expect(screen.queryByText(/rebalance schedule density/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/optimise spatial routing/i)).not.toBeInTheDocument();
+
+    // Opening the catalogue is free.
+    expect(mockedPlan).not.toHaveBeenCalled();
+    expect(mockedStage).not.toHaveBeenCalled();
+    expect(mockedApply).not.toHaveBeenCalled();
+  });
+
+  /** A conflict-free trip must not offer to repair conflicts. */
+  it('offers Fix schedule conflicts only when there are conflicts', async () => {
+    const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" itinerary={plannedTrip} />);
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+    await screen.findByText('Things I can help with');
+    expect(screen.queryByRole('button', { name: /Fix schedule conflicts/ })).not.toBeInTheDocument();
+  });
+
+  it('shows Undo last plan change only when something is reversible', async () => {
+    const view = render(<PlanTripProposalPanel tripId="trip-1" itinerary={plannedTrip} />);
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+    await screen.findByText('Things I can help with');
+    expect(screen.queryByRole('button', { name: /Undo last plan change/ })).not.toBeInTheDocument();
   });
 
   it('shows a full proposal and writes nothing on its own', async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -30,10 +30,20 @@ import {
   type AskChatMessage,
 } from '../lib/askChatThread';
 import { PlaceCard } from './PlaceCard';
+import {
+  capabilityAskExamples,
+  plannerTripSignals,
+} from '../lib/plannerCapabilities';
+import type { Itinerary } from '../data';
 
 interface AskPlanitenaryPanelProps {
   tripId: string;
   tripName?: string;
+  /**
+   * The trip as it stands, read only to decide which capability examples are
+   * worth offering. Absent is fine: the surface suggestions still apply.
+   */
+  itinerary?: Itinerary;
 }
 
 const PROGRESS = [
@@ -98,7 +108,7 @@ interface LatestDiagnostics {
   result: AskResult;
 }
 
-export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelProps) {
+export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlanitenaryPanelProps) {
   const intelligence = useTripIntelligenceUi();
   const { user, isDemoUser } = useAuth();
   const [open, setOpen] = useState(false);
@@ -165,11 +175,30 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
   if (askNonce > seenAskNonce) {
     setSeenAskNonce(askNonce);
     setOpen(true);
+    /**
+     * A capability chosen elsewhere arrives as text in the composer, never as
+     * a sent question. The traveller can edit it, and no metered call happens
+     * until they press Send.
+     */
+    if (intelligence?.askPrefill) setQuestion(intelligence.askPrefill);
   }
 
   const suggestions = intelligence?.envelope.surface
     ? askSuggestionsFor(intelligence.envelope.surface)
     : ASK_SUGGESTIONS;
+
+  /**
+   * What the planner can do, phrased as questions.
+   *
+   * Drawn from the shared capability registry rather than a list kept here,
+   * so Ask and Smart Plan cannot end up describing different products. Shown
+   * only while the conversation is empty — once there is a thread, this space
+   * belongs to it.
+   */
+  const capabilityExamples = useMemo(
+    () => (itinerary ? capabilityAskExamples(plannerTripSignals(itinerary)) : []),
+    [itinerary],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -468,6 +497,31 @@ export function AskPlanitenaryPanel({ tripId, tripName }: AskPlanitenaryPanelPro
                         </button>
                       ))}
                     </div>
+                    {capabilityExamples.length > 0 && (
+                      <section className="mt-6 border-t border-slate-200 pt-4 dark:border-slate-800">
+                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                          You can ask me to…
+                        </h3>
+                        <ul className="mt-2 grid gap-1">
+                          {capabilityExamples.map((example) => (
+                            <li key={example}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // Types it, never sends it.
+                                  setQuestion(example);
+                                  inputRef.current?.focus();
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs leading-5 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+                              >
+                                <span aria-hidden="true" className="text-rose-500 dark:text-rose-400">•</span>
+                                <span className="min-w-0">{example}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
                     <div className="mt-6 flex items-start gap-3 border-t border-slate-200 pt-4 text-xs leading-5 text-slate-500 dark:border-slate-800 dark:text-slate-400">
                       <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
                       Routes, weather, places, events, and images come from connected tools. The assistant does not estimate them.

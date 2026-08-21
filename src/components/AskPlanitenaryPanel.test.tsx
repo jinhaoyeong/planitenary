@@ -157,7 +157,7 @@ describe('Ask Planitenary panel', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /^Smart plan$/ }));
-    await user.click(await screen.findByRole('button', { name: /^Ask anything$/ }));
+    await user.click(await screen.findByRole('button', { name: /Ask something else/ }));
     expect(mockedPlan).not.toHaveBeenCalled();
     expect(await screen.findByRole('heading', { name: 'Ask Planitenary' })).toBeInTheDocument();
   });

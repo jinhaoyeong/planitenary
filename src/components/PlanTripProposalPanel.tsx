@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowRight, Check, Clock3, Loader2, MapPin, Route, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, Clock3, Loader2, MapPin, Route, ShieldCheck, Sparkles, Undo2, X } from 'lucide-react';
 import { planTripProposal, type PlanTripResult } from '../lib/planTripProposal';
 import {
   applyItineraryChange,
@@ -20,6 +20,11 @@ import { resolvePlaceCards } from '../lib/placeCards';
 import { PlaceCard } from './PlaceCard';
 import type { StructuredPlaceCard } from '../../supabase/functions/_shared/placeReference';
 import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
+import {
+  availableCapabilities,
+  plannerTripSignals,
+  type PlannerCapability,
+} from '../lib/plannerCapabilities';
 import { tripBudgetHint } from '../lib/tripBudgetHint';
 import type { Itinerary } from '../data';
 
@@ -331,6 +336,50 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
     if (action.id === 'review-budget') onNavigate?.('budget');
   };
 
+  /**
+   * One capability, routed to whichever surface can answer it cheapest.
+   *
+   * A deterministic capability is arithmetic the device can already do, so it
+   * goes to the itinerary planner and costs nothing. Only the genuinely
+   * open-ended ones reach a model, and even then this pre-types the question
+   * rather than asking it — the traveller still presses Send.
+   */
+  const runCapability = (capability: PlannerCapability) => {
+    setOpen(false);
+    if (capability.route === 'ask') {
+      intelligence?.openAsk(capability.askExample);
+      return;
+    }
+    onNavigate?.('itinerary');
+    intelligence?.requestPlannerCapability(capability.id);
+  };
+
+  /**
+   * What this trip needs, minus the Ask card.
+   *
+   * `deriveSmartActions` always appends an `ask` action, which used to render
+   * as a full-width card duplicating the launcher in the header. The action
+   * itself still exists for any other caller; this surface shows it as a link
+   * at the foot instead.
+   */
+  const contextualActions = useMemo(
+    () => smartActions.filter((action) => action.id !== 'ask'),
+    [smartActions],
+  );
+
+  /**
+   * The catalogue, filtered to what this trip has the material for.
+   *
+   * Same registry Ask draws its examples from, so the two surfaces cannot
+   * describe different products.
+   */
+  const capabilities = useMemo(
+    () => (itinerary ? availableCapabilities(plannerTripSignals(itinerary)) : []),
+    [itinerary],
+  );
+  const undoCapability = capabilities.find((capability) => capability.route === 'history');
+  const helpCapabilities = capabilities.filter((capability) => capability.route !== 'history');
+
   const showingProposal = view === 'proposal';
   const title = showingProposal ? 'Plan my trip' : 'Smart plan';
 
@@ -408,32 +457,95 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                 >
                   {!showingProposal && !loading && (
                     <div className="mx-auto max-w-xl">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
-                        Based on your trip
-                      </p>
-                      <div className="mt-4 grid gap-2">
-                        {smartActions.map((action) => {
-                          const card = action.decisionKey ? placeCards.get(action.decisionKey) : undefined;
-                          return (
-                            <div key={action.id} className="grid gap-2">
+                      {/*
+                        Two sections, and the order is the point. What this trip
+                        needs comes first and stays short; the full catalogue sits
+                        below it as chips. Giving every capability a card was what
+                        made this drawer scroll.
+                      */}
+                      {contextualActions.length > 0 && (
+                        <>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                            Based on your trip
+                          </p>
+                          <div className="mt-3 grid gap-2">
+                            {contextualActions.map((action) => {
+                              const card = action.decisionKey ? placeCards.get(action.decisionKey) : undefined;
+                              return (
+                                <div key={action.id} className="grid gap-2">
+                                  <button
+                                    type="button"
+                                    aria-label={action.title}
+                                    onClick={() => runSmartAction(action)}
+                                    className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-left transition hover:border-rose-200 hover:bg-rose-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-rose-900 dark:hover:bg-rose-950/20"
+                                  >
+                                    <Sparkles className="h-4 w-4 shrink-0 text-rose-500 dark:text-rose-400" aria-hidden="true" />
+                                    <span className="min-w-0">
+                                      <span className="block text-sm font-semibold text-slate-950 dark:text-white">{action.title}</span>
+                                      <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">{action.reason}</span>
+                                    </span>
+                                  </button>
+                                  {/*
+                                    Outside the button, not inside it: the credit is
+                                    a link, and a link nested in a button is neither
+                                    valid HTML nor reachable by keyboard.
+                                  */}
+                                  {card && <PlaceCard card={card} as="div" />}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+
+                      {helpCapabilities.length > 0 && (
+                        <div className={contextualActions.length > 0 ? 'mt-7' : ''}>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                            Things I can help with
+                          </p>
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {helpCapabilities.map((capability) => (
                               <button
+                                key={capability.id}
                                 type="button"
-                                aria-label={action.title}
-                                onClick={() => runSmartAction(action)}
-                                className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-rose-200 hover:bg-rose-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-rose-900 dark:hover:bg-rose-950/20"
+                                onClick={() => runCapability(capability)}
+                                title={capability.description}
+                                className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-sm text-slate-700 transition hover:border-rose-200 hover:bg-rose-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-rose-900 dark:hover:bg-rose-950/20"
                               >
-                                <span className="block text-sm font-semibold text-slate-950 dark:text-white">{action.title}</span>
-                                <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{action.reason}</span>
+                                <span aria-hidden="true" className="text-rose-500 dark:text-rose-400">✦</span>
+                                <span className="min-w-0 truncate font-medium">{capability.label}</span>
                               </button>
-                              {/*
-                                Outside the button, not inside it: the credit is
-                                a link, and a link nested in a button is neither
-                                valid HTML nor reachable by keyboard.
-                              */}
-                              {card && <PlaceCard card={card} as="div" />}
-                            </div>
-                          );
-                        })}
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+                        {/*
+                          Ask keeps its own launcher in the header, so a full card
+                          here was a second door to the same room. A link is enough.
+                        */}
+                        <button
+                          type="button"
+                          onClick={() => { setOpen(false); intelligence?.openAsk(); }}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 transition hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-rose-400"
+                        >
+                          Ask something else <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                        {/*
+                          Undo appears only when something is reversible. A
+                          permanently greyed button teaches nothing except that
+                          the app has a button it will not let you press.
+                        */}
+                        {undoCapability && (
+                          <button
+                            type="button"
+                            onClick={() => runCapability(undoCapability)}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 transition hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-300 dark:hover:text-white"
+                          >
+                            <Undo2 className="h-3.5 w-3.5" aria-hidden="true" /> {undoCapability.label}
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}

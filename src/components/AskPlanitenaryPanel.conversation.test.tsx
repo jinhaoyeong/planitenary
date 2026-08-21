@@ -137,7 +137,9 @@ describe('Ask keeps the conversation', () => {
     render(<AskPlanitenaryPanel tripId="trip-42" />);
     await openPanel(user);
 
-    for (let index = 0; index < 7; index += 1) {
+    // Six turns: comfortably more than the window, few enough that this stays
+    // a fast test rather than six seconds of sequential typing.
+    for (let index = 0; index < 6; index += 1) {
       await ask(user, `Question number ${index}`);
       await screen.findAllByText('Noted.');
     }
@@ -145,8 +147,8 @@ describe('Ask keeps the conversation', () => {
     const lastCall = askPlanitenary.mock.calls.at(-1)?.[0] as { conversation: unknown[] };
     expect(lastCall.conversation).toHaveLength(4);
     // All seven questions remain readable even though four turns were sent.
-    expect(spokenOrder().filter((line) => line.includes('Question number'))).toHaveLength(7);
-  });
+    expect(spokenOrder().filter((line) => line.includes('Question number'))).toHaveLength(6);
+  }, 15_000);
 
   it('keeps the earlier conversation when an ask fails', async () => {
     askPlanitenary

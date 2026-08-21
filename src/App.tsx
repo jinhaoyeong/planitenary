@@ -1171,7 +1171,7 @@ function App() {
                   onApplied={adoptWrittenItinerary}
                   onNavigate={(tab) => handleTabChange(tab)}
                 />
-                <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} />
+                <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} itinerary={displayItinerary} />
               </>
             )}
             {/*
