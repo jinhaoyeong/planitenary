@@ -210,3 +210,73 @@ describe('the cost, which is as much a requirement as the answer', () => {
     expect(result.telemetry.aliasSurvivors).toBe(0);
   });
 });
+
+/**
+ * Canonicalisation needs a settlement and, ideally, the operator's own site.
+ *
+ * `canonical_places.city` and `country_code` are NOT NULL, and the
+ * official-source path reads `website` to find a lead — so a lookup that
+ * resolves an identity but carries neither leaves the fare research with
+ * nothing to do. Both come back in the same request; none of it is a second
+ * round trip.
+ */
+describe('the fields canonicalisation needs come back in the same request', () => {
+  it('asks for address details alongside names and tags', () => {
+    expect(exactPlaceLookupUrl('Tokyo Disneyland', 'JP')).toContain('addressdetails=1');
+  });
+
+  it('reads the settlement, country and published site', () => {
+    const [candidate] = parseExactPlaceCandidates([{
+      osm_type: 'way', osm_id: 1282875870, lat: '35.63', lon: '139.88',
+      namedetails: { name: '東京ディズニーランド', 'name:en': 'Tokyo Disneyland' },
+      address: { city: '浦安市', province: '千葉県', country_code: 'jp' },
+      extratags: { website: 'https://www.tokyodisneyresort.jp/tdl/', wikidata: 'Q843997' },
+    }]);
+    expect(candidate).toMatchObject({
+      city: '浦安市',
+      countryCode: 'JP',
+      website: 'https://www.tokyodisneyresort.jp/tdl/',
+      wikidata: 'Q843997',
+    });
+  });
+
+  it('falls back through town and village for smaller settlements', () => {
+    const [town] = parseExactPlaceCandidates([{
+      osm_type: 'node', osm_id: 1, namedetails: { name: 'Somewhere' },
+      address: { town: 'Hakone', country_code: 'jp' },
+    }]);
+    expect(town.city).toBe('Hakone');
+  });
+
+  it('refuses a site that is not an absolute http(s) url', () => {
+    const [candidate] = parseExactPlaceCandidates([{
+      osm_type: 'node', osm_id: 2, namedetails: { name: 'Somewhere' },
+      extratags: { website: 'javascript:alert(1)' },
+    }]);
+    expect(candidate.website).toBeUndefined();
+  });
+
+  /**
+   * The rule real data forced, made deliberate. Universal Studios Japan is
+   * mapped as a relation and a way under one Wikidata subject, and only the
+   * relation publishes usj.co.jp. Collapsing to the way would canonicalise the
+   * same place with nothing for the official-source path to read.
+   */
+  it('picks the record carrying the operator site when both are the same subject', () => {
+    const outcome = selectExactIdentity(parseExactPlaceCandidates([
+      {
+        osm_type: 'way', osm_id: 32560852, namedetails: { 'name:en': 'Universal Studios Japan', name: 'USJ' },
+        address: { city: '大阪市', country_code: 'jp' }, extratags: { wikidata: 'Q1375103' },
+      },
+      {
+        osm_type: 'relation', osm_id: 5695002, namedetails: { 'name:en': 'Universal Studios Japan', name: 'USJ' },
+        address: { city: '大阪市', country_code: 'jp' },
+        extratags: { wikidata: 'Q1375103', website: 'https://www.usj.co.jp/' },
+      },
+    ]), 'Universal Studios Japan');
+
+    expect(outcome.status).toBe('resolved');
+    expect(outcome.status === 'resolved' && outcome.place.providerPlaceId).toBe('r5695002');
+    expect(outcome.status === 'resolved' && outcome.place.website).toBe('https://www.usj.co.jp/');
+  });
+});

@@ -56,7 +56,7 @@ import {
   buildPlanningMaterial,
 } from './itineraryProposal.ts';
 import { listPersistedFlights } from './askGrounding.ts';
-import { readItineraryProposalCache } from './cache.ts';
+import { linkCanonicalPlaces, readItineraryProposalCache } from './cache.ts';
 import { resolveStructuredPlaceCards } from './placeCardResolver.ts';
 import { MAX_PLACE_CARDS, type StructuredPlaceCard } from './placeReference.ts';
 import {
@@ -1425,25 +1425,63 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
         }, LOOKUP_TIMEOUT_MS),
       );
       if (outcome.status !== 'resolved') return { status: outcome.status, telemetry };
+
+      /**
+       * Canonicalise last, and only the winner.
+       *
+       * Identity is settled before any of this runs — alias match, Wikidata
+       * dedup, one survivor — so exactly one row per hint is ever linked, and
+       * the raw candidate list never reaches the database. `linkCanonicalPlaces`
+       * reads existing links before inserting and upserts on
+       * `(provider, provider_place_id)`, so asking the same price twice reuses
+       * the row rather than duplicating the place.
+       *
+       * The website is carried across because `canonical_places.website` is
+       * where the official-source path looks for a lead. Storing it asserts
+       * nothing: that path still applies its own reachability, reseller and
+       * authority rules before a fare read from it can be shown.
+       */
+      const resolvedCity = outcome.place.city;
+      const resolvedCountry = outcome.place.countryCode || countryCode;
+      const coordinates = outcome.place.coordinates;
+      if (!context.cache || !resolvedCity || !resolvedCountry || !coordinates) {
+        // No canonical authority can be established, so this place stops here
+        // rather than being priced from a name and a URL.
+        return { status: 'missing' as const, telemetry };
+      }
+
+      const linked = await linkCanonicalPlaces(context.cache, outcome.place.provider, [{
+        providerPlaceId: outcome.place.providerPlaceId,
+        name: outcome.place.name,
+        city: resolvedCity,
+        countryCode: resolvedCountry,
+        coordinates,
+        ...(outcome.place.website ? { website: outcome.place.website } : {}),
+      }]).catch(() => new Map<string, string>());
+
+      if (!linked.get(outcome.place.providerPlaceId)) {
+        return { status: 'missing' as const, telemetry };
+      }
+
       /**
        * Registering the winner is what turns a provider object into an id the
        * tools will accept. It is the same door `search_places` uses — the rule
-       * is still "an id the server put in this turn's index" — and the
-       * canonical binding is revalidated downstream, not here.
+       * is still "an id the server put in this turn's index".
        */
       const place = {
         id: `osm-${outcome.place.providerPlaceId}`,
         name: outcome.place.name,
         aliases: outcome.place.aliases,
-        countryCode,
-        coordinates: outcome.place.coordinates,
+        city: resolvedCity,
+        countryCode: resolvedCountry,
+        coordinates,
         provider: outcome.place.provider,
         providerPlaceId: outcome.place.providerPlaceId,
       };
       registerPlace(index, place);
       return {
         status: 'resolved' as const,
-        place: { id: place.id, name: place.name, provider: place.provider, providerPlaceId: place.providerPlaceId },
+        place: { id: place.id, name: place.name, city: place.city, provider: place.provider, providerPlaceId: place.providerPlaceId },
         telemetry,
       };
     },

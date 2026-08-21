@@ -64,6 +64,17 @@ export interface ExactPlaceCandidate {
   coordinates?: [number, number];
   /** Wikidata's identifier for the subject, when the object carries one. */
   wikidata?: string;
+  /** Settlement the object sits in. `canonical_places.city` is NOT NULL. */
+  city?: string;
+  countryCode?: string;
+  /**
+   * The site the object's mappers published for it.
+   *
+   * Carried, never trusted: it is a lead for the official-source path, which
+   * applies its own reachability, reseller and authority rules before any fare
+   * read from it is shown. Nothing here decides that a URL is official.
+   */
+  website?: string;
 }
 
 export type ExactPlaceOutcome =
@@ -99,6 +110,9 @@ export function exactPlaceLookupUrl(name: string, countryCode?: string): string 
     limit: String(MAX_CANDIDATES),
     namedetails: '1',
     extratags: '1',
+    // The canonical record requires a settlement, so ask in the same request
+    // rather than paying for a second lookup to find one.
+    addressdetails: '1',
   });
   const country = (countryCode || '').trim().toLowerCase();
   // Scoping to the trip's country keeps the index search tight and stops a
@@ -136,6 +150,13 @@ export function parseExactPlaceCandidates(payload: unknown): ExactPlaceCandidate
     const lat = Number(hit.lat);
     const lng = Number(hit.lon);
     const extra = asRecord(hit.extratags) ?? {};
+    const address = asRecord(hit.address) ?? {};
+    const settlement = ['city', 'town', 'village', 'municipality', 'county']
+      .map((key) => address[key])
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    const country = typeof address.country_code === 'string' ? address.country_code.trim().toUpperCase() : undefined;
+    const site = [extra.website, extra['contact:website']]
+      .find((value): value is string => typeof value === 'string' && /^https?:\/\//i.test(value.trim()));
     const wikidata = typeof extra.wikidata === 'string' && /^Q\d+$/.test(extra.wikidata.trim())
       ? extra.wikidata.trim()
       : undefined;
@@ -150,6 +171,9 @@ export function parseExactPlaceCandidates(payload: unknown): ExactPlaceCandidate
       aliases: aliases.slice(0, 12),
       ...(Number.isFinite(lat) && Number.isFinite(lng) ? { coordinates: [lat, lng] as [number, number] } : {}),
       ...(wikidata ? { wikidata } : {}),
+      ...(settlement ? { city: settlement.trim() } : {}),
+      ...(country && /^[A-Z]{2}$/.test(country) ? { countryCode: country } : {}),
+      ...(site ? { website: site.trim().slice(0, 500) } : {}),
     });
   }
   return candidates;
@@ -164,8 +188,18 @@ export function parseExactPlaceCandidates(payload: unknown): ExactPlaceCandidate
  * a way is the next best; a node is a point someone dropped.
  */
 const REPRESENTATION_ORDER = ['r', 'w', 'n'];
-const preferRepresentation = (left: ExactPlaceCandidate, right: ExactPlaceCandidate): number =>
-  REPRESENTATION_ORDER.indexOf(left.providerPlaceId[0]) - REPRESENTATION_ORDER.indexOf(right.providerPlaceId[0]);
+const preferRepresentation = (left: ExactPlaceCandidate, right: ExactPlaceCandidate): number => {
+  /**
+   * Among candidates already proven to be one subject, prefer the record that
+   * carries a site. Universal Studios Japan is mapped as a relation and a way;
+   * only the relation publishes usj.co.jp, and choosing the other one would
+   * canonicalise the same place with nothing for the official-source path to
+   * read. Representation order breaks the remaining ties.
+   */
+  const bySite = Number(Boolean(right.website)) - Number(Boolean(left.website));
+  if (bySite !== 0) return bySite;
+  return REPRESENTATION_ORDER.indexOf(left.providerPlaceId[0]) - REPRESENTATION_ORDER.indexOf(right.providerPlaceId[0]);
+};
 
 /**
  * Which candidate, if any, is the place that was asked for.
