@@ -27,6 +27,9 @@ describe('Ask Planitenary panel', () => {
   beforeEach(() => {
     askPlanitenary.mockReset();
     mockedPlan.mockReset();
+    // The thread persists per trip now, so without this each test would
+    // open onto the previous one’s conversation.
+    localStorage.clear();
   });
 
   it('opens as a read-only assistant and sends the current trip id', async () => {
@@ -44,6 +47,12 @@ describe('Ask Planitenary panel', () => {
 
     await user.click(screen.getByRole('button', { name: /ask planitenary/i }));
     expect(screen.getByRole('dialog')).toHaveTextContent(/cannot change your plan/i);
+    const scrollRegion = screen.getByRole('dialog').querySelector<HTMLElement>('[data-lenis-prevent]');
+    expect(scrollRegion).not.toBeNull();
+    expect(scrollRegion).toHaveAttribute('data-lenis-prevent-wheel');
+    expect(scrollRegion).toHaveAttribute('data-lenis-prevent-touch');
+    expect(scrollRegion).toHaveStyle({ touchAction: 'pan-y' });
+    expect(document.body.style.overflow).toBe('hidden');
 
     await user.click(screen.getByRole('button', { name: 'What should we do tonight?' }));
     await user.click(screen.getByRole('button', { name: 'Send question' }));
@@ -118,7 +127,9 @@ describe('Ask Planitenary panel', () => {
       conversation: [],
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Ask another question' }));
+    expect(await screen.findByText('Recorded spending is RM420.')).toBeInTheDocument();
+
+    // Straight into the composer: no reset step, and nothing cleared.
     await user.type(screen.getByLabelText('Question for Planitenary'), 'Which category?');
     await user.click(screen.getByRole('button', { name: 'Send question' }));
 
@@ -128,6 +139,12 @@ describe('Ask Planitenary panel', () => {
       uiContext: expect.objectContaining({ surface: 'budget' }),
       conversation: [{ question: 'Where am I spending most?', answer: 'Recorded spending is RM420.' }],
     });
+
+    // Both turns remain on screen, in order.
+    expect(await screen.findByText('The food category is the largest recorded spend.')).toBeInTheDocument();
+    expect(screen.getByText('Where am I spending most?')).toBeInTheDocument();
+    expect(screen.getByText('Recorded spending is RM420.')).toBeInTheDocument();
+    expect(screen.getByText('Which category?')).toBeInTheDocument();
   });
 
   it('opens Ask Planitenary from Smart plan without generating a proposal', async () => {

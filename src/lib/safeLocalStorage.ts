@@ -28,6 +28,10 @@ export const HISTORY_SOFT_LIMIT_BYTES = 512_000;
  */
 export const TRIP_SCOPED_KEY_PREFIXES = [
   'itinerary-',
+  // Ask Planitenary conversation, one entry per account+trip. Listed so the
+  // orphan sweep reclaims it when a trip is deleted on another device, the
+  // same way it reclaims that trip’s itinerary and budget caches.
+  'ask-chat-',
   'budget-meta-',
   'budget-',
   'checklist-data-',

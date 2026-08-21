@@ -55,7 +55,12 @@ const ask = async () => {
 };
 
 describe('structured place cards in Ask', () => {
-  beforeEach(() => { askPlanitenary.mockReset(); });
+  beforeEach(() => {
+    askPlanitenary.mockReset();
+    // Cards stay attached to their answer in a persisted thread, so a
+    // leftover conversation would put the previous test’s card on screen.
+    localStorage.clear();
+  });
 
   it('shows the place with its real photograph and the credit that licences it', async () => {
     askPlanitenary.mockResolvedValue(answered([cardFor()]));
