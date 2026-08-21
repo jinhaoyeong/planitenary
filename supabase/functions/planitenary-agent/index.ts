@@ -823,6 +823,9 @@ Deno.serve(async (request) => {
     ],
   };
 
+  const requiresPriceResearch = isAskPriceQuestion(question)
+    && (askGrounding?.evidence.priceFacts.length ?? 0) === 0;
+
   const contextChars = JSON.stringify(context).length + question.length;
   if (contextChars > limits.maxInputChars) {
     return json({ error: `Request too large: ${contextChars} characters, limit ${limits.maxInputChars}.` }, 413);
@@ -849,7 +852,7 @@ Deno.serve(async (request) => {
    * area text is search input and nothing more — no canonical place is
    * constructed from "Shinjuku".
    */
-  const preSearch = requiresPlaceDiscovery && askGrounding
+  const preSearch = (requiresPlaceDiscovery || requiresPriceResearch) && askGrounding
     ? await (async () => {
       // The trip's own city is the fallback, so a question naming no area
       // still searches somewhere real rather than nowhere.
@@ -872,6 +875,7 @@ Deno.serve(async (request) => {
       seededEvidence: askGrounding?.evidence,
       answerConstraints: askGrounding ? { dayCount: askGrounding.dayCount } : undefined,
       requiresPlaceDiscovery,
+      requiresPriceResearch,
       seededFindings: preSearch
         ? [preSearch.ok === true
           ? { tool: 'search_places', ok: true, result: preSearch.result }

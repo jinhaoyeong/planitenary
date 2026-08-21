@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AGENT_LIMITS, emptyEvidence } from '../../supabase/functions/_shared/agentContract';
 import { runAgent } from '../../supabase/functions/_shared/agentRuntime';
-import type { ModelCallOutcome, ToolOutcome } from '../../supabase/functions/_shared/agentRuntime';
+import type { AgentModelPayload, ModelCallOutcome, ToolOutcome } from '../../supabase/functions/_shared/agentRuntime';
 import type { AskPriceFact } from '../../supabase/functions/_shared/askPriceFacts';
 
 const ask = {
@@ -115,5 +115,111 @@ describe('a price the run established reaches the caller', () => {
 
     expect(run.status).toBe('refused');
     expect(run.priceFacts).toEqual([]);
+  });
+});
+
+describe('a price question must perform official research before answering', () => {
+  it('declines an offer to fetch later, then accepts an answer after admission research', async () => {
+    const callModel = vi.fn(async (payload: AgentModelPayload): Promise<ModelCallOutcome> => {
+      if (payload.round === 1) {
+        return { ok: true, value: { answer: 'Would you like me to fetch the current price?' } };
+      }
+      if (payload.round === 2) {
+        return {
+          ok: true,
+          value: { tool_calls: [{ tool: 'get_admission_prices', args: { placeIds: ['google:usj'] } }] },
+        };
+      }
+      return {
+        ok: true,
+        value: { answer: 'Adult admission is ¥8,600.', citations: [usj.sourceUrl] },
+      };
+    });
+    const executeTool = vi.fn(async (): Promise<ToolOutcome> => ({
+      ok: true,
+      result: {
+        places: [{
+          name: usj.name,
+          admission: {
+            fares: usj.fares,
+            source: usj.source,
+            sourceUrl: usj.sourceUrl,
+            retrievedAt: usj.retrievedAt,
+          },
+        }],
+      },
+    }));
+
+    const run = await runAgent(ask, {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool,
+      requiresPriceResearch: true,
+    });
+
+    expect(run.status).toBe('answered');
+    expect(run.priceFacts).toEqual([usj]);
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(callModel.mock.calls[0][0].requiresPriceResearch).toBe(true);
+    expect(callModel.mock.calls[1][0].findings).toContainEqual(expect.objectContaining({
+      tool: 'model',
+      ok: false,
+      detail: expect.stringContaining('get_admission_prices'),
+    }));
+    expect(run.diagnostics[0].answerGate).toBe('price-research-required');
+  });
+
+  it('allows an honest unavailable answer after an official lookup returns no fare', async () => {
+    const callModel = vi.fn(async (payload: AgentModelPayload): Promise<ModelCallOutcome> => ({
+      ok: true,
+      value: payload.round === 1
+        ? { tool_calls: [{ tool: 'get_admission_prices', args: { placeIds: ['google:usj'] } }] }
+        : { answer: 'I could not retrieve a current official fare.' },
+    }));
+
+    const run = await runAgent(ask, {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async (): Promise<ToolOutcome> => ({ ok: true, result: { places: [] } })),
+      requiresPriceResearch: true,
+    });
+
+    expect(run.status).toBe('answered');
+    expect(run.priceFacts).toEqual([]);
+  });
+
+  it('stops after two skipped research rounds without accepting the answer', async () => {
+    const callModel = answers('I do not have the exact price.');
+
+    const run = await runAgent(ask, {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async (): Promise<ToolOutcome> => ({ ok: true, result: {} })),
+      requiresPriceResearch: true,
+    });
+
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(run.status).toBe('partial');
+    expect(run.answer).toBeUndefined();
+    expect(run.detail).toMatch(/official admission-price lookup/i);
+    expect(run.diagnostics.map((entry) => entry.answerGate)).toEqual([
+      'price-research-required',
+      'price-research-required',
+    ]);
+  });
+
+  it('does not require another lookup when grounding already supplied a fare', async () => {
+    const callModel = answers('Adult admission is ¥8,600.', [usj.sourceUrl!]);
+
+    const run = await runAgent(ask, {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async (): Promise<ToolOutcome> => ({ ok: true, result: {} })),
+      seededEvidence: seededWith([usj]),
+      requiresPriceResearch: true,
+    });
+
+    expect(run.status).toBe('answered');
+    expect(callModel).toHaveBeenCalledTimes(1);
   });
 });

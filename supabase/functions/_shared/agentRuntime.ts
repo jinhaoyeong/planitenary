@@ -129,7 +129,7 @@ export interface AgentRoundDiagnostic {
   acceptedToolCalls: number;
   rejectedToolCalls: AgentToolRejection[];
   /** Set when the round produced an answer the server declined to accept. */
-  answerGate?: 'place-discovery-required';
+  answerGate?: 'place-discovery-required' | 'price-research-required';
 }
 
 export type ModelCallOutcome =
@@ -167,6 +167,8 @@ export interface AgentRunDeps {
    * can compel one.
    */
   requiresPlaceDiscovery?: boolean;
+  /** This question may not be answered until official admission research ran. */
+  requiresPriceResearch?: boolean;
   /**
    * Tool results the server gathered before the first model round.
    *
@@ -204,6 +206,8 @@ export interface AgentModelPayload {
    * only decides whether compliance costs one paid round or three.
    */
   requiresPlaceDiscovery: boolean;
+  /** True when a price question requires an official admission lookup. */
+  requiresPriceResearch: boolean;
 }
 
 /** The catalogue offered to the model, derived from the one dispatch table. */
@@ -216,6 +220,7 @@ export const toolCatalogue = (): Array<{ name: string; description: string }> =>
  * search or ran out of rounds: from the outside those are the same outcome.
  */
 const DISCOVERY_UNMET = 'I could not confirm a real place for that request, so I have not recommended one.';
+const PRICE_RESEARCH_UNMET = 'I could not complete an official admission-price lookup for that request.';
 
 /** One provider result cannot consume the next round's whole input budget. */
 const MAX_TOOL_RESULT_CHARS = 4_000;
@@ -290,6 +295,8 @@ export async function runAgent(
   }
 
   const requiresPlaceDiscovery = deps.requiresPlaceDiscovery === true;
+  const requiresPriceResearch = deps.requiresPriceResearch === true;
+  let priceResearchAttempted = evidence.priceFacts.length > 0;
   let placeDiscoveryAttempted = deps.seededPlaceDiscovery?.attempted === true;
   let placeDiscoverySucceeded = deps.seededPlaceDiscovery?.succeeded === true;
   let placeDiscoverySource: 'server-presearch' | 'model-tool' | undefined = deps.seededPlaceDiscovery
@@ -351,6 +358,7 @@ export async function runAgent(
       finalRound,
       round: budget.modelRounds + 1,
       requiresPlaceDiscovery,
+      requiresPriceResearch,
     };
     let payloadChars: number;
     try {
@@ -399,8 +407,12 @@ export async function runAgent(
      * recovery — answer, then search, then answer — is never charged: its
      * middle round dispatches a tool.
      */
+    const requiredResearchOutstanding = (): boolean =>
+      (requiresPlaceDiscovery && !placeDiscoverySucceeded)
+      || (requiresPriceResearch && !priceResearchAttempted);
+
     const wastedRound = (): boolean => {
-      if (!requiresPlaceDiscovery || placeDiscoverySucceeded) return false;
+      if (!requiredResearchOutstanding()) return false;
       discoveryNoncompliance += 1;
       return discoveryNoncompliance >= MAX_DISCOVERY_NONCOMPLIANCE;
     };
@@ -431,6 +443,16 @@ export async function runAgent(
             : 'This question asks for a place to visit. Call search_places first, then answer using only the places it returns.',
         });
         if (wastedRound()) return summarise('partial', { detail: DISCOVERY_UNMET });
+        continue;
+      }
+      if (requiresPriceResearch && !priceResearchAttempted) {
+        roundDiagnostic.answerGate = 'price-research-required';
+        findings.push({
+          tool: 'model',
+          ok: false,
+          detail: 'This is a price question. Use the trusted ids from search_places to call get_admission_prices before answering. If no official fare is returned, say that plainly.',
+        });
+        if (wastedRound()) return summarise('partial', { detail: PRICE_RESEARCH_UNMET });
         continue;
       }
       return summarise('answered', {
@@ -491,6 +513,7 @@ export async function runAgent(
         placeDiscoveryAttempted = true;
         placeDiscoverySource ??= 'model-tool';
       }
+      if (call.tool === 'get_admission_prices') priceResearchAttempted = true;
 
       let result: ToolOutcome;
       try {
@@ -516,6 +539,8 @@ export async function runAgent(
   return summarise('partial', {
     detail: requiresPlaceDiscovery && !placeDiscoverySucceeded
       ? DISCOVERY_UNMET
+      : requiresPriceResearch && !priceResearchAttempted
+        ? PRICE_RESEARCH_UNMET
       : 'The assistant reached its limit for this question before finishing.',
   });
 }
