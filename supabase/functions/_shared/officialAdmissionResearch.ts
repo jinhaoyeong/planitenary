@@ -36,11 +36,30 @@ export interface OfficialAdmissionLookup {
   id: string;
   name: string;
   canonicalPlaceId?: string;
-  status: 'verified' | 'no-price' | 'unavailable' | 'rejected-source';
+  /**
+   * `fetch-error` is reported separately from `no-price` because they call for
+   * opposite responses: a page that could not be read may publish a fare
+   * perfectly well, while one that was read and published none is a fact about
+   * the operator. Collapsing them is what made this path unreadable from
+   * production — every failure looked the same.
+   */
+  status: 'verified' | 'no-price' | 'unavailable' | 'rejected-source' | 'fetch-error';
   admission?: PlaceAdmission;
   sourceUrl?: string;
   retrievedAt?: string;
   note: string;
+  /**
+   * The URL research actually attempted, whatever the outcome.
+   *
+   * `sourceUrl` only exists once a fare has been read, so on every failing
+   * branch the address vanished and "no fare" could not be told apart from
+   * "wrong page". Diagnostics only: never shown to a traveller.
+   */
+  attemptedUrl?: string;
+  /** Whether the operator page was actually read this run. */
+  fetched?: boolean;
+  /** Fare-bearing documents the extractor produced from that page. */
+  documentCount?: number;
 }
 
 const authorityKey = (provider: string | undefined, providerPlaceId: string | undefined): string | undefined =>
@@ -74,9 +93,10 @@ const cachedOfficialDocuments = (
 
 const lookupFromAdmission = (
   target: OfficialAdmissionTarget,
-  authority: { canonicalPlaceId: string; name: string },
+  authority: { canonicalPlaceId: string; name: string; website?: string },
   admission: PlaceAdmission | undefined,
   fallbackNote: string,
+  diagnostics: { fetched?: boolean; documentCount?: number } = {},
 ): OfficialAdmissionLookup => {
   const hasFare = Boolean(admission?.class === 'free' || admission?.fares?.length);
   return {
@@ -90,6 +110,9 @@ const lookupFromAdmission = (
     note: hasFare
       ? 'Admission evidence was read from the operator source.'
       : fallbackNote,
+    attemptedUrl: authority.website,
+    ...(diagnostics.fetched === undefined ? {} : { fetched: diagnostics.fetched }),
+    ...(diagnostics.documentCount === undefined ? {} : { documentCount: diagnostics.documentCount }),
   };
 };
 
@@ -179,6 +202,8 @@ export async function researchOfficialAdmissions(
         canonicalPlaceId: authority.canonicalPlaceId,
         status: 'unavailable',
         note: 'No safe official website is stored for this attraction.',
+        attemptedUrl: authority.website,
+        fetched: false,
       });
       continue;
     }
@@ -189,6 +214,8 @@ export async function researchOfficialAdmissions(
         canonicalPlaceId: authority.canonicalPlaceId,
         status: 'rejected-source',
         note: 'The stored website is a map, guide or reseller domain, not an operator source.',
+        attemptedUrl: authority.website,
+        fetched: false,
       });
       continue;
     }
@@ -201,7 +228,13 @@ export async function researchOfficialAdmissions(
         first.sourceUrl,
         first.retrievedAt,
       );
-      results.push(lookupFromAdmission(target, authority, admission, 'The current official page was checked but did not publish a machine-readable fare.'));
+      results.push(lookupFromAdmission(
+        target,
+        authority,
+        admission,
+        'The current official page was checked but did not publish a machine-readable fare.',
+        { fetched: true, documentCount: cachedEntries.length },
+      ));
       continue;
     }
     if (freshProbes.has(probeKey(authority.canonicalPlaceId, OFFICIAL_ADMISSION_PROBE))) {
@@ -211,6 +244,9 @@ export async function researchOfficialAdmissions(
         canonicalPlaceId: authority.canonicalPlaceId,
         status: 'no-price',
         note: 'The official source was checked within the freshness window but no verified fare was found.',
+        attemptedUrl: authority.website,
+        fetched: true,
+        documentCount: 0,
       });
       continue;
     }
@@ -224,6 +260,19 @@ export async function researchOfficialAdmissions(
     if (evidence.fetched) {
       await writeEvidenceProbes(client, [{ canonicalPlaceId: authority.canonicalPlaceId, source: OFFICIAL_ADMISSION_PROBE }], expiresAt);
     }
+    if (!evidence.fetched) {
+      results.push({
+        id: target.id,
+        name: authority.name,
+        canonicalPlaceId: authority.canonicalPlaceId,
+        status: 'fetch-error',
+        note: 'The operator page could not be read this run, so no fare could be established either way.',
+        attemptedUrl: authority.website,
+        fetched: false,
+        documentCount: 0,
+      });
+      continue;
+    }
     results.push(lookupFromAdmission(
       target,
       authority,
@@ -231,6 +280,7 @@ export async function researchOfficialAdmissions(
       evidence.admission?.class === 'ticketed'
         ? 'The official source confirms admission is ticketed but did not publish a verified fare.'
         : 'The current official fare could not be verified from the operator source.',
+      { fetched: true, documentCount: documents.length },
     ));
   }
   return results;

@@ -26,6 +26,25 @@ export interface AskPriceResearchResult {
   unresolved: string[];
   /** What the lookups actually cost, so this path is never guessed at again. */
   lookups: ExactLookupTelemetry[];
+  /**
+   * Per-attraction outcome of the official fare research.
+   *
+   * Diagnostics, never traveller-facing. Without it every failure reaching
+   * production looked identical — a page that could not be read, a reseller
+   * domain and an operator publishing no machine-readable fare all arrived as
+   * "priceFacts: 0", which is three different problems wearing one face.
+   */
+  admissions: AskAdmissionDiagnostic[];
+}
+
+export interface AskAdmissionDiagnostic {
+  name: string;
+  status: string;
+  attemptedUrl?: string;
+  sourceUrl?: string;
+  fetched?: boolean;
+  documentCount?: number;
+  note?: string;
 }
 
 export interface AskPriceResearchDeps {
@@ -158,6 +177,7 @@ export async function researchAskAdmissionPrices(input: {
       findings,
       trace,
       lookups,
+      admissions: [],
       unresolved: trace.filter((entry) => entry.status !== 'resolved').map((entry) => entry.hint),
     };
   }
@@ -167,6 +187,28 @@ export async function researchAskAdmissionPrices(input: {
     ? { tool: 'get_admission_prices', ok: true, result: admission.result }
     : { tool: 'get_admission_prices', ok: false, detail: admission.detail });
   const priceFacts = admission.ok ? priceFactsFromValue(admission.result) : [];
+  /**
+   * Read off the same result the model is given, rather than a second pass:
+   * these are the researcher's own reported outcomes, not a re-derivation.
+   */
+  const admissions: AskAdmissionDiagnostic[] = (() => {
+    const result = admission.ok ? admission.result as Record<string, unknown> : null;
+    const places = Array.isArray(result?.places) ? result.places : [];
+    return places.slice(0, 6).map((entry) => {
+      const row = (entry ?? {}) as Record<string, unknown>;
+      const text = (value: unknown, max: number) =>
+        typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : undefined;
+      return {
+        name: text(row.name, 120) ?? 'unknown',
+        status: text(row.status, 40) ?? 'unknown',
+        attemptedUrl: text(row.attemptedUrl, 300),
+        sourceUrl: text(row.sourceUrl, 300),
+        ...(typeof row.fetched === 'boolean' ? { fetched: row.fetched } : {}),
+        ...(typeof row.documentCount === 'number' ? { documentCount: row.documentCount } : {}),
+        note: text(row.note, 200),
+      };
+    });
+  })();
   for (const entry of trace) {
     if (entry.status === 'resolved') entry.status = 'researched';
   }
@@ -176,6 +218,7 @@ export async function researchAskAdmissionPrices(input: {
     findings,
     trace,
     lookups,
+    admissions,
     unresolved: trace.filter((entry) => entry.status === 'ambiguous' || entry.status === 'missing')
       .map((entry) => entry.hint),
   };

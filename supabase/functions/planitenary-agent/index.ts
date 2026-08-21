@@ -687,7 +687,7 @@ Deno.serve(async (request) => {
       evidence: { citableUrls: 0, routeMinutes: 0, knownPlaceNames: 0 },
       placeDiscovery: { required: requiresPlaceDiscovery, attempted: false, succeeded: false },
       diagnostics: [],
-      priceResearch: { attempted: true, trace: priceResearch.trace, unresolved: priceResearch.unresolved, lookups: priceResearch.lookups },
+      priceResearch: { attempted: true, trace: priceResearch.trace, unresolved: priceResearch.unresolved, lookups: priceResearch.lookups, admissions: priceResearch.admissions },
       spend: await session.report(),
     });
   }
@@ -1065,7 +1065,7 @@ Deno.serve(async (request) => {
      */
     diagnostics: run.diagnostics,
     ...(priceResearch
-      ? { priceResearch: { attempted: true, trace: priceResearch.trace, unresolved: priceResearch.unresolved, lookups: priceResearch.lookups } }
+      ? { priceResearch: { attempted: true, trace: priceResearch.trace, unresolved: priceResearch.unresolved, lookups: priceResearch.lookups, admissions: priceResearch.admissions } }
       : {}),
     grounding: askGrounding ? groundingEnvelope(askGrounding) : undefined,
     /**

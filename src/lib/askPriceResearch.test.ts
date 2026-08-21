@@ -186,3 +186,109 @@ describe('server-owned Ask admission research', () => {
     expect(researchAdmissionPrices).toHaveBeenCalledWith(['recent-place-1', 'recent-place-2']);
   });
 });
+
+/**
+ * Why a fare is missing, visible from production.
+ *
+ * Four different failures were arriving as one symptom — `priceFacts: 0` — so
+ * the only way to tell "the page could not be read" from "the operator
+ * publishes no machine-readable fare" was to guess. These assert that each
+ * outcome survives all the way to something an operator can read, while the
+ * traveller still sees the same fail-closed sentence.
+ */
+describe('per-attraction research outcomes are observable', () => {
+  const lookupTwo = () => lookupStub({
+    'Tokyo Disneyland': { id: 'osm-w1', city: 'Urayasu' },
+    'Universal Studios Japan': { id: 'osm-r2', city: 'Osaka' },
+  });
+
+  const researchWith = (places: unknown[]) => researchAskAdmissionPrices({
+    question: 'How much are Tokyo Disneyland and Universal Studios Japan tickets?',
+    tripCities: ['Osaka'],
+  }, {
+    resolveTrustedPlaceHints: ([hint]) => [missing(hint)],
+    lookupExactPlaceByName: lookupTwo(),
+    researchAdmissionPrices: vi.fn(async () => ({ ok: true as const, result: { places } })),
+  });
+
+  it('reports a verified fare with its source', async () => {
+    const result = await researchWith([{
+      name: 'Tokyo Disneyland', status: 'verified', fetched: true, documentCount: 2,
+      attemptedUrl: 'https://www.tokyodisneyresort.jp/tdl/',
+      sourceUrl: 'https://www.tokyodisneyresort.jp/tdl/ticket/',
+      admission: { fares: [{ audience: 'adult', amount: 10_900, currency: 'JPY' }], source: 'official-website', sourceUrl: 'https://www.tokyodisneyresort.jp/tdl/ticket/', retrievedAt: '2026-08-22T00:00:00.000Z' },
+      note: 'Admission evidence was read from the operator source.',
+    }]);
+    expect(result.admissions[0]).toMatchObject({ status: 'verified', fetched: true, documentCount: 2 });
+    expect(result.admissions[0].sourceUrl).toContain('tokyodisneyresort.jp');
+  });
+
+  /** The page was read; the operator simply published nothing machine-readable. */
+  it('distinguishes a page that was read but published no fare', async () => {
+    const result = await researchWith([{
+      name: 'Universal Studios Japan', status: 'no-price', fetched: true, documentCount: 0,
+      attemptedUrl: 'https://www.usj.co.jp/',
+      note: 'The current official fare could not be verified from the operator source.',
+    }]);
+    expect(result.admissions[0]).toMatchObject({ status: 'no-price', fetched: true, documentCount: 0 });
+    expect(result.admissions[0].attemptedUrl).toBe('https://www.usj.co.jp/');
+    expect(result.priceFacts).toEqual([]);
+  });
+
+  /** A page that could not be read is not evidence that there is no fare. */
+  it('distinguishes a page that could not be read at all', async () => {
+    const result = await researchWith([{
+      name: 'Tokyo Disneyland', status: 'fetch-error', fetched: false, documentCount: 0,
+      attemptedUrl: 'https://www.tokyodisneyresort.jp/tdl/',
+      note: 'The operator page could not be read this run.',
+    }]);
+    expect(result.admissions[0]).toMatchObject({ status: 'fetch-error', fetched: false });
+  });
+
+  it('distinguishes no stored source from a rejected one', async () => {
+    const none = await researchWith([{ name: 'A', status: 'unavailable', fetched: false, note: 'No safe official website is stored.' }]);
+    expect(none.admissions[0].status).toBe('unavailable');
+    const reseller = await researchWith([{ name: 'B', status: 'rejected-source', fetched: false, attemptedUrl: 'https://tickets.example/resell', note: 'reseller domain' }]);
+    expect(reseller.admissions[0]).toMatchObject({ status: 'rejected-source', attemptedUrl: 'https://tickets.example/resell' });
+  });
+
+  it('keeps two attractions’ outcomes independent', async () => {
+    const result = await researchWith([
+      { name: 'Tokyo Disneyland', status: 'no-price', fetched: true, documentCount: 0 },
+      { name: 'Universal Studios Japan', status: 'fetch-error', fetched: false, documentCount: 0 },
+    ]);
+    expect(result.admissions.map((entry) => `${entry.name}:${entry.status}`))
+      .toEqual(['Tokyo Disneyland:no-price', 'Universal Studios Japan:fetch-error']);
+  });
+
+  /** The whole point: observable even though the traveller gets nothing. */
+  it('is present when priceFacts is empty', async () => {
+    const result = await researchWith([{ name: 'A', status: 'no-price', fetched: true, documentCount: 0 }]);
+    expect(result.priceFacts).toEqual([]);
+    expect(result.admissions).toHaveLength(1);
+  });
+
+  it('is empty rather than absent when no identity was resolved', async () => {
+    const result = await researchAskAdmissionPrices({
+      question: 'How much is Somewhere Unfindable?',
+      tripCities: ['Osaka'],
+    }, {
+      resolveTrustedPlaceHints: ([hint]) => [missing(hint)],
+      lookupExactPlaceByName: lookupStub({}),
+      researchAdmissionPrices: vi.fn(),
+    });
+    expect(result.admissions).toEqual([]);
+  });
+
+  it('bounds what it reports and never carries a payload', async () => {
+    const result = await researchWith([{
+      name: 'x'.repeat(500), status: 'no-price', note: 'y'.repeat(500),
+      attemptedUrl: 'https://example.test/' + 'z'.repeat(500),
+      html: '<html>enormous</html>',
+    }]);
+    expect(result.admissions[0].name.length).toBeLessThanOrEqual(120);
+    expect(result.admissions[0].note!.length).toBeLessThanOrEqual(200);
+    expect(result.admissions[0].attemptedUrl!.length).toBeLessThanOrEqual(300);
+    expect(JSON.stringify(result.admissions)).not.toContain('enormous');
+  });
+});
