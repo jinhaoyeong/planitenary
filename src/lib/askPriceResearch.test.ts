@@ -18,22 +18,30 @@ const fare = (name: string, amount: number, sourceUrl: string) => ({
 
 const missing = (hint: string): TrustedPlaceHintResolution => ({ hint, status: 'missing' });
 
+const telemetry = (hint: string, status: 'resolved' | 'ambiguous' | 'missing' | 'timeout') => ({
+  hint, providerRequests: 1, elapsedMs: 12, candidates: status === 'resolved' ? 3 : 0,
+  aliasSurvivors: status === 'resolved' ? 1 : 0, status,
+});
+
+/** One bounded lookup per name, as the Edge budget requires. */
+const lookupStub = (found: Record<string, { id: string; city?: string }>, log?: string[]) =>
+  vi.fn(async (hint: string) => {
+    log?.push(`lookup:${hint}`);
+    const place = found[hint];
+    return place
+      ? { status: 'resolved' as const, place: { id: place.id, name: hint, city: place.city }, telemetry: telemetry(hint, 'resolved') }
+      : { status: 'missing' as const, telemetry: telemetry(hint, 'missing') };
+  });
+
 describe('server-owned Ask admission research', () => {
   it('extracts a single named attraction and researches it before any model exists', async () => {
     const events: string[] = [];
-    let resolved = false;
     const result = await researchAskAdmissionPrices({
       question: 'How much is Tokyo Disneyland?',
       tripCities: ['Osaka'],
     }, {
-      resolveTrustedPlaceHints: ([hint]) => resolved
-        ? [{ hint, status: 'resolved', place: { id: 'google:tdl', name: 'Tokyo Disneyland', city: 'Tokyo' } }]
-        : [missing(hint)],
-      searchExactPlaces: vi.fn(async (city, name) => {
-        events.push(`search:${name}:${city}`);
-        resolved = true;
-        return { ok: true as const, result: [{ id: 'google:tdl', name, city }] };
-      }),
+      resolveTrustedPlaceHints: ([hint]) => [missing(hint)],
+      lookupExactPlaceByName: lookupStub({ 'Tokyo Disneyland': { id: 'google:tdl', city: 'Tokyo' } }, events),
       researchAdmissionPrices: vi.fn(async (ids) => {
         events.push(`fare:${ids.join(',')}`);
         return { ok: true as const, result: { places: [fare('Tokyo Disneyland', 10_900, 'https://www.tokyodisneyresort.jp/en/ticket/')] } };
@@ -41,23 +49,16 @@ describe('server-owned Ask admission research', () => {
     });
 
     expect(extractAdmissionPlaceHints('How much is Tokyo Disneyland?')).toEqual(['Tokyo Disneyland']);
-    expect(events).toEqual(['search:Tokyo Disneyland:Tokyo', 'fare:google:tdl']);
+    expect(events).toEqual(['lookup:Tokyo Disneyland', 'fare:google:tdl']);
     expect(result.priceFacts).toHaveLength(1);
   });
 
   it('resolves Tokyo Disneyland and USJ independently instead of sharing one trip city', async () => {
-    const resolved = new Map<string, { id: string; city: string }>();
-    const searchExactPlaces = vi.fn(async (city: string, name: string) => {
-      if (name === 'Tokyo Disneyland' && city === 'Tokyo') resolved.set(name, { id: 'google:tdl', city });
-      if (name === 'Universal Studios Japan' && city === 'Osaka') resolved.set(name, { id: 'google:usj', city });
-      return { ok: true as const, result: resolved.has(name) ? [{ id: resolved.get(name)?.id, name, city }] : [] };
+    const lookupExactPlaceByName = lookupStub({
+      'Tokyo Disneyland': { id: 'google:tdl', city: 'Tokyo' },
+      'Universal Studios Japan': { id: 'google:usj', city: 'Osaka' },
     });
-    const resolveTrustedPlaceHints = ([hint]: string[]): TrustedPlaceHintResolution[] => {
-      const place = resolved.get(hint);
-      return place
-        ? [{ hint, status: 'resolved', place: { id: place.id, name: hint, city: place.city } }]
-        : [missing(hint)];
-    };
+    const resolveTrustedPlaceHints = ([hint]: string[]): TrustedPlaceHintResolution[] => [missing(hint)];
     const researchAdmissionPrices = vi.fn(async () => ({
       ok: true as const,
       result: { places: [
@@ -69,12 +70,16 @@ describe('server-owned Ask admission research', () => {
     const result = await researchAskAdmissionPrices({
       question: 'How much are Tokyo Disneyland and Universal Studios Japan tickets?',
       tripCities: ['Osaka', 'Kyoto', 'Nara'],
-    }, { resolveTrustedPlaceHints, searchExactPlaces, researchAdmissionPrices });
+    }, { resolveTrustedPlaceHints, lookupExactPlaceByName, researchAdmissionPrices });
 
     expect(extractAdmissionPlaceHints('How much are Tokyo Disneyland and Universal Studios Japan tickets?'))
       .toEqual(['Tokyo Disneyland', 'Universal Studios Japan']);
-    expect(searchExactPlaces).toHaveBeenCalledWith('Tokyo', 'Tokyo Disneyland', 5);
-    expect(searchExactPlaces).toHaveBeenCalledWith('Osaka', 'Universal Studios Japan', 5);
+    // One bounded lookup per attraction, and no city fan-out: the lookup does
+    // not take a city at all, which is what keeps this inside one invocation.
+    expect(lookupExactPlaceByName).toHaveBeenCalledTimes(2);
+    expect(lookupExactPlaceByName).toHaveBeenCalledWith('Tokyo Disneyland');
+    expect(lookupExactPlaceByName).toHaveBeenCalledWith('Universal Studios Japan');
+    expect(result.lookups.every((entry) => entry.providerRequests === 1)).toBe(true);
     expect(researchAdmissionPrices).toHaveBeenCalledWith(['google:tdl', 'google:usj']);
     expect(result.trace.map((entry) => [entry.hint, entry.resolvedCity])).toEqual([
       ['Tokyo Disneyland', 'Tokyo'],
@@ -97,7 +102,7 @@ describe('server-owned Ask admission research', () => {
       tripCities: ['Osaka'],
     }, {
       resolveTrustedPlaceHints,
-      searchExactPlaces: vi.fn(),
+      lookupExactPlaceByName: vi.fn(),
       researchAdmissionPrices: vi.fn(async () => ({
         ok: true as const,
         result: { places: [
@@ -125,7 +130,7 @@ describe('server-owned Ask admission research', () => {
         status: 'resolved',
         place: { id: 'google:tdl', name: hint, city: 'Tokyo' },
       }],
-      searchExactPlaces: vi.fn(),
+      lookupExactPlaceByName: vi.fn(),
       researchAdmissionPrices,
     });
 
@@ -140,7 +145,7 @@ describe('server-owned Ask admission research', () => {
       tripCities: ['Osaka'],
     }, {
       resolveTrustedPlaceHints: ([hint]) => [{ hint, status: 'ambiguous' }],
-      searchExactPlaces: vi.fn(),
+      lookupExactPlaceByName: vi.fn(),
       researchAdmissionPrices,
     });
 
@@ -156,7 +161,7 @@ describe('server-owned Ask admission research', () => {
   });
 
   it('reuses signed recent-place aliases for a selected-currency follow-up without searching', async () => {
-    const searchExactPlaces = vi.fn();
+    const lookupExactPlaceByName = vi.fn();
     const researchAdmissionPrices = vi.fn(async () => ({
       ok: true as const,
       result: { places: [
@@ -173,11 +178,11 @@ describe('server-owned Ask admission research', () => {
       ],
     }, {
       resolveTrustedPlaceHints: vi.fn(),
-      searchExactPlaces,
+      lookupExactPlaceByName,
       researchAdmissionPrices,
     });
 
-    expect(searchExactPlaces).not.toHaveBeenCalled();
+    expect(lookupExactPlaceByName).not.toHaveBeenCalled();
     expect(researchAdmissionPrices).toHaveBeenCalledWith(['recent-place-1', 'recent-place-2']);
   });
 });

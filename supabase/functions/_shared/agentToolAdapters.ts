@@ -45,6 +45,11 @@ import { summarizeBudgetFacts } from './budgetFacts.ts';
 import { summarizeDocumentFacts } from './documentFacts.ts';
 import { researchOfficialAdmissions } from './officialAdmissionResearch.ts';
 import {
+  LOOKUP_TIMEOUT_MS,
+  lookupExactPlace,
+  type ExactLookupTelemetry,
+} from './exactPlaceLookup.ts';
+import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
   minutesToClock,
@@ -60,6 +65,12 @@ import {
   listItineraryChangeHistory,
   type HistoryRecord,
 } from './itineraryChangeHistory.ts';
+
+/**
+ * Nominatim blocks anonymous traffic, so the lookup identifies itself.
+ * Matches the string `travel-discover` already sends for city geocoding.
+ */
+const PLACE_LOOKUP_USER_AGENT = 'Planitenary/1.0 (travel itinerary planner; +https://github.com/planitenary)';
 
 /** A place the trip already knows about, indexed for the tools to resolve. */
 interface KnownPlace {
@@ -491,6 +502,18 @@ export interface AgentToolSession {
   execute: (call: AgentToolCall) => Promise<ToolOutcome>;
   /** Exact provider lookup used by deterministic price orchestration. */
   searchExactPlaces: (city: string, name: string, limit?: number) => Promise<ToolOutcome>;
+  /**
+   * One bounded identity lookup for one named place.
+   *
+   * Deliberately not a discovery search: it costs a single indexed request and
+   * knows nothing about cities, which is what keeps a two-attraction question
+   * inside one Edge invocation.
+   */
+  lookupExactPlaceByName: (hint: string) => Promise<{
+    place?: { id: string; name: string; city?: string; provider?: string; providerPlaceId?: string };
+    status: 'resolved' | 'ambiguous' | 'missing' | 'timeout';
+    telemetry: ExactLookupTelemetry;
+  }>;
   /** Resolve server-indexed names without allowing a name collision to pick one. */
   resolveTrustedPlaceHints: (hints: string[]) => TrustedPlaceHintResolution[];
   /** The same official-fare implementation exposed by get_admission_prices. */
@@ -1392,6 +1415,38 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
       limit: Math.max(1, Math.min(8, Math.floor(limit))),
       exact: true,
     }),
+    lookupExactPlaceByName: async (hint) => {
+      const countryCode = tripCountryCode(context.itinerary);
+      const { outcome, telemetry } = await lookupExactPlace(
+        hint,
+        countryCode,
+        (url) => fetchJson(url, {
+          headers: { 'User-Agent': PLACE_LOOKUP_USER_AGENT, Accept: 'application/json' },
+        }, LOOKUP_TIMEOUT_MS),
+      );
+      if (outcome.status !== 'resolved') return { status: outcome.status, telemetry };
+      /**
+       * Registering the winner is what turns a provider object into an id the
+       * tools will accept. It is the same door `search_places` uses — the rule
+       * is still "an id the server put in this turn's index" — and the
+       * canonical binding is revalidated downstream, not here.
+       */
+      const place = {
+        id: `osm-${outcome.place.providerPlaceId}`,
+        name: outcome.place.name,
+        aliases: outcome.place.aliases,
+        countryCode,
+        coordinates: outcome.place.coordinates,
+        provider: outcome.place.provider,
+        providerPlaceId: outcome.place.providerPlaceId,
+      };
+      registerPlace(index, place);
+      return {
+        status: 'resolved' as const,
+        place: { id: place.id, name: place.name, provider: place.provider, providerPlaceId: place.providerPlaceId },
+        telemetry,
+      };
+    },
     researchAdmissionPrices: (placeIds) => execute({
       tool: 'get_admission_prices',
       args: { placeIds: placeIds.slice(0, 6) },

@@ -1,5 +1,6 @@
 import { priceFactsFromValue, type AskPriceFact } from './askPriceFacts.ts';
 import type { ToolOutcome } from './agentRuntime.ts';
+import { MAX_PRICE_HINTS, type ExactLookupTelemetry } from './exactPlaceLookup.ts';
 
 export interface TrustedPlaceHintResolution {
   hint: string;
@@ -23,11 +24,25 @@ export interface AskPriceResearchResult {
   findings: Array<{ tool: string; ok: boolean; result?: unknown; detail?: string }>;
   trace: AskPriceResearchTrace[];
   unresolved: string[];
+  /** What the lookups actually cost, so this path is never guessed at again. */
+  lookups: ExactLookupTelemetry[];
 }
 
 export interface AskPriceResearchDeps {
   resolveTrustedPlaceHints: (hints: string[]) => TrustedPlaceHintResolution[];
-  searchExactPlaces: (city: string, name: string, limit?: number) => Promise<ToolOutcome>;
+  /**
+   * One bounded identity lookup for one name.
+   *
+   * Replaces a per-city discovery search. That version ran the recommendation
+   * pipeline once per (hint x candidate city) — roughly seven provider round
+   * trips for two attractions — and exhausted the Edge worker. Identity is a
+   * single indexed question and now costs a single request.
+   */
+  lookupExactPlaceByName: (hint: string) => Promise<{
+    place?: { id: string; name: string; city?: string; provider?: string; providerPlaceId?: string };
+    status: 'resolved' | 'ambiguous' | 'missing' | 'timeout';
+    telemetry: ExactLookupTelemetry;
+  }>;
   researchAdmissionPrices: (placeIds: string[]) => Promise<ToolOutcome>;
 }
 
@@ -57,28 +72,6 @@ export function extractAdmissionPlaceHints(question: string): string[] {
     .slice(0, 6);
 }
 
-const cityQualifiedHint = (hint: string): string | undefined => {
-  const parenthetical = /\(([^()]{2,50})\)\s*$/.exec(hint)?.[1];
-  if (parenthetical) return normalise(parenthetical);
-  const branded = /^(.{2,50}?)\s+(?:Disneyland|DisneySea|Disney Resort)\b/i.exec(hint)?.[1];
-  return branded ? normalise(branded) : undefined;
-};
-
-const searchCitiesForHint = (hint: string, savedCities: string[]): string[] => {
-  const candidates = [
-    cityQualifiedHint(hint),
-    ...savedCities.filter((city) => new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(hint)),
-    ...savedCities,
-  ].filter((city): city is string => Boolean(city));
-  const seen = new Set<string>();
-  return candidates.filter((city) => {
-    const key = city.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 5);
-};
-
 const referentialPriceQuestion = (question: string): boolean =>
   /\b(?:both|these|those|them|the first one|the second one)\b/i.test(question);
 
@@ -90,6 +83,7 @@ export async function researchAskAdmissionPrices(input: {
 }, deps: AskPriceResearchDeps): Promise<AskPriceResearchResult> {
   const findings: AskPriceResearchResult['findings'] = [];
   const trace: AskPriceResearchTrace[] = [];
+  const lookups: ExactLookupTelemetry[] = [];
   const resolvedIds: string[] = [];
 
   const recent = input.recentPlaces ?? [];
@@ -105,35 +99,53 @@ export async function researchAskAdmissionPrices(input: {
       });
     }
   } else {
-    for (const hint of extractAdmissionPlaceHints(input.question)) {
-      let resolution = deps.resolveTrustedPlaceHints([hint])[0];
-      const searchedCities: string[] = [];
-      if (resolution?.status === 'missing') {
-        for (const city of searchCitiesForHint(hint, input.tripCities)) {
-          searchedCities.push(city);
-          const search = await deps.searchExactPlaces(city, hint, 5);
-          findings.push(search.ok
-            ? { tool: 'search_places', ok: true, result: search.result }
-            : { tool: 'search_places', ok: false, detail: search.detail });
-          resolution = deps.resolveTrustedPlaceHints([hint])[0];
-          if (resolution?.status !== 'missing') break;
-        }
-      }
-
-      if (resolution?.status === 'resolved' && resolution.place) {
-        if (!resolvedIds.includes(resolution.place.id)) resolvedIds.push(resolution.place.id);
+    /**
+     * At most two hints, and at most one provider request each.
+     *
+     * The budget is enforced by the shape of this loop rather than checked
+     * inside it: there is no city list to iterate and no retry, so a question
+     * naming six attractions costs two lookups and refuses the rest instead of
+     * quietly costing six. Exceeding the budget is not something this can do.
+     */
+    for (const hint of extractAdmissionPlaceHints(input.question).slice(0, MAX_PRICE_HINTS)) {
+      // An identity the trip already holds needs no lookup at all.
+      const known = deps.resolveTrustedPlaceHints([hint])[0];
+      if (known?.status === 'resolved' && known.place) {
+        if (!resolvedIds.includes(known.place.id)) resolvedIds.push(known.place.id);
         trace.push({
           hint,
           status: 'resolved',
-          searchedCities,
-          resolvedName: resolution.place.name,
-          resolvedCity: resolution.place.city,
+          searchedCities: [],
+          resolvedName: known.place.name,
+          resolvedCity: known.place.city,
+        });
+        continue;
+      }
+      if (known?.status === 'ambiguous') {
+        trace.push({ hint, status: 'ambiguous', searchedCities: [] });
+        continue;
+      }
+
+      const found = await deps.lookupExactPlaceByName(hint);
+      lookups.push(found.telemetry);
+      findings.push(found.status === 'resolved'
+        ? { tool: 'search_places', ok: true, result: { places: [found.place] } }
+        : { tool: 'search_places', ok: false, detail: `No single trusted place is named ${hint}.` });
+
+      if (found.status === 'resolved' && found.place) {
+        if (!resolvedIds.includes(found.place.id)) resolvedIds.push(found.place.id);
+        trace.push({
+          hint,
+          status: 'resolved',
+          searchedCities: [],
+          resolvedName: found.place.name,
+          resolvedCity: found.place.city,
         });
       } else {
         trace.push({
           hint,
-          status: resolution?.status === 'ambiguous' ? 'ambiguous' : 'missing',
-          searchedCities,
+          status: found.status === 'ambiguous' ? 'ambiguous' : 'missing',
+          searchedCities: [],
         });
       }
     }
@@ -145,6 +157,7 @@ export async function researchAskAdmissionPrices(input: {
       priceFacts: [],
       findings,
       trace,
+      lookups,
       unresolved: trace.filter((entry) => entry.status !== 'resolved').map((entry) => entry.hint),
     };
   }
@@ -162,6 +175,7 @@ export async function researchAskAdmissionPrices(input: {
     priceFacts,
     findings,
     trace,
+    lookups,
     unresolved: trace.filter((entry) => entry.status === 'ambiguous' || entry.status === 'missing')
       .map((entry) => entry.hint),
   };
