@@ -3,7 +3,6 @@ import type { DiscoveryCandidateLike } from '../../supabase/functions/_shared/di
 import {
   buildDiscoveryQueryPlan,
   buildExactDiscoveryQueryPlan,
-  overpassExactNameClauses,
   queryForCandidate,
   selectDiscoveryEntries,
 } from '../../supabase/functions/_shared/discoveryPlan';
@@ -148,70 +147,5 @@ describe('preference-first discovery plans', () => {
 
     expect(selected).toHaveLength(1);
     expect(selected[0].trace.fallbackReason).toBe('bounded-general-fallback');
-  });
-});
-
-/**
- * The defect that made every by-name lookup return nothing.
- *
- * An exact plan names one place and carries no categories. The categorical
- * Overpass builder turns categories into clauses, so an empty category list
- * produced an empty clause list, `fetchOverpassPlaces` returned `[]` before
- * issuing a request, and both Tokyo Disneyland and Universal Studios Japan
- * came back unresolved. It read as a name-matching problem; nothing was ever
- * searched.
- */
-describe('asking Overpass for one place by name', () => {
-  const scope = '(around:12000,35.6762,139.6503)';
-
-  it('produces clauses at all, which the categorical builder could not', () => {
-    const clauses = overpassExactNameClauses('Tokyo Disneyland', scope);
-    expect(clauses.length).toBeGreaterThan(0);
-    expect(clauses.every((clause) => clause.includes(scope))).toBe(true);
-  });
-
-  /** The bridge to a locally-named object is the provider's own `name:en`. */
-  it('searches the authoritative name keys, not just the primary name', () => {
-    const joined = overpassExactNameClauses('Tokyo Disneyland', scope).join('\n');
-    for (const key of ['"name"', '"name:en"', '"official_name"', '"int_name"', '"short_name"', '"alt_name"']) {
-      expect(joined).toContain(key);
-    }
-  });
-
-  /**
-   * Anchored, so this stays a lookup rather than a substring sweep: "Disney"
-   * must not select Tokyo Disneyland for pricing.
-   */
-  it('anchors the match so a fragment cannot select a place', () => {
-    const joined = overpassExactNameClauses('Tokyo Disneyland', scope).join('\n');
-    expect(joined).toContain('^Tokyo Disneyland$');
-    // alt_name holds a semicolon list, so it is matched as a list member.
-    expect(joined).toMatch(/alt_name.*\(\^\|;\)/);
-  });
-
-  it('is case-insensitive, because mappers are inconsistent about capitals', () => {
-    expect(overpassExactNameClauses('Universal Studios Japan', scope).every((c) => c.includes(',i]'))).toBe(true);
-  });
-
-  /** A place name is untrusted text; it must not be able to alter the query. */
-  it('escapes regex and quote metacharacters out of the name', () => {
-    const clauses = overpassExactNameClauses('Ho"ll[y]wood (Park).*', scope).join('\n');
-    expect(clauses).not.toContain('Ho"ll');
-    expect(clauses).toContain('\\"');
-    expect(clauses).toContain('\\[');
-    expect(clauses).toContain('\\.');
-    expect(clauses).toContain('\\*');
-  });
-
-  it('yields nothing for an empty name rather than an unbounded query', () => {
-    expect(overpassExactNameClauses('   ', scope)).toEqual([]);
-  });
-
-  /** The plan that triggers this path still carries no categories. */
-  it('is the only way an exact plan can match, since it has no categories', () => {
-    const plan = buildExactDiscoveryQueryPlan('Tokyo Disneyland', 5);
-    expect(plan.mode).toBe('exact');
-    expect(plan.preferredQueries[0].categories).toEqual([]);
-    expect(plan.preferredQueries[0].text).toBe('Tokyo Disneyland');
   });
 });

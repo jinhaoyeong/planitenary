@@ -36,7 +36,6 @@ import {
   osmDietaryOptions,
   osmElementCoordinates,
   osmIndoorOutdoor,
-  osmAliasNames,
   osmNames,
   osmNotability,
   osmNotabilitySignals,
@@ -56,7 +55,6 @@ import {
 } from '../_shared/wikivoyage.ts';
 import {
   buildExactDiscoveryQueryPlan,
-  overpassExactNameClauses,
   buildDiscoveryQueryPlan,
   queryMatchesCandidate,
   selectDiscoveryEntries,
@@ -536,8 +534,6 @@ interface OpenCandidate {
   providerPlaceId: string;
   name: string;
   localName?: string;
-  /** Names this object authoritatively answers to, for identity acceptance. */
-  aliases?: string[];
   description?: string;
   countryCode: string;
   city: string;
@@ -655,16 +651,10 @@ const overpassClausesFor = (categories: readonly string[], scope: string): strin
   return clauses;
 };
 
-async function fetchOverpassPlaces(
-  area: CityArea,
-  categories: readonly string[],
-  exactName?: string,
-): Promise<OsmElement[]> {
+async function fetchOverpassPlaces(area: CityArea, categories: readonly string[]): Promise<OsmElement[]> {
   const [lat, lng] = area.centre;
   const scope = `(around:${area.radiusMetres},${lat},${lng})`;
-  const clauses = exactName
-    ? overpassExactNameClauses(exactName, scope)
-    : overpassClausesFor(categories, scope);
+  const clauses = overpassClausesFor(categories, scope);
   if (clauses.length === 0) return [];
   const query = `[out:json][timeout:40];
 (
@@ -781,15 +771,9 @@ async function searchOsm(
     if (queries.length === 0) return [];
     const categories = [...new Set(queries.flatMap((query) => query.categories))];
     const wantsFood = categories.some((category) => FOOD_CATEGORIES.includes(category));
-    /**
-     * An exact plan names one place and carries no categories, so it must be
-     * asked by name. Without this the categorical builder produced no clauses
-     * and the lookup silently returned nothing.
-     */
-    const exactName = plan.mode === 'exact' ? queries[0]?.text : undefined;
     // Independent sources, so one being down must not sink the other.
     const [elements, food] = await Promise.all([
-      fetchOverpassPlaces(area, categories, exactName),
+      fetchOverpassPlaces(area, categories),
       wantsFood ? fetchOverpassFood(area).catch(() => [] as OsmElement[]) : Promise.resolve([] as OsmElement[]),
     ]);
     const byKey = new Map<string, OpenCandidate>();
@@ -924,7 +908,6 @@ function buildOsmCandidate(
     providerPlaceId: placeId,
     name,
     localName,
-    aliases: osmAliasNames(tags),
     // Wikivoyage prose beats a bare tag list for explaining why to go.
     description: listing?.content,
     countryCode,
