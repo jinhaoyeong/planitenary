@@ -403,3 +403,36 @@ export function selectDiscoveryEntries<T extends DiscoveryCandidateLike>(
     })),
   ];
 }
+
+/** Overpass regex metacharacters, so a place name cannot alter the query. */
+export const escapeOverpassRegex = (value: string): string =>
+  value.replace(/["\\]/g, '\\$&').replace(/[.*+?^${}()|[\]]/g, '\\$&');
+
+/**
+ * Clauses for "find the object actually called this", in this city.
+ *
+ * The categorical query cannot answer a by-name lookup: it asks for every
+ * museum and theme park near a centre and caps at 400 by proximity, so an
+ * attraction that sits fifteen kilometres out — Tokyo Disneyland is in
+ * Urayasu, not Tokyo — is not in the answer at any category. Worse, an exact
+ * plan carries no categories at all, which produced *no clauses*, an empty
+ * result, and a place-identity failure that looked like a name-matching
+ * problem.
+ *
+ * Matching is anchored and case-insensitive across the same authoritative name
+ * keys {@link osmAliasNames} reads back, so a query in English finds an object
+ * named in Japanese through its own `name:en`. `alt_name` is semicolon
+ * separated, so it is matched as a list member rather than a whole value.
+ * Anchoring is what keeps this a *lookup* rather than a substring search:
+ * "Disney" does not match "Tokyo Disneyland".
+ */
+export const overpassExactNameClauses = (query: string, scope: string): string[] => {
+  const escaped = escapeOverpassRegex(query.trim());
+  if (!escaped) return [];
+  const single = ['name', 'name:en', 'int_name', 'official_name', 'short_name'];
+  return [
+    ...single.map((key) => `nwr["${key}"~"^${escaped}$",i]["name"]${scope};`),
+    `nwr["alt_name"~"(^|;)\\s*${escaped}\\s*(;|$)",i]["name"]${scope};`,
+  ];
+};
+

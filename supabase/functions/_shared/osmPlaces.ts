@@ -170,6 +170,46 @@ export function osmNames(tags: OsmTags, language = 'en'): { name?: string; local
 }
 
 /**
+ * The name keys a mapper uses to say "this object is also called that".
+ *
+ * Every one is an assertion by the same community that named the object in the
+ * first place — not a guess, not a similarity score. `name:en` is why a
+ * traveller asking for "Tokyo Disneyland" can be matched to an object whose
+ * primary name is 東京ディズニーランド, which is the case this exists for.
+ *
+ * `loc_name` and `nickname` are deliberately absent: a local nickname is a
+ * colloquialism rather than an identity, and admitting one here would let
+ * "USJ" or "the Mouse" select a place for pricing. If colloquial names are
+ * ever wanted they should be an explicit, separate policy.
+ */
+const OSM_ALIAS_KEYS = ['name', 'name:en', 'int_name', 'official_name', 'short_name', 'alt_name'] as const;
+
+/** `alt_name` holds several names in one tag, semicolon separated. */
+const splitOsmNameList = (value: string): string[] =>
+  value.split(';').map((entry) => entry.trim()).filter(Boolean);
+
+/**
+ * Every name this object authoritatively answers to, bounded.
+ *
+ * Used to *accept* an identity, never to rank one, so it must contain only
+ * names the provider itself published for this object. Order is stable and
+ * deduplicated case-sensitively here; the caller normalises before comparing.
+ */
+export function osmAliasNames(tags: OsmTags, language = 'en'): string[] {
+  const found: string[] = [];
+  const push = (value: string | undefined) => {
+    if (!value) return;
+    for (const entry of splitOsmNameList(value)) {
+      if (entry.length > 0 && entry.length <= 160 && !found.includes(entry)) found.push(entry);
+    }
+  };
+  for (const key of OSM_ALIAS_KEYS) push(tags[key]);
+  // A requested language beyond the default, when the caller asks for one.
+  if (language !== 'en') push(tags[`name:${language}`]);
+  return found.slice(0, 12);
+}
+
+/**
  * What a place can actually feed someone, from OSM's `diet:*` tags.
  *
  * Only `yes` and `only` count. `diet:vegan=limited` means one dish on a

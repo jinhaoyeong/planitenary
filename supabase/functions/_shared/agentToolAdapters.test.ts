@@ -473,3 +473,109 @@ describe('real agent tool adapters', () => {
     });
   });
 });
+
+/**
+ * The seam that failed in production.
+ *
+ * A traveller types "Tokyo Disneyland"; OpenStreetMap calls the object
+ * 東京ディズニーランド. Requiring the primary name to equal the query resolved
+ * nothing, no trusted id existed, and the admission lookup was never reached —
+ * a real attraction indistinguishable from an unknown one.
+ *
+ * Aliases select a candidate. They never grant authority: the identity rules
+ * below are unchanged, and one alias shared by two objects still refuses.
+ */
+describe('resolving a hint through the names a provider published', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const discovers = (candidate: Record<string, unknown>) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([candidate]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    return createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary,
+      routingProviders: { amap: true, openRouteService: true },
+    });
+  };
+
+  it('matches an English query to a locally-named object through its published alias', async () => {
+    const session = discovers({
+      id: 'osm-node/99',
+      name: '東京ディズニーランド',
+      aliases: ['東京ディズニーランド', 'Tokyo Disneyland'],
+      provider: 'osm',
+      providerPlaceId: 'node/99',
+      city: 'Tokyo',
+      coordinates: [35.6329, 139.8804],
+    });
+
+    await session.searchExactPlaces('Tokyo', 'Tokyo Disneyland', 5);
+    const [resolution] = session.resolveTrustedPlaceHints(['Tokyo Disneyland']);
+    expect(resolution.status).toBe('resolved');
+    expect(resolution.place).toEqual(expect.objectContaining({ providerPlaceId: 'node/99' }));
+  });
+
+  it('still matches when the primary name is the one asked for', async () => {
+    const session = discovers({
+      id: 'osm-node/7',
+      name: 'Universal Studios Japan',
+      aliases: ['Universal Studios Japan', 'ユニバーサル・スタジオ・ジャパン'],
+      provider: 'osm',
+      providerPlaceId: 'node/7',
+      city: 'Osaka',
+    });
+
+    await session.searchExactPlaces('Osaka', 'Universal Studios Japan', 5);
+    expect(session.resolveTrustedPlaceHints(['Universal Studios Japan'])[0].status).toBe('resolved');
+  });
+
+  /**
+   * The safety half. A neighbouring attraction whose published names do not
+   * include the requested one must not be priced as if it were.
+   */
+  it('refuses a similar attraction that never published the requested name', async () => {
+    const session = discovers({
+      id: 'osm-node/8',
+      name: 'Tokyo Disney Resort',
+      aliases: ['Tokyo Disney Resort', '東京ディズニーリゾート'],
+      provider: 'osm',
+      providerPlaceId: 'node/8',
+      city: 'Tokyo',
+    });
+
+    await session.searchExactPlaces('Tokyo', 'Tokyo Disneyland', 5);
+    expect(session.resolveTrustedPlaceHints(['Tokyo Disneyland'])[0].status).toBe('missing');
+  });
+
+  it('refuses as ambiguous when two objects publish the same alias', () => {
+    const session = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary: {
+        days: [{
+          day: 1,
+          city: 'Tokyo',
+          activities: [
+            { id: 'a', name: '東京ディズニーランド', aliases: ['Tokyo Disneyland'], provider: 'osm', providerPlaceId: 'node/1' },
+            { id: 'b', name: 'Tokyo Disneyland', provider: 'osm', providerPlaceId: 'node/2' },
+          ],
+        }],
+      },
+      routingProviders: { amap: true, openRouteService: true },
+    });
+
+    const [resolution] = session.resolveTrustedPlaceHints(['Tokyo Disneyland']);
+    expect(['ambiguous', 'missing']).toContain(resolution.status);
+    expect(resolution.place).toBeUndefined();
+  });
+});

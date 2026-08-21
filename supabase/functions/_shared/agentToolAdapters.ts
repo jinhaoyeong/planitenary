@@ -65,6 +65,8 @@ import {
 interface KnownPlace {
   id: string;
   name: string;
+  /** Other names the provider published for this same object. */
+  aliases?: string[];
   city?: string;
   countryCode?: string;
   coordinates?: [number, number];
@@ -228,6 +230,11 @@ export function buildPlaceIndex(itinerary: Record<string, unknown> | null): Map<
     registerPlace(index, {
       id,
       name,
+      // A saved place keeps the names discovery published for it, so a price
+      // question about a place already on the trip resolves without searching.
+      aliases: asArray(activity.aliases)
+        .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        .slice(0, 12),
       city: resolvedCity,
       countryCode: resolvedCountry,
       coordinates: coordinatesOf(activity.coordinates),
@@ -572,11 +579,29 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 
+  /**
+   * Every name a place authoritatively answers to.
+   *
+   * The provider's own name keys — `name`, `name:en`, `official_name` and the
+   * rest — not similarity and not a curated table. A traveller asking for
+   * "Tokyo Disneyland" must reach an object whose primary name is
+   * 東京ディズニーランド, and the only honest bridge between the two is that the
+   * same mappers published both as names for the same object.
+   *
+   * Aliases select a candidate; they never grant authority. The canonical
+   * binding is revalidated downstream exactly as before.
+   */
+  const trustedAliasesOf = (place: KnownPlace): string[] => [
+    place.name,
+    ...(Array.isArray(place.aliases) ? place.aliases : []),
+  ].filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+
   const resolveTrustedPlaceHints = (hints: string[]): TrustedPlaceHintResolution[] => {
     const uniquePlaces = [...new Set(index.values())];
     return hints.slice(0, 6).map((hint) => {
       const wanted = normalisePlaceName(hint);
-      const matches = uniquePlaces.filter((place) => normalisePlaceName(place.name) === wanted);
+      const matches = uniquePlaces.filter((place) =>
+        trustedAliasesOf(place).some((alias) => normalisePlaceName(alias) === wanted));
       const distinct = matches.filter((place, position) => matches.findIndex((held) =>
         (held.provider && held.providerPlaceId && held.provider === place.provider
           && held.providerPlaceId === place.providerPlaceId)
@@ -626,6 +651,9 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
         registerPlace(index, {
           id,
           name,
+          aliases: asArray(candidate?.aliases)
+            .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+            .slice(0, 12),
           city: typeof candidate?.city === 'string' ? candidate.city : input.city,
           countryCode: typeof candidate?.countryCode === 'string'
             ? candidate.countryCode
