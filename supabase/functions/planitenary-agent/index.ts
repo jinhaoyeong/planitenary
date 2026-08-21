@@ -939,7 +939,7 @@ Deno.serve(async (request) => {
      * can add a deterministic selected-currency view without asking the model
      * to invent an exchange rate.
      */
-    priceFacts: isAskPriceQuestion(question) ? run.evidence.priceFacts : [],
+    priceFacts: isAskPriceQuestion(question) ? run.priceFacts : [],
     currency: askGrounding?.packet?.currency,
     /**
      * Opaque follow-up references, one per card, matched by canonical id.

@@ -42,6 +42,7 @@ import {
   type BudgetState,
   type ValidatedAgentAnswer,
 } from './agentContract.ts';
+import type { AskPriceFact } from './askPriceFacts.ts';
 
 /** One tool execution, as it happened. Returned so the UI can show progress. */
 export interface AgentTranscriptEntry {
@@ -69,6 +70,21 @@ export interface AgentRunResult {
   budget: BudgetState;
   /** Counts rather than the sets themselves, so the payload stays small. */
   evidence: { citableUrls: number; routeMinutes: number; knownPlaceNames: number };
+  /**
+   * Source prices this run established, for the browser to present.
+   *
+   * A sibling of `evidence` rather than a member of it, and the distinction is
+   * the reason this field exists at all. `evidence` is deliberately counts —
+   * how *much* was gathered, for diagnostics — so everything projected into it
+   * loses its contents by design. Price facts are not a measurement; they are
+   * the answer's own material, rendered verbatim with their source and the
+   * date they were checked. Summarising them to a number silently emptied the
+   * verified-price panel on every price question.
+   *
+   * Both origins converge here: fares seeded from the grounding packet, and
+   * fares a tool established during the run.
+   */
+  priceFacts: AskPriceFact[];
   /**
    * Whether this run had to search for a place, and how that went.
    *
@@ -306,6 +322,12 @@ export async function runAgent(
       routeMinutes: evidence.routeMinutes.size,
       knownPlaceNames: evidence.knownPlaceNames.size,
     },
+    // Copied out rather than shared, so a caller holding the result cannot
+    // reach back into the run's own accumulator.
+    priceFacts: evidence.priceFacts.map((fact) => ({
+      ...fact,
+      fares: fact.fares.map((fare) => ({ ...fare })),
+    })),
     placeDiscovery: {
       required: requiresPlaceDiscovery,
       attempted: placeDiscoveryAttempted,
