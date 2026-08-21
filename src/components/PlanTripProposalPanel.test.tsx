@@ -198,6 +198,53 @@ describe('Plan my trip proposal panel', () => {
     expect(mockedPlan).toHaveBeenCalledTimes(1);
   });
 
+  it('returns from a proposal to the original Smart plan home without writing', async () => {
+    await openPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Smart plan' }));
+
+    expect(await screen.findByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
+    expect(screen.getByText('Based on your trip')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Plan day 1$/ })).toBeInTheDocument();
+    expect(screen.queryByText('Proposed itinerary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate proposal' })).not.toBeInTheDocument();
+    expect(mockedStage).not.toHaveBeenCalled();
+    expect(mockedApply).not.toHaveBeenCalled();
+  });
+
+  it('keeps Back in the fixed dialog header and keeps it distinct from Close', async () => {
+    const view = await openPanel();
+    const dialog = screen.getByRole('dialog');
+    const header = dialog.querySelector('header');
+
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByRole('button', { name: 'Back to Smart plan' })).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByRole('button', { name: 'Close Plan my trip' })).toBeInTheDocument();
+
+    fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Back to Smart plan' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Smart plan' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+    expect(await screen.findByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
+    expect(screen.queryByText('Proposed itinerary')).not.toBeInTheDocument();
+  });
+
+  it('cancels an unconfirmed staged write when returning to Smart plan', async () => {
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
+    await screen.findByText('Apply this plan to your itinerary?');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Smart plan' }));
+
+    expect(await screen.findByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
+    expect(screen.queryByText('Apply this plan to your itinerary?')).not.toBeInTheDocument();
+    expect(mockedStage).toHaveBeenCalledTimes(1);
+    expect(mockedApply).not.toHaveBeenCalled();
+  });
+
   it('regenerates only after the traveller asks', async () => {
     await openPanel();
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate proposal' }));
@@ -217,6 +264,8 @@ describe('Plan my trip proposal panel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply to my itinerary' }));
     await screen.findByText('Applied to your itinerary');
+    expect(screen.getByRole('heading', { name: 'Smart plan' })).toBeInTheDocument();
+    expect(screen.queryByText('Proposed itinerary')).not.toBeInTheDocument();
     expect(mockedApply).toHaveBeenCalledWith('stage-1', expect.anything());
   });
 

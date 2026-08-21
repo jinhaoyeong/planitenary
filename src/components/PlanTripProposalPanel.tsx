@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowRight, Check, Clock3, Loader2, MapPin, Route, ShieldCheck, Sparkles, Undo2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, Clock3, Loader2, MapPin, Route, ShieldCheck, Sparkles, Undo2, X } from 'lucide-react';
 import { planTripProposal, type PlanTripResult } from '../lib/planTripProposal';
 import {
   applyItineraryChange,
@@ -279,6 +279,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
     }
     onApplied?.(applied.itinerary);
     setWrite({ phase: 'applied', changeId: applied.changeId });
+    setView('menu');
   };
 
   const undo = async () => {
@@ -320,8 +321,19 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
 
   const openPlanner = () => {
     setOpen(true);
-    if (result || loading) setView('proposal');
-    else setView('menu');
+    setView('menu');
+  };
+
+  /**
+   * Back changes only the drawer's navigation level. The generated proposal is
+   * deliberately retained for this mounted session, while an unfinished write
+   * confirmation and its presentation errors are discarded.
+   */
+  const returnToSmartPlan = () => {
+    if (busy) return;
+    setView('menu');
+    if (write.phase !== 'applied') setWrite({ phase: 'idle' });
+    setWriteError(null);
   };
 
   const runSmartAction = (action: SmartAction) => {
@@ -426,8 +438,19 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                 exit={{ x: '100%' }}
                 transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
               >
-                <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5 dark:border-slate-800 sm:px-7">
-                  <div className="min-w-0">
+                <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800 sm:px-7 sm:py-5">
+                  <div className="min-w-0 flex-1">
+                    {showingProposal && (
+                      <button
+                        type="button"
+                        onClick={returnToSmartPlan}
+                        disabled={busy}
+                        className="mb-2 inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-lg px-1 text-xs font-semibold text-rose-600 transition hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-40 dark:text-rose-400"
+                      >
+                        <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span className="truncate">Back to Smart plan</span>
+                      </button>
+                    )}
                     <h2 id="plan-trip-title" className="font-display text-3xl tracking-[-0.025em] sm:text-4xl">{title}</h2>
                     <p className="mt-1 max-w-xl text-sm leading-6 text-slate-500 dark:text-slate-400">
                       {showingProposal
@@ -457,6 +480,46 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                 >
                   {!showingProposal && !loading && (
                     <div className="mx-auto max-w-xl">
+                      {write.phase === 'applied' && (
+                        <section
+                          role="status"
+                          aria-labelledby="apply-success-title"
+                          className="mb-6 rounded-2xl bg-emerald-50 p-4 text-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-100"
+                        >
+                          <h3 id="apply-success-title" className="flex items-center gap-2 text-sm font-semibold">
+                            <Check className="h-4 w-4" /> Applied to your itinerary
+                          </h3>
+                          <p className="mt-1 text-xs leading-5">
+                            Smart Plan has refreshed its suggestions for your updated trip.
+                          </p>
+                          <button
+                            type="button"
+                            className="mt-3 rounded-full border border-emerald-700 px-4 py-2 text-xs font-semibold disabled:opacity-60 dark:border-emerald-300"
+                            onClick={() => void undo()}
+                            disabled={busy}
+                          >
+                            Undo this change
+                          </button>
+                        </section>
+                      )}
+                      {write.phase === 'undoing' && (
+                        <p role="status" className="mb-6 flex items-center gap-2 rounded-2xl bg-slate-100 p-4 text-sm font-semibold dark:bg-slate-900">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Undoing…
+                        </p>
+                      )}
+                      {write.phase === 'undone' && (
+                        <p role="status" className="mb-6 rounded-2xl bg-slate-100 p-4 text-sm font-semibold dark:bg-slate-900">
+                          Change undone. Your itinerary is back to what it was.
+                        </p>
+                      )}
+                      {writeError && (
+                        <section role="alert" className="mb-6 rounded-2xl bg-rose-50 p-4 text-rose-950 dark:bg-rose-950/40 dark:text-rose-100">
+                          <div className="flex items-center gap-2 text-sm font-semibold">
+                            <AlertTriangle className="h-4 w-4" /> Nothing was changed
+                          </div>
+                          <p className="plan-trip-wrap mt-2 text-xs leading-5">{writeError}</p>
+                        </section>
+                      )}
                       {/*
                         Two sections, and the order is the point. What this trip
                         needs comes first and stays short; the full catalogue sits
@@ -591,15 +654,6 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
 
                   {showingProposal && !loading && proposal && (
                     <div className="space-y-8">
-                      {!busy && write.phase !== 'confirm' && write.phase !== 'applied' && (
-                        <button
-                          type="button"
-                          onClick={() => setView('menu')}
-                          className="text-xs font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400"
-                        >
-                          Back to Smart plan
-                        </button>
-                      )}
                       {notice && (
                         <section role="alert" className="plan-trip-notice rounded-2xl bg-rose-50 p-4 text-rose-950 dark:bg-rose-950/40 dark:text-rose-100">
                           <div className="flex items-start gap-2 text-sm font-semibold">
@@ -807,6 +861,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                   )}
                 </div>
 
+                {showingProposal && (
                 <footer className="border-t border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-950 sm:px-7">
                   <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <button type="button" className="rounded-full px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-300 dark:hover:bg-slate-900" onClick={() => setOpen(false)} disabled={busy}>
@@ -842,6 +897,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                     </div>
                   </div>
                 </footer>
+                )}
               </motion.section>
             </motion.div>
           )}
