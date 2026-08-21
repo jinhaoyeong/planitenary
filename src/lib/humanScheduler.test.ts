@@ -705,7 +705,15 @@ describe('pace limits that used to be declared but never enforced', () => {
     expect(day.rejections.some((rejection) => rejection.reason === 'daily-capacity-reached')).toBe(true);
   });
 
-  it('keeps a relaxed day inside one city', () => {
+  /**
+   * Geography decides whether a neighbouring city is *possible*; pace decides
+   * how much of the day it may take. These were once the same switch, which
+   * meant a relaxed traveller staying in Osaka could not be offered Kyoto at
+   * all — not because it is far, but because they had asked for a calm trip.
+   * Geelong is about 64 km from Melbourne, so it is a real day trip, and a
+   * relaxed day may now include one.
+   */
+  it('does not refuse a reachable neighbouring city just because the pace is relaxed', () => {
     const day = simulateDay({
       dayNumber: 1,
       city: 'Melbourne',
@@ -716,8 +724,9 @@ describe('pace limits that used to be declared but never enforced', () => {
       behaviour: behaviourFor(['slow-living']),
     });
     const crossCity = day.rejections.find((rejection) => rejection.candidate.id === 'away');
-    expect(crossCity?.reason).toBe('incompatible-location');
-    expect(crossCity?.detail).toContain('Geelong');
+    // It may still not fit — a calm day has a return time — but if it is
+    // dropped it must be for the time it costs, never for the city it is in.
+    expect(crossCity?.reason).not.toBe('incompatible-location');
   });
 
   it('allows a cross-city day at a pace that permits one', () => {
@@ -731,5 +740,26 @@ describe('pace limits that used to be declared but never enforced', () => {
       behaviour: behaviourFor(['fast-paced']),
     });
     expect(day.rejections.some((rejection) => rejection.reason === 'incompatible-location')).toBe(false);
+  });
+
+  /**
+   * The case the guard exists for. Sydney is ~700 km from Melbourne: there is
+   * no pace at which it is a day out, so no amount of energy makes it legal.
+   */
+  it('refuses a city that cannot be reached and returned from, at any pace', () => {
+    for (const style of [['slow-living'], ['fast-paced']]) {
+      const day = simulateDay({
+        dayNumber: 1,
+        city: 'Melbourne',
+        candidates: [
+          calm('home', 60),
+          calm('far', 60, { city: 'Sydney', coordinates: [-33.8688, 151.2093] }),
+        ],
+        behaviour: behaviourFor(style),
+      });
+      const rejected = day.rejections.find((rejection) => rejection.candidate.id === 'far');
+      expect(rejected?.reason).toBe('incompatible-location');
+      expect(rejected?.detail).toContain('Sydney');
+    }
   });
 });

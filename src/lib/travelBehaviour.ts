@@ -88,8 +88,6 @@ export interface PaceDefaults {
   maximumWalkingMinutes: number;
   maximumContinuousWalkMinutes: number;
   maximumQueueMinutes: number;
-  /** Whether a day may cross into another city. */
-  allowCrossCityDays: boolean;
 }
 
 export const PACE_DEFAULTS: Record<TravelPace, PaceDefaults> = {
@@ -105,7 +103,6 @@ export const PACE_DEFAULTS: Record<TravelPace, PaceDefaults> = {
     maximumWalkingMinutes: 55,
     maximumContinuousWalkMinutes: 15,
     maximumQueueMinutes: 15,
-    allowCrossCityDays: false,
   },
   relaxed: {
     maxMainActivities: 2,
@@ -119,7 +116,6 @@ export const PACE_DEFAULTS: Record<TravelPace, PaceDefaults> = {
     maximumWalkingMinutes: 75,
     maximumContinuousWalkMinutes: 20,
     maximumQueueMinutes: 25,
-    allowCrossCityDays: false,
   },
   balanced: {
     maxMainActivities: 3,
@@ -133,7 +129,6 @@ export const PACE_DEFAULTS: Record<TravelPace, PaceDefaults> = {
     maximumWalkingMinutes: 100,
     maximumContinuousWalkMinutes: 30,
     maximumQueueMinutes: 40,
-    allowCrossCityDays: true,
   },
   active: {
     maxMainActivities: 4,
@@ -147,7 +142,6 @@ export const PACE_DEFAULTS: Record<TravelPace, PaceDefaults> = {
     maximumWalkingMinutes: 140,
     maximumContinuousWalkMinutes: 40,
     maximumQueueMinutes: 60,
-    allowCrossCityDays: true,
   },
   intensive: {
     maxMainActivities: 5,
@@ -161,7 +155,6 @@ export const PACE_DEFAULTS: Record<TravelPace, PaceDefaults> = {
     maximumWalkingMinutes: 170,
     maximumContinuousWalkMinutes: 50,
     maximumQueueMinutes: 90,
-    allowCrossCityDays: true,
   },
 };
 

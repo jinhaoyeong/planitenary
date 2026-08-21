@@ -21,6 +21,13 @@
  */
 import { canonicalFingerprint } from './canonicalHash.ts';
 import {
+  cityKey,
+  cityReachability,
+  isPlacementAllowed,
+  placementConflictMessage,
+  type CityReachability,
+} from './cityReachability.ts';
+import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
 } from './itineraryEdgeTiming.ts';
@@ -215,6 +222,12 @@ export type ProposalConflictCode =
   | 'must-do-omitted'
   | 'day-window-exceeded'
   | 'excessive-region-bouncing'
+  /**
+   * A place scheduled in a city it cannot be reached from that day. Distinct
+   * from `excessive-region-bouncing`, which is about too much *legitimate*
+   * movement; this one is about movement that could not happen at all.
+   */
+  | 'incompatible-location'
   | 'unknown-place'
   | 'duplicate-place';
 
@@ -678,6 +691,34 @@ const dayWindowsOf = (day: PlanningDayMaterial): PlanningDayWindow[] =>
 const citiesOnDay = (day: PlanningDayMaterial): Set<string> =>
   new Set([day.city, ...dayWindowsOf(day).map((window) => window.city)]);
 
+/**
+ * May this place be scheduled on this day?
+ *
+ * Two ways to qualify, and they are different situations:
+ *
+ * **The day already covers that city.** On a transfer day the traveller is in
+ * Osaka in the morning and Kyoto in the evening, and both cities are on the
+ * day's windows. A place in either is simply where they are.
+ *
+ * **The day's base can reach it and come back.** The traveller sleeps in Osaka
+ * and spends the day in Kyoto. The hotel does not move, the day's city does not
+ * change, and this is the single most common shape of a Kansai trip.
+ *
+ * Anything else is a misplacement: a stop in a city the traveller is neither in
+ * nor able to get to that day. That — and only that — is refused. The rule is
+ * never "the place's city must equal the day's city", because that sentence
+ * would delete every day trip in the plan.
+ */
+const placementAllowedOnDay = (
+  day: PlanningDayMaterial,
+  place: PlanningPlace,
+  reach: CityReachability,
+): boolean => {
+  const covered = new Set([...citiesOnDay(day)].map(cityKey));
+  if (covered.has(cityKey(place.city))) return true;
+  return isPlacementAllowed(reach.verdictFor(day.city, place));
+};
+
 const overlappingFixedEvent = (
   events: PlanningFixedEvent[] | undefined,
   start: number,
@@ -1071,11 +1112,23 @@ export function defaultComposition(material: PlanningMaterial): ModelItineraryCo
         || left.cluster.localeCompare(right.cluster)
         || left.name.localeCompare(right.name);
     });
+  const reach = cityReachability(material.places);
+  const hasRoom = (candidate: PlanningDayMaterial) =>
+    (assignments.find((entry) => entry.day === candidate.day)?.placeIds.length ?? 0)
+      < (capacity.get(candidate.day) ?? 0);
   for (const place of sorted) {
-    const day = material.days.find((candidate) => citiesOnDay(candidate).has(place.city)
-      && (assignments.find((entry) => entry.day === candidate.day)?.placeIds.length ?? 0) < (capacity.get(candidate.day) ?? 0))
-      ?? material.days.find((candidate) =>
-        (assignments.find((entry) => entry.day === candidate.day)?.placeIds.length ?? 0) < (capacity.get(candidate.day) ?? 0));
+    /**
+     * A day in the place's own city first, then a day whose base can reach it.
+     *
+     * The previous last resort was "any day with room at all", which is
+     * precisely how an Osaka place landed on a Kyoto day once the Osaka days
+     * filled up. Leaving a place unscheduled is the correct outcome there: it
+     * stays on the shortlist for the traveller to place, and
+     * `unscheduledReasons` explains it, rather than the plan quietly asserting
+     * a journey nobody could make.
+     */
+    const day = material.days.find((candidate) => citiesOnDay(candidate).has(place.city) && hasRoom(candidate))
+      ?? material.days.find((candidate) => hasRoom(candidate) && placementAllowedOnDay(candidate, place, reach));
     if (day) assignments.find((entry) => entry.day === day.day)!.placeIds.push(place.id);
   }
   return { days: assignments };
@@ -1478,6 +1531,7 @@ export function validateItineraryProposal(
   const conflicts: ProposalConflict[] = [];
   const places = new Map(material.places.map((place) => [place.id, place]));
   const scheduled = new Set<string>();
+  const reach = cityReachability(material.places);
   for (const day of proposalDays) {
     const materialDay = material.days.find((entry) => entry.day === day.day);
     const startLimit = clockToMinutes(materialDay?.startTime);
@@ -1518,6 +1572,16 @@ export function validateItineraryProposal(
         if (scheduled.has(item.placeId)) conflicts.push({ code: 'duplicate-place', severity: 'error', day: day.day, placeId: item.placeId, message: `${item.name} appears more than once.` });
         scheduled.add(item.placeId);
         const place = places.get(item.placeId);
+        /**
+         * The city check. A saved place keeps its own city identity: nothing
+         * downstream may quietly relocate an Osaka stop into a Kyoto day
+         * because that day happened to have room. A day trip the base can
+         * reach is not a relocation and passes untouched.
+         */
+        if (place && materialDay && !placementAllowedOnDay(materialDay, place, reach)) conflicts.push({
+          code: 'incompatible-location', severity: 'error', day: day.day, placeId: item.placeId,
+          message: placementConflictMessage(item.name, place.city, day.day, materialDay.city),
+        });
         const window = place ? hoursForDate(place, day.date) : undefined;
         if (place && place.openingHours.length > 0 && (!window
           || start < clockToMinutes(window.opensAt)!

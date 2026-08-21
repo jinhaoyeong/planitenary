@@ -914,8 +914,9 @@ export function buildDestinationItinerary(
    * A deck for Osaka also offers Nara, Kyoto and Kobe as *day trips* — the
    * fixture has six such places. Those are not stays, and turning one into a
    * leg would silently move the traveller's hotel. Whether a day trip is
-   * schedulable at all is `simulateDay`'s decision, made from the pace:
-   * `allowCrossCityDays` is exactly this question.
+   * schedulable at all is `simulateDay`'s decision, made from geography:
+   * `cityReachability` asks whether the base can reach the place and return,
+   * and the pace limits then decide how much of the day it may take.
    */
   const chosenCities = orderedCities([
     ...profile.destinations.map((destination) => destination.city),

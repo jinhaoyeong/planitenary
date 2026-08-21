@@ -19,6 +19,7 @@ import type { PlaceCandidate } from './destinationIntelligence';
 import { openingWindow, toMinutes, toTime } from './openingHours';
 import { distanceMeters } from './placeIdentity';
 import { PACE_DEFAULTS, type TravelBehaviourProfile } from './travelBehaviour';
+import { cityReachability, isPlacementAllowed } from '../../supabase/functions/_shared/cityReachability';
 
 export type TravelMode = 'walking' | 'public-transport' | 'driving';
 
@@ -408,6 +409,11 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
   const optionalAllowance = paceDefaults.optionalActivities;
   const weekday = weekdayOf(request.date);
   const dayCity = request.origin?.city || candidates[0]?.city;
+  /**
+   * City geography for this day, derived from the candidates themselves.
+   * No geocoding call and nothing stored: a city is where its places are.
+   */
+  const reach = cityReachability(candidates);
 
   /**
    * Restaurants are scheduled as meals, not as sights.
@@ -566,13 +572,21 @@ export function simulateDay(request: DayPlanRequest): SimulatedDay {
       rejections.push({ candidate, reason: 'duplicate', detail: 'Already scheduled on this day.' });
       continue;
     }
-    // A day should stay in one part of one city unless the pace allows
-    // otherwise; a relaxed traveller did not ask for an intercity hop.
-    if (!paceDefaults.allowCrossCityDays && dayCity && candidate.city && candidate.city !== dayCity) {
+    /**
+     * Whether the traveller *can* get there, not whether they feel energetic.
+     *
+     * These used to be the same switch: `allowCrossCityDays` was false at a
+     * relaxed pace, so somebody staying in Osaka for five calm days could not
+     * be offered Kyoto at all — not because it is far, but because they had
+     * said they wanted an unhurried trip. That conflates geography with
+     * appetite. Reachability decides whether the visit is possible; the pace
+     * limits below decide how much of the day it may take.
+     */
+    if (dayCity && !isPlacementAllowed(reach.verdictFor(dayCity, candidate))) {
       rejections.push({
         candidate,
         reason: 'incompatible-location',
-        detail: `A ${behaviour.pace} day stays in ${dayCity} rather than crossing to ${candidate.city}.`,
+        detail: `${candidate.city} is too far from ${dayCity} to visit and return the same day.`,
       });
       continue;
     }

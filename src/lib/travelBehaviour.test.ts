@@ -66,10 +66,19 @@ describe('pace produces materially different days', () => {
     }
   });
 
-  it('keeps relaxed travellers within one city', () => {
-    expect(PACE_DEFAULTS['very-relaxed'].allowCrossCityDays).toBe(false);
-    expect(PACE_DEFAULTS.relaxed.allowCrossCityDays).toBe(false);
-    expect(PACE_DEFAULTS.active.allowCrossCityDays).toBe(true);
+  /**
+   * Pace no longer decides which cities are permitted — geography does, in
+   * `cityReachability`. What pace still decides is how much of a day a visit
+   * may consume, which is what these numbers express. The old
+   * `allowCrossCityDays` flag conflated the two and meant a relaxed traveller
+   * in Osaka could not be offered Kyoto at all.
+   */
+  it('limits how much a calm day holds without ruling any city out', () => {
+    expect(PACE_DEFAULTS['very-relaxed'].minimumFreeTimeMinutes)
+      .toBeGreaterThan(PACE_DEFAULTS.active.minimumFreeTimeMinutes);
+    expect(PACE_DEFAULTS['very-relaxed'].maximumWalkingMinutes)
+      .toBeLessThan(PACE_DEFAULTS.active.maximumWalkingMinutes);
+    expect(PACE_DEFAULTS).not.toHaveProperty('very-relaxed.allowCrossCityDays');
   });
 });
 
