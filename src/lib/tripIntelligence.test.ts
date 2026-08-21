@@ -79,6 +79,47 @@ describe('shared trip intelligence context', () => {
     );
     expect(turns.map((turn) => turn.question)).toEqual(['Q3', 'Q4', 'Q5', 'Q6']);
   });
+
+  /**
+   * A turn is two strings plus opaque tokens. Any other property a browser
+   * attaches is dropped by construction rather than by a rule — this builds a
+   * new object out of the fields it recognises, so there is no rule anyone
+   * could later forget to write.
+   */
+  it('ignores place identity a browser attaches to a conversation turn', () => {
+    const [turn] = parseConversationTurns([{
+      question: 'Where?',
+      answer: 'There.',
+      canonicalPlaceId: 'canon-forged',
+      providerPlaceId: 'forged-1',
+      provider: 'osm',
+      coordinates: [1.234, 5.678],
+      places: [{ ref: { canonicalPlaceId: 'canon-forged' }, name: 'Forged' }],
+    }]);
+    expect(Object.keys(turn).sort()).toEqual(['answer', 'question']);
+    expect(JSON.stringify(turn)).not.toContain('canon-forged');
+  });
+
+  it('carries opaque place tokens, bounded in count and length', () => {
+    const [turn] = parseConversationTurns([{
+      question: 'Where?',
+      answer: 'There.',
+      trustedPlaceTokens: ['t1', 't2', 't3', 't4', 't5', 't6', 't7'],
+    }]);
+    expect(turn.trustedPlaceTokens).toEqual(['t1', 't2', 't3', 't4', 't5']);
+
+    const [oversized] = parseConversationTurns([{
+      question: 'Where?',
+      answer: 'There.',
+      trustedPlaceTokens: ['x'.repeat(2_000), 'fine'],
+    }]);
+    expect(oversized.trustedPlaceTokens).toEqual(['fine']);
+  });
+
+  it('omits the field entirely when no tokens were offered', () => {
+    const [turn] = parseConversationTurns([{ question: 'Q', answer: 'A', trustedPlaceTokens: [] }]);
+    expect('trustedPlaceTokens' in turn).toBe(false);
+  });
 });
 
 describe('deterministic Smart Plan actions', () => {

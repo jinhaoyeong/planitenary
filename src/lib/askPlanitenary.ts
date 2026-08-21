@@ -75,6 +75,16 @@ export interface AskResult {
    * is an addition to an answer, never a substitute for one.
    */
   places: StructuredPlaceCard[];
+  /**
+   * Opaque server-signed references, one per card, matched by canonical id.
+   *
+   * Never rendered and never inspected. The panel stores these beside the
+   * message and offers them back with the next question, which is the only
+   * way a follow-up can be about a place that was never saved to the trip.
+   * A build that ignores the field loses follow-up references and nothing
+   * else.
+   */
+  placeTokens: Array<{ canonicalPlaceId: string; token: string }>;
 }
 
 const text = (value: unknown, max = 4_000): string | undefined =>
@@ -127,7 +137,7 @@ function parseProposal(value: unknown): AskProposal | undefined {
 }
 
 export function parseAskResult(payload: unknown): AskResult {
-  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [] };
+  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [] };
   if (!payload || typeof payload !== 'object') return empty;
   const raw = payload as Record<string, unknown>;
 
@@ -193,6 +203,20 @@ export function parseAskResult(payload: unknown): AskResult {
         .filter((card): card is StructuredPlaceCard => Boolean(card))
         .slice(0, MAX_PLACE_CARDS)
       : [],
+    /**
+     * Shape-checked like everything else, and nothing more. A token is
+     * opaque to this side: the client cannot tell a real one from a
+     * plausible string, which is exactly why it never acts on the contents.
+     * Only the server that signed it can read it back.
+     */
+    placeTokens: Array.isArray(raw.placeTokens)
+      ? raw.placeTokens.flatMap((entry) => {
+        const row = entry as Record<string, unknown> | null;
+        const canonicalPlaceId = text(row?.canonicalPlaceId, 200);
+        const token = text(row?.token, 1_024);
+        return canonicalPlaceId && token ? [{ canonicalPlaceId, token }] : [];
+      }).slice(0, MAX_PLACE_CARDS)
+      : [],
   };
 }
 
@@ -216,7 +240,7 @@ export async function askPlanitenary(
 ): Promise<AskResult> {
   const question = input.question.trim();
   if (!question || !input.tripId) {
-    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], detail: 'A question is required.' };
+    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], detail: 'A question is required.' };
   }
   if (question.length > 600) {
     return {
@@ -226,6 +250,7 @@ export async function askPlanitenary(
       steps: [],
       rejectedClaims: 0,
       places: [],
+      placeTokens: [],
       detail: 'Keep the question under 600 characters.',
     };
   }
@@ -247,6 +272,7 @@ export async function askPlanitenary(
       steps: [],
       rejectedClaims: 0,
       places: [],
+      placeTokens: [],
       detail: error instanceof Error ? error.message : 'The assistant is unavailable right now.',
     };
   }

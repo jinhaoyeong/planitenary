@@ -314,6 +314,9 @@ export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlaniten
       // places field at all, and an answer is worth keeping either way.
       ...((next.places ?? []).length > 0 ? { places: next.places } : {}),
       ...((next.citations ?? []).length > 0 ? { citations: next.citations } : {}),
+      // Kept beside the answer they belong to, never rendered. This is what a
+      // follow-up about an unsaved place is carried by.
+      ...((next.placeTokens ?? []).length > 0 ? { placeTokens: next.placeTokens } : {}),
     };
 
     setMessages((current) => [...current, assistantMessage]);

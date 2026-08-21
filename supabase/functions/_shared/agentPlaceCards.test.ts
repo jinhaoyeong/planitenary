@@ -107,6 +107,40 @@ const sessionWith = (cache: unknown, requests: RecordedRequest[]) => {
   });
 };
 
+/** The same session, with a place carried over from a previous answer. */
+const sessionWithSeed = (cache: unknown, requests: RecordedRequest[]) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body?: string }) => {
+    const name = String(url).split('/').pop() ?? '';
+    const body = JSON.parse(init?.body ?? '{}') as Record<string, unknown>;
+    requests.push({ name, body });
+    if (name === 'travel-images') {
+      const first = (body.placeIds as string[])[0];
+      return new Response(JSON.stringify(imagePayload(first)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }));
+  return createToolExecutor({
+    authHeader: 'Bearer user-jwt',
+    functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+    cache: cache as never,
+    tripId: 'trip-1',
+    userId: 'user-1',
+    itinerary,
+    routingProviders: { amap: true, openRouteService: true },
+    seedTrustedPlaces: [{
+      alias: 'recent-place-1',
+      name: 'ACROS Fukuoka',
+      provider: 'osm',
+      providerPlaceId: 'wv:ACROS rooftop garden',
+      city: 'Fukuoka',
+      coordinates: [33.5916, 130.4023],
+    }],
+  });
+};
+
 const linkedAcros = () => cacheFor({
   links: [{ provider: 'osm', provider_place_id: 'wv:ACROS rooftop garden', canonical_place_id: 'canon-acros' }],
   places: [{
@@ -241,5 +275,56 @@ describe('the answer contract holds place references to what the tools returned'
     const validated = validateAgentAnswer({ answer: 'Your budget is fine.', citations: [] }, placeEvidence());
     expect(validated.placeIds).toEqual([]);
     expect(validated.rejected).toEqual([]);
+  });
+});
+
+/**
+ * Places carried across turns, seeded by the server after it re-established
+ * them. The rule `strictlyKnown` enforces is unchanged — "the id must be one
+ * the server put in this turn's index" — and this is the server putting one
+ * there, rather than a second and weaker way to be trusted.
+ */
+describe('a place carried over from a previous answer', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('cards a seeded place by its alias, without any tool having run', async () => {
+    const requests: RecordedRequest[] = [];
+    const session = sessionWithSeed(linkedAcros(), requests);
+
+    const cards = await session.resolvePlaceCards(['recent-place-1']);
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0].ref.canonicalPlaceId).toBe('canon-acros');
+    // The name comes from the canonical record, not from the seed.
+    expect(cards[0].name).toBe('ACROS Fukuoka');
+    expect(requests.some((request) => request.name === 'travel-discover')).toBe(false);
+  });
+
+  it('also accepts the real provider place id the server seeded', async () => {
+    const session = sessionWithSeed(linkedAcros(), []);
+    const cards = await session.resolvePlaceCards(['wv:ACROS rooftop garden']);
+    expect(cards).toHaveLength(1);
+  });
+
+  /**
+   * `registerPlace` files every place under its lowercased name too. That key
+   * is a trapdoor `strictlyKnown` has always refused, and seeding must not
+   * quietly open it.
+   */
+  it('still refuses a hit that came through the name key', async () => {
+    const session = sessionWithSeed(linkedAcros(), []);
+    expect(await session.resolvePlaceCards(['acros fukuoka'])).toEqual([]);
+    expect(await session.resolvePlaceCards(['ACROS Fukuoka'])).toEqual([]);
+  });
+
+  it('refuses an alias the server did not seed', async () => {
+    const session = sessionWithSeed(linkedAcros(), []);
+    expect(await session.resolvePlaceCards(['recent-place-2'])).toEqual([]);
+    expect(await session.resolvePlaceCards(['recent-place-99'])).toEqual([]);
+  });
+
+  it('cards nothing at all when the server seeded nothing', async () => {
+    const session = sessionWith(linkedAcros(), []);
+    expect(await session.resolvePlaceCards(['recent-place-1'])).toEqual([]);
   });
 });

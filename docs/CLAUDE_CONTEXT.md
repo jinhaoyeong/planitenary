@@ -121,6 +121,39 @@ Other env: `YOUTUBE_DAILY_SEARCH_LIMIT` (default 90), `TRAVEL_REFRESH_SECRET`,
 `OPENAI_REASONING_EFFORT` (default `minimal`), `AI_DAILY_CALL_LIMIT`
 (default 50).
 
+### Ask remembers what was said; only the server remembers what a place is
+
+Ask earns place identity within one turn: the model may only point at ids a
+place-bearing tool returned that turn, checked against the server-owned index
+(`strictlyKnown`). That rule is unchanged, and is why a follow-up about an
+*unsaved* place needed a mechanism rather than a relaxation.
+
+Each card Ask returns is accompanied by an opaque HMAC-SHA256 token signed
+with `ASK_PLACE_REF_SIGNING_SECRET` (its own secret; never the service-role
+key, the JWT secret or a provider credential). The payload binds user, trip,
+canonical place, provider, provider place id and a 30-day expiry. The browser
+stores it beside the message and offers it back with the next question.
+
+A signature is necessary and never sufficient. On the next request the server
+re-resolves `(provider, providerPlaceId)` against `place_provider_links` and
+requires the canonical id to still match — the same stale-reference check
+Smart Plan performs on a reference recovered from stored JSON. Only then is
+the place seeded into *this* turn’s tool index under an alias
+(`recent-place-1`, `recent-place-2`, in the order the cards were shown), which
+is what lets `strictlyKnown` accept it without being loosened: the rule is
+still "an id the server put in this turn’s index".
+
+Names shown to the model come from `canonical_places`, never from the
+conversation, so a card edited in a browser cannot rename a place. A
+`ConversationTurn` is two strings plus opaque tokens — there is no field for a
+`canonicalPlaceId`, provider id or coordinate to travel in, so a fabricated
+identity has nowhere to go and an edited token stops verifying rather than
+starting to lie. Failures are silent to the traveller and counted by reason
+in `recentPlaceRefs` for operators.
+
+Unset secret means the capability is off, not broken: Ask works, and a
+follow-up about an unsaved place is researched afresh.
+
 ### The reasoning provider is selected, never inferred
 
 `reasoningProvider()` reads one env var; `reasoningKey()` reads only that

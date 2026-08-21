@@ -40,6 +40,19 @@ export interface IntelligenceUiEnvelope {
 export interface ConversationTurn {
   question: string;
   answer: string;
+  /**
+   * Opaque server-signed references to places this answer showed cards for.
+   *
+   * The shape is the security property. There is no `canonicalPlaceId`,
+   * `provider`, `providerPlaceId` or coordinate field on a turn, so a browser
+   * has nowhere to put a fabricated identity — the only thing it can offer is
+   * a string this server signed, and it cannot alter one without breaking it.
+   *
+   * Ordered as the cards were shown, which is what makes "the second one"
+   * answerable. A token is a claim to re-check, never a fact: the agent still
+   * re-resolves the provider link before any of it becomes authority.
+   */
+  trustedPlaceTokens?: string[];
 }
 
 /** What the model may see as "the thing the traveller is looking at". */
@@ -107,13 +120,38 @@ export function parseUiContextEnvelope(value: unknown): IntelligenceUiEnvelope |
   return Object.keys(envelope).length > 0 ? envelope : undefined;
 }
 
+/**
+ * One token is a signature plus a small payload, and nothing longer is one.
+ * The cap stops a caller using the field as a channel for bulk data that the
+ * request-size limit would otherwise have to absorb.
+ */
+const MAX_TOKEN_CHARS = 1_024;
+const MAX_TOKENS_PER_TURN = 5;
+
+/**
+ * Read the bounded conversation a follow-up may carry.
+ *
+ * Note what is *not* read. Any other property on a turn — a place id, a
+ * coordinate, a card, a name — is dropped here by construction rather than
+ * rejected by a rule, because this builds a new object out of the three
+ * fields it recognises. A browser adding `canonicalPlaceId` to a turn does
+ * not get it refused; it gets it ignored, which is the same outcome with no
+ * rule to forget to write.
+ */
 export function parseConversationTurns(value: unknown): ConversationTurn[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     const row = asRecord(entry);
     const question = text(row?.question, 400);
     const answer = text(row?.answer, 800);
-    return question && answer ? [{ question, answer }] : [];
+    if (!question || !answer) return [];
+    const tokens = asArray(row?.trustedPlaceTokens)
+      .filter((token): token is string =>
+        typeof token === 'string' && token.length > 0 && token.length <= MAX_TOKEN_CHARS)
+      .slice(0, MAX_TOKENS_PER_TURN);
+    return [tokens.length > 0
+      ? { question, answer, trustedPlaceTokens: tokens }
+      : { question, answer }];
   }).slice(-4);
 }
 

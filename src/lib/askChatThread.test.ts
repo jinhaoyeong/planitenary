@@ -320,3 +320,125 @@ describe('persisting through the safe storage layer', () => {
     expect(readAskChat(key).length).toBeLessThanOrEqual(ASK_CHAT_MAX_MESSAGES);
   });
 });
+
+describe('carrying place references across turns', () => {
+  beforeEach(() => { localStorage.clear(); });
+
+  const card = (canonicalPlaceId: string, name: string) => ({
+    ref: { canonicalPlaceId, provider: 'osm', providerPlaceId: `pp-${canonicalPlaceId}` },
+    name,
+  });
+
+  /** Two cards, and a token for each, as one answer would produce. */
+  const answered = () => [
+    message({ role: 'user', text: 'Suggest two places near Shinjuku.' }),
+    message({
+      role: 'assistant',
+      text: 'Try these.',
+      status: 'answered',
+      places: [card('canon-a', 'Ameya-Yokocho'), card('canon-b', 'Shinjuku Gyoen')],
+      placeTokens: [
+        { canonicalPlaceId: 'canon-a', token: 'token-a' },
+        { canonicalPlaceId: 'canon-b', token: 'token-b' },
+      ],
+    }),
+  ];
+
+  /**
+   * Order is what makes "the second one" answerable, and it follows the cards
+   * rather than the token array — which may arrive in any order.
+   */
+  it('sends tokens in the order the cards were shown', () => {
+    const [turn] = conversationTurnsFrom(answered());
+    expect(turn.trustedPlaceTokens).toEqual(['token-a', 'token-b']);
+  });
+
+  it('follows the cards even when the tokens arrived in another order', () => {
+    const thread = answered();
+    thread[1].placeTokens = [
+      { canonicalPlaceId: 'canon-b', token: 'token-b' },
+      { canonicalPlaceId: 'canon-a', token: 'token-a' },
+    ];
+    expect(conversationTurnsFrom(thread)[0].trustedPlaceTokens).toEqual(['token-a', 'token-b']);
+  });
+
+  /**
+   * A hole would shift every later ordinal by one and make the model answer
+   * confidently about the wrong place, so a card with no token is skipped.
+   */
+  it('skips a card that has no token rather than leaving a gap', () => {
+    const thread = answered();
+    thread[1].placeTokens = [{ canonicalPlaceId: 'canon-b', token: 'token-b' }];
+    expect(conversationTurnsFrom(thread)[0].trustedPlaceTokens).toEqual(['token-b']);
+  });
+
+  it('omits the field for an answer that carried no cards', () => {
+    const [turn] = conversationTurnsFrom(turns(1));
+    expect('trustedPlaceTokens' in turn).toBe(false);
+  });
+
+  /**
+   * The whole point of the token: the identity never travels, only a
+   * signature the browser cannot read does.
+   */
+  it('still sends no place identity of any kind', () => {
+    const serialised = JSON.stringify(conversationTurnsFrom(answered()));
+    for (const identity of ['canon-a', 'canon-b', 'pp-canon-a', 'Ameya-Yokocho', 'osm']) {
+      expect(serialised).not.toContain(identity);
+    }
+  });
+
+  it('round-trips tokens through storage', () => {
+    const key = askChatStorageKey({ tripId: 'trip-a', userId: 'u1' });
+    writeAskChat(key, answered());
+    const restored = readAskChat(key);
+    expect(restored[1].placeTokens).toEqual([
+      { canonicalPlaceId: 'canon-a', token: 'token-a' },
+      { canonicalPlaceId: 'canon-b', token: 'token-b' },
+    ]);
+    expect(conversationTurnsFrom(restored)[0].trustedPlaceTokens).toEqual(['token-a', 'token-b']);
+  });
+
+  /**
+   * Editing a stored token does not promote a fabricated place. It travels,
+   * and the server that signed it refuses it — which is the design: this side
+   * cannot tell a real token from a plausible string, so it never tries.
+   */
+  it('carries a tampered token without ever inspecting it', () => {
+    const key = askChatStorageKey({ tripId: 'trip-a', userId: 'u1' });
+    writeAskChat(key, answered());
+    const raw = JSON.parse(localStorage.getItem(key) as string);
+    raw[1].placeTokens[0].token = 'v1.forged.forged';
+    localStorage.setItem(key, JSON.stringify(raw));
+
+    const restored = readAskChat(key);
+    expect(conversationTurnsFrom(restored)[0].trustedPlaceTokens?.[0]).toBe('v1.forged.forged');
+  });
+
+  it('drops a stored token entry that is not a usable pair', () => {
+    const key = askChatStorageKey({ tripId: 'trip-a', userId: 'u1' });
+    writeAskChat(key, answered());
+    const raw = JSON.parse(localStorage.getItem(key) as string);
+    raw[1].placeTokens = [
+      { canonicalPlaceId: 'canon-a' },
+      { token: 'orphan' },
+      { canonicalPlaceId: 'canon-b', token: 'x'.repeat(5_000) },
+      { canonicalPlaceId: 'canon-b', token: 'token-b' },
+    ];
+    localStorage.setItem(key, JSON.stringify(raw));
+
+    expect(readAskChat(key)[1].placeTokens).toEqual([{ canonicalPlaceId: 'canon-b', token: 'token-b' }]);
+  });
+
+  /** A user turn has no cards, whatever a stored entry claims. */
+  it('never lets a stored user turn claim tokens', () => {
+    const stored = JSON.stringify([{
+      id: 'u1',
+      role: 'user',
+      text: 'Where?',
+      createdAt: '2026-08-21T10:00:00.000Z',
+      placeTokens: [{ canonicalPlaceId: 'canon-a', token: 'token-a' }],
+    }]);
+    expect(parseAskChat(stored)[0].placeTokens).toBeUndefined();
+  });
+});

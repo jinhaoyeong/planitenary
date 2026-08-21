@@ -12,14 +12,18 @@
  * actually bounds them. That direction matters: a bound enforced only by the
  * sender is not a bound, because the sender is a browser.
  *
- * **What is trusted** is narrower still, and is nothing from this file. A
+ * **What is trusted** is narrower still, and is nothing this file holds. A
  * message restored from `localStorage` is text a browser had write access to.
  * It may be displayed and it may remind the model what "that place" referred
  * to, but it can never establish a canonical place, a coordinate, or an
  * opening time — those come from the server's own grounding on every request.
- * The structural guarantee is that {@link conversationTurnsFrom} emits only
- * `{ question, answer }` strings, so there is no field on the wire for a
- * fabricated identity to travel in.
+ *
+ * The structural guarantee is what {@link conversationTurnsFrom} may emit:
+ * two strings, plus opaque tokens this server signed. There is no field on
+ * the wire for a `canonicalPlaceId`, a provider id or a coordinate, so a
+ * fabricated identity has nowhere to travel — and a token altered here stops
+ * verifying rather than starting to lie. The browser carries a reference it
+ * cannot read; only the server that signed it can turn it back into a place.
  *
  * No React and no direct `localStorage` access: every touch goes through the
  * safe wrappers, and the logic stays testable without a DOM.
@@ -69,6 +73,19 @@ export interface AskChatMessage {
   places?: StructuredPlaceCard[];
   /** Sources the answer cited. Re-checked as absolute http(s) on read. */
   citations?: string[];
+  /**
+   * Opaque server-signed references, one per card, matched by canonical id.
+   *
+   * Capability metadata, not content: never rendered, never inspected, and
+   * meaningless to anything but the server that signed it. This is what lets
+   * "is the second one open late?" work for a place that was never saved to
+   * the trip — the browser carries the reference without ever holding the
+   * identity inside it.
+   *
+   * Editing one here does not promote a fabricated place; it invalidates a
+   * signature, and the server drops it. See {@link conversationTurnsFrom}.
+   */
+  placeTokens?: Array<{ canonicalPlaceId: string; token: string }>;
 }
 
 /**
@@ -145,6 +162,9 @@ const text = (value: unknown, max: number): string | undefined => {
   return trimmed ? trimmed.slice(0, max) : undefined;
 };
 
+/** A signature plus a small payload. Nothing longer is one. */
+const MAX_PLACE_TOKEN_CHARS = 1_024;
+
 const citable = (value: unknown): value is string =>
   typeof value === 'string' && /^https?:\/\//i.test(value.trim());
 
@@ -191,6 +211,26 @@ const parseAskChatMessage = (value: unknown): AskChatMessage | undefined => {
       : {}),
     ...(role === 'assistant' && Array.isArray(raw.citations)
       ? { citations: raw.citations.filter(citable).slice(0, 12) }
+      : {}),
+    ...(role === 'assistant' && Array.isArray(raw.places) && Array.isArray(raw.placeTokens)
+      ? {
+        placeTokens: raw.placeTokens.flatMap((entry) => {
+          const row = entry as Record<string, unknown> | null;
+          const canonicalPlaceId = text(row?.canonicalPlaceId, 200);
+          /**
+           * Length-checked, never truncated. Slicing a signature produces a
+           * different string that cannot verify, so a too-long entry is
+           * dropped outright rather than kept as something that will fail
+           * later while occupying a slot a real reference could have used.
+           * The contents are the server’s business either way.
+           */
+          const raw = row?.token;
+          const token = typeof raw === 'string' && raw.length > 0 && raw.length <= MAX_PLACE_TOKEN_CHARS
+            ? raw
+            : undefined;
+          return canonicalPlaceId && token ? [{ canonicalPlaceId, token }] : [];
+        }).slice(0, MAX_PLACE_CARDS),
+      }
       : {}),
   };
 };
@@ -260,6 +300,7 @@ const serialiseAskChat = (messages: AskChatMessage[]): string => JSON.stringify(
     ...(message.status ? { status: message.status } : {}),
     ...(message.places?.length ? { places: message.places } : {}),
     ...(message.citations?.length ? { citations: message.citations } : {}),
+    ...(message.placeTokens?.length ? { placeTokens: message.placeTokens } : {}),
   })),
 );
 
@@ -324,7 +365,20 @@ export function conversationTurnsFrom(
     const reply = messages[index + 1];
     if (!reply || reply.role !== 'assistant') continue;
     if (reply.status === 'refused') continue;
-    turns.push({ question: message.text, answer: reply.text });
+    /**
+     * Tokens travel in the order their cards were shown, which is what makes
+     * "the second one" resolvable. A card with no token is skipped rather
+     * than padded: a hole would shift every later ordinal by one and make
+     * the model confidently answer about the wrong place.
+     */
+    const tokens = (reply.places ?? [])
+      .map((card) => reply.placeTokens?.find(
+        (entry) => entry.canonicalPlaceId === card.ref.canonicalPlaceId,
+      )?.token)
+      .filter((token): token is string => Boolean(token));
+    turns.push(tokens.length > 0
+      ? { question: message.text, answer: reply.text, trustedPlaceTokens: tokens }
+      : { question: message.text, answer: reply.text });
   }
   return limit > 0 ? turns.slice(-limit) : [];
 }

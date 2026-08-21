@@ -45,6 +45,7 @@ import {
   ITINERARY_PLANNER_SYSTEM_PROMPT,
   aiBudgetEpoch,
   aiReasoningLimits,
+  askPlaceRefSecret,
   aiSafetyBudgetUsd,
   isAgentOperation,
   json,
@@ -57,6 +58,12 @@ import {
 import { callModel } from '../_shared/reasoning.ts';
 import { budgetWindowStart, maximumReservedCost, type ModelUsage } from '../_shared/aiCost.ts';
 import { authenticateRequest, bearerToken } from '../_shared/auth.ts';
+import { signAskPlaceRef } from '../_shared/askPlaceToken.ts';
+import {
+  latestTurnPlaceTokens,
+  presentRecentPlaces,
+  resolveRecentTrustedPlaces,
+} from '../_shared/askRecentPlaces.ts';
 import { readOwnedTrip } from '../_shared/tripOwnership.ts';
 import {
   finalizeAiSpendAttempt,
@@ -342,6 +349,7 @@ async function resolvePlaceCardsOperation(
   }
   if (wanted.length === 0) return json({ cards: [] });
 
+
   const token = bearerToken(request);
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
   if (!token || !supabaseUrl) return json({ error: 'The place card service is not configured.' }, 503);
@@ -580,6 +588,26 @@ Deno.serve(async (request) => {
     budgetUsd,
   );
 
+  /**
+   * Re-establish the places last turn's answer showed cards for.
+   *
+   * Done before the tool session exists, because its result is part of how
+   * that session is built: a verified place is seeded into the index the
+   * tools share, so the model can point at it on exactly the same terms as
+   * a place found this turn. Nothing here reads a place identity from the
+   * request — only signatures this server made, re-resolved against the
+   * link table before any of it counts.
+   *
+   * Costs no model round. Two indexed reads at most, and only when the
+   * previous answer actually carried cards.
+   */
+  const recentTrusted = await resolveRecentTrustedPlaces({
+    client: cache,
+    secret: askPlaceRefSecret(),
+    tokens: latestTurnPlaceTokens(conversation),
+    userId: authentication.caller.userId,
+    tripId: trip.tripId,
+  });
   const token = bearerToken(request);
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
   if (!token || !supabaseUrl) return json({ error: 'The agent tool boundary is not configured.' }, 503);
@@ -592,6 +620,14 @@ Deno.serve(async (request) => {
     userId: authentication.caller.userId,
     itinerary,
     uiFocus,
+    seedTrustedPlaces: recentTrusted.places.map((place) => ({
+      alias: place.alias,
+      name: place.name,
+      provider: place.provider,
+      providerPlaceId: place.providerPlaceId,
+      city: place.city,
+      coordinates: place.coordinates,
+    })),
   });
   const executeTool = toolSession.execute;
 
@@ -756,6 +792,17 @@ Deno.serve(async (request) => {
     today: new Date().toISOString().slice(0, 10),
     focus: uiFocus,
     conversation,
+    /**
+     * Places from the previous answer, in the order their cards were shown.
+     *
+     * Names come from the canonical record, not from the conversation, so a
+     * card edited in a browser cannot rename a place. The model gets an
+     * alias and a name and nothing else: enough to resolve "the second one"
+     * to a handle the tools accept, and not enough to state a fact about it.
+     */
+    ...(recentTrusted.places.length > 0
+      ? { recentPlaces: presentRecentPlaces(recentTrusted.places) }
+      : {}),
     authoritativeEvidence: askGrounding?.packet ? presentAskEvidence(askGrounding.packet) : undefined,
     rules: [
       'Authoritative evidence overrides conversation history.',
@@ -763,6 +810,8 @@ Deno.serve(async (request) => {
       'Cite only URLs a tool returned.',
       'You cannot change or save the itinerary. Describe a proposal instead.',
       'Focus is a hint. Current itinerary facts win over conversation memory.',
+      'recentPlaces are places from your previous answer, in the order shown. Use their ref id (recent-place-1, recent-place-2) to refer to them in tool calls and in placeIds.',
+      'A recentPlaces entry is an identity only. Opening hours, travel time and prices for it still require a tool call.',
       'Do not mention hashes, revisions, ledgers, or internal ids.',
     ],
   };
@@ -842,6 +891,29 @@ Deno.serve(async (request) => {
     ? await toolSession.resolvePlaceCards(run.answer.placeIds)
     : [];
 
+  /**
+   * A signed reference per card, so the next question can be about them.
+   *
+   * Issued only for cards that survived resolution, which means the server
+   * has already established the identity being signed. The traveller keeps
+   * the token; the identity never leaves this server, and a token the
+   * browser alters stops verifying.
+   *
+   * Absent when no signing secret is configured. The answer and its cards
+   * are unaffected; only the follow-up loses its shortcut.
+   */
+  const placeRefSecret = askPlaceRefSecret();
+  const placeTokens = (await Promise.all(places.map(async (card) => {
+    const issued = await signAskPlaceRef(placeRefSecret, {
+      userId: authentication.caller.userId,
+      tripId: trip.tripId,
+      canonicalPlaceId: card.ref.canonicalPlaceId,
+      provider: card.ref.provider,
+      providerPlaceId: card.ref.providerPlaceId,
+    });
+    return issued ? { canonicalPlaceId: card.ref.canonicalPlaceId, token: issued } : undefined;
+  }))).filter((entry): entry is { canonicalPlaceId: string; token: string } => Boolean(entry));
+
   const status = run.status === 'refused' && run.refusal ? responseStatus(run.refusal) : 200;
 
   return json({
@@ -855,6 +927,15 @@ Deno.serve(async (request) => {
      * not about specific places — a card is an extra, never the answer.
      */
     places,
+    /**
+     * Opaque follow-up references, one per card, matched by canonical id.
+     *
+     * Capability metadata rather than content: the panel never renders these,
+     * it stores them beside the message and offers them back on the next
+     * question. An older client that ignores the field simply gets the
+     * previous behaviour.
+     */
+    placeTokens,
     /**
      * A suggestion, never an action. Phase 1 has no write path at all, so this
      * is text for a person to act on — which is why the flag is stated rather
@@ -888,6 +969,19 @@ Deno.serve(async (request) => {
      */
     diagnostics: run.diagnostics,
     grounding: askGrounding ? groundingEnvelope(askGrounding) : undefined,
+    /**
+     * Counts by reason for previous-turn references that did not survive.
+     * Carries no token, no place and no id — enough to see a signing secret
+     * rotate or a link table churn, and nothing a traveller is ever shown.
+     */
+    ...(recentTrusted.places.length > 0 || Object.keys(recentTrusted.rejected).length > 0
+      ? {
+        recentPlaceRefs: {
+          accepted: recentTrusted.places.length,
+          rejected: recentTrusted.rejected,
+        },
+      }
+      : {}),
     spend: await session.report(),
   }, status);
 });

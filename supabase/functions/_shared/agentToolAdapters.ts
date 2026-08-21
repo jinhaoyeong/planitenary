@@ -97,6 +97,32 @@ export interface AgentToolContext {
   itinerary: Record<string, unknown> | null;
   /** Rehydrated UI focus. Hints only; facts still come from `itinerary`. */
   uiFocus?: IntelligenceFocus;
+  /**
+   * Places carried over from a previous answer, already re-established by
+   * the server this turn.
+   *
+   * These are seeded into the same index the tools write to, which is what
+   * lets `strictlyKnown` accept them without being loosened: the rule is
+   * still "the id must be one the server put in the index for this turn",
+   * and this is the server putting one there. The alternative — teaching the
+   * card resolver a second, weaker way to trust an id — would be a bypass
+   * with a comment on it.
+   *
+   * The caller is responsible for having verified the signature and
+   * re-resolved the provider link before anything reaches here. Nothing in
+   * this file re-checks that, because nothing in this file could: by the
+   * time a place is in this list it is indistinguishable from one a tool
+   * found, which is precisely the property that makes seeding safe only at a
+   * boundary that has already done the work.
+   */
+  seedTrustedPlaces?: Array<{
+    alias: string;
+    name: string;
+    provider: string;
+    providerPlaceId: string;
+    city?: string;
+    coordinates?: [number, number];
+  }>;
   /** Injected in tests; production resolves only server-side provider secrets. */
   routingProviders?: RoutingProviderAvailability;
 }
@@ -460,6 +486,26 @@ export interface AgentToolSession {
 
 export function createToolExecutor(context: AgentToolContext): AgentToolSession {
   const index = buildPlaceIndex(context.itinerary);
+
+  /**
+   * Previous-turn places, registered before any tool runs.
+   *
+   * Filed under the alias as its `id`, so `strictlyKnown` accepts the alias
+   * on the same terms it accepts anything else: the entry it lands on claims
+   * that id. The real provider place id is registered too, because the
+   * routing and detail tools work in those. The name key `registerPlace` also
+   * writes stays a trapdoor `strictlyKnown` refuses, exactly as before.
+   */
+  for (const seeded of context.seedTrustedPlaces ?? []) {
+    registerPlace(index, {
+      id: seeded.alias,
+      name: seeded.name,
+      provider: seeded.provider,
+      providerPlaceId: seeded.providerPlaceId,
+      city: seeded.city,
+      coordinates: seeded.coordinates,
+    });
+  }
   const routingProviders = context.routingProviders ?? {
     amap: Boolean(secrets.amap()),
     openRouteService: Boolean(secrets.openRouteService()),

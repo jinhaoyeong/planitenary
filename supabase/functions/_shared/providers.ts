@@ -281,6 +281,24 @@ export const aiBudgetUsd = (): number => {
 export const aiBudgetEpoch = (): string | undefined => env('AI_BUDGET_STARTED_AT');
 
 /**
+ * The secret Ask signs cross-turn place references with.
+ *
+ * Its own secret, and deliberately not a borrowed one. The service-role key
+ * and the JWT secret already authorise things; giving either a second meaning
+ * means a leak in one feature becomes a leak in all of them, and rotating for
+ * one reason silently invalidates the other. A model key is not a signing key
+ * at all.
+ *
+ * Absent means the deployment has simply not enabled cross-turn references.
+ * Ask keeps working; a follow-up about an unsaved place is researched afresh
+ * rather than carried forward. That is the correct behaviour for a missing
+ * capability, and it is why this returns undefined instead of refusing.
+ *
+ * Never a VITE_ variable: a signing secret in the browser is not a signature.
+ */
+export const askPlaceRefSecret = (): string | undefined => env('ASK_PLACE_REF_SIGNING_SECRET');
+
+/**
  * Everything the reasoning tier needs to make one call, resolved in one place.
  *
  * Assembled here rather than at each call site because the provider, its key,
