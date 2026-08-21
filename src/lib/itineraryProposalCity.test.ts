@@ -33,6 +33,8 @@ const CITY_POINTS: Record<string, [number, number]> = {
   Osaka: [34.6687, 135.5013],
   Kyoto: [34.9671, 135.7727],
   Nara: [34.6851, 135.8048],
+  Kobe: [34.6901, 135.1955],
+  Hiroshima: [34.3853, 132.4553],
   Tokyo: [35.6762, 139.6503],
 };
 
@@ -207,6 +209,70 @@ describe('day trips are not relocations, and must keep working', () => {
       item('fushimi', 'Fushimi Inari', '16:00', '17:00'),
     ])], source);
     expect(conflicts.some((entry) => entry.code === 'incompatible-location')).toBe(false);
+  });
+});
+
+/**
+ * The rule, stated as the traveller's own scenarios.
+ *
+ * These exist to be hard to "fix" by accident. The obvious-looking correction
+ * to this guard is to make it strict — a place's city must equal the day's
+ * city — and that change would pass a suite testing only the refusals while
+ * silently deleting every day trip in a Kansai itinerary. Each case below
+ * names the trip it protects, so anyone tightening the rule has to delete a
+ * sentence describing a real holiday before the build goes green.
+ */
+describe('acceptance: which cities a base may reach', () => {
+  const base = (city: string, places: PlanningPlace[]) => kansai({
+    cities: [...new Set(places.map((entry) => entry.city))],
+    days: [{
+      day: 1, date: '2026-08-11', city, startTime: '09:00', endTime: '21:00',
+      maxMainActivities: 3, fixedPlaceIds: [],
+    }],
+    places,
+  });
+
+  const verdictFor = (dayCity: string, target: PlanningPlace, places: PlanningPlace[]) =>
+    validateItineraryProposal(
+      [dayWith(1, '2026-08-11', [item(target.id, target.name, '10:00', '11:00')], dayCity)],
+      base(dayCity, places),
+    ).some((entry) => entry.code === 'incompatible-location') ? 'rejected' : 'allowed';
+
+  /** Test 1 — an Osaka base, the standard Kansai hub. */
+  it('Osaka base: allows Kyoto, Nara and Kobe; refuses Tokyo and Hiroshima', () => {
+    const kyoto = place('fushimi', 'Kyoto');
+    const nara = place('todaiji', 'Nara');
+    const kobe = place('ikuta', 'Kobe');
+    const tokyo = place('skytree', 'Tokyo');
+    const hiroshima = place('miyajima', 'Hiroshima');
+    const all = [place('dotonbori', 'Osaka'), kyoto, nara, kobe, tokyo, hiroshima];
+
+    expect(verdictFor('Osaka', kyoto, all)).toBe('allowed');
+    expect(verdictFor('Osaka', nara, all)).toBe('allowed');
+    expect(verdictFor('Osaka', kobe, all)).toBe('allowed');
+    expect(verdictFor('Osaka', tokyo, all)).toBe('rejected');
+    expect(verdictFor('Osaka', hiroshima, all)).toBe('rejected');
+  });
+
+  /** Test 2 — a Kyoto base. The relationship is symmetric, not hub-and-spoke. */
+  it('Kyoto base: allows an Osaka day trip; refuses Tokyo', () => {
+    const osaka = place('dotonbori', 'Osaka');
+    const tokyo = place('skytree', 'Tokyo');
+    const all = [place('fushimi', 'Kyoto'), osaka, tokyo];
+
+    expect(verdictFor('Kyoto', osaka, all)).toBe('allowed');
+    expect(verdictFor('Kyoto', tokyo, all)).toBe('rejected');
+  });
+
+  /**
+   * Test 3 — the exact case that prompted this work, and the one most likely
+   * to be "corrected" later. Four nights in a Kyoto hotel with a day out in
+   * Osaka is an ordinary holiday, not a planner defect.
+   */
+  it('Kyoto stay, Dotonbori in Osaka: allowed, because a day trip is not a relocation', () => {
+    const dotonbori = place('dotonbori', 'Osaka');
+    const all = [place('fushimi', 'Kyoto'), dotonbori];
+    expect(verdictFor('Kyoto', dotonbori, all)).toBe('allowed');
   });
 });
 
