@@ -222,4 +222,23 @@ describe('a price question must perform official research before answering', () 
     expect(run.status).toBe('answered');
     expect(callModel).toHaveBeenCalledTimes(1);
   });
+
+  it('withdraws place search and admission tools after server-owned research', async () => {
+    const callModel = vi.fn(async (payload: AgentModelPayload): Promise<ModelCallOutcome> => {
+      expect(payload.tools.map((tool) => tool.name)).not.toContain('search_places');
+      expect(payload.tools.map((tool) => tool.name)).not.toContain('get_admission_prices');
+      return { ok: true, value: { answer: 'Adult admission is ¥8,600.', citations: [usj.sourceUrl!] } };
+    });
+
+    const run = await runAgent(ask, {
+      limits: AGENT_LIMITS.ask,
+      callModel,
+      executeTool: vi.fn(async (): Promise<ToolOutcome> => ({ ok: true, result: {} })),
+      seededEvidence: seededWith([usj]),
+      disabledTools: ['search_places', 'get_admission_prices'],
+    });
+
+    expect(run.status).toBe('answered');
+    expect(callModel).toHaveBeenCalledTimes(1);
+  });
 });

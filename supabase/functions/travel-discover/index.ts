@@ -54,6 +54,7 @@ import {
   type WikivoyageListing,
 } from '../_shared/wikivoyage.ts';
 import {
+  buildExactDiscoveryQueryPlan,
   buildDiscoveryQueryPlan,
   queryMatchesCandidate,
   selectDiscoveryEntries,
@@ -69,6 +70,8 @@ interface DiscoverBody {
   countryCode?: string;
   provider?: 'google' | 'osm' | 'amap' | 'baidu' | 'fixture';
   interests?: string[];
+  /** Server-owned canonical-name lookup. Never used for Browse preferences. */
+  exactQuery?: string;
   hiddenGems?: boolean;
   limit?: number;
   travelStartsInDays?: number;
@@ -978,7 +981,12 @@ Deno.serve(async (request) => {
   const interests = Array.isArray(body.interests)
     ? body.interests.filter((interest): interest is string => typeof interest === 'string')
     : [];
-  const plan = buildDiscoveryQueryPlan(interests, limit, { hiddenGems: body.hiddenGems === true });
+  const exactQuery = typeof body.exactQuery === 'string'
+    ? body.exactQuery.trim().replace(/\s+/g, ' ').slice(0, 160)
+    : '';
+  const plan = exactQuery
+    ? buildExactDiscoveryQueryPlan(exactQuery, limit)
+    : buildDiscoveryQueryPlan(interests, limit, { hiddenGems: body.hiddenGems === true });
 
   // Mainland China needs a regional provider; say so plainly rather than
   // returning thin Google results that look like a working answer.
@@ -1004,7 +1012,11 @@ Deno.serve(async (request) => {
     // holds — 30 days normally, 7 near travel — so this is the single largest
     // reduction in provider calls available.
     const cache = serviceClient();
-    const cityKey = discoveryCityKey(city, countryCode, plan.selectedStyles);
+    const cityKey = discoveryCityKey(
+      city,
+      countryCode,
+      exactQuery ? [`exact:${exactQuery}`] : plan.selectedStyles,
+    );
 
     /**
      * Give every candidate a canonical identity while we hold the full record.

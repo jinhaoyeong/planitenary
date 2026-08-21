@@ -80,7 +80,11 @@ import {
   type PlaceCardRequest,
 } from '../_shared/placeCardResolver.ts';
 import { parseStructuredPlaceRef } from '../_shared/placeReference.ts';
-import { createToolExecutor, tripPrimaryCity } from '../_shared/agentToolAdapters.ts';
+import { createToolExecutor, tripCities, tripPrimaryCity } from '../_shared/agentToolAdapters.ts';
+import {
+  ASK_PRICE_RESEARCH_UNMET,
+  researchAskAdmissionPrices,
+} from '../_shared/askPriceResearch.ts';
 import {
   parseConversationTurns,
   parseUiContextEnvelope,
@@ -639,6 +643,56 @@ Deno.serve(async (request) => {
   const executeTool = toolSession.execute;
 
   /**
+   * Admission research is an intent-level server operation.
+   *
+   * The model failed twice in production to choose the required tool chain,
+   * first offering to fetch later and then exhausting the answer gate. Place
+   * identity and official fares are therefore established here before a paid
+   * round exists. The model receives findings to explain; it cannot choose to
+   * skip either exact place resolution or official admission research.
+   */
+  const priceQuestion = operation === 'ask' && isAskPriceQuestion(question);
+  const priceResearch = priceQuestion
+    ? await researchAskAdmissionPrices({
+      question,
+      tripCities: tripCities(itinerary),
+      recentPlaces: recentTrusted.places.map((place) => ({
+        alias: place.alias,
+        name: place.name,
+        city: place.city,
+      })),
+    }, {
+      resolveTrustedPlaceHints: toolSession.resolveTrustedPlaceHints,
+      searchExactPlaces: toolSession.searchExactPlaces,
+      researchAdmissionPrices: toolSession.researchAdmissionPrices,
+    })
+    : undefined;
+
+  if (priceResearch && priceResearch.priceFacts.length === 0) {
+    return json({
+      operation,
+      tripId: trip.tripId,
+      status: 'partial',
+      detail: ASK_PRICE_RESEARCH_UNMET,
+      answer: ASK_PRICE_RESEARCH_UNMET,
+      citations: [],
+      places: [],
+      priceFacts: [],
+      currency: askGrounding?.packet?.currency,
+      placeTokens: [],
+      applied: false,
+      transcript: [],
+      budget: { modelRounds: 0, toolCalls: 0, webSearches: 0, routeCalls: 0, placeLookups: 0 },
+      limits,
+      evidence: { citableUrls: 0, routeMinutes: 0, knownPlaceNames: 0 },
+      placeDiscovery: { required: requiresPlaceDiscovery, attempted: false, succeeded: false },
+      diagnostics: [],
+      priceResearch: { attempted: true, trace: priceResearch.trace, unresolved: priceResearch.unresolved },
+      spend: await session.report(),
+    });
+  }
+
+  /**
    * One metered model round.
    *
    * Fresh usage and request-id state per round: `meteredModelCall`'s contract
@@ -810,7 +864,18 @@ Deno.serve(async (request) => {
     ...(recentTrusted.places.length > 0
       ? { recentPlaces: presentRecentPlaces(recentTrusted.places) }
       : {}),
-    authoritativeEvidence: askGrounding?.packet ? presentAskEvidence(askGrounding.packet) : undefined,
+    authoritativeEvidence: askGrounding?.packet
+      ? presentAskEvidence(priceQuestion
+        ? {
+          ...askGrounding.packet,
+          priceFacts: [],
+          relevantActivities: askGrounding.packet.relevantActivities.map((activity) => ({
+            ...activity,
+            priceFacts: [],
+          })),
+        }
+        : askGrounding.packet)
+      : undefined,
     rules: [
       'Authoritative evidence overrides conversation history.',
       'Never state a travel time, opening hour, price or forecast you did not receive from evidence or a tool.',
@@ -819,12 +884,12 @@ Deno.serve(async (request) => {
       'Focus is a hint. Current itinerary facts win over conversation memory.',
       'recentPlaces are places from your previous answer, in the order shown. Use their ref id (recent-place-1, recent-place-2) to refer to them in tool calls and in placeIds.',
       'A recentPlaces entry is an identity only. Opening hours, travel time and prices for it still require a tool call.',
+      ...(priceQuestion
+        ? ['Admission-price research was already completed by the server. Summarize its findings; do not request place search or admission tools.']
+        : []),
       'Do not mention hashes, revisions, ledgers, or internal ids.',
     ],
   };
-
-  const requiresPriceResearch = isAskPriceQuestion(question)
-    && (askGrounding?.evidence.priceFacts.length ?? 0) === 0;
 
   const contextChars = JSON.stringify(context).length + question.length;
   if (contextChars > limits.maxInputChars) {
@@ -852,7 +917,7 @@ Deno.serve(async (request) => {
    * area text is search input and nothing more — no canonical place is
    * constructed from "Shinjuku".
    */
-  const preSearch = (requiresPlaceDiscovery || requiresPriceResearch) && askGrounding
+  const preSearch = requiresPlaceDiscovery && askGrounding
     ? await (async () => {
       // The trip's own city is the fallback, so a question naming no area
       // still searches somewhere real rather than nowhere.
@@ -872,15 +937,28 @@ Deno.serve(async (request) => {
       limits,
       callModel: (payload) => callOneRound(payload),
       executeTool,
-      seededEvidence: askGrounding?.evidence,
+      seededEvidence: askGrounding?.evidence
+        ? priceQuestion
+          ? {
+            ...askGrounding.evidence,
+            priceAmounts: new Set<number>(),
+            priceKeys: new Set<string>(),
+            priceFacts: [],
+          }
+          : askGrounding.evidence
+        : undefined,
       answerConstraints: askGrounding ? { dayCount: askGrounding.dayCount } : undefined,
       requiresPlaceDiscovery,
-      requiresPriceResearch,
-      seededFindings: preSearch
-        ? [preSearch.ok === true
+      requiresPriceResearch: false,
+      disabledTools: priceQuestion ? ['search_places', 'get_admission_prices'] : undefined,
+      seededFindings: [
+        ...(priceResearch?.findings ?? []),
+        ...(preSearch
+          ? [preSearch.ok === true
           ? { tool: 'search_places', ok: true, result: preSearch.result }
           : { tool: 'search_places', ok: false, detail: preSearch.detail }]
-        : undefined,
+          : []),
+      ],
       seededPlaceDiscovery: preSearch
         ? { attempted: true, succeeded: preSearch.ok === true }
         : undefined,
@@ -986,6 +1064,9 @@ Deno.serve(async (request) => {
      * Carries no model prose, no prompt, no argument values, no credentials.
      */
     diagnostics: run.diagnostics,
+    ...(priceResearch
+      ? { priceResearch: { attempted: true, trace: priceResearch.trace, unresolved: priceResearch.unresolved } }
+      : {}),
     grounding: askGrounding ? groundingEnvelope(askGrounding) : undefined,
     /**
      * Counts by reason for previous-turn references that did not survive.

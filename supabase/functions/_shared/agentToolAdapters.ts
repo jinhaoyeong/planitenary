@@ -196,7 +196,9 @@ export function buildPlaceIndex(itinerary: Record<string, unknown> | null): Map<
   if (!itinerary) return index;
 
   const profile = asRecord(itinerary.tripProfile);
-  const destinations = asArray(profile?.destinations).map(asRecord).filter(Boolean);
+  const destinations = asArray(profile?.destinations)
+    .map(asRecord)
+    .filter((destination): destination is Record<string, unknown> => Boolean(destination));
   const countriesByCity = new Map<string, string>();
   const tripCountries = new Set<string>();
   for (const destination of destinations) {
@@ -274,6 +276,23 @@ export const tripPrimaryCity = (itinerary: Record<string, unknown> | null): stri
     if (typeof city === 'string' && city.trim()) return city.trim();
   }
   return undefined;
+};
+
+/** Every saved destination city, in itinerary order, with duplicates removed. */
+export const tripCities = (itinerary: Record<string, unknown> | null): string[] => {
+  const profile = asRecord(itinerary?.tripProfile);
+  const seen = new Set<string>();
+  const cities: string[] = [];
+  for (const raw of asArray(profile?.destinations)) {
+    const city = asRecord(raw)?.city;
+    if (typeof city !== 'string' || !city.trim()) continue;
+    const value = city.trim();
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cities.push(value);
+  }
+  return cities;
 };
 
 const tripCountryCode = (itinerary: Record<string, unknown> | null): string | undefined => {
@@ -470,6 +489,12 @@ export async function searchWeb(query: string, cache: SupabaseClient | null = nu
  */
 export interface AgentToolSession {
   execute: (call: AgentToolCall) => Promise<ToolOutcome>;
+  /** Exact provider lookup used by deterministic price orchestration. */
+  searchExactPlaces: (city: string, name: string, limit?: number) => Promise<ToolOutcome>;
+  /** Resolve server-indexed names without allowing a name collision to pick one. */
+  resolveTrustedPlaceHints: (hints: string[]) => TrustedPlaceHintResolution[];
+  /** The same official-fare implementation exposed by get_admission_prices. */
+  researchAdmissionPrices: (placeIds: string[]) => Promise<ToolOutcome>;
   /**
    * Ids → cards, strictly.
    *
@@ -483,6 +508,12 @@ export interface AgentToolSession {
    * throws. A missing card costs a picture; a wrong one costs the truth.
    */
   resolvePlaceCards: (placeIds: string[]) => Promise<StructuredPlaceCard[]>;
+}
+
+export interface TrustedPlaceHintResolution {
+  hint: string;
+  status: 'resolved' | 'ambiguous' | 'missing';
+  place?: { id: string; name: string; city?: string; provider?: string; providerPlaceId?: string };
 }
 
 export function createToolExecutor(context: AgentToolContext): AgentToolSession {
@@ -533,6 +564,110 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
       if (place) found.push(place); else missing.push(id);
     }
     return { found, missing };
+  };
+
+  const normalisePlaceName = (value: string): string => value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+  const resolveTrustedPlaceHints = (hints: string[]): TrustedPlaceHintResolution[] => {
+    const uniquePlaces = [...new Set(index.values())];
+    return hints.slice(0, 6).map((hint) => {
+      const wanted = normalisePlaceName(hint);
+      const matches = uniquePlaces.filter((place) => normalisePlaceName(place.name) === wanted);
+      const distinct = matches.filter((place, position) => matches.findIndex((held) =>
+        (held.provider && held.providerPlaceId && held.provider === place.provider
+          && held.providerPlaceId === place.providerPlaceId)
+        || (!held.providerPlaceId && held.id === place.id)) === position);
+      if (distinct.length !== 1) {
+        return { hint, status: distinct.length > 1 ? 'ambiguous' as const : 'missing' as const };
+      }
+      const place = distinct[0];
+      return {
+        hint,
+        status: 'resolved' as const,
+        place: {
+          id: place.id,
+          name: place.name,
+          city: place.city,
+          provider: place.provider,
+          providerPlaceId: place.providerPlaceId,
+        },
+      };
+    });
+  };
+
+  const searchAndRegisterPlaces = async (input: {
+    city: string;
+    query: string;
+    categories?: unknown[];
+    limit?: number;
+    exact?: boolean;
+  }): Promise<ToolOutcome> => {
+    try {
+      const payload = await callFunction('travel-discover', {
+        city: input.city,
+        countryCode: tripCountryCode(context.itinerary),
+        ...(input.exact
+          ? { exactQuery: input.query }
+          : { interests: [input.query, ...asArray(input.categories)].filter(Boolean) }),
+        limit: input.limit,
+      });
+      const candidates = asArray(payload).slice(0, Number(input.limit) || 10);
+      for (const raw of candidates) {
+        const candidate = asRecord(raw);
+        const id = typeof candidate?.id === 'string'
+          ? candidate.id
+          : typeof candidate?.providerPlaceId === 'string' ? candidate.providerPlaceId : '';
+        const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
+        if (!id || !name) continue;
+        registerPlace(index, {
+          id,
+          name,
+          city: typeof candidate?.city === 'string' ? candidate.city : input.city,
+          countryCode: typeof candidate?.countryCode === 'string'
+            ? candidate.countryCode
+            : tripCountryCode(context.itinerary),
+          coordinates: coordinatesOf(candidate?.coordinates),
+          provider: typeof candidate?.provider === 'string' ? candidate.provider : undefined,
+          providerPlaceId: typeof candidate?.providerPlaceId === 'string' ? candidate.providerPlaceId : undefined,
+          type: typeof asArray(candidate?.categories)[0] === 'string'
+            ? String(asArray(candidate?.categories)[0])
+            : undefined,
+          location: typeof candidate?.neighbourhood === 'string' ? candidate.neighbourhood : undefined,
+          admission: candidate?.admission,
+          openingHoursWeek: candidate?.openingHoursWeek,
+          imageLeads: candidate?.imageLeads,
+        });
+      }
+      return {
+        ok: true,
+        result: candidates.map((raw) => {
+          const candidate = asRecord(raw);
+          return {
+            id: candidate?.id,
+            provider: candidate?.provider,
+            providerPlaceId: candidate?.providerPlaceId,
+            name: candidate?.name,
+            city: candidate?.city,
+            categories: candidate?.categories,
+            neighbourhood: candidate?.neighbourhood,
+            coordinates: candidate?.coordinates,
+            description: typeof candidate?.description === 'string'
+              ? candidate.description.slice(0, 300)
+              : undefined,
+            website: candidate?.website,
+            admission: candidate?.admission,
+            openingHoursWeek: candidate?.openingHoursWeek,
+            imageLeads: candidate?.imageLeads,
+          };
+        }),
+      };
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : 'Place search failed.' };
+    }
   };
 
   const routeFor = async (places: KnownPlace[], mode: string, matrix: boolean): Promise<ToolOutcome> => {
@@ -725,7 +860,7 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
           ok: true,
           result: {
             present: true,
-            applied: cached.applied === true,
+            applied: cached.applied,
             status: cached.status,
             days: cached.days.slice(0, MAX_RESULT_ITEMS).map((day) => ({
               day: day.day,
@@ -866,67 +1001,12 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
       },
     }),
 
-    search_places: async (args) => {
-      try {
-        const payload = await callFunction('travel-discover', {
-          city: args.city,
-          countryCode: tripCountryCode(context.itinerary),
-          interests: [args.query, ...asArray(args.categories)].filter(Boolean),
-          limit: args.limit,
-        });
-        const candidates = asArray(payload).slice(0, Number(args.limit) || 10);
-        for (const raw of candidates) {
-          const candidate = asRecord(raw);
-          const id = typeof candidate?.id === 'string'
-            ? candidate.id
-            : typeof candidate?.providerPlaceId === 'string' ? candidate.providerPlaceId : '';
-          const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
-          if (!id || !name) continue;
-          registerPlace(index, {
-            id,
-            name,
-            city: typeof candidate?.city === 'string' ? candidate.city : String(args.city),
-            countryCode: typeof candidate?.countryCode === 'string'
-              ? candidate.countryCode
-              : tripCountryCode(context.itinerary),
-            coordinates: coordinatesOf(candidate?.coordinates),
-            provider: typeof candidate?.provider === 'string' ? candidate.provider : undefined,
-            providerPlaceId: typeof candidate?.providerPlaceId === 'string' ? candidate.providerPlaceId : undefined,
-            type: typeof asArray(candidate?.categories)[0] === 'string'
-              ? String(asArray(candidate?.categories)[0])
-              : undefined,
-            location: typeof candidate?.neighbourhood === 'string' ? candidate.neighbourhood : undefined,
-            admission: candidate?.admission,
-            openingHoursWeek: candidate?.openingHoursWeek,
-            imageLeads: candidate?.imageLeads,
-          });
-        }
-        return {
-          ok: true,
-          result: candidates.map((raw) => {
-            const candidate = asRecord(raw);
-            return {
-              id: candidate?.id,
-              provider: candidate?.provider,
-              providerPlaceId: candidate?.providerPlaceId,
-              name: candidate?.name,
-              categories: candidate?.categories,
-              neighbourhood: candidate?.neighbourhood,
-              coordinates: candidate?.coordinates,
-              description: typeof candidate?.description === 'string'
-                ? candidate.description.slice(0, 300)
-                : undefined,
-              website: candidate?.website,
-              admission: candidate?.admission,
-              openingHoursWeek: candidate?.openingHoursWeek,
-              imageLeads: candidate?.imageLeads,
-            };
-          }),
-        };
-      } catch (error) {
-        return { ok: false, detail: error instanceof Error ? error.message : 'Place search failed.' };
-      }
-    },
+    search_places: async (args) => searchAndRegisterPlaces({
+      city: String(args.city),
+      query: String(args.query),
+      categories: asArray(args.categories),
+      limit: Number(args.limit) || 10,
+    }),
 
     search_web: async (args) => {
       try {
@@ -1302,5 +1382,19 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
     );
   };
 
-  return { execute, resolvePlaceCards };
+  return {
+    execute,
+    resolvePlaceCards,
+    resolveTrustedPlaceHints,
+    searchExactPlaces: (city, name, limit = 5) => searchAndRegisterPlaces({
+      city,
+      query: name,
+      limit: Math.max(1, Math.min(8, Math.floor(limit))),
+      exact: true,
+    }),
+    researchAdmissionPrices: (placeIds) => execute({
+      tool: 'get_admission_prices',
+      args: { placeIds: placeIds.slice(0, 6) },
+    }),
+  };
 }

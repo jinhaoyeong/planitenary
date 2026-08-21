@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DiscoveryCandidateLike } from '../../supabase/functions/_shared/discoveryPlan';
 import {
   buildDiscoveryQueryPlan,
+  buildExactDiscoveryQueryPlan,
   queryForCandidate,
   selectDiscoveryEntries,
 } from '../../supabase/functions/_shared/discoveryPlan';
@@ -28,6 +29,21 @@ const entriesFor = (
 });
 
 describe('preference-first discovery plans', () => {
+  it('preserves exact identity candidates without applying Browse taxonomy gates', () => {
+    const plan = buildExactDiscoveryQueryPlan('Universal Studios Japan', 5);
+    const weaklyTagged = candidate('google:usj', ['amusement-park'], { notability: undefined, rating: undefined });
+    const selected = selectDiscoveryEntries([
+      { candidate: weaklyTagged, query: plan.preferredQueries[0] },
+    ], plan, 5);
+
+    expect(plan.mode).toBe('exact');
+    expect(plan.preferredQueries[0].text).toBe('Universal Studios Japan');
+    expect(selected).toEqual([{
+      candidate: weaklyTagged,
+      trace: { matchedQueryGroup: 'exact-place-name' },
+    }]);
+  });
+
   it('maps the real Trip Setup ids and excludes culture groups for food/shopping/nature', () => {
     const plan = buildDiscoveryQueryPlan(['street-food', 'shopping', 'nature'], 25);
 

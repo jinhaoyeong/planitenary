@@ -169,6 +169,8 @@ export interface AgentRunDeps {
   requiresPlaceDiscovery?: boolean;
   /** This question may not be answered until official admission research ran. */
   requiresPriceResearch?: boolean;
+  /** Tools the server already executed deterministically for this intent. */
+  disabledTools?: AgentToolName[];
   /**
    * Tool results the server gathered before the first model round.
    *
@@ -353,7 +355,9 @@ export async function runAgent(
       context: input.context,
       // Withdrawn on the last round the budget allows. A model with no tools
       // to ask for has only one useful thing left to do.
-      tools: finalRound ? [] : toolCatalogue(),
+      tools: finalRound
+        ? []
+        : toolCatalogue().filter((tool) => !(deps.disabledTools ?? []).includes(tool.name as AgentToolName)),
       findings,
       finalRound,
       round: budget.modelRounds + 1,

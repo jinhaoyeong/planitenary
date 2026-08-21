@@ -133,11 +133,36 @@ export interface PlannedDiscoveryQuery {
 
 export interface DiscoveryQueryPlan {
   selectedStyles: string[];
-  mode: 'preference-first' | 'general';
+  mode: 'preference-first' | 'general' | 'exact';
   preferredQueries: PlannedDiscoveryQuery[];
   fallbackQueries: PlannedDiscoveryQuery[];
   /** Maximum normal general fallback share; sparse destinations may exceed it. */
   fallbackLimit: number;
+}
+
+/**
+ * One server-owned identity lookup, not traveller preference discovery.
+ *
+ * Exact queries keep their own mode so the selector does not discard a
+ * canonical-name match merely because it lacks the taxonomy tags used by the
+ * Browse deck. The caller still has to compare the returned name exactly;
+ * this only preserves the provider candidates needed to make that decision.
+ */
+export function buildExactDiscoveryQueryPlan(query: string, limit = 5): DiscoveryQueryPlan {
+  const text = query.trim().replace(/\s+/g, ' ').slice(0, 160);
+  return {
+    selectedStyles: [],
+    mode: 'exact',
+    preferredQueries: [{
+      id: 'exact-place-name',
+      text,
+      categories: [],
+      matchedStyles: [],
+      isFallback: false,
+    }],
+    fallbackQueries: [],
+    fallbackLimit: Math.max(1, Math.floor(limit)),
+  };
 }
 
 export interface DiscoveryCandidateLike {
@@ -306,6 +331,15 @@ export function selectDiscoveryEntries<T extends DiscoveryCandidateLike>(
     const key = candidateKey(entry.candidate);
     if (!key || seen.has(key)) continue;
 
+    if (plan.mode === 'exact') {
+      seen.add(key);
+      preferred.push({
+        candidate: entry.candidate,
+        trace: { matchedQueryGroup: entry.query.id },
+      });
+      continue;
+    }
+
     const matchedStyle = matchedStylesForCandidate(entry.candidate, plan.selectedStyles)[0]
       || entry.query.matchedStyles[0];
     const targetedMatch = Boolean(matchedStyle) && (
@@ -348,6 +382,7 @@ export function selectDiscoveryEntries<T extends DiscoveryCandidateLike>(
   }
 
   const target = Math.max(1, Math.floor(limit));
+  if (plan.mode === 'exact') return preferred.slice(0, target);
   if (plan.mode === 'general') {
     return fallback.slice(0, target).map(({ candidate, trace }) => ({
       candidate,

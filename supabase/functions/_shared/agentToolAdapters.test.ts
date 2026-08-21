@@ -33,6 +33,88 @@ const executor = (
 afterEach(() => vi.unstubAllGlobals());
 
 describe('real agent tool adapters', () => {
+  it('uses exactQuery for deterministic identity search and registers the returned authority', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body).toMatchObject({ city: 'Tokyo', exactQuery: 'Tokyo Disneyland', limit: 5 });
+      expect(body).not.toHaveProperty('interests');
+      return new Response(JSON.stringify([{
+        id: 'google:tdl',
+        name: 'Tokyo Disneyland',
+        city: 'Tokyo',
+        provider: 'google',
+        providerPlaceId: 'tdl-provider-id',
+        coordinates: [35.6329, 139.8804],
+      }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const session = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary,
+      routingProviders: { amap: true, openRouteService: true },
+    });
+
+    await session.searchExactPlaces('Tokyo', 'Tokyo Disneyland', 5);
+    expect(session.resolveTrustedPlaceHints(['Tokyo Disneyland'])).toEqual([{
+      hint: 'Tokyo Disneyland',
+      status: 'resolved',
+      place: expect.objectContaining({
+        id: 'google:tdl',
+        provider: 'google',
+        providerPlaceId: 'tdl-provider-id',
+      }),
+    }]);
+  });
+
+  it('reports an exact-name collision as ambiguous instead of selecting one identity', () => {
+    const session = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary: {
+        days: [{
+          day: 1,
+          city: 'Osaka',
+          activities: [
+            { id: 'one', name: 'Adventure World', provider: 'google', providerPlaceId: 'one' },
+            { id: 'two', name: 'Adventure World', provider: 'google', providerPlaceId: 'two' },
+          ],
+        }],
+      },
+      routingProviders: { amap: true, openRouteService: true },
+    });
+
+    expect(session.resolveTrustedPlaceHints(['Adventure World'])).toEqual([{
+      hint: 'Adventure World',
+      status: 'ambiguous',
+    }]);
+  });
+
+  it('routes deterministic admission research through the same tool handler', async () => {
+    const session = createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary,
+      routingProviders: { amap: true, openRouteService: true },
+    });
+
+    const direct = await session.researchAdmissionPrices(['castle']);
+    const tool = await session.execute({
+      tool: 'get_admission_prices',
+      args: { placeIds: ['castle'] },
+    } as AgentToolCall);
+    expect(direct).toEqual(tool);
+  });
+
   it('asks the routing function for one point-to-point pair, not a full matrix', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
