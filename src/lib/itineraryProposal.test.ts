@@ -42,8 +42,8 @@ const material = (override: Partial<PlanningMaterial> = {}): PlanningMaterial =>
   transportModes: ['public-transport'],
   preferences: { hiddenGems: true },
   days: [
-    { day: 1, date: '2026-08-17', city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: [] },
-    { day: 2, date: '2026-08-18', city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: [] },
+    { day: 1, date: '2026-08-17', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: [] },
+    { day: 2, date: '2026-08-18', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: [] },
   ],
   places: [place('a'), place('b')],
   excludedRequiredPlaces: [],
@@ -200,8 +200,8 @@ describe('Phase 2A deterministic itinerary proposal', () => {
     const source = material({
       departureTime: '12:00',
       days: [
-        { day: 1, date: '2026-08-17', city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: [] },
-        { day: 2, date: '2026-08-18', city: 'Osaka', startTime: '09:15', endTime: '08:30', maxMainActivities: 1, fixedPlaceIds: [] },
+        { day: 1, date: '2026-08-17', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: [] },
+        { day: 2, date: '2026-08-18', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:15', endTime: '08:30', maxMainActivities: 1, fixedPlaceIds: [] },
       ],
       places: [place('a')],
     });
@@ -219,7 +219,7 @@ describe('Phase 2A deterministic itinerary proposal', () => {
         place('b', { priority: 'locked', locked: true, reservation: true, fixedDay: 1, fixedStartTime: '11:00', durationRangeMinutes: [60, 60] }),
       ],
       days: [
-        { day: 1, date: '2026-08-17', city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: ['a', 'b'] },
+        { day: 1, date: '2026-08-17', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:15', endTime: '21:30', maxMainActivities: 3, fixedPlaceIds: ['a', 'b'] },
       ],
     });
     const proposal = await run(source, { days: [{ day: 1, placeIds: [] }] });
@@ -232,12 +232,12 @@ describe('Phase 2A deterministic itinerary proposal', () => {
   it('makes relaxed pace lower-density with larger transition buffers', async () => {
     const places = [place('a'), place('b'), place('c'), place('d')];
     const relaxed = material({ pace: 'relaxed', places, days: [
-      { day: 1, city: 'Osaka', startTime: '10:00', endTime: '20:30', maxMainActivities: 2, fixedPlaceIds: [] },
-      { day: 2, city: 'Osaka', startTime: '10:00', endTime: '20:30', maxMainActivities: 2, fixedPlaceIds: [] },
+      { day: 1, stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '10:00', endTime: '20:30', maxMainActivities: 2, fixedPlaceIds: [] },
+      { day: 2, stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '10:00', endTime: '20:30', maxMainActivities: 2, fixedPlaceIds: [] },
     ] });
     const fast = material({ pace: 'fast', places, days: [
-      { day: 1, city: 'Osaka', startTime: '08:30', endTime: '22:00', maxMainActivities: 4, fixedPlaceIds: [] },
-      { day: 2, city: 'Osaka', startTime: '08:30', endTime: '22:00', maxMainActivities: 4, fixedPlaceIds: [] },
+      { day: 1, stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '08:30', endTime: '22:00', maxMainActivities: 4, fixedPlaceIds: [] },
+      { day: 2, stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '08:30', endTime: '22:00', maxMainActivities: 4, fixedPlaceIds: [] },
     ] });
     const relaxedComposition = defaultComposition(relaxed);
     const fastComposition = defaultComposition(fast);
@@ -253,6 +253,8 @@ describe('Phase 2A deterministic itinerary proposal', () => {
   it('catches overlaps in a proposal built outside the scheduler', () => {
     const day: ProposedItineraryDay = {
       day: 1,
+      stayCity: 'Osaka',
+      activityCities: [],
       city: 'Osaka',
       startTime: '09:15',
       endTime: '21:30',

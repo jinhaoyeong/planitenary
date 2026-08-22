@@ -341,6 +341,7 @@ export function candidateToActivity(candidate: PlaceCandidate): Activity {
     name: candidate.name,
     description: candidate.description || `${candidate.categories.join(', ')} in ${candidate.city}.`,
     type: 'sight',
+    city: candidate.city,
     location: candidate.neighbourhood || candidate.city,
     source: 'imported',
     provider: candidate.provider,

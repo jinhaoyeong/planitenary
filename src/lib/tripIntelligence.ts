@@ -10,6 +10,7 @@ import type {
 import { profileRevision } from './identityFields';
 import { declaredTripDays } from './tripDuration';
 import type { TripProfile } from './tripProfile';
+import { activityCitiesFrom, parseDayTransfer, sameCity } from '../../supabase/functions/_shared/dayCitySemantics';
 
 export type PlannerAction = 'generate' | 'optimise-day' | 'optimise-trip' | 'replan-day';
 export type PlannerChangeKind = 'move' | 'time' | 'insert' | 'remove' | 'travel' | 'constraint' | 'budget' | 'availability';
@@ -72,6 +73,20 @@ const MEAL_MINUTES = 60;
 const REST_MINUTES = 45;
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const withActivityCitySemantics = (day: DayPlan): DayPlan => {
+  const stayCity = day.stayCity || day.city;
+  return {
+    ...day,
+    stayCity,
+    city: stayCity,
+    activityCities: activityCitiesFrom([
+      ...(Array.isArray(day.activityCities) ? day.activityCities : []),
+      ...day.activities.map((activity) => activity.city),
+    ], stayCity),
+    transfer: parseDayTransfer(day.transfer, stayCity),
+  };
+};
 
 const parseMinutes = (value?: string) => {
   if (!value) return null;
@@ -147,7 +162,7 @@ const generatedActivity = (
   name,
   description,
   type,
-  location: day.city ? `Near ${day.city}` : undefined,
+  location: day.stayCity ? `Near ${day.stayCity}` : undefined,
   source: 'generated',
   bookingStatus: 'none',
   lockedFields: [],
@@ -389,31 +404,32 @@ const makeProposal = (
   beforeUnassignedActivities: Activity[] = [],
   afterUnassignedActivities: Activity[] = [],
 ): ItineraryProposal => {
-  const changes = buildChanges(beforeDays, afterDays);
+  const semanticAfterDays = afterDays.map(withActivityCitySemantics);
+  const changes = buildChanges(beforeDays, semanticAfterDays);
   const beforeMetrics = beforeDays.reduce((sum, day) => {
     const metrics = travelMetrics(day, profile.transport[0]);
     return { total: sum.total + metrics.total, knownLegs: sum.knownLegs + metrics.knownLegs, unknownLegs: sum.unknownLegs + metrics.unknownLegs };
   }, { total: 0, knownLegs: 0, unknownLegs: 0 });
-  const afterMetrics = afterDays.reduce((sum, day) => {
+  const afterMetrics = semanticAfterDays.reduce((sum, day) => {
     const metrics = travelMetrics(day, profile.transport[0]);
     return { total: sum.total + metrics.total, knownLegs: sum.knownLegs + metrics.knownLegs, unknownLegs: sum.unknownLegs + metrics.unknownLegs };
   }, { total: 0, knownLegs: 0, unknownLegs: 0 });
   const totalLegs = afterMetrics.knownLegs + afterMetrics.unknownLegs;
-  const coverage = plannerCoverage(afterDays);
+  const coverage = plannerCoverage(semanticAfterDays);
   const warnings: string[] = afterMetrics.unknownLegs > 0
     ? [`${afterMetrics.unknownLegs} movement leg${afterMetrics.unknownLegs === 1 ? '' : 's'} lack coordinates and remain unknown.`]
     : [];
   if (coverage.placeVerification < 1) warnings.push('Some places are not linked to a verified discovery source.');
   if (coverage.coordinates < 1) warnings.push('Some places lack coordinates, so their movement remains approximate.');
   if (coverage.route < 1) warnings.push('Some movement legs use offline estimates instead of provider routes.');
-  if (afterDays.flatMap((day) => day.activities).filter(isPlaceActivity).length === 0) {
+  if (semanticAfterDays.flatMap((day) => day.activities).filter(isPlaceActivity).length === 0) {
     warnings.push('No real places are scheduled. Add or discover places before building a destination-specific itinerary.');
   }
   const constraints = itinerary.planningConstraints;
   const preferredEnd = parseMinutes(constraints?.preferredEndTime);
   const currencies = new Set<string>();
   let knownBudget = 0;
-  afterDays.forEach((day) => day.activities.forEach((activity) => {
+  semanticAfterDays.forEach((day) => day.activities.forEach((activity) => {
     const start = parseMinutes(activity.time);
     if (preferredEnd !== null && start !== null && start + activityDuration(activity) > preferredEnd) {
       warnings.push(`${activityLabel(activity)} ends after the preferred day end.`);
@@ -443,8 +459,8 @@ const makeProposal = (
   if (currencies.size > 1) warnings.push('Known costs use multiple currencies; no combined total is calculated without a saved conversion rate.');
   if (constraints?.maxBudgetAmount !== undefined && knownBudget > constraints.maxBudgetAmount) warnings.push('Known costs exceed the configured budget limit.');
   const declaredDays = declaredTripDays(profile);
-  if (declaredDays > afterDays.length && afterDays.length > 0) {
-    warnings.push(`Planning covers the ${afterDays.length} daily pages already created, not all ${declaredDays} days of the trip.`);
+  if (declaredDays > semanticAfterDays.length && semanticAfterDays.length > 0) {
+    warnings.push(`Planning covers the ${semanticAfterDays.length} daily pages already created, not all ${declaredDays} days of the trip.`);
   }
   const uniqueWarnings = Array.from(new Set(warnings));
   return {
@@ -456,7 +472,7 @@ const makeProposal = (
     reason,
     confidence: plannerConfidence(coverage),
     beforeDays,
-    afterDays,
+    afterDays: semanticAfterDays,
     beforeUnassignedActivities,
     afterUnassignedActivities,
     changes,
@@ -602,7 +618,7 @@ export function optimiseTrip(itinerary: Itinerary, profile: TripProfile): Itiner
           return candidateDistance < closestDistance ? candidate : closest;
         })
       : undefined;
-    const cityMatch = destination ? day.city.toLowerCase().includes(destination.city.toLowerCase()) : false;
+    const cityMatch = destination ? day.stayCity.toLowerCase().includes(destination.city.toLowerCase()) : false;
     const capacityPenalty = dayLoad(day) >= maxMain ? 1000 : dayLoad(day) * 5;
     const originalPenalty = day.day === originalDay ? 0 : 2;
     return capacityPenalty + originalPenalty + (cityMatch ? 0 : destination ? 250 : 0);
@@ -701,9 +717,17 @@ export function applyItineraryProposal(
   profile: TripProfile,
   proposal: ItineraryProposal,
   selectedChangeIds: Iterable<string> = proposal.changes.map((change) => change.id),
-): { ok: boolean; reason?: 'profile-changed' | 'itinerary-changed'; itinerary: Itinerary; applied: ProposedChange[]; history?: PlannerChangeRecord } {
+): { ok: boolean; reason?: 'profile-changed' | 'itinerary-changed' | 'unauthorized-base-change'; itinerary: Itinerary; applied: ProposedChange[]; history?: PlannerChangeRecord } {
   if (proposal.baseProfileRevision !== profileRevision(profile)) return { ok: false, reason: 'profile-changed', itinerary, applied: [] };
   if (proposal.baseItineraryRevision !== (itinerary.revision || 0)) return { ok: false, reason: 'itinerary-changed', itinerary, applied: [] };
+  for (const proposedDay of proposal.afterDays) {
+    const current = itinerary.days.find((day) => day.day === proposedDay.day);
+    if (!current || sameCity(current.stayCity, proposedDay.stayCity)) continue;
+    const transfer = parseDayTransfer(proposedDay.transfer, proposedDay.stayCity);
+    if (!transfer || !sameCity(transfer.from, current.stayCity)) {
+      return { ok: false, reason: 'unauthorized-base-change', itinerary, applied: [] };
+    }
+  }
   const selected = new Set(selectedChangeIds);
   const selectedChanges = proposal.changes.filter((change) => selected.has(change.id) && !change.protected);
   if (selectedChanges.length === 0) {
@@ -735,7 +759,13 @@ export function applyItineraryProposal(
     const dayChanges = proposal.changes.filter((change) => change.dayNumber === day.day);
     const allSafeChangesSelected = !dayChanges.some((change) => change.protected)
       && dayChanges.filter((change) => !change.protected).every((change) => selected.has(change.id));
-    if (allSafeChangesSelected) return { ...day, activities: proposedDay.activities };
+    if (allSafeChangesSelected) return withActivityCitySemantics({
+      ...day,
+      stayCity: proposedDay.stayCity,
+      city: proposedDay.stayCity,
+      transfer: proposedDay.transfer,
+      activities: proposedDay.activities,
+    });
 
     const selectedDayChanges = selectedChanges.filter((change) => change.dayNumber === day.day);
     const selectedActivityIds = new Set(selectedDayChanges.map((change) => change.activityId).filter((id): id is string => Boolean(id)));
@@ -768,7 +798,13 @@ export function applyItineraryProposal(
         transportMode: hasTravelChange ? proposedActivity.transportMode : activity.transportMode,
       };
     });
-    return { ...day, activities: nextActivities };
+    return withActivityCitySemantics({
+      ...day,
+      stayCity: proposedDay.stayCity,
+      city: proposedDay.stayCity,
+      transfer: proposedDay.transfer,
+      activities: nextActivities,
+    });
   });
   const history: PlannerChangeRecord = {
     id: proposal.id,

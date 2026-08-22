@@ -68,9 +68,9 @@ const kansai = (override: Partial<PlanningMaterial> = {}): PlanningMaterial => (
   transportModes: ['public-transport'],
   preferences: {},
   days: [
-    { day: 1, date: '2026-08-11', city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
-    { day: 2, date: '2026-08-12', city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
-    { day: 5, date: '2026-08-15', city: 'Kyoto', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
+    { day: 1, date: '2026-08-11', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
+    { day: 2, date: '2026-08-12', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
+    { day: 5, date: '2026-08-15', stayCity: 'Kyoto', activityCities: [], city: 'Kyoto', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
   ],
   places: [place('dotonbori', 'Osaka'), place('fushimi', 'Kyoto'), place('todaiji', 'Nara')],
   excludedRequiredPlaces: [],
@@ -91,7 +91,7 @@ const dayWith = (
   items: ReturnType<typeof item>[],
   city = 'Osaka',
 ): ProposedItineraryDay => ({
-  day, date, city, startTime: '09:00', endTime: '21:00', warnings: [],
+  day, date, stayCity: city, activityCities: [], city, startTime: '09:00', endTime: '21:00', warnings: [],
   metrics: { placeCount: items.length, travelMinutes: 0, freeMinutes: 0, clusterChanges: 0 },
   items,
 });
@@ -196,7 +196,7 @@ describe('day trips are not relocations, and must keep working', () => {
   it('accepts both cities on a transfer day', () => {
     const source = kansai({
       days: [{
-        day: 4, date: '2026-08-14', city: 'Osaka', startTime: '09:00', endTime: '21:00',
+        day: 4, date: '2026-08-14', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:00', endTime: '21:00',
         maxMainActivities: 3, fixedPlaceIds: [],
         windows: [
           { startTime: '09:00', endTime: '12:00', city: 'Osaka' },
@@ -226,7 +226,7 @@ describe('acceptance: which cities a base may reach', () => {
   const base = (city: string, places: PlanningPlace[]) => kansai({
     cities: [...new Set(places.map((entry) => entry.city))],
     days: [{
-      day: 1, date: '2026-08-11', city, startTime: '09:00', endTime: '21:00',
+      day: 1, date: '2026-08-11', stayCity: city, activityCities: [], city, startTime: '09:00', endTime: '21:00',
       maxMainActivities: 3, fixedPlaceIds: [],
     }],
     places,
@@ -286,8 +286,8 @@ describe('the deterministic fallback obeys the same rule', () => {
     const source = kansai({
       cities: ['Osaka', 'Tokyo'],
       days: [
-        { day: 1, date: '2026-08-11', city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 1, fixedPlaceIds: [] },
-        { day: 2, date: '2026-08-12', city: 'Tokyo', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
+        { day: 1, date: '2026-08-11', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 1, fixedPlaceIds: [] },
+        { day: 2, date: '2026-08-12', stayCity: 'Tokyo', activityCities: [], city: 'Tokyo', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
       ],
       // A Tokyo place has to exist for Tokyo to have a location at all; see
       // the "city nobody shortlisted" case below for what happens when it does not.
@@ -313,8 +313,8 @@ describe('the deterministic fallback obeys the same rule', () => {
     const source = kansai({
       cities: ['Osaka', 'Sapporo'],
       days: [
-        { day: 1, date: '2026-08-11', city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 1, fixedPlaceIds: [] },
-        { day: 2, date: '2026-08-12', city: 'Sapporo', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
+        { day: 1, date: '2026-08-11', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 1, fixedPlaceIds: [] },
+        { day: 2, date: '2026-08-12', stayCity: 'Sapporo', activityCities: [], city: 'Sapporo', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
       ],
       places: [place('dotonbori', 'Osaka'), place('namba', 'Osaka')],
     });
@@ -324,8 +324,8 @@ describe('the deterministic fallback obeys the same rule', () => {
   it('still uses a reachable day when the place’s own city is full', () => {
     const source = kansai({
       days: [
-        { day: 1, date: '2026-08-11', city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 1, fixedPlaceIds: [] },
-        { day: 5, date: '2026-08-15', city: 'Kyoto', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
+        { day: 1, date: '2026-08-11', stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:00', endTime: '21:00', maxMainActivities: 1, fixedPlaceIds: [] },
+        { day: 5, date: '2026-08-15', stayCity: 'Kyoto', activityCities: [], city: 'Kyoto', startTime: '09:00', endTime: '21:00', maxMainActivities: 3, fixedPlaceIds: [] },
       ],
       places: [place('dotonbori', 'Osaka'), place('namba', 'Osaka')],
     });

@@ -22,6 +22,12 @@ import {
   type ProposedItineraryItem,
   type TripItineraryProposal,
 } from './itineraryProposal.ts';
+import {
+  activityCitiesFrom,
+  cleanCity,
+  parseDayTransfer,
+  sameCity,
+} from './dayCitySemantics.ts';
 
 export type ChangeProposalStatus = 'pending' | 'applied' | 'stale' | 'expired' | 'cancelled';
 
@@ -139,6 +145,8 @@ export interface AppliedItineraryResult {
   unscheduledPlaceIds: string[];
   /** Place IDs the proposal referenced that no longer exist in the trip. */
   unresolvedPlaceIds: string[];
+  /** Proposed overnight moves lacking the exact explicit transfer authority. */
+  unauthorizedBaseChanges: Array<{ day: number; from: string; to: string }>;
 }
 
 /**
@@ -162,6 +170,7 @@ export function applyProposalToItinerary(
 
   const scheduled = new Set<string>();
   const unresolvedPlaceIds: string[] = [];
+  const unauthorizedBaseChanges: Array<{ day: number; from: string; to: string }> = [];
   // Identity, not equality: `indexPlannerActivities` ran over this same cloned
   // itinerary, so its refs point at the very objects the days hold.
   const plannerOwned = new Set(refs.map((ref) => ref.activity));
@@ -171,6 +180,17 @@ export function applyProposalToItinerary(
     const dayNumber = Number.isInteger(day.day) ? Number(day.day) : index + 1;
     const proposed = proposalDays.get(dayNumber);
     if (!proposed) return day;
+
+    const currentStay = cleanCity(day.stayCity) ?? cleanCity(day.city) ?? '';
+    const proposedStay = cleanCity(proposed.stayCity) ?? cleanCity(proposed.city) ?? currentStay;
+    const transfer = parseDayTransfer(proposed.transfer, proposedStay);
+    const baseChanged = !sameCity(currentStay, proposedStay);
+    const authorized = Boolean(baseChanged && transfer
+      && sameCity(transfer.from, currentStay)
+      && sameCity(transfer.to, proposedStay));
+    if ((baseChanged && !authorized) || !sameCity(proposed.city, proposedStay)) {
+      unauthorizedBaseChanges.push({ day: dayNumber, from: currentStay, to: proposedStay });
+    }
 
     const activities = asArray(day.activities).flatMap((entry) => {
       const activity = asRecord(entry);
@@ -199,7 +219,16 @@ export function applyProposalToItinerary(
       return [windowActivity(item, dayNumber, itemIndex, proposal.createdAt)];
     });
 
-    day.activities = byTime([...preserved, ...rebuilt], (activity) => text(activity.time, 5));
+    const nextActivities = byTime([...preserved, ...rebuilt], (activity) => text(activity.time, 5));
+    day.activities = nextActivities;
+    day.stayCity = proposedStay;
+    day.city = proposedStay;
+    day.activityCities = activityCitiesFrom([
+      ...asArray(proposed.activityCities),
+      ...nextActivities.map((activity) => activity.city),
+    ], proposedStay);
+    if (transfer) day.transfer = transfer;
+    else delete day.transfer;
     return day;
   });
 
@@ -232,7 +261,7 @@ export function applyProposalToItinerary(
   }
   itinerary.revision = Math.max(0, Math.round(finite(itinerary.revision) ?? 0)) + 1;
 
-  return { itinerary, unscheduledPlaceIds, unresolvedPlaceIds };
+  return { itinerary, unscheduledPlaceIds, unresolvedPlaceIds, unauthorizedBaseChanges };
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +308,9 @@ export function validateStagedChange(
   }
   if (applied.unresolvedPlaceIds.length > 0) {
     blocking.push(`The proposal references ${applied.unresolvedPlaceIds.length} place(s) that are no longer in this trip.`);
+  }
+  for (const change of applied.unauthorizedBaseChanges) {
+    blocking.push(`Day ${change.day} cannot change its overnight base from ${change.from || 'unknown'} to ${change.to || 'unknown'} without an authorized transfer.`);
   }
 
   const seenIds = new Set<string>();

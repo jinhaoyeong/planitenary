@@ -31,6 +31,13 @@ import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
 } from './itineraryEdgeTiming.ts';
+import {
+  activityCitiesFrom,
+  cleanCity,
+  parseDayTransfer,
+  sameCity,
+  type DayTransfer,
+} from './dayCitySemantics.ts';
 
 export { ARRIVAL_SETTLING_MINUTES, DEPARTURE_LEAD_MINUTES };
 
@@ -94,7 +101,12 @@ export interface PlanningDayWindow {
 export interface PlanningDayMaterial {
   day: number;
   date?: string;
+  /** Overnight/base city after any explicit transfer on this day. */
+  stayCity: string;
+  /** Compatibility alias; always equal to stayCity. */
   city: string;
+  activityCities: string[];
+  transfer?: DayTransfer;
   startTime: string;
   endTime: string;
   maxMainActivities: number;
@@ -191,11 +203,17 @@ export interface ProposedItineraryItem {
   imageUrl?: string;
   priority?: ProposalPriority;
   locked?: boolean;
+  /** Provider/planner-backed place city. Absent means unknown, never the stay. */
+  activityCity?: string;
 }
 
 export interface ProposedItineraryDay {
   day: number;
   date?: string;
+  stayCity: string;
+  activityCities: string[];
+  transfer?: DayTransfer;
+  /** Compatibility alias; always equal to stayCity. */
   city: string;
   startTime: string;
   endTime: string;
@@ -228,6 +246,8 @@ export type ProposalConflictCode =
    * movement; this one is about movement that could not happen at all.
    */
   | 'incompatible-location'
+  | 'activity-city-mismatch'
+  | 'unauthorized-base-change'
   | 'unknown-place'
   | 'duplicate-place';
 
@@ -593,23 +613,37 @@ const constrainDayAroundFixedTransport = (
 ): PlanningDayMaterial => {
   if (rawEvents.length === 0) return day;
   const sorted = [...rawEvents].sort((left, right) => left.start - right.start || left.end - right.end);
+  const startCity = day.transfer?.from ?? day.stayCity;
+  const roles = sorted.map((_event, index) => classifyFixedTransport(
+      index,
+      sorted.length,
+      context.dayIndex,
+      context.dayCount,
+      startCity,
+      context.prevCity,
+      context.nextCity,
+    ));
+  // A persisted transfer remains explicit on the next proposal build. The
+  // first build inferred it from the same fixed event plus the following base;
+  // after Apply, both this day and the following day correctly stay in `to`.
+  if (day.transfer && !roles.includes('transfer')) roles[roles.length - 1] = 'transfer';
   const fixedEvents: PlanningFixedEvent[] = sorted.map((event, index) => ({
     id: event.id,
     name: event.name,
     startTime: event.startTime,
     endTime: event.endTime,
-    role: classifyFixedTransport(
-      index,
-      sorted.length,
-      context.dayIndex,
-      context.dayCount,
-      day.city,
-      context.prevCity,
-      context.nextCity,
-    ),
+    role: roles[index],
     transportKind: event.transportKind,
     coordinates: event.coordinates,
   }));
+  const transfer = day.transfer ?? (
+    context.nextCity
+    && !sameCity(startCity, context.nextCity)
+    && fixedEvents.some((event) => event.role === 'transfer')
+      ? { from: startCity, to: context.nextCity }
+      : undefined
+  );
+  const stayCity = transfer?.to ?? day.stayCity;
 
   let start = clockToMinutes(day.startTime) ?? 0;
   let end = clockToMinutes(day.endTime) ?? 1439;
@@ -652,9 +686,9 @@ const constrainDayAroundFixedTransport = (
   const windows: PlanningDayWindow[] = parts.map((part) => ({
     startTime: minutesToClock(part.start),
     endTime: minutesToClock(part.end),
-    city: lastOutboundEnd !== undefined && context.nextCity && part.start >= lastOutboundEnd
-      ? context.nextCity
-      : day.city,
+    city: lastOutboundEnd !== undefined && transfer && part.start >= lastOutboundEnd
+      ? transfer.to
+      : startCity,
   }));
 
   let maxMainActivities = day.maxMainActivities;
@@ -674,6 +708,9 @@ const constrainDayAroundFixedTransport = (
 
   return {
     ...day,
+    stayCity,
+    city: stayCity,
+    transfer,
     startTime,
     endTime,
     maxMainActivities,
@@ -686,10 +723,14 @@ const constrainDayAroundFixedTransport = (
 const dayWindowsOf = (day: PlanningDayMaterial): PlanningDayWindow[] =>
   day.windows && day.windows.length > 0
     ? day.windows
-    : [{ startTime: day.startTime, endTime: day.endTime, city: day.city }];
+    : [{ startTime: day.startTime, endTime: day.endTime, city: day.stayCity }];
 
 const citiesOnDay = (day: PlanningDayMaterial): Set<string> =>
-  new Set([day.city, ...dayWindowsOf(day).map((window) => window.city)]);
+  new Set([
+    day.stayCity,
+    ...(day.transfer ? [day.transfer.from, day.transfer.to] : []),
+    ...dayWindowsOf(day).map((window) => window.city),
+  ]);
 
 /**
  * May this place be scheduled on this day?
@@ -716,7 +757,7 @@ const placementAllowedOnDay = (
 ): boolean => {
   const covered = new Set([...citiesOnDay(day)].map(cityKey));
   if (covered.has(cityKey(place.city))) return true;
-  return isPlacementAllowed(reach.verdictFor(day.city, place));
+  return isPlacementAllowed(reach.verdictFor(day.stayCity, place));
 };
 
 const overlappingFixedEvent = (
@@ -737,7 +778,7 @@ const nextFeasibleStart = (
   duration: number,
 ): number | undefined => {
   const windows = dayWindowsOf(day);
-  const mixedCities = windows.some((window) => window.city !== day.city);
+  const mixedCities = windows.some((window) => !sameCity(window.city, day.stayCity));
   const blocks = [...(day.fixedEvents ?? [])].sort((left, right) =>
     (clockToMinutes(left.startTime) ?? 0) - (clockToMinutes(right.startTime) ?? 0));
   for (const window of windows) {
@@ -830,7 +871,6 @@ const activityPlace = (
   activity: Record<string, unknown>,
   options: {
     day?: number;
-    city?: string;
     decisions: Record<string, unknown>;
     mustDo: Set<string>;
     safeLegacyKeys: Set<string>;
@@ -860,11 +900,14 @@ const activityPlace = (
     return url ? [url] : [];
   }).slice(0, 6);
   const location = text(activity.location, 120);
+  const activityCity = cleanCity(activity.city);
   return {
     id,
     name,
-    city: options.city ?? 'Unassigned',
-    cluster: location ?? options.city ?? 'Unassigned',
+    // Only a place record may identify its activity city. A day's base is not
+    // evidence that every stop sits there; legacy activities remain unknown.
+    city: activityCity ?? '',
+    cluster: location ?? activityCity ?? 'Unassigned',
     coordinates: coordinates(activity.coordinates),
     categories: [type, kind].filter((entry): entry is string => Boolean(entry)),
     priority,
@@ -934,7 +977,11 @@ export async function buildPlanningMaterial(
   const draftDays = rawDays.map((raw, index): PlanningDayMaterial => {
     const day = asRecord(raw) ?? {};
     const dayNumber = Number.isInteger(day.day) ? Number(day.day) : index + 1;
-    const city = text(day.city, 120) ?? text(asArray(profile?.destinations)[0] && asRecord(asArray(profile?.destinations)[0])?.city, 120) ?? 'Destination';
+    const stayCity = text(day.stayCity, 120)
+      ?? text(day.city, 120)
+      ?? text(asArray(profile?.destinations)[0] && asRecord(asArray(profile?.destinations)[0])?.city, 120)
+      ?? 'Destination';
+    const transfer = parseDayTransfer(day.transfer, stayCity);
     const fixedPlaceIds: string[] = [];
     const events: RawFixedTransport[] = [];
     for (const rawActivity of asArray(day.activities)) {
@@ -943,7 +990,7 @@ export async function buildPlanningMaterial(
       const fixed = extractFixedTransport(activity, dayNumber);
       if (fixed) events.push(fixed);
       if (recordPlanningExclusion(activity, dayNumber)) continue;
-      const place = activityPlace(activity, { day: dayNumber, city, decisions, mustDo, safeLegacyKeys });
+      const place = activityPlace(activity, { day: dayNumber, decisions, mustDo, safeLegacyKeys });
       if (!place || seen.has(place.id)) continue;
       seen.add(place.id);
       candidatePlaces.push(place);
@@ -968,7 +1015,10 @@ export async function buildPlanningMaterial(
     return {
       day: dayNumber,
       date: text(day.date, 20) ?? addDays(startDate, index),
-      city,
+      stayCity,
+      activityCities: activityCitiesFrom(asArray(day.activityCities), stayCity),
+      transfer,
+      city: stayCity,
       startTime,
       endTime,
       maxMainActivities,
@@ -979,8 +1029,8 @@ export async function buildPlanningMaterial(
   const days = draftDays.map((draft, index) => constrainDayAroundFixedTransport(draft, fixedByDay[index] ?? [], {
     dayIndex: index,
     dayCount: draftDays.length,
-    prevCity: draftDays[index - 1]?.city,
-    nextCity: draftDays[index + 1]?.city,
+    prevCity: draftDays[index - 1]?.stayCity,
+    nextCity: draftDays[index + 1]?.stayCity,
   }));
 
   for (const raw of asArray(itinerary.unassignedActivities)) {
@@ -988,7 +1038,6 @@ export async function buildPlanningMaterial(
     if (!activity) continue;
     if (recordPlanningExclusion(activity)) continue;
     const place = activityPlace(activity, {
-      city: text(activity.location, 120) ?? days[0]?.city,
       decisions,
       mustDo,
       safeLegacyKeys,
@@ -1225,8 +1274,8 @@ function composeSchedule(
     const asAnchor = (event: PlanningFixedEvent): PlanningPlace => ({
       id: event.id,
       name: event.name,
-      city: day.city,
-      cluster: day.city,
+      city: day.stayCity,
+      cluster: day.stayCity,
       categories: [event.transportKind],
       priority: 'locked',
       durationRangeMinutes: [1, 1],
@@ -1447,6 +1496,7 @@ function composeSchedule(
         imageUrl: place.imageUrl,
         priority: place.priority,
         locked: place.locked,
+        activityCity: cleanCity(place.city),
       });
       scheduled.add(place.id);
       previous = place;
@@ -1476,10 +1526,17 @@ function composeSchedule(
     const freeMinutes = Math.max(0, dayEnd - usedEnd);
     const warnings = [day.note].filter((entry): entry is string => Boolean(entry));
     if (freeMinutes < rules.minimumFreeMinutes) warnings.push(`This ${material.pace} day keeps only ${freeMinutes} free minutes.`);
+    const activityCities = activityCitiesFrom([
+      ...day.activityCities,
+      ...items.map((item) => item.activityCity),
+    ], day.stayCity);
     return {
       day: day.day,
       date: day.date,
-      city: day.city,
+      stayCity: day.stayCity,
+      activityCities,
+      transfer: day.transfer,
+      city: day.stayCity,
       startTime: day.startTime,
       endTime: day.endTime,
       rationale: selected?.rationale,
@@ -1498,7 +1555,7 @@ function composeSchedule(
     if (!scheduled.has(place.id)) {
       const blockedDay = material.days.find((day) =>
         (day.fixedEvents?.length ?? 0) > 0
-        && (citiesOnDay(day).has(place.city) || day.city === place.city));
+        && (citiesOnDay(day).has(place.city) || sameCity(day.stayCity, place.city)));
       const departure = blockedDay?.fixedEvents?.some((event) => event.role === 'departure' || event.role === 'transfer');
       const arrival = blockedDay?.fixedEvents?.some((event) => event.role === 'arrival');
       conflicts.push({
@@ -1534,9 +1591,46 @@ export function validateItineraryProposal(
   const reach = cityReachability(material.places);
   for (const day of proposalDays) {
     const materialDay = material.days.find((entry) => entry.day === day.day);
+    if (materialDay && (!sameCity(day.stayCity, materialDay.stayCity) || !sameCity(day.city, day.stayCity))) {
+      conflicts.push({
+        code: 'unauthorized-base-change',
+        severity: 'error',
+        day: day.day,
+        message: `Day ${day.day} cannot change its overnight base from ${materialDay.stayCity} to ${day.stayCity || day.city} without an authorized transfer.`,
+      });
+    }
+    const materialTransfer = materialDay?.transfer;
+    const proposedTransfer = day.transfer;
+    const transferMatches = (!materialTransfer && !proposedTransfer)
+      || Boolean(materialTransfer && proposedTransfer
+        && sameCity(materialTransfer.from, proposedTransfer.from)
+        && sameCity(materialTransfer.to, proposedTransfer.to));
+    if (materialDay && !transferMatches) {
+      conflicts.push({
+        code: 'unauthorized-base-change',
+        severity: 'error',
+        day: day.day,
+        message: `Day ${day.day} has transfer semantics that were not authorized by its fixed transport.`,
+      });
+    }
     const startLimit = clockToMinutes(materialDay?.startTime);
     const endLimit = clockToMinutes(materialDay?.endTime);
     const sorted = [...day.items].sort((left, right) => (clockToMinutes(left.startTime) ?? 0) - (clockToMinutes(right.startTime) ?? 0));
+    const authoritativeActivityCities = activityCitiesFrom([
+      ...(materialDay?.activityCities ?? []),
+      ...sorted.flatMap((item) => {
+        const city = item.placeId ? places.get(item.placeId)?.city : undefined;
+        return city ? [city] : [];
+      }),
+    ], day.stayCity);
+    if (JSON.stringify(day.activityCities) !== JSON.stringify(authoritativeActivityCities)) {
+      conflicts.push({
+        code: 'activity-city-mismatch',
+        severity: 'error',
+        day: day.day,
+        message: `Day ${day.day}'s activity cities do not match its scheduled place evidence.`,
+      });
+    }
     sorted.forEach((item, index) => {
       const start = clockToMinutes(item.startTime);
       const end = clockToMinutes(item.endTime);
@@ -1580,7 +1674,7 @@ export function validateItineraryProposal(
          */
         if (place && materialDay && !placementAllowedOnDay(materialDay, place, reach)) conflicts.push({
           code: 'incompatible-location', severity: 'error', day: day.day, placeId: item.placeId,
-          message: placementConflictMessage(item.name, place.city, day.day, materialDay.city),
+          message: placementConflictMessage(item.name, place.city, day.day, materialDay.stayCity),
         });
         const window = place ? hoursForDate(place, day.date) : undefined;
         if (place && place.openingHours.length > 0 && (!window
@@ -1632,7 +1726,7 @@ export function validateItineraryProposal(
     if (!scheduled.has(place.id)) {
       const blockedDay = material.days.find((day) =>
         (day.fixedEvents?.length ?? 0) > 0
-        && (citiesOnDay(day).has(place.city) || day.city === place.city));
+        && (citiesOnDay(day).has(place.city) || sameCity(day.stayCity, place.city)));
       const departure = blockedDay?.fixedEvents?.some((event) => event.role === 'departure' || event.role === 'transfer');
       const arrival = blockedDay?.fixedEvents?.some((event) => event.role === 'arrival');
       conflicts.push({

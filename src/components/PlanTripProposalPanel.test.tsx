@@ -110,7 +110,7 @@ beforeEach(() => {
       kind: 'itinerary-proposal-v1', id: 'p1', tripId: 'trip-1', materialRevision: 'r1',
       createdAt: '2026-08-16T08:00:00Z', status: 'valid', applied: false, pace: 'balanced',
       days: [{
-        day: 1, city: 'Osaka', startTime: '09:15', endTime: '21:30', warnings: [],
+        day: 1, stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:15', endTime: '21:30', warnings: [],
         metrics: { placeCount: 2, travelMinutes: 27, freeMinutes: 90, clusterChanges: 0 },
         items: [
           { id: 'a', placeId: 'a', type: 'place', name: 'Osaka Castle', arrivalTime: '09:15', startTime: '09:15', endTime: '10:45', visitDurationMinutes: 90, bufferMinutes: 0, rationale: 'Must do', warnings: [], evidence: [], priority: 'must-do' },
@@ -390,7 +390,7 @@ describe('Plan my trip proposal panel', () => {
         kind: 'itinerary-proposal-v1', id: 'p-cached', tripId: 'trip-1', materialRevision: 'r2',
         createdAt: '2026-08-16T09:00:00Z', status: 'valid', applied: false, pace: 'balanced',
         days: [{
-          day: 1, city: 'Osaka', startTime: '09:15', endTime: '21:30', warnings: [],
+          day: 1, stayCity: 'Osaka', activityCities: [], city: 'Osaka', startTime: '09:15', endTime: '21:30', warnings: [],
           metrics: { placeCount: 1, travelMinutes: 0, freeMinutes: 90, clusterChanges: 0 },
           items: [
             { id: 'c', placeId: 'c', type: 'place', name: 'Cached Dotonbori plan', arrivalTime: '09:15', startTime: '09:15', endTime: '10:45', visitDurationMinutes: 90, bufferMinutes: 0, rationale: 'Cached', warnings: [], evidence: [], priority: 'must-do' },

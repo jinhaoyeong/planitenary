@@ -17,6 +17,7 @@ import {
   parseStructuredPlaceRef,
   type StructuredPlaceRef,
 } from '../../supabase/functions/_shared/placeReference';
+import { parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
 import type {
   AdmissionClass,
   AdmissionExpectation,
@@ -256,6 +257,9 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
   const name = typeof source.name === 'string' && source.name.trim() ? source.name.trim() : fallback.name;
   const time = normalizeStoredTime(source.time, fallback.time);
   const location = typeof source.location === 'string' ? source.location : undefined;
+  const city = typeof source.city === 'string' && source.city.trim()
+    ? source.city.trim().slice(0, 120)
+    : undefined;
   const estimatedCost = source.estimatedCost && typeof source.estimatedCost === 'object'
     ? (() => {
         const raw = source.estimatedCost as unknown as Record<string, unknown>;
@@ -348,6 +352,7 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
     name,
     description: typeof source.description === 'string' ? source.description : fallback.description,
     type,
+    city,
     location,
     cost: typeof source.cost === 'string' ? source.cost : undefined,
     estimatedCost,
@@ -522,6 +527,7 @@ export const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, in
      * the planner actually knows it.
      */
     activityCities: sanitizeActivityCities(source.activityCities),
+    transfer: parseDayTransfer(source.transfer, stayCity),
     // Alias, forced. Nothing may write it independently of the line above.
     city: stayCity,
     title: typeof source.title === 'string' && source.title.trim() ? source.title : fallback.title,

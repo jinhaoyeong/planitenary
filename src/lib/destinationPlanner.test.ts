@@ -67,6 +67,13 @@ describe('destination planner vertical slice', () => {
     expect(result.scheduledCandidates.length + result.unscheduledCandidates.length).toBe(OSAKA_PLACE_FIXTURE.length);
     expect(result.unscheduledReasons.map(({ candidate }) => candidate.id)).toEqual(result.unscheduledCandidates.map((candidate) => candidate.id));
     expect(result.routeMode).toBe('offline-straight-line');
+
+    const dayTrip = result.days.find((day) => day.activities.some((activity) => activity.city && activity.city !== day.stayCity));
+    expect(dayTrip?.stayCity).toBe('Osaka');
+    expect(dayTrip?.city).toBe('Osaka');
+    expect(dayTrip?.activityCities.some((city) => city !== 'Osaka')).toBe(true);
+    expect(dayTrip?.transfer).toBeUndefined();
+    expect(scheduledPlaces.every((activity) => Boolean(activity.city))).toBe(true);
   });
 
   it('preserves locked activities while building around them', () => {

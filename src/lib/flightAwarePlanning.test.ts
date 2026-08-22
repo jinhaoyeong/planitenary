@@ -46,6 +46,7 @@ const sight = (
   name,
   description: `${name} description`,
   type: 'sight',
+  city,
   location: city,
   provider: 'osm',
   providerPlaceId: id.replace('discovered-osm-', ''),
@@ -209,6 +210,8 @@ describe('Flight-Aware Planning V1', () => {
   it('D. rejects an activity that overlaps a fixed flight', () => {
     const day: ProposedItineraryDay = {
       day: 1,
+      stayCity: 'Osaka',
+      activityCities: [],
       city: 'Osaka',
       startTime: '09:15',
       endTime: '21:30',
@@ -244,6 +247,8 @@ describe('Flight-Aware Planning V1', () => {
       days: [{
         day: 1,
         date: '2026-08-17',
+        stayCity: 'Osaka',
+        activityCities: [],
         city: 'Osaka',
         startTime: '09:15',
         endTime: '21:30',

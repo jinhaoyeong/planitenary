@@ -6,6 +6,7 @@ import type {
   ProposedItineraryItem,
   TripItineraryProposal,
 } from '../../supabase/functions/_shared/itineraryProposal';
+import { activityCitiesFrom, parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
 
 export interface PlanTripResult {
   status: 'answered' | 'partial' | 'refused';
@@ -96,6 +97,7 @@ const parseItem = (value: unknown): ProposedItineraryItem | undefined => {
     imageUrl: text(raw.imageUrl, 1000),
     priority: ['must-do', 'interested', 'optional', 'locked'].find((entry) => entry === raw.priority) as ProposedItineraryItem['priority'],
     locked: raw.locked === true,
+    activityCity: text(raw.activityCity, 160),
   };
 };
 
@@ -103,15 +105,18 @@ const parseDay = (value: unknown): ProposedItineraryDay | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
   const day = finite(raw.day);
-  const city = text(raw.city, 160);
+  const stayCity = text(raw.stayCity, 160) ?? text(raw.city, 160);
   const startTime = text(raw.startTime, 5);
   const endTime = text(raw.endTime, 5);
   const metrics = raw.metrics && typeof raw.metrics === 'object' ? raw.metrics as Record<string, unknown> : {};
-  if (!day || !Number.isInteger(day) || !city || !startTime || !endTime) return undefined;
+  if (!day || !Number.isInteger(day) || !stayCity || !startTime || !endTime) return undefined;
   return {
     day,
     date: text(raw.date, 20),
-    city,
+    stayCity,
+    activityCities: activityCitiesFrom(strings(raw.activityCities, 6), stayCity),
+    transfer: parseDayTransfer(raw.transfer, stayCity),
+    city: stayCity,
     startTime,
     endTime,
     rationale: text(raw.rationale, 300),

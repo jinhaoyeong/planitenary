@@ -32,6 +32,7 @@ import type {
   IntelligenceSurface,
   IntelligenceUiEnvelope,
 } from './intelligenceContext.ts';
+import { activityCitiesFrom, cleanCity, parseDayTransfer, type DayTransfer } from './dayCitySemantics.ts';
 
 export const ASK_GROUNDING_SCOPES = [
   'trip',
@@ -97,7 +98,15 @@ export interface AskEvidencePacket {
     dayCount: number;
     currentRevision?: string;
   };
-  days: Array<{ day: number; date?: string; city?: string; title?: string }>;
+  days: Array<{
+    day: number;
+    date?: string;
+    stayCity?: string;
+    activityCities: string[];
+    transfer?: DayTransfer;
+    city?: string;
+    title?: string;
+  }>;
   savedPlaceNames: string[];
   relevantActivities: Array<{
     name: string;
@@ -134,6 +143,9 @@ export interface AskEvidencePacket {
   }>;
   currentDay?: {
     day: number;
+    stayCity?: string;
+    activityCities: string[];
+    transfer?: DayTransfer;
     city?: string;
     activityNames: string[];
   };
@@ -667,12 +679,18 @@ export function collectAskGrounding(input: {
       dayCount,
       currentRevision: text(itinerary.revision, 80) ?? (typeof itinerary.revision === 'number' ? String(itinerary.revision) : undefined),
     },
-    days: days.slice(0, 14).map((day) => ({
-      day: typeof day.day === 'number' ? day.day : 0,
-      date: text(day.date, 40),
-      city: text(day.city, 80),
-      title: text(day.title, 120),
-    })).filter((day) => day.day > 0),
+    days: days.slice(0, 14).map((day) => {
+      const stayCity = cleanCity(day.stayCity, 80) ?? cleanCity(day.city, 80);
+      return {
+        day: typeof day.day === 'number' ? day.day : 0,
+        date: text(day.date, 40),
+        stayCity,
+        activityCities: activityCitiesFrom(asArray(day.activityCities), stayCity ?? ''),
+        transfer: parseDayTransfer(day.transfer, stayCity ?? ''),
+        city: stayCity,
+        title: text(day.title, 120),
+      };
+    }).filter((day) => day.day > 0),
     savedPlaceNames,
     relevantActivities: relevantActivities.length > 0
       ? relevantActivities
@@ -711,9 +729,13 @@ export function collectAskGrounding(input: {
         ?? (typeof days[0]?.day === 'number' ? days[0].day : undefined);
       const day = days.find((entry) => entry.day === focusDay);
       if (!day || typeof day.day !== 'number') return undefined;
+      const stayCity = cleanCity(day.stayCity, 80) ?? cleanCity(day.city, 80);
       return {
         day: day.day,
-        city: text(day.city, 80),
+        stayCity,
+        activityCities: activityCitiesFrom(asArray(day.activityCities), stayCity ?? ''),
+        transfer: parseDayTransfer(day.transfer, stayCity ?? ''),
+        city: stayCity,
         activityNames: asArray(day.activities).flatMap((entry) => {
           const name = text(asRecord(entry)?.name, 160);
           return name ? [name] : [];

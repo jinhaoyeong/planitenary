@@ -33,6 +33,7 @@ import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
 } from '../../supabase/functions/_shared/itineraryEdgeTiming';
+import { activityCitiesFrom, parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -1273,16 +1274,21 @@ export function buildDestinationItinerary(
       : existing?.title || `Flexible day ${index + 1}`;
     usedTitles.add(title);
 
-    // The planner assigns days to a base city; where the individual stops sit is
-    // not something it decides here, so an existing day keeps whatever activity
-    // cities it already carried and a fresh one starts with none.
+    // The stay comes from the traveller's city legs. Activity cities come only
+    // from provider-backed candidates (or a protected activity that already
+    // carries an explicit city), never from that stay assignment.
     const stayCity = cityOfDayIndex(index) || simulated.city || existing?.stayCity || existing?.city || primaryCity;
+    const activityCities = activityCitiesFrom([
+      ...protectedActivities.map((activity) => activity.city),
+      ...dayPlaces.map((place) => place.city),
+    ], stayCity);
 
     days.push({
       day: existing?.day || index + 1,
       date: existing?.date || '',
       stayCity,
-      activityCities: existing?.activityCities ?? [],
+      activityCities,
+      transfer: parseDayTransfer(existing?.transfer, stayCity),
       city: stayCity,
       title,
       activities: [...protectedActivities, ...discoveredActivities].sort((a, b) => a.time.localeCompare(b.time)),

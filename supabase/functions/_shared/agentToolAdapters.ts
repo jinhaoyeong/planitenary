@@ -59,6 +59,7 @@ import { listPersistedFlights } from './askGrounding.ts';
 import { linkCanonicalPlaces, readItineraryProposalCache } from './cache.ts';
 import { resolveStructuredPlaceCards } from './placeCardResolver.ts';
 import { MAX_PLACE_CARDS, type StructuredPlaceCard } from './placeReference.ts';
+import { activityCitiesFrom, cleanCity, parseDayTransfer } from './dayCitySemantics.ts';
 import {
   HISTORY_DIFF_SELECT,
   historyRecordFromAuthorityRow,
@@ -180,6 +181,17 @@ const summarizeActivity = (raw: unknown) => {
 
 const dayRecord = (itinerary: Record<string, unknown> | null, day?: number) =>
   asArray(itinerary?.days).map(asRecord).find((entry) => entry?.day === day);
+
+const semanticDayCities = (day: Record<string, unknown> | null) => {
+  const stayCity = cleanCity(day?.stayCity) ?? cleanCity(day?.city);
+  return {
+    stayCity,
+    activityCities: activityCitiesFrom(asArray(day?.activityCities), stayCity ?? ''),
+    transfer: parseDayTransfer(day?.transfer, stayCity ?? ''),
+    // Compatibility for the existing tool contract while the alias exists.
+    city: stayCity,
+  };
+};
 
 const defaultDayNumber = (itinerary: Record<string, unknown> | null, focusDay?: number): number | undefined => {
   if (focusDay && dayRecord(itinerary, focusDay)) return focusDay;
@@ -771,7 +783,7 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
           return {
             day: day?.day,
             date: day?.date,
-            city: day?.city,
+            ...semanticDayCities(day),
             title: day?.title,
             activityCount: asArray(day?.activities).length,
           };
@@ -791,7 +803,7 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
         return {
           day: day?.day,
           date: day?.date,
-          city: day?.city,
+          ...semanticDayCities(day),
           title: day?.title,
               activities: asArray(day?.activities).slice(0, MAX_RESULT_ITEMS).map((entry) => {
             const activity = asRecord(entry);
@@ -801,6 +813,7 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
               time: activity?.time,
               durationMinutes: activity?.durationMinutes,
               type: activity?.type,
+              city: activity?.city,
               location: activity?.location,
               locked: activity?.locked === true,
             };
@@ -853,7 +866,7 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
         result: {
           day: day.day,
           date: day.date,
-          city: day.city,
+          ...semanticDayCities(day),
           title: day.title,
           activities: asArray(day.activities).slice(0, MAX_RESULT_ITEMS).map(summarizeActivity).filter(Boolean),
         },

@@ -2,6 +2,7 @@ import type { FieldSourceMap } from './lib/identityFields';
 // Declared once, server-side, where currency is resolved. Imported direct
 // rather than via `destinationIntelligence`, which imports this file.
 import type { PlaceAdmission } from '../supabase/functions/_shared/placeCost';
+import type { DayTransfer } from '../supabase/functions/_shared/dayCitySemantics';
 
 export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 'travel' | 'flight' | 'cafe' | 'shop' | 'nightlife' | 'other';
 
@@ -43,6 +44,8 @@ export interface Activity {
   name: string;
   description: string;
   type: ActivityType;
+  /** Authoritative city supplied by a provider/planner; never inferred from the day base. */
+  city?: string;
   location?: string;
   cost?: string; // Legacy display value, retained for old records. Never written to.
   /**
@@ -236,6 +239,8 @@ export interface DayPlan {
    * would be guessing at what the traveller meant.
    */
   activityCities: string[];
+  /** An explicit accommodation/base move that ends at this day's stay city. */
+  transfer?: DayTransfer;
   /**
    * Compatibility alias of {@link stayCity}, for readers not yet migrated.
    *
