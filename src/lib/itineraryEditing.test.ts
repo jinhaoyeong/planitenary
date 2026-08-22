@@ -100,7 +100,7 @@ describe('a day may only fall inside the trip', () => {
     // A trip whose dates predate the ISO format keeps its free-text control
     // rather than being handed an empty dropdown.
     const legacy = trip({
-      days: [{ day: 1, date: 'Aug 12', city: 'Osaka', title: 'Day 1', activities: [] }],
+      days: [{ day: 1, date: 'Aug 12', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day 1', activities: [] }],
       tripProfile: { version: 1, dayCount: 1, destinations: [] },
     });
     expect(tripDateOptions(legacy)).toEqual([]);
@@ -137,8 +137,8 @@ describe('moving a day moves the card, not just the label', () => {
   it('accepts the date but keeps the arrangement when days cannot be compared', () => {
     const legacy = trip({
       days: [
-        { day: 1, date: 'Aug 12', city: 'Osaka', title: 'Arrival day', activities: [] },
-        { day: 2, date: '2026-08-13', city: 'Osaka', title: 'Day 2', activities: [] },
+        { day: 1, date: 'Aug 12', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Arrival day', activities: [] },
+        { day: 2, date: '2026-08-13', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day 2', activities: [] },
       ],
     });
     const moved = moveDayToDate(legacy, 1, '2026-08-20');
@@ -215,9 +215,9 @@ describe('the deck is sized by the days spent in that city', () => {
 describe('an existing trip with AUG 12 style dates', () => {
   const legacy = () => trip({
     days: [
-      { day: 1, date: 'AUG 12', city: 'Osaka', title: 'Arrival day', activities: [] },
-      { day: 2, date: 'AUG 13', city: 'Osaka', title: 'Day 2', activities: [] },
-      { day: 3, date: 'AUG 18', city: 'Tokyo', title: 'Day 3', activities: [] },
+      { day: 1, date: 'AUG 12', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Arrival day', activities: [] },
+      { day: 2, date: 'AUG 13', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day 2', activities: [] },
+      { day: 3, date: 'AUG 18', stayCity: 'Tokyo', activityCities: [], city: 'Tokyo', title: 'Day 3', activities: [] },
     ],
   });
 
@@ -227,7 +227,7 @@ describe('an existing trip with AUG 12 style dates', () => {
   });
 
   it.each(['Aug 12', 'August 12', '12 Aug', 'aug 12'])('understands %s', (label) => {
-    const written = trip({ days: [{ day: 1, date: label, city: 'Osaka', title: 'Day 1', activities: [] }] });
+    const written = trip({ days: [{ day: 1, date: label, stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day 1', activities: [] }] });
     expect(resolveDayDate(written, 0)).toBe('2026-08-12');
   });
 
@@ -243,8 +243,8 @@ describe('an existing trip with AUG 12 style dates', () => {
   it('falls back to position only when the label carries no date', () => {
     const unlabelled = trip({
       days: [
-        { day: 1, date: 'Day 1', city: 'Osaka', title: 'Arrival day', activities: [] },
-        { day: 2, date: 'Day 2', city: 'Osaka', title: 'Day 2', activities: [] },
+        { day: 1, date: 'Day 1', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Arrival day', activities: [] },
+        { day: 2, date: 'Day 2', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day 2', activities: [] },
       ],
     });
     expect(resolveDayDate(unlabelled, 0)).toBe('2026-08-12');
@@ -274,7 +274,7 @@ describe('an existing trip with AUG 12 style dates', () => {
 describe('only configured destinations are selectable', () => {
   it('offers the trip cities and nothing else', () => {
     const withNara = trip({
-      days: [{ day: 1, date: '2026-08-12', city: 'Nara', title: 'Day 1', activities: [] }],
+      days: [{ day: 1, date: '2026-08-12', stayCity: 'Nara', activityCities: [], city: 'Nara', title: 'Day 1', activities: [] }],
     });
     // Nara is where the day currently is, but the trip was never set up for it.
     expect(tripCityOptions(withNara).map((o) => o.city)).toEqual(['Osaka', 'Tokyo']);
@@ -282,7 +282,7 @@ describe('only configured destinations are selectable', () => {
 
   it('names an unconfigured current city so it can be shown, not chosen', () => {
     const withNara = trip({
-      days: [{ day: 1, date: '2026-08-12', city: 'Nara', title: 'Day 1', activities: [] }],
+      days: [{ day: 1, date: '2026-08-12', stayCity: 'Nara', activityCities: [], city: 'Nara', title: 'Day 1', activities: [] }],
     });
     expect(unconfiguredDayCity(withNara, 'Nara')).toBe('Nara');
     expect(unconfiguredDayCity(withNara, 'Tokyo')).toBeUndefined();

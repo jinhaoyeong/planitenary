@@ -22,6 +22,8 @@ const itinerary = (): Itinerary => ({
   days: Array.from({ length: 11 }, (_, index) => ({
     day: index + 1,
     date: `Oct ${index + 1}`,
+    stayCity: 'Osaka',
+    activityCities: [],
     city: 'Osaka',
     title: `Day ${index + 1}`,
     activities: [],
@@ -102,7 +104,7 @@ describe('destination planner vertical slice', () => {
       name: city,
       cities: [city],
       description: '',
-      days: Array.from({ length: 3 }, (_, index) => ({ day: index + 1, date: `Day ${index + 1}`, city, title: `Day ${index + 1}`, activities: [] })),
+      days: Array.from({ length: 3 }, (_, index) => ({ day: index + 1, date: `Day ${index + 1}`, stayCity: city, activityCities: [], city, title: `Day ${index + 1}`, activities: [] })),
     };
     const ranked = rankDestinationCandidates(candidates, otherProfile);
     const decisions = Object.fromEntries(ranked.map(({ candidate }) => [candidate.id, 'interested' as const]));

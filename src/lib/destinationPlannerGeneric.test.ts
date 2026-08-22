@@ -82,6 +82,8 @@ const emptyItinerary = (days: number): Itinerary => ({
   days: Array.from({ length: days }, (_, index) => ({
     day: index + 1,
     date: '',
+    stayCity: 'Melbourne',
+    activityCities: [],
     city: 'Melbourne',
     title: `Day ${index + 1}`,
     activities: [],

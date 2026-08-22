@@ -59,7 +59,7 @@ const itinerary: Itinerary = {
   id: 'trip-f5262604-cb74-4d39-af90-0d8a233c9906',
   name: 'Flight Acceptance Test',
   cities: ['Fukuoka'],
-  days: [{ day: 1, date: '2026-08-20', city: 'Fukuoka', title: 'Arrive', activities: [] }],
+  days: [{ day: 1, date: '2026-08-20', stayCity: 'Fukuoka', activityCities: [], city: 'Fukuoka', title: 'Arrive', activities: [] }],
 };
 
 describe('Budget UI source of truth', () => {

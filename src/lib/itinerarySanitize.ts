@@ -459,10 +459,31 @@ const sanitizeDiscoveryState = (value: unknown): ItineraryDiscoveryState | undef
 const blankDay = (index: number): DayPlan => ({
   day: index + 1,
   date: `Day ${index + 1}`,
+  stayCity: '',
+  activityCities: [],
   city: '',
   title: `Day ${index + 1}`,
   activities: [],
 });
+
+/**
+ * Cities a stored day claims its activities were in.
+ *
+ * Re-derived rather than trusted, like every other field here: a malformed
+ * entry costs the list, never the day. Deliberately never falls back to the
+ * stay city — "we did not record this" and "it was the same as the base" are
+ * different statements, and only one of them is true of a migrated trip.
+ */
+const sanitizeActivityCities = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const kept: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const city = entry.trim().slice(0, 120);
+    if (city && !kept.some((held) => held.toLowerCase() === city.toLowerCase())) kept.push(city);
+  }
+  return kept.slice(0, 6);
+};
 
 export const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, index: number, tripId = 'trip'): DayPlan => {
   const source = value && typeof value === 'object' ? value as Partial<DayPlan> : {};
@@ -474,10 +495,35 @@ export const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, in
   // An explicitly empty day is valid (generated trip skeletons start blank).
   const sourceActivities = Array.isArray(source.activities) ? source.activities : activityFallbacks;
 
+  /**
+   * The overnight base, preferring what the day says about itself.
+   *
+   * An explicit `stayCity` wins over `city` because a trip written after this
+   * change means the former; a trip written before it only ever had the
+   * latter, and reading it as the base is exactly what it meant. The two are
+   * then forced equal below, so a stored pair that disagrees — however it got
+   * that way — cannot survive a read as two competing truths.
+   */
+  const stayCity = typeof source.stayCity === 'string' && source.stayCity.trim()
+    ? source.stayCity.trim()
+    : typeof source.city === 'string' && source.city.trim()
+      ? source.city.trim()
+      : fallback.stayCity || fallback.city;
+
   return {
     day: index + 1,
     date: typeof source.date === 'string' && source.date.trim() ? source.date : fallback.date,
-    city: typeof source.city === 'string' && source.city.trim() ? source.city : fallback.city,
+    stayCity,
+    /**
+     * Never inferred here. Coordinates could suggest that a stop sits nearer
+     * Kyoto than Osaka, but "reachable from" is not "belongs to", and a
+     * migration that guessed would write a plausible answer the traveller
+     * never gave into their saved trip. Stage 2 producers record this where
+     * the planner actually knows it.
+     */
+    activityCities: sanitizeActivityCities(source.activityCities),
+    // Alias, forced. Nothing may write it independently of the line above.
+    city: stayCity,
     title: typeof source.title === 'string' && source.title.trim() ? source.title : fallback.title,
     activities: sourceActivities.map((activity, activityIndex) =>
       sanitizeActivity(activity, activityFallbacks[activityIndex] || activityFallbacks[activityFallbacks.length - 1], activityIndex, `${tripId}|day-${index + 1}`)

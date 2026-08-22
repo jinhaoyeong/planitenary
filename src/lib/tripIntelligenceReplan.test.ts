@@ -29,6 +29,8 @@ const itinerary = (): Itinerary => ({
   days: [{
     day: 1,
     date: '2026-08-05',
+    stayCity: 'Melbourne',
+    activityCities: [],
     city: 'Melbourne',
     title: 'CBD',
     activities: [

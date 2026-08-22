@@ -679,6 +679,8 @@ describe('saved-place decision binding in review UI', () => {
     days: [{
       day: 1,
       date: '2026-08-20',
+      stayCity: 'Osaka',
+      activityCities: [],
       city: 'Osaka',
       title: 'Day one',
       activities: [savedKushida],
@@ -806,7 +808,7 @@ describe('saved-place decision binding in review UI', () => {
     };
     discoveryFixture.candidates = [osmListing, otherListing];
     const panel = renderPanel(profileFor(), savedItinerary({
-      days: [{ day: 1, date: '2026-08-20', city: 'Osaka', title: 'Day one', activities: [imported] }],
+      days: [{ day: 1, date: '2026-08-20', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day one', activities: [imported] }],
     }));
     await waitForStart();
     fireEvent.click(screen.getByRole('button', { name: /^Start$/ }));
@@ -840,7 +842,7 @@ describe('saved-place decision binding in review UI', () => {
       name: 'Glico Man Sign',
     };
     const panel = await startSavedReview(savedItinerary({
-      days: [{ day: 1, date: '2026-08-20', city: 'Osaka', title: 'Day one', activities: [imported] }],
+      days: [{ day: 1, date: '2026-08-20', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day one', activities: [imported] }],
       discoveryState: {
         city: 'Osaka',
         mode: 'live',
@@ -863,7 +865,7 @@ describe('saved-place decision binding in review UI', () => {
     const parkA = { ...savedKushida, id: 'activity-park-a', name: 'Central Park' };
     const parkB = { ...savedKushida, id: 'activity-park-b', name: 'Central Park', time: '11:00' };
     const panel = await startSavedReview(savedItinerary({
-      days: [{ day: 1, date: '2026-08-20', city: 'Osaka', title: 'Day one', activities: [parkA, parkB] }],
+      days: [{ day: 1, date: '2026-08-20', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day one', activities: [parkA, parkB] }],
     }), [otherListing]);
 
     fireEvent.click(document.querySelector('[data-decision-target="activity-park-a"] input[value="skip"]') as HTMLInputElement);

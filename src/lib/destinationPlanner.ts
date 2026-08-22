@@ -1273,10 +1273,17 @@ export function buildDestinationItinerary(
       : existing?.title || `Flexible day ${index + 1}`;
     usedTitles.add(title);
 
+    // The planner assigns days to a base city; where the individual stops sit is
+    // not something it decides here, so an existing day keeps whatever activity
+    // cities it already carried and a fresh one starts with none.
+    const stayCity = cityOfDayIndex(index) || simulated.city || existing?.stayCity || existing?.city || primaryCity;
+
     days.push({
       day: existing?.day || index + 1,
       date: existing?.date || '',
-      city: cityOfDayIndex(index) || simulated.city || existing?.city || primaryCity,
+      stayCity,
+      activityCities: existing?.activityCities ?? [],
+      city: stayCity,
       title,
       activities: [...protectedActivities, ...discoveredActivities].sort((a, b) => a.time.localeCompare(b.time)),
       photos: existing?.photos,

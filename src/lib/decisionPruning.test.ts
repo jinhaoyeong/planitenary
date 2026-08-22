@@ -108,8 +108,8 @@ describe('a build after pruning uses the places actually chosen', () => {
     ...emptyItinerary,
     id: 'trip-1',
     days: [
-      { day: 1, date: '2027-01-21', city: 'Guangzhou', title: 'Day one', activities: [] },
-      { day: 2, date: '2027-01-22', city: 'Guangzhou', title: 'Day two', activities: [] },
+      { day: 1, date: '2027-01-21', stayCity: 'Guangzhou', activityCities: [], city: 'Guangzhou', title: 'Day one', activities: [] },
+      { day: 2, date: '2027-01-22', stayCity: 'Guangzhou', activityCities: [], city: 'Guangzhou', title: 'Day two', activities: [] },
     ],
   };
 

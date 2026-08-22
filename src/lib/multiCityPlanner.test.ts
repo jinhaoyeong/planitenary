@@ -41,6 +41,8 @@ const kansaiTrip = (dayCount = 8): Itinerary => ({
     date: `Oct ${index + 1}`,
     // Neutral, which is what `buildDaysFromProfile` now produces for a
     // multi-city trip: no city is claimed before the plan knows one.
+    stayCity: '',
+    activityCities: [],
     city: '',
     title: `Day ${index + 1}`,
     activities: [],

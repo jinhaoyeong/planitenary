@@ -32,7 +32,7 @@ const fixture = (name: string): PlaceCandidate => {
 const tripWith = (activities: Activity[]): Itinerary => ({
   ...emptyItinerary,
   id: 'trip-1',
-  days: [{ day: 1, date: '12 Apr', city: 'Osaka', title: 'Day one', activities }],
+  days: [{ day: 1, date: '12 Apr', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day one', activities }],
 });
 
 /** Discovery → activity → save → JSON → reload. The whole path, every time. */

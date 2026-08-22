@@ -220,8 +220,16 @@ export function buildPlaceIndex(itinerary: Record<string, unknown> | null): Map<
     if (city) countriesByCity.set(city, code);
   }
   const soleTripCountry = tripCountries.size === 1 ? [...tripCountries][0] : undefined;
+  const countryOf = (cityName: string | undefined) =>
+    (cityName ? countriesByCity.get(cityName.trim().toLowerCase()) : undefined);
 
-  const consider = (raw: unknown, day?: number, city?: string) => {
+  /**
+   * `dayStayCity` is where the traveller sleeps that night, not where the stop
+   * is. It is a country hint and nothing more: a day trip stays inside one
+   * country, so it can answer "which country", but it cannot answer "which
+   * city" without claiming a place sits somewhere it may not.
+   */
+  const consider = (raw: unknown, day?: number, dayStayCity?: string) => {
     const activity = asRecord(raw);
     if (!activity) return;
     const name = typeof activity.name === 'string' ? activity.name.trim() : '';
@@ -229,13 +237,18 @@ export function buildPlaceIndex(itinerary: Record<string, unknown> | null): Map<
     const id = typeof activity.id === 'string' && activity.id
       ? activity.id
       : `${day ?? 0}:${name.toLowerCase()}`;
-    const resolvedCity = typeof activity.city === 'string' ? activity.city : city;
+    // Only the activity may say which city it is in. Where it says nothing, the
+    // place stays city-less — the same state unassigned activities have always
+    // been registered in — rather than inheriting the day's base city.
+    const resolvedCity = typeof activity.city === 'string' && activity.city.trim()
+      ? activity.city
+      : undefined;
     const explicitCountry = typeof activity.countryCode === 'string'
       ? activity.countryCode.trim().toUpperCase()
       : undefined;
     const resolvedCountry = explicitCountry && /^[A-Z]{2}$/.test(explicitCountry)
       ? explicitCountry
-      : resolvedCity ? countriesByCity.get(resolvedCity.trim().toLowerCase()) ?? soleTripCountry : soleTripCountry;
+      : countryOf(resolvedCity) ?? countryOf(dayStayCity) ?? soleTripCountry;
     registerPlace(index, {
       id,
       name,
@@ -259,8 +272,10 @@ export function buildPlaceIndex(itinerary: Record<string, unknown> | null): Map<
     const day = asRecord(rawDay);
     if (!day) continue;
     const number = typeof day.day === 'number' ? day.day : undefined;
-    const city = typeof day.city === 'string' ? day.city : undefined;
-    for (const activity of asArray(day.activities)) consider(activity, number, city);
+    const stayCity = typeof day.stayCity === 'string' && day.stayCity.trim()
+      ? day.stayCity
+      : typeof day.city === 'string' ? day.city : undefined;
+    for (const activity of asArray(day.activities)) consider(activity, number, stayCity);
   }
   for (const activity of asArray(itinerary.unassignedActivities)) consider(activity);
 

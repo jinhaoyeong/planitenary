@@ -98,7 +98,17 @@ export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
         ? city ? `Last morning in ${city}` : 'Departure day'
         : city ? `Day ${index + 1} in ${city}` : `Day ${index + 1}`;
 
-    return { day: index + 1, date, city, title, activities: [] } satisfies DayPlan;
+    // A generated card has one city and no recorded stops, so the base is that
+    // city and the activity list is genuinely empty rather than unknown.
+    return {
+      day: index + 1,
+      date,
+      stayCity: city,
+      activityCities: [],
+      city,
+      title,
+      activities: [],
+    } satisfies DayPlan;
   });
 }
 

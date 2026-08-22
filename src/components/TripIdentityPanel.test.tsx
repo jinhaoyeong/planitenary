@@ -28,7 +28,7 @@ const melbourneTrip = (profile: TripProfile = melbourneProfile()): Itinerary => 
   ...emptyItinerary,
   id: 'trip-1',
   cities: ['Melbourne'],
-  days: [{ day: 1, date: '2027-01-21', city: 'Melbourne', title: 'Day one', activities: [] }],
+  days: [{ day: 1, date: '2027-01-21', stayCity: 'Melbourne', activityCities: [], city: 'Melbourne', title: 'Day one', activities: [] }],
   tripProfile: profile,
 });
 

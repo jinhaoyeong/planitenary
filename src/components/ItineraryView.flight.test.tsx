@@ -52,7 +52,7 @@ const trip = (activities: Activity[]): Itinerary => ({
   id: 'trip-add-flight',
   name: 'Flight editor trip',
   cities: ['Osaka'],
-  days: [{ day: 1, date: '17 Aug', city: 'Osaka', title: 'Arrival day', activities }],
+  days: [{ day: 1, date: '17 Aug', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Arrival day', activities }],
 });
 
 const openDayEditor = (itinerary: Itinerary, onItineraryChange = vi.fn()) => {

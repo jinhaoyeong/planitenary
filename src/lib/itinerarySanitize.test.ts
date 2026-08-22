@@ -46,7 +46,7 @@ const osmCandidate = (overrides: Partial<PlaceCandidate> = {}): PlaceCandidate =
 const tripWith = (activities: Activity[]): Itinerary => ({
   ...emptyItinerary,
   id: 'trip-1',
-  days: [{ day: 1, date: '2027-01-21', city: 'Guangzhou', title: 'Day one', activities }],
+  days: [{ day: 1, date: '2027-01-21', stayCity: 'Guangzhou', activityCities: [], city: 'Guangzhou', title: 'Day one', activities }],
 });
 
 describe('the planner’s work survives a save', () => {

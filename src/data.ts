@@ -214,6 +214,35 @@ export interface DayPhoto {
 export interface DayPlan {
   day: number;
   date: string;
+  /**
+   * Where the traveller sleeps and returns to. The semantic source of truth.
+   *
+   * Separate from where the day actually happens, because those are different
+   * facts and one field could only ever hold one of them. A traveller based in
+   * Osaka who spends Tuesday in Kyoto has not moved hotels, and a planner that
+   * cannot say so must either forbid the day trip or silently relocate them.
+   */
+  stayCity: string;
+  /**
+   * Where the day's activities actually are, when that differs from the base.
+   *
+   * An array because a transfer day is legitimately two cities — Osaka in the
+   * morning, Kyoto by evening — and forcing one would rebuild the limitation
+   * this field exists to remove.
+   *
+   * Empty means "nothing recorded to distinguish", not "same as the stay".
+   * Existing trips migrate to empty on purpose: the day they were saved, only
+   * one city was ever written down, and inferring the rest from coordinates
+   * would be guessing at what the traveller meant.
+   */
+  activityCities: string[];
+  /**
+   * Compatibility alias of {@link stayCity}, for readers not yet migrated.
+   *
+   * Temporary, and never independently writable: `sanitizeDay` forces it equal
+   * to `stayCity` on every read, so the two cannot drift into two truths. New
+   * code should say `stayCity` when it means the overnight base.
+   */
   city: string;
   title: string;
   activities: Activity[];
@@ -300,7 +329,19 @@ export interface Itinerary {
   days: DayPlan[];
 }
 
-export const itineraries: Itinerary[] = [
+/**
+ * The demo trips predate stay/activity city semantics: each day was written
+ * the way a traveller writes one, with a single city line. Rather than repeat
+ * that line twice in twenty-two places — where the two copies could drift
+ * apart — the sample data keeps saying it once and the mapping below derives
+ * the rest. `activityCities` stays empty because nobody recorded where these
+ * stops actually are; a demo day out to a neighbouring town is still a day
+ * whose activity cities were never written down.
+ */
+type SampleDay = Omit<DayPlan, 'stayCity' | 'activityCities'>;
+type SampleItinerary = Omit<Itinerary, 'days'> & { days: SampleDay[] };
+
+const sampleItineraries: SampleItinerary[] = [
   {
     id: 'gz-sz',
     name: 'Lingnan Modern & History',
@@ -567,6 +608,11 @@ export const itineraries: Itinerary[] = [
     ]
   }
 ];
+
+export const itineraries: Itinerary[] = sampleItineraries.map((itinerary) => ({
+  ...itinerary,
+  days: itinerary.days.map((day) => ({ ...day, stayCity: day.city, activityCities: [] })),
+}));
 
 export const tips = [
   { category: 'Apps', items: ['Alipay (Link foreign card)', 'WeChat (Communication & Pay)', 'Amap (Gaode Maps) - Essential for navigation', 'Trip.com (Hotels/Trains)', 'MetroMan (Subway maps)', 'Translate App (DeepL/Baidu)'] },

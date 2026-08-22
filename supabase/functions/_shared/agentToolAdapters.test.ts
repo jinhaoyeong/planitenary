@@ -473,3 +473,115 @@ describe('real agent tool adapters', () => {
     });
   });
 });
+
+/**
+ * A day's city is where the traveller sleeps. It is not where each of that
+ * day's stops is, and the place index used to treat it as both: every saved
+ * activity that did not carry its own city inherited the day's. On a day out
+ * from Osaka to Nara, that told the model Todai-ji is in Osaka — and because
+ * saved activities are never written with a city of their own, it told it that
+ * about every stop on every trip. The model then answered, searched and priced
+ * against a city the place is not in.
+ */
+describe('a saved place does not inherit the city its day is based in', () => {
+  const dayTrip = {
+    name: 'Kansai',
+    tripProfile: { destinations: [{ city: 'Osaka', countryCode: 'JP' }] },
+    days: [{
+      day: 1,
+      stayCity: 'Osaka',
+      city: 'Osaka',
+      activities: [
+        { id: 'todaiji', name: 'Todai-ji', provider: 'osm', providerPlaceId: 'way/1' },
+        { id: 'kuromon', name: 'Kuromon Market', city: 'Osaka', provider: 'osm', providerPlaceId: 'way/2' },
+      ],
+    }],
+  };
+
+  const savedPlaces = async (itinerary: Record<string, unknown>) => {
+    const result = await createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary,
+      routingProviders: { amap: true, openRouteService: true },
+    }).execute({ tool: 'get_saved_places', args: {} } as AgentToolCall);
+    const places = (result as { result: { name: string; city?: string; countryCode?: string }[] }).result;
+    return new Map(places.map((place) => [place.name, place]));
+  };
+
+  it('reports no city for a stop that never said which city it is in', async () => {
+    // Not "Osaka" and not a guess: absent. The model can search for the name,
+    // and an absent city is a question it can ask; a wrong one is not.
+    const places = await savedPlaces(dayTrip);
+    expect(places.get('Todai-ji')?.city).toBeUndefined();
+  });
+
+  it('still reports the city a stop does claim', async () => {
+    const places = await savedPlaces(dayTrip);
+    expect(places.get('Kuromon Market')?.city).toBe('Osaka');
+  });
+
+  it('reads a legacy day, which only has the old city field, the same way', async () => {
+    const legacy = { ...dayTrip, days: [{ ...dayTrip.days[0], stayCity: undefined }] };
+    const places = await savedPlaces(legacy);
+    expect(places.get('Todai-ji')?.city).toBeUndefined();
+    expect(places.get('Kuromon Market')?.city).toBe('Osaka');
+  });
+});
+
+describe('the day a stop belongs to still answers which country it is in', () => {
+  it('picks a routing provider from the day, for stops that carry no city of their own', async () => {
+    // Dropping the city inheritance must not also drop the country. A day trip
+    // is bounded by how far one can go and come back, which does not reach
+    // another country — so the base city is still sound evidence of the
+    // country while saying nothing about the city.
+    //
+    // The trip spans China and Japan, so nothing but the day itself can say
+    // which of the two these stops are in, and provider selection refuses
+    // outright when it cannot tell. Amap coming back means the day answered.
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.provider).toBe('amap');
+      return new Response(JSON.stringify({ durations: [[0, 900]], distances: [[0, 4200]] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createToolExecutor({
+      authHeader: 'Bearer user-jwt',
+      functionsBaseUrl: 'https://project.supabase.co/functions/v1',
+      cache: null,
+      tripId: 'trip-1',
+      userId: 'user-1',
+      itinerary: {
+        tripProfile: {
+          destinations: [
+            { city: 'Guangzhou', countryCode: 'CN' },
+            { city: 'Osaka', countryCode: 'JP' },
+          ],
+        },
+        days: [{
+          day: 1,
+          stayCity: 'Guangzhou',
+          city: 'Guangzhou',
+          activities: [
+            { id: 'temple', name: 'Six Banyan Trees', coordinates: [23.1291, 113.2644], provider: 'osm', providerPlaceId: 'node/1' },
+            { id: 'island', name: 'Shamian Island', coordinates: [23.1067, 113.2419], provider: 'osm', providerPlaceId: 'node/2' },
+          ],
+        }],
+      },
+      routingProviders: { amap: true, openRouteService: true },
+    }).execute({
+      tool: 'get_route',
+      args: { fromPlaceId: 'temple', toPlaceId: 'island', mode: 'walking' },
+    } as AgentToolCall);
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+});

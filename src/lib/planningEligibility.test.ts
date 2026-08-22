@@ -256,6 +256,8 @@ describe('Skip / Visited planning eligibility', () => {
       days: [{
         day: 1,
         date: '2026-08-17',
+        stayCity: 'Osaka',
+        activityCities: [],
         city: 'Osaka',
         title: 'Day one',
         activities: [scheduled],

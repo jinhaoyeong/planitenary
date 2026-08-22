@@ -180,7 +180,7 @@ describe('explicit saved-activity linkage without names', () => {
       provider: 'osm' as const,
       providerPlaceId: 'n3507545614',
     };
-    const bound = bindSavedActivityIds([osmGlico], tripWith([saved], {}, { cities: ['Osaka'], days: [{ day: 1, date: '2026-08-17', city: 'Osaka', title: 'Day one', activities: [saved] }] }));
+    const bound = bindSavedActivityIds([osmGlico], tripWith([saved], {}, { cities: ['Osaka'], days: [{ day: 1, date: '2026-08-17', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day one', activities: [saved] }] }));
     expect(bound[0]?.savedActivityId).toBe('discovered-osm-n3507545614');
     expect(bound[0]?.id).toBe('osm-n3507545614');
     expect(decisionTargetIdOf(bound[0]!)).toBe('discovered-osm-n3507545614');
@@ -196,7 +196,7 @@ describe('explicit saved-activity linkage without names', () => {
     };
     const bound = bindSavedActivityIds([osmGlico], tripWith([saved], {}, {
       cities: ['Osaka'],
-      days: [{ day: 1, date: '2026-08-17', city: 'Osaka', title: 'Day one', activities: [saved] }],
+      days: [{ day: 1, date: '2026-08-17', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day one', activities: [saved] }],
     }));
     expect(bound[0]?.savedActivityId).toBe('activity-legacy-glico');
   });
