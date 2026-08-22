@@ -168,8 +168,10 @@ export async function officialEvidence(
     return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined, fetched: false };
   }
 
+  /** Why the last unreadable page could not be read. Diagnostics only. */
+  let fetchFailure: string | undefined;
   const readPage = async (url: string) => {
-    const html = await fetchText(url);
+    const html = await fetchText(url, undefined, undefined, (reason) => { fetchFailure = reason; });
     if (!html) return undefined;
     const nodes = extractJsonLd(html);
     const text = visibleText(html);
@@ -189,7 +191,12 @@ export async function officialEvidence(
   };
 
   const root = await readPage(website!);
-  if (!root) return { documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined, fetched: false };
+  if (!root) {
+    return {
+      documents: [], openingRules: [], admission: undefined as PlaceAdmission | undefined,
+      fetched: false, fetchFailure,
+    };
+  }
 
   let selected = root;
   // Operator homepages often link to the ticket page. Follow only a few

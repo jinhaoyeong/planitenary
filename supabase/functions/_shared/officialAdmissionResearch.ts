@@ -43,7 +43,7 @@ export interface OfficialAdmissionLookup {
    * the operator. Collapsing them is what made this path unreadable from
    * production — every failure looked the same.
    */
-  status: 'verified' | 'no-price' | 'unavailable' | 'rejected-source' | 'fetch-error';
+  status: 'verified' | 'no-price' | 'unavailable' | 'rejected-source' | 'fetch-error' | 'probe-cached';
   admission?: PlaceAdmission;
   sourceUrl?: string;
   retrievedAt?: string;
@@ -242,10 +242,17 @@ export async function researchOfficialAdmissions(
         id: target.id,
         name: authority.name,
         canonicalPlaceId: authority.canonicalPlaceId,
-        status: 'no-price',
-        note: 'The official source was checked within the freshness window but no verified fare was found.',
+        /**
+         * Not `no-price`: nothing was read this run. An earlier run checked
+         * this source inside the freshness window and found no fare, and the
+         * probe is deliberately suppressing a re-fetch. Reporting it as
+         * `fetched: true` read as "we looked just now", which hid the fact
+         * that today's outcome is simply unknown.
+         */
+        status: 'probe-cached',
+        note: 'A previous run checked this source within the freshness window and found no fare; it was not re-read.',
         attemptedUrl: authority.website,
-        fetched: true,
+        fetched: false,
         documentCount: 0,
       });
       continue;
@@ -266,7 +273,7 @@ export async function researchOfficialAdmissions(
         name: authority.name,
         canonicalPlaceId: authority.canonicalPlaceId,
         status: 'fetch-error',
-        note: 'The operator page could not be read this run, so no fare could be established either way.',
+        note: `The operator page could not be read this run (${evidence.fetchFailure ?? 'reason unreported'}), so no fare could be established either way.`,
         attemptedUrl: authority.website,
         fetched: false,
         documentCount: 0,

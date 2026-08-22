@@ -547,6 +547,15 @@ export async function fetchText(
   url: string,
   timeoutMs = 10_000,
   maxBytes = 512_000,
+  /**
+   * Told why the read failed, when a caller cares.
+   *
+   * Optional and last so no existing caller changes. Every failure used to
+   * collapse into `null`, which meant a 403 from a bot-protected operator, a
+   * timeout and a PDF at the end of a redirect were indistinguishable — and
+   * they need completely different responses.
+   */
+  onFailure?: (reason: string) => void,
 ): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -556,11 +565,15 @@ export async function fetchText(
       redirect: 'follow',
       headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'Planitenary/1.0 (travel itinerary planner)' },
     });
-    if (!response.ok) return null;
-    if (!/text\/html|application\/xhtml/i.test(response.headers.get('content-type') || '')) return null;
+    if (!response.ok) { onFailure?.(`http-${response.status}`); return null; }
+    const contentType = response.headers.get('content-type') || '';
+    if (!/text\/html|application\/xhtml/i.test(contentType)) {
+      onFailure?.(`content-type:${contentType.split(';')[0].trim() || 'unknown'}`);
+      return null;
+    }
 
     const reader = response.body?.getReader();
-    if (!reader) return null;
+    if (!reader) { onFailure?.('no-body'); return null; }
     const chunks: Uint8Array[] = [];
     let total = 0;
     while (total < maxBytes) {
@@ -579,7 +592,12 @@ export async function fetchText(
       offset += chunk.length;
     }
     return new TextDecoder('utf-8', { fatal: false }).decode(merged);
-  } catch {
+  } catch (error) {
+    // An abort is the timeout firing; anything else is DNS, TLS or a refused
+    // connection. The name is enough to tell those apart without logging a URL
+    // the caller may not want in an operator's console.
+    const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : 'unknown';
+    onFailure?.(name === 'AbortError' ? `timeout-${timeoutMs}ms` : `network:${name}`);
     return null;
   } finally {
     clearTimeout(timer);

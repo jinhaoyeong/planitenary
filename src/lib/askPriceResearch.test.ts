@@ -292,3 +292,53 @@ describe('per-attraction research outcomes are observable', () => {
     expect(JSON.stringify(result.admissions)).not.toContain('enormous');
   });
 });
+
+/**
+ * The two failures that looked alike, told apart.
+ *
+ * `fetch-error` collapsed every unreadable page into one word, and the
+ * probe-cache branch reported `fetched: true` meaning "was checked", which
+ * read as "read just now" and hid that today's outcome is unknown. Both cost
+ * a diagnostic round to notice.
+ */
+describe('an unreadable page and an unread one are different answers', () => {
+  const research = (places: unknown[]) => researchAskAdmissionPrices({
+    question: 'How much is Tokyo Disneyland?',
+    tripCities: ['Osaka'],
+  }, {
+    resolveTrustedPlaceHints: ([hint]) => [missing(hint)],
+    lookupExactPlaceByName: lookupStub({ 'Tokyo Disneyland': { id: 'osm-w1', city: 'Urayasu' } }),
+    researchAdmissionPrices: vi.fn(async () => ({ ok: true as const, result: { places } })),
+  });
+
+  it('carries the reason a page could not be read', async () => {
+    const result = await research([{
+      name: 'Tokyo Disneyland', status: 'fetch-error', fetched: false, documentCount: 0,
+      attemptedUrl: 'https://www.tokyodisneyresort.jp/tdl/',
+      note: 'The operator page could not be read this run (http-403), so no fare could be established either way.',
+    }]);
+    expect(result.admissions[0].status).toBe('fetch-error');
+    expect(result.admissions[0].note).toContain('http-403');
+  });
+
+  /** A suppressed re-fetch is not a finding about the operator. */
+  it('reports a suppressed re-read as probe-cached, not as no-price', async () => {
+    const result = await research([{
+      name: 'Universal Studios Japan', status: 'probe-cached', fetched: false, documentCount: 0,
+      attemptedUrl: 'https://www.usj.co.jp/',
+      note: 'A previous run checked this source within the freshness window and found no fare; it was not re-read.',
+    }]);
+    expect(result.admissions[0].status).toBe('probe-cached');
+    // The distinction that matters: nothing was read now.
+    expect(result.admissions[0].fetched).toBe(false);
+    expect(result.admissions[0].status).not.toBe('no-price');
+  });
+
+  it('still reports a genuine no-price as a fact about the operator', async () => {
+    const result = await research([{
+      name: 'Somewhere', status: 'no-price', fetched: true, documentCount: 3,
+      attemptedUrl: 'https://example.test/',
+    }]);
+    expect(result.admissions[0]).toMatchObject({ status: 'no-price', fetched: true, documentCount: 3 });
+  });
+});
