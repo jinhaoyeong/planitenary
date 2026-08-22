@@ -1680,10 +1680,25 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     const targetDay = customItinerary.days[dayIndex];
     if (!targetDay) return;
     if (!nextCity.trim()) return;
-    if (targetDay.city === nextCity) return;
+    // Both, because a day written by a build that only set `city` reads back
+    // with the two disagreeing, and re-typing the same city is the one action
+    // a traveller has to repair it.
+    if (targetDay.stayCity === nextCity && targetDay.city === nextCity) return;
 
+    /**
+     * The base city, and its alias, moved together.
+     *
+     * Editing a day's city has always meant "this day is now Kyoto", which
+     * under the new model is a statement about where the traveller is based.
+     * Writing only the alias leaves `stayCity` behind, and since the read path
+     * treats `stayCity` as the truth, the edit would come back reverted the
+     * next time the trip loaded.
+     *
+     * `activityCities` is deliberately untouched: saying where you are based
+     * says nothing about which cities the day's stops are in.
+     */
     const updatedDays = customItinerary.days.map((day, idx) =>
-      idx === dayIndex ? { ...day, city: nextCity } : day
+      idx === dayIndex ? { ...day, stayCity: nextCity, city: nextCity } : day
     );
     const updatedItinerary = { ...customItinerary, days: updatedDays };
     setCustomItinerary(updatedItinerary);

@@ -174,9 +174,18 @@ export function syncDaysWithDuration(itinerary: Itinerary, profile: TripProfile)
 
   // A single-city trip names its city on every card, including newly added
   // ones; a multi-city trip leaves that to the planner, as at creation.
+  //
+  // One value resolved once and written to both fields. Filling in only the
+  // alias would leave the pair disagreeing until something else sanitized it,
+  // and a writer that depends on being cleaned up afterwards is a writer that
+  // breaks as soon as its output is read directly.
   const city = cityForDay(cities);
+  const named = (day: DayPlan): DayPlan => {
+    const stayCity = day.stayCity || day.city || city;
+    return { ...day, stayCity, city: stayCity };
+  };
   return {
-    days: city ? days.map((day) => ({ ...day, city: day.city || city })) : days,
+    days: city ? days.map(named) : days,
     added,
     removed,
     strandedDays,

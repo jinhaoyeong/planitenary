@@ -140,3 +140,42 @@ describe('clearing the dates', () => {
     expect(synced.removed).toBe(0);
   });
 });
+
+/**
+ * The other half of the stay/activity city invariant: writers.
+ *
+ * `city` is a compatibility alias of `stayCity` during the migration, and the
+ * read path treats `stayCity` as the truth. A writer that fills in only the
+ * alias therefore produces a day whose stated city is discarded the next time
+ * the trip loads. Sanitizing would repair the particular case below — the
+ * blank day's `stayCity` is empty, so the alias wins by default — but a writer
+ * that is only correct because something downstream tidies up after it is a
+ * writer that breaks the moment its output is read directly.
+ */
+describe('naming the city on a day that had none', () => {
+  const blankDayTrip = (): Itinerary => {
+    const built = createItineraryFromProfile(kyoto());
+    return {
+      ...built,
+      days: built.days.map((day, index) => (index === 0
+        ? { ...day, stayCity: '', city: '' }
+        : day)),
+    };
+  };
+
+  it('fills in both fields, not just the alias', () => {
+    const synced = syncDaysWithDuration(blankDayTrip(), kyoto({ dayCount: 8 }));
+    expect(synced.days[0].stayCity).toBe('Kyoto');
+    expect(synced.days[0].city).toBe('Kyoto');
+  });
+
+  it('leaves a day that already names a city alone', () => {
+    const synced = syncDaysWithDuration(createItineraryFromProfile(kyoto()), kyoto({ dayCount: 8 }));
+    for (const day of synced.days) expect(day.city).toBe(day.stayCity);
+  });
+
+  it('never returns a day whose two city fields disagree', () => {
+    const synced = syncDaysWithDuration(blankDayTrip(), { ...kyoto({ endDate: '2027-04-10' }), dayCount: 9 });
+    for (const day of synced.days) expect(day.city).toBe(day.stayCity);
+  });
+});
