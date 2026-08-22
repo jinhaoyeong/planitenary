@@ -147,3 +147,59 @@ describe('a card that crossed the network is re-checked', () => {
     expect(parseAskResult({ status: 'answered', answer: 'Fine.' }).places).toEqual([]);
   });
 });
+
+/**
+ * The card that replaces a price nobody could verify.
+ *
+ * Some operators refuse server requests and others draw their fares in the
+ * browser, so there are attractions this app cannot read a price from at all.
+ * The rule it must not break is inventing one; the rule it should not break is
+ * being useless. A link satisfies both.
+ */
+describe('when no fare could be verified', () => {
+  beforeEach(() => { askPlanitenary.mockReset(); localStorage.clear(); });
+
+  const unverified = (over: Record<string, unknown> = {}) => ({
+    status: 'partial',
+    answer: 'I could not complete an official admission-price lookup for that request.',
+    citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], priceFacts: [],
+    officialSources: [{ name: 'Universal Studios Japan', url: 'https://www.usj.co.jp/' }],
+    ...over,
+  });
+
+  it('offers the operator’s own site instead of a number', async () => {
+    askPlanitenary.mockResolvedValue(unverified());
+    await ask();
+
+    expect(await screen.findByText(/Check current ticket price/i)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /Universal Studios Japan/i });
+    expect(link).toHaveAttribute('href', 'https://www.usj.co.jp/');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noreferrer'));
+    expect(screen.getByText(/vary by date or ticket type/i)).toBeInTheDocument();
+  });
+
+  /** A verified fare answers the question; the link would be noise. */
+  it('does not offer a link once a fare is verified', async () => {
+    askPlanitenary.mockResolvedValue(unverified({
+      status: 'answered',
+      answer: 'Adult admission is published on the operator page.',
+      priceFacts: [{
+        name: 'Universal Studios Japan', kind: 'admission',
+        fares: [{ audience: 'adult', amount: 8_600, currency: 'JPY' }],
+        source: 'official-website', sourceUrl: 'https://www.usj.co.jp/tickets',
+      }],
+    }));
+    await ask();
+
+    expect(await screen.findByText('Verified prices')).toBeInTheDocument();
+    expect(screen.queryByText(/Check current ticket price/i)).not.toBeInTheDocument();
+  });
+
+  it('shows nothing extra when the server offered no source', async () => {
+    askPlanitenary.mockResolvedValue(unverified({ officialSources: [] }));
+    await ask();
+
+    expect(await screen.findByText(/could not complete an official admission-price lookup/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Check current ticket price/i)).not.toBeInTheDocument();
+  });
+});

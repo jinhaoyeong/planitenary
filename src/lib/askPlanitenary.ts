@@ -93,6 +93,15 @@ export interface AskResult {
   placeTokens: Array<{ canonicalPlaceId: string; token: string }>;
   /** Server-proven admission/estimate facts, separate from model prose. */
   priceFacts: AskPriceFact[];
+  /**
+   * Where to check a fare the server could not verify itself.
+   *
+   * Only ever the operator's own address, and only when research reached it
+   * and still could not read a price — a site that blocks server fetches, or
+   * one that renders its prices in the browser. A link is not a price, which
+   * is what makes it safe to show where a number would not be.
+   */
+  officialSources: Array<{ name: string; url: string }>;
   currency?: { selected?: string; home?: string; trip?: string; source?: string };
 }
 
@@ -146,7 +155,7 @@ function parseProposal(value: unknown): AskProposal | undefined {
 }
 
 export function parseAskResult(payload: unknown): AskResult {
-  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], priceFacts: [] };
+  const empty: AskResult = { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], priceFacts: [], officialSources: [] };
   if (!payload || typeof payload !== 'object') return empty;
   const raw = payload as Record<string, unknown>;
 
@@ -224,6 +233,15 @@ export function parseAskResult(payload: unknown): AskResult {
     rejectedClaims: Array.isArray(raw.rejected) ? raw.rejected.length : 0,
     grounding,
     priceFacts: parseAskPriceFacts(raw.priceFacts),
+    officialSources: (Array.isArray(raw.officialSources) ? raw.officialSources : [])
+      .flatMap((entry) => {
+        const row = entry as { name?: unknown; url?: unknown } | null;
+        const name = typeof row?.name === 'string' ? row.name.trim().slice(0, 120) : '';
+        const url = typeof row?.url === 'string' ? row.url.trim() : '';
+        // https only: this becomes an anchor the traveller clicks.
+        return name && /^https:\/\//i.test(url) ? [{ name, url: url.slice(0, 300) }] : [];
+      })
+      .slice(0, 4),
     currency: raw.currency && typeof raw.currency === 'object' && !Array.isArray(raw.currency)
       ? {
         selected: text((raw.currency as Record<string, unknown>).selected, 3),
@@ -281,7 +299,7 @@ export async function askPlanitenary(
 ): Promise<AskResult> {
   const question = input.question.trim();
   if (!question || !input.tripId) {
-    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], priceFacts: [], detail: 'A question is required.' };
+    return { status: 'refused', citations: [], applied: false, steps: [], rejectedClaims: 0, places: [], placeTokens: [], priceFacts: [], officialSources: [], detail: 'A question is required.' };
   }
   if (question.length > 600) {
     return {
@@ -293,6 +311,7 @@ export async function askPlanitenary(
       places: [],
       placeTokens: [],
       priceFacts: [],
+      officialSources: [],
       detail: 'Keep the question under 600 characters.',
     };
   }
@@ -316,6 +335,7 @@ export async function askPlanitenary(
       places: [],
       placeTokens: [],
       priceFacts: [],
+      officialSources: [],
       detail: error instanceof Error ? error.message : 'The assistant is unavailable right now.',
     };
   }

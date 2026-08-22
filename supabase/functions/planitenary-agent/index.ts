@@ -678,6 +678,12 @@ Deno.serve(async (request) => {
       citations: [],
       places: [],
       priceFacts: [],
+      /**
+       * The one useful thing left when no fare could be verified: where to
+       * look. A link asserts nothing, so it is safe on exactly the path that
+       * refuses to assert a number.
+       */
+      officialSources: priceResearch.officialSources,
       currency: askGrounding?.packet?.currency,
       placeTokens: [],
       applied: false,
@@ -1022,6 +1028,7 @@ Deno.serve(async (request) => {
      * to invent an exchange rate.
      */
     priceFacts: isAskPriceQuestion(question) ? run.priceFacts : [],
+    officialSources: priceResearch?.officialSources ?? [],
     currency: askGrounding?.packet?.currency,
     /**
      * Opaque follow-up references, one per card, matched by canonical id.

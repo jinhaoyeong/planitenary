@@ -844,6 +844,46 @@ export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlaniten
                             )}
 
                             {/*
+                              What is left when a fare could not be verified.
+
+                              Some operators block server requests outright and
+                              others draw their prices in the browser, so there
+                              are attractions this app cannot read a fare from
+                              however long it waits. Inventing a number is the
+                              one thing it must not do, and "I could not check"
+                              on its own helps nobody — so it offers the place
+                              the traveller can check, which asserts nothing.
+
+                              Shown only when nothing was verified: a real fare
+                              makes the link redundant.
+                            */}
+                            {priceFacts.length === 0 && !refused && (diagnostics?.officialSources ?? []).length > 0 && (
+                              <section className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/70" aria-label="Check current ticket price">
+                                <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
+                                  Check current ticket price
+                                </h3>
+                                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                                  Planitenary could not verify today&rsquo;s fare automatically. Prices may vary by date or ticket type.
+                                </p>
+                                <ul className="mt-3 space-y-1">
+                                  {(diagnostics?.officialSources ?? []).map((source) => (
+                                    <li key={source.url}>
+                                      <a
+                                        href={source.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="group flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
+                                      >
+                                        <span className="min-w-0 truncate">{source.name} &mdash; official site</span>
+                                        <ArrowUpRight className="h-3.5 w-3.5 shrink-0 opacity-60 transition group-hover:opacity-100" aria-hidden="true" />
+                                      </a>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </section>
+                            )}
+
+                            {/*
                               Cards stay attached to the answer that produced
                               them, so a follow-up does not scroll the place it is
                               about off the record. Their identity was resolved

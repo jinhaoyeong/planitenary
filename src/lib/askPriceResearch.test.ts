@@ -342,3 +342,78 @@ describe('an unreadable page and an unread one are different answers', () => {
     expect(result.admissions[0]).toMatchObject({ status: 'no-price', fetched: true, documentCount: 3 });
   });
 });
+
+/**
+ * Where to look, when we could not look ourselves.
+ *
+ * Two of the biggest attractions in Japan cannot be read by a server fetch at
+ * all: tokyodisneyresort.jp does not answer one, and usj.co.jp returns a
+ * JavaScript shell with no fare in the HTML. Neither is a bug to fix, and
+ * inventing a number for them is the one thing this app must never do — so the
+ * useful, honest answer is the operator's own address.
+ */
+describe('offering the operator’s own page when no fare could be verified', () => {
+  const research = (places: unknown[]) => researchAskAdmissionPrices({
+    question: 'How much is Universal Studios Japan?',
+    tripCities: ['Osaka'],
+  }, {
+    resolveTrustedPlaceHints: ([hint]) => [missing(hint)],
+    lookupExactPlaceByName: lookupStub({ 'Universal Studios Japan': { id: 'osm-r1', city: 'Osaka' } }),
+    researchAdmissionPrices: vi.fn(async () => ({ ok: true as const, result: { places } })),
+  });
+
+  it('offers the site when the page could not be read', async () => {
+    const result = await research([{
+      name: 'Universal Studios Japan', status: 'fetch-error', fetched: false,
+      officialUrl: 'https://www.usj.co.jp/', attemptedUrl: 'https://www.usj.co.jp/',
+    }]);
+    expect(result.officialSources).toEqual([{ name: 'Universal Studios Japan', url: 'https://www.usj.co.jp/' }]);
+    expect(result.priceFacts).toEqual([]);
+  });
+
+  it('offers it for a page read that published no fare, and for a suppressed re-read', async () => {
+    for (const status of ['no-price', 'probe-cached']) {
+      const result = await research([{ name: 'USJ', status, officialUrl: 'https://www.usj.co.jp/' }]);
+      expect(result.officialSources).toHaveLength(1);
+    }
+  });
+
+  /** A verified fare makes the link redundant — the panel already answered. */
+  it('offers nothing once a fare is verified', async () => {
+    const result = await research([{
+      name: 'USJ', status: 'verified', officialUrl: 'https://www.usj.co.jp/',
+      admission: { fares: [{ audience: 'adult', amount: 8_600, currency: 'JPY' }], source: 'official-website', sourceUrl: 'https://www.usj.co.jp/tickets', retrievedAt: '2026-08-22T00:00:00.000Z' },
+    }]);
+    expect(result.officialSources).toEqual([]);
+  });
+
+  /**
+   * The safety half. `unavailable` means the stored address failed the safety
+   * check and `rejected-source` means it was a reseller — neither may be
+   * handed to a traveller as "the official site", so neither sets officialUrl
+   * upstream and neither can appear here.
+   */
+  it('never offers an unsafe address or a reseller', async () => {
+    const unsafe = await research([{ name: 'A', status: 'unavailable', attemptedUrl: 'http://10.0.0.1/' }]);
+    expect(unsafe.officialSources).toEqual([]);
+    const reseller = await research([{ name: 'B', status: 'rejected-source', attemptedUrl: 'https://www.klook.com/usj' }]);
+    expect(reseller.officialSources).toEqual([]);
+  });
+
+  it('refuses a link that is not https', async () => {
+    const result = await research([{ name: 'C', status: 'fetch-error', officialUrl: 'http://insecure.example/' }]);
+    expect(result.officialSources).toEqual([]);
+  });
+
+  it('is empty rather than absent when nothing was researched', async () => {
+    const result = await researchAskAdmissionPrices({
+      question: 'How much is Somewhere Unfindable?',
+      tripCities: ['Osaka'],
+    }, {
+      resolveTrustedPlaceHints: ([hint]) => [missing(hint)],
+      lookupExactPlaceByName: lookupStub({}),
+      researchAdmissionPrices: vi.fn(),
+    });
+    expect(result.officialSources).toEqual([]);
+  });
+});

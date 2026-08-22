@@ -24,6 +24,16 @@ export interface AskPriceResearchResult {
   findings: Array<{ tool: string; ok: boolean; result?: unknown; detail?: string }>;
   trace: AskPriceResearchTrace[];
   unresolved: string[];
+  /**
+   * Where a traveller can check a fare we could not verify ourselves.
+   *
+   * Present only when research reached a validated operator address and still
+   * could not establish a fare — a site that blocks server fetches, or one
+   * that renders its prices in the browser. A link is not a price, which is
+   * exactly why it is safe to show: it answers "where do I find out" without
+   * ever asserting a number nobody read.
+   */
+  officialSources: Array<{ name: string; url: string }>;
   /** What the lookups actually cost, so this path is never guessed at again. */
   lookups: ExactLookupTelemetry[];
   /**
@@ -178,6 +188,7 @@ export async function researchAskAdmissionPrices(input: {
       trace,
       lookups,
       admissions: [],
+      officialSources: [],
       unresolved: trace.filter((entry) => entry.status !== 'resolved').map((entry) => entry.hint),
     };
   }
@@ -191,6 +202,7 @@ export async function researchAskAdmissionPrices(input: {
    * Read off the same result the model is given, rather than a second pass:
    * these are the researcher's own reported outcomes, not a re-derivation.
    */
+  const officialSources: Array<{ name: string; url: string }> = [];
   const admissions: AskAdmissionDiagnostic[] = (() => {
     const result = admission.ok ? admission.result as Record<string, unknown> : null;
     const places = Array.isArray(result?.places) ? result.places : [];
@@ -198,6 +210,12 @@ export async function researchAskAdmissionPrices(input: {
       const row = (entry ?? {}) as Record<string, unknown>;
       const text = (value: unknown, max: number) =>
         typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : undefined;
+      const officialUrl = text(row.officialUrl, 300);
+      const verified = text(row.status, 40) === 'verified';
+      // Offered only when we could not answer it ourselves.
+      if (officialUrl && !verified && /^https:\/\//i.test(officialUrl)) {
+        officialSources.push({ name: text(row.name, 120) ?? 'This attraction', url: officialUrl });
+      }
       return {
         name: text(row.name, 120) ?? 'unknown',
         status: text(row.status, 40) ?? 'unknown',
@@ -219,6 +237,7 @@ export async function researchAskAdmissionPrices(input: {
     trace,
     lookups,
     admissions,
+    officialSources,
     unresolved: trace.filter((entry) => entry.status === 'ambiguous' || entry.status === 'missing')
       .map((entry) => entry.hint),
   };
