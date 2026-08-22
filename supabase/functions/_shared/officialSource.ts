@@ -530,6 +530,7 @@ export function isLikelyResellerUrl(raw: string | undefined): boolean {
   return [
     'booking.com', 'expedia.com', 'getyourguide.com', 'klook.com', 'viator.com',
     'tripadvisor.com', 'rakutentravel.com', 'kkday.com', 'traveloka.com',
+    'trip.com', 'ctrip.com', 'agoda.com', 'tiqets.com', 'headout.com',
     'google.com', 'google.co.jp', 'maps.google.com', 'amap.com', 'baidu.com',
     'wikivoyage.org', 'wikipedia.org',
   ].some((blocked) => host === blocked || host.endsWith(`.${blocked}`));

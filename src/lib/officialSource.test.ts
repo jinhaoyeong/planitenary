@@ -268,3 +268,32 @@ describe('closure notices', () => {
     expect(closureNotices('')).toEqual([]);
   });
 });
+
+/**
+ * A ticket reseller is not an authority on a ticket price.
+ *
+ * The list is a blocklist rather than an allowlist because the alternative —
+ * deciding a domain is official because it looks official — is exactly the
+ * guess this codebase refuses to make elsewhere about prices.
+ */
+describe('reseller domains cannot vouch for a fare', () => {
+  it('rejects the aggregators travellers most often land on', () => {
+    for (const url of [
+      'https://www.klook.com/activity/1-usj/',
+      'https://www.trip.com/things-to-do/detail/12345',
+      'https://us.trip.com/tickets/tokyo-disneyland',
+      'https://www.getyourguide.com/osaka-l243/usj-t123/',
+      'https://www.agoda.com/activities/usj',
+      'https://tiqets.com/en/tokyo-disneyland',
+      'https://www.headout.com/tokyo-disneyland/',
+      'https://www.viator.com/tours/Osaka/USJ/',
+    ]) {
+      expect(isLikelyResellerUrl(url)).toBe(true);
+    }
+  });
+
+  it('still accepts the operators’ own domains', () => {
+    expect(isLikelyResellerUrl('https://www.usj.co.jp/')).toBe(false);
+    expect(isLikelyResellerUrl('https://www.tokyodisneyresort.jp/tdl/')).toBe(false);
+  });
+});

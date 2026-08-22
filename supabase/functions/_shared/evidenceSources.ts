@@ -160,6 +160,16 @@ export async function officialEvidence(
   placeId: string,
   countryCode?: string,
   readAdmission?: AdmissionReader,
+  /**
+   * Ceiling for reading the operator's own pages.
+   *
+   * Defaulted so the discovery-evidence caller is unchanged. The admission
+   * path passes a longer one because a measured failure said it needed it:
+   * tokyodisneyresort.jp timed out at the 10s default, and an operator
+   * homepage heavy enough to miss that is exactly the kind of page a fare
+   * lives on. Longer, once — not a retry.
+   */
+  fetchTimeoutMs?: number,
 ) {
   // The address is supplied by a server-owned canonical place record in the
   // live admission path. Keep the SSRF and reseller guard here as defence in
@@ -171,7 +181,7 @@ export async function officialEvidence(
   /** Why the last unreadable page could not be read. Diagnostics only. */
   let fetchFailure: string | undefined;
   const readPage = async (url: string) => {
-    const html = await fetchText(url, undefined, undefined, (reason) => { fetchFailure = reason; });
+    const html = await fetchText(url, fetchTimeoutMs, undefined, (reason) => { fetchFailure = reason; });
     if (!html) return undefined;
     const nodes = extractJsonLd(html);
     const text = visibleText(html);

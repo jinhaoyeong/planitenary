@@ -23,6 +23,16 @@ import { admissionFromOfficialClaims, type PlaceAdmission } from './placeCost.ts
 
 /** Fares change more quickly than the general review evidence cache. */
 export const OFFICIAL_ADMISSION_TTL_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * How long an operator page gets to answer, for fare reads only.
+ *
+ * Twice the generic default, and scoped here rather than raised globally:
+ * every other Edge caller of `fetchText` keeps its 10s ceiling, so a slow
+ * ticket page cannot lengthen unrelated requests or bring back the worker
+ * resource ceiling. One attempt, no retry.
+ */
+export const OFFICIAL_ADMISSION_FETCH_TIMEOUT_MS = 20_000;
 export const OFFICIAL_ADMISSION_PROBE = 'official-admission';
 
 export interface OfficialAdmissionTarget {
@@ -258,7 +268,13 @@ export async function researchOfficialAdmissions(
       continue;
     }
 
-    const evidence = await officialEvidence(authority.website, authority.canonicalPlaceId, authority.countryCode);
+    const evidence = await officialEvidence(
+      authority.website,
+      authority.canonicalPlaceId,
+      authority.countryCode,
+      undefined,
+      OFFICIAL_ADMISSION_FETCH_TIMEOUT_MS,
+    );
     const documents = cachedDocumentsForWrite(evidence.documents, authority.canonicalPlaceId);
     const expiresAt = new Date(Date.now() + OFFICIAL_ADMISSION_TTL_MS).toISOString();
     if (documents.length > 0) await writeEvidenceCache(client, documents, expiresAt);
