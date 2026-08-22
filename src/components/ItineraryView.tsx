@@ -33,6 +33,7 @@ import { FlightDurationFields } from './FlightDurationFields';
 import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
 import { DaySemantics } from './DaySemantics';
 import { getDaySemanticModel } from '../lib/daySemanticsPresentation';
+import { emptyItinerary, sanitizeItinerary } from '../lib/itinerarySanitize';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -1236,7 +1237,15 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   const [dayPhotos, setDayPhotos] = useState<Record<number, DayPhoto[]>>({});
 
   // Use the prop as the source of truth; parent handles persistence and Supabase sync
-  const [customItinerary, setCustomItinerary] = useState<Itinerary>(initialItinerary);
+  // The dashboard can hand us a raw legacy payload before App's async
+  // storage/remote hydration has run. Normalize at this read boundary so the
+  // presentation path can stay authoritative on stayCity without crashing or
+  // losing the old day's city line.
+  const normalizedInitialItinerary = useMemo(
+    () => sanitizeItinerary(initialItinerary, { ...emptyItinerary, id: initialItinerary.id }),
+    [initialItinerary],
+  );
+  const [customItinerary, setCustomItinerary] = useState<Itinerary>(normalizedInitialItinerary);
 
   /**
    * What the day header may offer. Derived from the trip itself so the same
@@ -1277,8 +1286,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   );
   // Sync internal state when parent prop changes (from Supabase realtime or other sources)
   useEffect(() => {
-    setCustomItinerary(initialItinerary);
-  }, [initialItinerary]);
+    setCustomItinerary(normalizedInitialItinerary);
+  }, [normalizedInitialItinerary]);
 
   // Reset selection states when itinerary id changes
   useEffect(() => {

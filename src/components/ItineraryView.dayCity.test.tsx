@@ -127,4 +127,21 @@ describe('reading day semantics in the itinerary cards', () => {
     expect(screen.queryByRole('note')).toBeNull();
     expect(screen.getByText('Osaka')).toBeInTheDocument();
   });
+
+  it('normalizes a legacy day before the stay/activity presentation reads it', () => {
+    const legacy = {
+      ...trip(),
+      days: [{
+        ...trip().days[0],
+        stayCity: undefined,
+        activityCities: undefined,
+        city: 'Osaka',
+      }],
+    } as unknown as Itinerary;
+
+    render(<ItineraryView itinerary={legacy} />);
+
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.getByText('Osaka')).toBeInTheDocument();
+  });
 });
