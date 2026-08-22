@@ -31,6 +31,8 @@ import { markManualFieldEdits } from '../lib/identityFields';
 import { applyActivityDuration, durationFieldsFromMinutes, formatFlightDuration } from '../lib/flightDuration';
 import { FlightDurationFields } from './FlightDurationFields';
 import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
+import { DaySemantics } from './DaySemantics';
+import { getDaySemanticModel } from '../lib/daySemanticsPresentation';
 
 const ICON_OPTIONS: { id: ActivityType, icon: any, label: string }[] = [
   { id: 'sight', icon: Camera, label: 'Sightseeing' },
@@ -69,6 +71,7 @@ const REACTION_EMOJI: Record<MoodReaction, string> = {
   surprised: '😮',
   pray: '🙏',
 };
+
 
 const RATING_OPTIONS = Array.from({ length: 11 }, (_, index) => index);
 
@@ -1481,7 +1484,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     const lowerQuery = searchQuery.toLowerCase();
     return customItinerary.days.filter(day => 
       day.title.toLowerCase().includes(lowerQuery) ||
-      day.city.toLowerCase().includes(lowerQuery) ||
+      day.stayCity.toLowerCase().includes(lowerQuery) ||
+      day.activityCities.some((city) => city.toLowerCase().includes(lowerQuery)) ||
       day.activities.some(act => 
         act.name.toLowerCase().includes(lowerQuery) || 
         act.description.toLowerCase().includes(lowerQuery)
@@ -2177,6 +2181,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                             {day.title}
                           </h3>
 
+                          <DaySemantics day={day} />
+
                           {day.activities.length === 0 && (
                             <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>
                               No plans yet.
@@ -2186,6 +2192,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                           <div 
                             className={clsx(
                               "mt-auto pt-4 flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 border-t border-slate-50 dark:border-slate-800",
+                              !isEditingMode && getDaySemanticModel(day) && "justify-end",
                               !isEditingMode && "cursor-pointer"
                             )}
                             onClick={() => !isEditingMode && setSelectedDay(day.day)}
@@ -2224,9 +2231,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                                     be moved *to* without passing through
                                     settings.
                                   */}
-                                  {unconfiguredDayCity(customItinerary, day.city) && (
-                                    <option value={day.city} disabled>
-                                      {'Current: ' + day.city + ' — not in trip settings'}
+                                  {unconfiguredDayCity(customItinerary, day.stayCity) && (
+                                    <option value={day.stayCity} disabled>
+                                      {'Current: ' + day.stayCity + ' — not in trip settings'}
                                     </option>
                                   )}
                                   {cityOptions.map((option) => (
@@ -2237,7 +2244,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                                   )}
                                 </select>
                               </div>
-                            ) : (
+                            ) : getDaySemanticModel(day) ? null : (
                               <div 
                                 className={clsx(
                                   "flex items-center gap-1.5 min-w-0",
@@ -2246,13 +2253,13 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                                 onClick={(e) => {
                                   if (isEditingMode) {
                                     e.stopPropagation();
-                                    setEditedCity(day.city);
+                                    setEditedCity(day.stayCity);
                                     setEditingCityIndex(index);
                                   }
                                 }}
                               >
                                 <MapPin className="w-4 h-4 text-slate-400" />
-                                <span className="truncate">{day.city}</span>
+                                <span className="truncate">{day.stayCity}</span>
                                 {isEditingMode && <Edit2 className="w-3 h-3 opacity-50" />}
                               </div>
                             )}
@@ -2398,7 +2405,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               )}>{day.day}</span>
             </div>
             <div className="text-[10px] md:text-xs truncate font-medium opacity-80">
-              {day.city}
+              {day.stayCity}
             </div>
           </button>
         ))}
@@ -2428,7 +2435,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               <MapPin className="w-20 h-20 md:w-32 md:h-32 text-slate-900 dark:text-white" />
             </div>
             <div className="relative z-10">
-              <div className="text-[10px] md:text-xs font-bold text-rose-500 uppercase tracking-widest mb-1 md:mb-2">Current Location</div>
+              {!getDaySemanticModel(currentDay) && (
+                <div className="text-[10px] md:text-xs font-bold text-rose-500 uppercase tracking-widest mb-1 md:mb-2">Current Location</div>
+              )}
               
               {isEditingMode && isTitleEditing ? (
                 <div className="flex items-center gap-2 mb-2 md:mb-3">
@@ -2465,12 +2474,15 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 </h2>
               )}
 
-              <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 font-medium text-sm md:text-base">
-                <div className="p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-sm">
-                  <MapPin className="w-3.5 h-3.5 md:w-4 md:h-4 text-rose-500" />
+              {!getDaySemanticModel(currentDay) && (
+                <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 font-medium text-sm md:text-base">
+                  <div className="p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-sm">
+                    <MapPin className="w-3.5 h-3.5 md:w-4 md:h-4 text-rose-500" />
+                  </div>
+                  {currentDay.stayCity}
                 </div>
-                {currentDay.city}
-              </div>
+              )}
+              <DaySemantics day={currentDay} mode="detail" />
             </div>
           </div>
 
@@ -2815,4 +2827,3 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     </div>
   );
 };
-

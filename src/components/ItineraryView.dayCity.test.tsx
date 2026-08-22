@@ -53,6 +53,11 @@ const trip = (): Itinerary => ({
   },
 } as Itinerary);
 
+const tripWithDaySemantics = (overrides: Partial<Itinerary['days'][number]>): Itinerary => ({
+  ...trip(),
+  days: [{ ...trip().days[0], ...overrides }],
+});
+
 /** Enter the editor and move day one to Kyoto, exactly as the card does. */
 const editDayCityToKyoto = () => {
   const onItineraryChange = vi.fn();
@@ -82,5 +87,44 @@ describe('moving a day to another city', () => {
   it('says nothing about where the day’s activities are', () => {
     // Changing where you sleep is not a claim about which cities you visit.
     expect(editDayCityToKyoto().days[0].activityCities).toEqual([]);
+  });
+});
+
+describe('reading day semantics in the itinerary cards', () => {
+  it('shows a recorded Kyoto day trip while keeping Osaka as the stay', () => {
+    render(
+      <ItineraryView
+        itinerary={tripWithDaySemantics({ activityCities: ['Kyoto'] })}
+      />,
+    );
+
+    const note = screen.getByRole('note', { name: 'Kyoto day trip. Staying in Osaka.' });
+    expect(note).toHaveTextContent('Kyoto day trip');
+    expect(note).toHaveTextContent('Staying in Osaka');
+  });
+
+  it('shows an explicit transfer rather than deriving one from activity cities', () => {
+    render(
+      <ItineraryView
+        itinerary={tripWithDaySemantics({
+          stayCity: 'Kyoto',
+          city: 'Kyoto',
+          activityCities: ['Osaka', 'Kyoto'],
+          transfer: { from: 'Osaka', to: 'Kyoto' },
+        })}
+      />,
+    );
+
+    const note = screen.getByRole('note', { name: 'Transfer day from Osaka to Kyoto. Staying in Kyoto tonight.' });
+    expect(note).toHaveTextContent('Transfer day');
+    expect(note).toHaveTextContent('Staying in Kyoto tonight');
+    expect(note).toHaveTextContent('Activities: Osaka · Kyoto');
+  });
+
+  it('keeps an ordinary same-city day free of an extra semantic label', () => {
+    render(<ItineraryView itinerary={trip()} />);
+
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.getByText('Osaka')).toBeInTheDocument();
   });
 });
