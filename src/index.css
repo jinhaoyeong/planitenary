@@ -318,6 +318,114 @@ body.planner-intelligence-active .pet-overlay {
   border-color: var(--accent);
 }
 
+/* A city the traveller comes back to. Said in words, never as an index. */
+.city-stay-return {
+  font-style: normal;
+  font-weight: 750;
+  color: var(--accent);
+}
+
+/*
+ * Deliberately smaller than the − and + beside it: removing a stay is rarer
+ * than changing its length, and a same-size target invites the wrong tap on a
+ * phone. Only rendered when the city is stayed in somewhere else.
+ */
+.city-stay-remove {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-width: var(--border-width-control, 1px);
+  border-radius: var(--radius-button, var(--button-radius, 9999px));
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.city-stay-remove:hover {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.city-stay-add {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-compact-card, 0.75rem);
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.city-stay-sheet {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-width: var(--border-width-control, 1px);
+  border-radius: var(--radius-compact-card, 0.75rem);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+.city-stay-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.city-stay-sheet > p {
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+
+.city-stay-sheet-close {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.city-stay-sheet-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-width: var(--border-width-control, 1px);
+  border-radius: var(--radius-compact-card, 0.6rem);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.city-stay-sheet-option:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.city-stay-sheet-option strong {
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.city-stay-sheet-option span {
+  font-size: 0.66rem;
+  color: var(--ink-muted);
+}
+
 .city-stay-days::-webkit-outer-spin-button,
 .city-stay-days::-webkit-inner-spin-button {
   appearance: none;

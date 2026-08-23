@@ -82,6 +82,28 @@ export interface TripCityStay {
   days: number;
 }
 
+/**
+ * The destination already covering this city, if the trip has one.
+ *
+ * Matched on the city, not only the suggestion's id: the same place arrives
+ * under different provider records, and two Osaka destinations would mean two
+ * decks of Osaka places and two rows to keep in step for a traveller who only
+ * ever meant one Osaka.
+ *
+ * A traveller who wants to *return* to Osaka wants something real, and this is
+ * not where it lives — nights belong to the stay plan, which is allowed to name
+ * a city as often as the route actually visits it.
+ */
+export function existingDestinationFor(
+  destinations: readonly TripDestination[],
+  candidate: { id?: string; city: string },
+): TripDestination | undefined {
+  const city = candidate.city.trim().toLowerCase();
+  return destinations.find((existing) =>
+    (candidate.id !== undefined && existing.id === candidate.id)
+    || existing.city.trim().toLowerCase() === city);
+}
+
 export interface TripProfile {
   version: 1;
   destinations: TripDestination[];

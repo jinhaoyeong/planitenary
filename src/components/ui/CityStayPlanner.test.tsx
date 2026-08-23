@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
+
 /**
- * The control that asks the traveller where they are sleeping.
+ * Creating a route that comes back.
  *
- * What matters here is what it refuses to do: it must never move a day the
- * traveller already placed, never balance the plan for them, and never present
- * an incomplete plan as finished.
+ * 4A taught the stay plan to hold Osaka → Kyoto → Osaka and 4B taught the
+ * planner to build it, but until this surface existed no traveller could
+ * make one. These tests are about the two lists staying distinct: destinations
+ * are a set of places, the stay plan is a sequence of nights, and the second
+ * Osaka belongs to the second list only.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { CityStayPlanner } from './CityStayPlanner';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import type { TripCityStay } from '../../lib/tripProfile';
+import { CityStayPlanner } from './CityStayPlanner';
 
 const KANSAI = ['Osaka', 'Nara', 'Kyoto', 'Kobe'];
 
@@ -34,7 +39,12 @@ const EVEN_KANSAI: TripCityStay[] = [
   { city: 'Kobe', days: 2 },
 ];
 
-describe('asking the question', () => {
+/**
+ * The complete pre-4C component regression suite remains intact here. The 4C
+ * tests below extend it; they do not trade away direct coverage of the ordinary
+ * repeat-free planner to make repeated stays pass.
+ */
+describe('pre-4C planner regressions', () => {
   it('lists every city on the trip', () => {
     renderPlanner(EVEN_KANSAI);
     for (const city of KANSAI) expect(screen.getByText(city)).toBeInTheDocument();
@@ -54,9 +64,7 @@ describe('asking the question', () => {
     );
     expect(container).toBeEmptyDOMElement();
   });
-});
 
-describe('what is still undecided', () => {
   it('reports the days left to place', () => {
     renderPlanner([{ city: 'Osaka', days: 3 }]);
     expect(screen.getByRole('status')).toHaveTextContent('5 of 8 days still to place');
@@ -71,9 +79,7 @@ describe('what is still undecided', () => {
     renderPlanner([{ city: 'Osaka', days: 8 }]);
     expect(screen.getByText(/Nara and Kyoto and Kobe have no days yet/)).toBeInTheDocument();
   });
-});
 
-describe('editing, without editing anything else', () => {
   it('adds a day from the unplaced pool', () => {
     const { onChange } = renderPlanner([{ city: 'Osaka', days: 3 }, { city: 'Kyoto', days: 3 }]);
 
@@ -89,7 +95,7 @@ describe('editing, without editing anything else', () => {
 
   it('cannot add a day once the trip is fully placed', () => {
     // The alternative — taking one from a neighbour — would undo a decision the
-    // traveller had already made, which is the whole thing this control exists
+    // traveller already made, which is the whole thing this control exists
     // to prevent.
     const { onChange } = renderPlanner(EVEN_KANSAI);
 
@@ -157,5 +163,301 @@ describe('editing, without editing anything else', () => {
     // empty, so typing 99 can only keep Osaka at the days it already owns.
     expect(onChange).not.toHaveBeenCalled();
     expect(field).toHaveValue('2');
+  });
+});
+
+const CITIES = ['Osaka', 'Kyoto'];
+
+/** The planner is controlled, so tests drive it through a real owner. */
+function Harness({
+  cities = CITIES,
+  dayCount = 7,
+  startDate = '2026-08-11',
+  initial,
+  onChange,
+}: {
+  cities?: string[];
+  dayCount?: number;
+  startDate?: string;
+  initial?: TripCityStay[];
+  onChange?: (next: TripCityStay[]) => void;
+}) {
+  const [stays, setStays] = useState<TripCityStay[] | undefined>(initial);
+  return (
+    <CityStayPlanner
+      cities={cities}
+      dayCount={dayCount}
+      startDate={startDate}
+      value={stays}
+      onChange={(next) => { setStays(next); onChange?.(next); }}
+    />
+  );
+}
+
+const rows = () => screen.getAllByRole('listitem');
+const rowFor = (index: number) => rows()[index];
+const cityOf = (index: number) => within(rowFor(index)).getByRole('textbox').getAttribute('aria-label');
+const daysOf = (index: number) => (within(rowFor(index)).getByRole('textbox') as HTMLInputElement).value;
+const sequence = () => rows().map((_, index) => `${cityOf(index)?.replace('Days in ', '')} ${daysOf(index)}`);
+
+describe('adding a stay the traveller comes back to', () => {
+  it('offers the trip’s own cities, and says what each already holds', async () => {
+    const user = userEvent.setup();
+    render(<Harness cities={['Osaka', 'Kyoto', 'Kobe']} initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add another stay' }));
+
+    const sheet = screen.getByRole('group', { name: 'Add another stay' });
+    expect(sheet).toHaveTextContent('Your destinations don’t change');
+    expect(within(sheet).getByRole('button', { name: /Osaka/ })).toHaveTextContent('staying 4 days');
+    expect(within(sheet).getByRole('button', { name: /Kobe/ })).toHaveTextContent('no days yet');
+  });
+
+  it('moves focus into the choices and returns it when the sheet closes', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
+
+    const trigger = screen.getByRole('button', { name: '+ Add another stay' });
+    await user.click(trigger);
+    expect(within(screen.getByRole('group', { name: 'Add another stay' })).getByRole('button', { name: /Osaka/ }))
+      .toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: '+ Add another stay' })).toHaveFocus();
+  });
+
+  it('takes a spare day when the trip has one', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={[{ city: 'Osaka', days: 3 }, { city: 'Kyoto', days: 3 }]} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add another stay' }));
+    await user.click(within(screen.getByRole('group')).getByRole('button', { name: /Osaka/ }));
+
+    expect(sequence()).toEqual(['Osaka 3', 'Kyoto 3', 'Osaka 1']);
+    expect(screen.getByRole('status')).toHaveTextContent('All 7 days placed.');
+  });
+
+  it('never shortens a stay the traveller already placed', async () => {
+    // The whole trip is spent. The new stay arrives empty and says so, rather
+    // than quietly funding itself out of the first Osaka.
+    const user = userEvent.setup();
+    render(<Harness initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add another stay' }));
+    await user.click(within(screen.getByRole('group')).getByRole('button', { name: /Osaka/ }));
+
+    expect(sequence()).toEqual(['Osaka 4', 'Kyoto 3', 'Osaka 0']);
+    expect(rowFor(2)).toHaveTextContent('Needs a day');
+    expect(screen.getByText(/has no days yet/)).toHaveTextContent('Your return stay in Osaka has no days yet.');
+  });
+
+  it('lets the traveller move the day across themselves', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add another stay' }));
+    await user.click(within(screen.getByRole('group')).getByRole('button', { name: /Osaka/ }));
+    await user.click(within(rowFor(0)).getByRole('button', { name: 'One day fewer in Osaka' }));
+    await user.click(within(rowFor(2)).getByRole('button', { name: 'One more day in Osaka' }));
+
+    expect(sequence()).toEqual(['Osaka 3', 'Kyoto 3', 'Osaka 1']);
+  });
+});
+
+describe('two stays in one city, told apart', () => {
+  const route = [
+    { city: 'Osaka', days: 3 },
+    { city: 'Kyoto', days: 3 },
+    { city: 'Osaka', days: 1 },
+  ];
+
+  it('says "Coming back" rather than a number', () => {
+    render(<Harness initial={route} />);
+    expect(rowFor(0)).not.toHaveTextContent('Coming back');
+    expect(rowFor(2)).toHaveTextContent('Coming back');
+    for (const row of rows()) {
+      expect(row).not.toHaveTextContent('#');
+      expect(row.textContent ?? '').not.toMatch(/leg|visit index/i);
+    }
+  });
+
+  it('gives each stay its own dates', () => {
+    render(<Harness initial={route} />);
+    // 11 Aug start: Osaka 11-13, Kyoto 14-16, and the return on the 17th. The
+    // return must never inherit the first Osaka's range.
+    expect(rowFor(0)).toHaveTextContent('11 Aug');
+    expect(rowFor(1)).toHaveTextContent('14 Aug');
+    expect(rowFor(2)).toHaveTextContent('17 Aug');
+    expect(rowFor(2)).not.toHaveTextContent('11 Aug');
+  });
+
+  it('edits one Osaka without touching the other', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={route} dayCount={8} />);
+
+    await user.click(within(rowFor(2)).getByRole('button', { name: 'One more day in Osaka' }));
+
+    expect(sequence()).toEqual(['Osaka 3', 'Kyoto 3', 'Osaka 2']);
+  });
+});
+
+describe('removing a stay', () => {
+  const route = [
+    { city: 'Osaka', days: 3 },
+    { city: 'Kyoto', days: 3 },
+    { city: 'Osaka', days: 1 },
+  ];
+
+  it('offers removal on either Osaka, and on neither Kyoto nor a plain route', () => {
+    const { unmount } = render(<Harness initial={route} />);
+    expect(within(rowFor(0)).getByRole('button', { name: 'Remove this stay in Osaka' })).toBeTruthy();
+    expect(within(rowFor(2)).getByRole('button', { name: 'Remove this stay in Osaka' })).toBeTruthy();
+    expect(within(rowFor(1)).queryByRole('button', { name: /Remove this stay/ })).toBeNull();
+    unmount();
+
+    render(<Harness initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
+    expect(screen.queryByRole('button', { name: /Remove this stay/ })).toBeNull();
+  });
+
+  it('returns the removed days to the pool', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={route} />);
+
+    await user.click(within(rowFor(2)).getByRole('button', { name: 'Remove this stay in Osaka' }));
+
+    expect(sequence()).toEqual(['Osaka 3', 'Kyoto 3']);
+    expect(screen.getByRole('status')).toHaveTextContent('1 of 7 days still to place.');
+  });
+
+  it('can drop the first Osaka and keep the return', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={route} />);
+
+    await user.click(within(rowFor(0)).getByRole('button', { name: 'Remove this stay in Osaka' }));
+
+    expect(sequence()).toEqual(['Kyoto 3', 'Osaka 1']);
+  });
+});
+
+describe('when two stays end up next to each other', () => {
+  it('merges them and says so once', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={[
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Osaka', days: 1 },
+    ]} />);
+
+    await user.click(within(rowFor(2)).getByRole('button', { name: 'Move Osaka earlier in the trip' }));
+
+    expect(sequence()).toEqual(['Osaka 4', 'Kyoto 3']);
+    expect(screen.getByText(/ran back to back/))
+      .toHaveTextContent("Two Osaka stays ran back to back, so they're one 4-day stay now.");
+  });
+
+  it('clears the notice on the next ordinary edit', async () => {
+    const user = userEvent.setup();
+    render(<Harness dayCount={8} initial={[
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Osaka', days: 1 },
+    ]} />);
+
+    await user.click(within(rowFor(2)).getByRole('button', { name: 'Move Osaka earlier in the trip' }));
+    expect(screen.queryByText(/ran back to back/)).not.toBeNull();
+
+    await user.click(within(rowFor(0)).getByRole('button', { name: 'One more day in Osaka' }));
+    expect(screen.queryByText(/ran back to back/)).toBeNull();
+  });
+});
+
+describe('Split evenly keeps the route', () => {
+  it('does not delete a return stay', async () => {
+    // The Stage 4C release blocker, through the button that would have caused
+    // it: three stays in, three stays out.
+    const user = userEvent.setup();
+    render(<Harness initial={[
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Osaka', days: 1 },
+    ]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Split evenly' }));
+
+    expect(sequence()).toEqual(['Osaka 3', 'Kyoto 2', 'Osaka 2']);
+    expect(screen.getByRole('status')).toHaveTextContent('All 7 days placed.');
+  });
+});
+
+describe('a trip that never doubles back', () => {
+  it('looks the way it always did', () => {
+    render(<Harness cities={['Osaka', 'Kyoto', 'Nara']} dayCount={10} initial={[
+      { city: 'Osaka', days: 4 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Nara', days: 3 },
+    ]} />);
+
+    expect(sequence()).toEqual(['Osaka 4', 'Kyoto 3', 'Nara 3']);
+    // No remove controls, no "Coming back", no merge notice: nothing about
+    // repeated stays intrudes on a trip that has none.
+    expect(screen.queryByRole('button', { name: /Remove this stay/ })).toBeNull();
+    expect(screen.queryByText(/Coming back/)).toBeNull();
+    expect(screen.queryByText(/ran back to back/)).toBeNull();
+    // The one new affordance is present but quiet.
+    expect(screen.getByRole('button', { name: '+ Add another stay' })).toBeTruthy();
+  });
+
+  it('still shows each ordinary stay and its own dates', () => {
+    render(<Harness cities={['Osaka', 'Kyoto', 'Nara']} dayCount={8} startDate="2027-04-02" initial={[
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Nara', days: 2 },
+    ]} />);
+
+    expect(rows()).toHaveLength(3);
+    expect(rowFor(0)).toHaveTextContent('2 Apr – 4 Apr');
+    expect(rowFor(2)).toHaveTextContent('8 Apr – 9 Apr');
+  });
+
+  it('stays out of the way of a single-city trip', () => {
+    const { container } = render(
+      <CityStayPlanner cities={['Osaka']} dayCount={8} value={undefined} onChange={vi.fn()} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('keeps typed counts inside the unallocated pool', async () => {
+    const user = userEvent.setup();
+    render(<Harness dayCount={8} initial={[
+      { city: 'Osaka', days: 2 },
+      { city: 'Kyoto', days: 6 },
+    ]} />);
+
+    const field = within(rowFor(0)).getByRole('textbox', { name: 'Days in Osaka' });
+    await user.click(field);
+    await user.keyboard('99');
+    await user.tab();
+
+    expect(field).toHaveValue('2');
+    expect(sequence()).toEqual(['Osaka 2', 'Kyoto 6']);
+  });
+});
+
+describe('rendering is inert', () => {
+  it('writes nothing and calls nothing on mount', () => {
+    const onChange = vi.fn();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch' as never).mockImplementation(() => {
+      throw new Error('the stay planner must not reach the network');
+    });
+
+    render(<Harness onChange={onChange} initial={[
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Osaka', days: 1 },
+    ]} />);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });

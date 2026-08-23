@@ -13,19 +13,26 @@
  * React, and nothing about places.
  */
 import type { CityLeg } from './cityLegs';
-import { cityKey, orderedCities, withLegIdentity } from './cityLegs';
+import { cityKey, orderedCities, routeStops, withLegIdentity } from './cityLegs';
 import { addDays, isIsoDate } from './dateRange';
 import type { TripCityStay } from './tripProfile';
 
 /**
- * An even split, remainder to the earlier cities.
+ * An even split, remainder to the earlier stays.
  *
  * Deliberately not weighted by anything: this is the first thing the traveller
  * sees, and it should look like an obvious starting point they are expected to
  * change, not a recommendation they have to argue with.
+ *
+ * It splits the **route it is given**, repeats included. Deduplicating here
+ * would mean "Split evenly" quietly deleted a return stay: a traveller with
+ * Osaka → Kyoto → Osaka would press it and get two stays back, with their
+ * last night in Osaka gone and no indication it had ever been there. The
+ * caller decides what the route is — a fresh trip passes its destinations,
+ * which are unique anyway, and an edited plan passes its own sequence.
  */
 export function proposeCityStays(cities: string[], dayCount: number): TripCityStay[] {
-  const ordered = orderedCities(cities);
+  const ordered = routeStops(cities);
   if (ordered.length === 0 || dayCount <= 0) return [];
   if (dayCount <= ordered.length) {
     // Fewer days than cities: one day each for as many as fit. The rest are
@@ -93,6 +100,14 @@ export interface CityStayStatus {
   remaining: number;
   /** Cities the traveller listed but gave no days to. */
   unplaced: string[];
+  /**
+   * The same stays, named so a repeated city is not ambiguous.
+   *
+   * "Osaka has no days yet" is unanswerable on a route with two Osaka stays —
+   * the traveller cannot tell which row to go and fix. {@link describeStaySlot}
+   * says which one.
+   */
+  unplacedStays: Array<{ index: number; city: string; label: string }>;
 }
 
 export function cityStayStatus(stays: TripCityStay[], dayCount: number): CityStayStatus {
@@ -103,6 +118,9 @@ export function cityStayStatus(stays: TripCityStay[], dayCount: number): CitySta
     complete: dayCount > 0 && total === dayCount,
     remaining: dayCount - total,
     unplaced: stays.filter((stay) => stay.days <= 0).map((stay) => stay.city),
+    unplacedStays: stays.flatMap((stay, index) => (stay.days > 0
+      ? []
+      : [{ index, city: stay.city, label: describeStaySlot(stays, index) }])),
   };
 }
 
@@ -159,6 +177,120 @@ export function moveCityStay(stays: TripCityStay[], index: number, direction: -1
   const next = [...stays];
   [next[index], next[target]] = [next[target], next[index]];
   return next;
+}
+
+/** How many stays this route has in one city. */
+const staysIn = (stays: TripCityStay[], city: string): number =>
+  stays.filter((stay) => cityKey(stay.city) === cityKey(city)).length;
+
+const ordinalVisit = (visit: number): string => {
+  const words = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+  if (words[visit]) return words[visit];
+  const tens = visit % 100;
+  const suffix = tens >= 11 && tens <= 13
+    ? 'th'
+    : visit % 10 === 1
+      ? 'st'
+      : visit % 10 === 2
+        ? 'nd'
+        : visit % 10 === 3
+          ? 'rd'
+          : 'th';
+  return `${visit}${suffix}`;
+};
+
+/**
+ * Add another stay, at the end of the route.
+ *
+ * The end is where a return almost always belongs — a last night near the
+ * airport — and the move controls already handle the rest. It takes a day only
+ * if the trip has one spare: a traveller who has already placed all seven
+ * nights has not agreed to lose one of them, and quietly shortening an earlier
+ * stay to fund this one would undo a decision they made deliberately. With
+ * nothing free the stay arrives empty and says so, which is the same state any
+ * unplaced city is already shown in.
+ */
+export function addCityStay(
+  stays: TripCityStay[],
+  city: string,
+  dayCount: number,
+): TripCityStay[] {
+  const trimmed = city.trim();
+  if (!trimmed) return stays;
+  const free = Math.max(0, dayCount - cityStayTotal(stays));
+  return [...stays, { city: trimmed, days: free > 0 ? 1 : 0 }];
+}
+
+/**
+ * Whether this stay can be removed here.
+ *
+ * Only when the same city is stayed in somewhere else on the route. Removing
+ * the *only* stay in a city is removing the city from the trip, which is a
+ * destination decision and belongs to the destination editor — doing it from
+ * here would delete a place's whole deck as a side effect of editing nights.
+ *
+ * Deliberately not "is this a later visit": on Osaka → Kyoto → Osaka either
+ * Osaka may go, because either way Osaka is still somewhere the traveller
+ * sleeps. A traveller who decides to start in Kyoto should not have to delete
+ * their return and rebuild it at the front.
+ */
+export function canRemoveCityStay(stays: TripCityStay[], index: number): boolean {
+  const stay = stays[index];
+  return Boolean(stay) && staysIn(stays, stay.city) > 1;
+}
+
+/**
+ * Drop one stay from the route. Its days return to the unplaced pool rather
+ * than moving to a neighbour — same rule as every other edit here.
+ */
+export function removeCityStay(stays: TripCityStay[], index: number): TripCityStay[] {
+  if (!canRemoveCityStay(stays, index)) return stays;
+  return stays.filter((_, position) => position !== index);
+}
+
+/**
+ * Merge stays that have ended up next to each other in the same city.
+ *
+ * There is no Osaka → Osaka move, so two adjacent Osaka rows are one stay
+ * written twice. The legs already merge them; doing it in the plan as well
+ * keeps the rows the traveller edits and the stay they actually get from
+ * drifting apart, and means the dates under each row stay honest.
+ *
+ * Only ever triggered by adding, removing or reordering — never by typing a
+ * night count, which cannot change what is adjacent to what.
+ */
+export function collapseAdjacentStays(stays: TripCityStay[]): TripCityStay[] {
+  const merged: TripCityStay[] = [];
+  for (const stay of stays) {
+    const previous = merged[merged.length - 1];
+    if (previous && cityKey(previous.city) === cityKey(stay.city)) {
+      merged[merged.length - 1] = { ...previous, days: previous.days + Math.max(0, stay.days) };
+      continue;
+    }
+    merged.push({ ...stay });
+  }
+  return merged;
+}
+
+/**
+ * How the traveller would refer to one row, when a bare city name is ambiguous.
+ *
+ * "Osaka" on a route that only visits Osaka once. "Your return stay in Osaka"
+ * when there are two and this is the last of them. Never a number the app made
+ * up: a traveller has stays, not indices.
+ */
+export function describeStaySlot(stays: TripCityStay[], index: number): string {
+  const stay = stays[index];
+  if (!stay) return '';
+  const total = staysIn(stays, stay.city);
+  if (total < 2) return stay.city;
+
+  const occurrence = stays
+    .slice(0, index + 1)
+    .filter((entry) => cityKey(entry.city) === cityKey(stay.city)).length;
+  if (occurrence === 1) return `your first stay in ${stay.city}`;
+  if (occurrence === total) return `your return stay in ${stay.city}`;
+  return `your ${ordinalVisit(occurrence)} stay in ${stay.city}`;
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   TRIP_TYPE_OPTIONS,
   createEmptyProfile,
   destinationFromPlace,
+  existingDestinationFor,
   manualDestination,
   primaryCountry,
   resolveDuration,
@@ -62,6 +63,8 @@ export function TripIdentityPanel({ itinerary, onItineraryChange, isDesignHighli
   );
   const [draftProfile, setDraftProfile] = useState<TripProfile>(savedProfile);
   const [durationError, setDurationError] = useState<string | null>(null);
+  /** A city the traveller tried to add twice — see {@link addPlace}. */
+  const [duplicateCity, setDuplicateCity] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus | null>(null);
 
   useEffect(() => {
@@ -102,9 +105,26 @@ export function TripIdentityPanel({ itinerary, onItineraryChange, isDesignHighli
     updateDraft({ ...profile, [key]: next } as TripProfile);
   };
 
+  /**
+   * Add a city to the trip, once.
+   *
+   * Matched on the city itself rather than the suggestion's id: the same place
+   * can arrive under two provider records, and two Osaka destinations would
+   * mean two decks of Osaka places and two rows to keep in step for a traveller
+   * who only ever meant one Osaka.
+   *
+   * A traveller *returning* to Osaka wants something real, and this is the
+   * wrong door for it — the stay planner is where nights live. So the refusal
+   * says where to go instead of failing silently, which is what it used to do.
+   */
   const addPlace = (place: PlaceSuggestion) => {
     const destination = destinationFromPlace(place, profile.destinations[0]?.country);
-    if (profile.destinations.some((existing) => existing.id === destination.id)) return;
+    const already = existingDestinationFor(profile.destinations, destination);
+    if (already) {
+      setDuplicateCity(already.city);
+      return;
+    }
+    setDuplicateCity(null);
     updateDraft({ ...profile, destinations: [...profile.destinations, destination] });
   };
 
@@ -397,6 +417,12 @@ export function TripIdentityPanel({ itinerary, onItineraryChange, isDesignHighli
           onSelect={addPlace}
           placeholder="Add another city"
         />
+        {duplicateCity && (
+          <p className="text-xs" style={{ color: 'var(--accent)' }} role="status">
+            {duplicateCity} is already on this trip. To go back there later, add another stay
+            under <span className="font-semibold">How long in each city</span>.
+          </p>
+        )}
         <div className="flex flex-wrap gap-2 pt-1">
           {profile.destinations.map((destination, index) => (
             <span

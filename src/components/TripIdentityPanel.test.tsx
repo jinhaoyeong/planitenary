@@ -14,7 +14,33 @@ import { TripIdentityPanel } from './TripIdentityPanel';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { emptyItinerary } from '../lib/itinerarySanitize';
 import { createEmptyProfile, manualDestination, sanitizeTripProfile, type TripProfile } from '../lib/tripProfile';
+import type { PlaceSuggestion } from '../lib/destinations';
 import type { Itinerary } from '../data';
+
+vi.mock('./ui/CitySearchInput', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./ui/CitySearchInput')>();
+  type Props = Parameters<typeof actual.CitySearchInput>[0];
+  return {
+    ...actual,
+    CitySearchInput: (props: Props) => props.countryName === 'Japan' ? (
+      <button
+        type="button"
+        onClick={() => props.onSelect({
+          id: 'place_osaka_jp_provider-variant',
+          city: 'Osaka',
+          country: 'Japan',
+          countryCode: 'JP',
+          lat: 34.6937,
+          lng: 135.5023,
+          provider: 'nominatim',
+          providerPlaceId: 'provider-variant',
+        } satisfies PlaceSuggestion)}
+      >
+        Offer Osaka provider variant
+      </button>
+    ) : <actual.CitySearchInput {...props} />,
+  };
+});
 
 const melbourneProfile = (overrides: Partial<TripProfile> = {}): TripProfile => ({
   ...createEmptyProfile('MYR'),
@@ -124,5 +150,37 @@ describe('flight times reach the profile the planner reads', () => {
     const profile = savedProfile(onItineraryChange);
     expect(profile?.startDate).toBe('2027-01-21');
     expect(profile?.endDate).toBe('2027-01-31');
+  });
+});
+
+describe('destinations stay a set, not a route', () => {
+  const kansaiProfile = (): TripProfile => ({
+    ...createEmptyProfile('MYR'),
+    destinations: [manualDestination('Osaka', 'Japan'), manualDestination('Kyoto', 'Japan')],
+    startDate: '2027-01-21',
+    endDate: '2027-01-27',
+    cityStays: [{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }],
+    cityStayDayCount: 7,
+  });
+
+  const kansaiTrip = (): Itinerary => ({
+    ...emptyItinerary,
+    id: 'trip-kansai',
+    cities: ['Osaka', 'Kyoto'],
+    days: [{ day: 1, date: '2027-01-21', stayCity: 'Osaka', activityCities: [], city: 'Osaka', title: 'Day one', activities: [] }],
+    tripProfile: kansaiProfile(),
+  });
+
+  it('refuses another provider record for Osaka without changing the trip', () => {
+    const onItineraryChange = vi.fn();
+    renderPanel(kansaiTrip(), onItineraryChange);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Offer Osaka provider variant' }));
+
+    expect(screen.getByText(/Osaka is already on this trip/i)).toHaveTextContent(
+      'Osaka is already on this trip. To go back there later, add another stay',
+    );
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled();
+    expect(onItineraryChange).not.toHaveBeenCalled();
   });
 });

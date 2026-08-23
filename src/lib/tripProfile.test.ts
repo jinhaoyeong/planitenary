@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createEmptyProfile,
+  existingDestinationFor,
   manualDestination,
   sanitizeClockTime,
   sanitizeTripProfile,
@@ -127,5 +128,31 @@ describe('a stay plan that returns to a city', () => {
       { city: 'Osaka', days: 4 },
       { city: 'Kyoto', days: 3 },
     ]);
+  });
+});
+
+describe('destinations are a set of places, not a route', () => {
+  const kansai = [manualDestination('Osaka', 'Japan'), manualDestination('Kyoto', 'Japan')];
+
+  it('finds a city the trip already has, whatever id it arrives under', () => {
+    // The same place reaches the app under different provider records. Matching
+    // only on id would let a second Osaka through, and two Osaka destinations
+    // mean two decks of Osaka places for a traveller who meant one Osaka.
+    expect(existingDestinationFor(kansai, { id: 'somewhere-else', city: 'Osaka' })?.city).toBe('Osaka');
+    expect(existingDestinationFor(kansai, { id: 'x', city: ' osaka ' })?.city).toBe('Osaka');
+    expect(existingDestinationFor(kansai, { id: kansai[1].id, city: 'Kyoto' })?.city).toBe('Kyoto');
+  });
+
+  it('lets a genuinely new city through', () => {
+    expect(existingDestinationFor(kansai, { id: 'kobe', city: 'Kobe' })).toBeUndefined();
+    expect(existingDestinationFor([], { id: 'osaka', city: 'Osaka' })).toBeUndefined();
+  });
+
+  it('says nothing about the stay plan, which may name a city as often as it likes', () => {
+    // The guard is about destinations only. Coming back to Osaka is a stay
+    // decision, and this function has no opinion on it.
+    const stays = [{ city: 'Osaka', days: 3 }, { city: 'Kyoto', days: 3 }, { city: 'Osaka', days: 1 }];
+    expect(stays.filter((stay) => stay.city === 'Osaka')).toHaveLength(2);
+    expect(existingDestinationFor(kansai, { city: 'Osaka' })).toBeDefined();
   });
 });
