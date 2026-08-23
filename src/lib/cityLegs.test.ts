@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { cityForDay, describeCityLegs, orderedCities, planCityLegs } from './cityLegs';
+import {
+  cityForDay,
+  describeCityLegs,
+  legForDay,
+  orderedCities,
+  planCityLegs,
+  routeStops,
+  withLegIdentity,
+  type CityLeg,
+} from './cityLegs';
+
+/** The four fields a leg had before Stage 4 added identity to it. */
+const shape = (legs: CityLeg[]) =>
+  legs.map((leg) => [leg.city, leg.startDay, leg.endDay, leg.days]);
 
 describe('ordering the cities', () => {
   it('keeps the traveller\'s own order, which is the travel order', () => {
@@ -14,7 +27,9 @@ describe('ordering the cities', () => {
 describe('dividing the days', () => {
   it('gives a single city the whole trip', () => {
     const { legs } = planCityLegs(['Osaka'], 8);
-    expect(legs).toEqual([{ city: 'Osaka', startDay: 1, endDay: 8, days: 8 }]);
+    expect(legs).toEqual([
+      { city: 'Osaka', startDay: 1, endDay: 8, days: 8, visitIndex: 1, legId: 'osaka#1' },
+    ]);
   });
 
   it('splits evenly when nothing has been shortlisted yet', () => {
@@ -122,5 +137,123 @@ describe('degenerate input', () => {
 
   it('plans nothing for a trip with no cities', () => {
     expect(planCityLegs([], 8)).toEqual({ legs: [], dropped: [] });
+  });
+});
+
+describe('stops on the route, as opposed to cities on the trip', () => {
+  it('keeps a city the traveller returns to', () => {
+    // The whole point of the pair. Osaka twice is a route, not a typo.
+    expect(routeStops(['Osaka', 'Kyoto', 'Osaka'])).toEqual(['Osaka', 'Kyoto', 'Osaka']);
+  });
+
+  it('still drops blanks, because a blank is not a stop', () => {
+    expect(routeStops(['Osaka', '', '  ', 'Kyoto', undefined, null])).toEqual(['Osaka', 'Kyoto']);
+  });
+
+  it('agrees with orderedCities on every route that never repeats', () => {
+    // This is what makes Stage 4A inert: no saved trip has a repeated city,
+    // so no saved trip can tell the two functions apart.
+    for (const route of [
+      ['Osaka'],
+      ['Osaka', 'Kyoto'],
+      ['Osaka', 'Nara', 'Kyoto', 'Kobe'],
+      [],
+    ]) {
+      expect(routeStops(route)).toEqual(orderedCities(route));
+    }
+  });
+});
+
+describe('telling one stay from another', () => {
+  it('numbers each visit to a city in travel order', () => {
+    const legs = withLegIdentity([
+      { city: 'Osaka', startDay: 1, endDay: 3, days: 3 },
+      { city: 'Kyoto', startDay: 4, endDay: 6, days: 3 },
+      { city: 'Osaka', startDay: 7, endDay: 7, days: 1 },
+    ]);
+
+    expect(legs.map((leg) => leg.legId)).toEqual(['osaka#1', 'kyoto#1', 'osaka#2']);
+    expect(legs.map((leg) => leg.visitIndex)).toEqual([1, 1, 2]);
+  });
+
+  it('ignores case and padding when deciding two stays share a city', () => {
+    const legs = withLegIdentity([
+      { city: 'Osaka', startDay: 1, endDay: 2, days: 2 },
+      { city: 'Kyoto', startDay: 3, endDay: 4, days: 2 },
+      { city: ' osaka ', startDay: 5, endDay: 5, days: 1 },
+    ]);
+    expect(legs.map((leg) => leg.legId)).toEqual(['osaka#1', 'kyoto#1', 'osaka#2']);
+  });
+
+  it('gives a route with no repeats all first visits', () => {
+    const { legs } = planCityLegs(['Osaka', 'Nara', 'Kyoto'], 7, { Osaka: 10, Nara: 2, Kyoto: 8 });
+    expect(legs.every((leg) => leg.visitIndex === 1)).toBe(true);
+  });
+
+  it('answers which stay a day belongs to, not just which city', () => {
+    const legs = withLegIdentity([
+      { city: 'Osaka', startDay: 1, endDay: 3, days: 3 },
+      { city: 'Kyoto', startDay: 4, endDay: 6, days: 3 },
+      { city: 'Osaka', startDay: 7, endDay: 7, days: 1 },
+    ]);
+
+    // cityForDay cannot tell these apart, and that is exactly why legForDay
+    // exists: day 1 and day 7 are both Osaka, and they are different stays.
+    expect(cityForDay(legs, 1)).toBe(cityForDay(legs, 7));
+    expect(legForDay(legs, 1)?.legId).toBe('osaka#1');
+    expect(legForDay(legs, 7)?.legId).toBe('osaka#2');
+    expect(legForDay(legs, 99)).toBeUndefined();
+  });
+
+  it('describes a returned-to city once per stay, without the ids', () => {
+    const legs = withLegIdentity([
+      { city: 'Osaka', startDay: 1, endDay: 3, days: 3 },
+      { city: 'Kyoto', startDay: 4, endDay: 6, days: 3 },
+      { city: 'Osaka', startDay: 7, endDay: 7, days: 1 },
+    ]);
+    expect(describeCityLegs(legs)).toBe('Osaka 3 days · Kyoto 3 days · Osaka 1 day');
+  });
+});
+
+describe('Stage 4A changes nothing for a trip that already exists', () => {
+  /**
+   * The gate on this stage. Every expectation below is the answer this
+   * function gave at `eb21d9d`, before legs had identity. Identity is
+   * additive; if any day number moves, this stage is not inert and must not
+   * ship.
+   */
+  it('divides a weighted four-city trip exactly as it did before', () => {
+    const { legs } = planCityLegs(['Osaka', 'Nara', 'Kyoto', 'Kobe'], 8, {
+      Osaka: 20, Nara: 4, Kyoto: 15, Kobe: 3,
+    });
+    expect(shape(legs)).toEqual([
+      ['Osaka', 1, 3, 3],
+      ['Nara', 4, 4, 1],
+      ['Kyoto', 5, 7, 3],
+      ['Kobe', 8, 8, 1],
+    ]);
+  });
+
+  it('splits an unweighted two-city trip exactly as it did before', () => {
+    expect(shape(planCityLegs(['Osaka', 'Kyoto'], 8).legs)).toEqual([
+      ['Osaka', 1, 4, 4],
+      ['Kyoto', 5, 8, 4],
+    ]);
+  });
+
+  it('gives a single-city trip the whole trip exactly as it did before', () => {
+    expect(shape(planCityLegs(['Osaka'], 8).legs)).toEqual([['Osaka', 1, 8, 8]]);
+  });
+
+  it('drops the least-supported cities exactly as it did before', () => {
+    const { legs, dropped } = planCityLegs(['Kobe', 'Osaka', 'Kyoto', 'Nara'], 3, {
+      Kobe: 1, Osaka: 20, Kyoto: 15, Nara: 4,
+    });
+    expect(dropped).toEqual(['Kobe']);
+    expect(shape(legs)).toEqual([
+      ['Osaka', 1, 1, 1],
+      ['Kyoto', 2, 2, 1],
+      ['Nara', 3, 3, 1],
+    ]);
   });
 });

@@ -492,11 +492,15 @@ const pickAll = <T extends string>(value: unknown, allowed: readonly T[]): T[] =
  * Deliberately dumb: it validates shape and membership and nothing else. The
  * plan may be incomplete, over-spent, or all zeroes — those are states the
  * traveller is in the middle of, not corruption to repair behind their back.
+ *
+ * A city may appear more than once. A route that returns to Osaka for the
+ * airport is not a duplicate entry to tidy away, and treating it as one is
+ * what silently turned a complete seven-day plan into an unfinished six-day
+ * one — after which the planner ignored it and inferred its own split.
  */
 function sanitizeCityStays(value: unknown, cities: string[]): TripCityStay[] | undefined {
   if (!Array.isArray(value) || cities.length === 0) return undefined;
   const byKey = new Map(cities.map((city) => [city.toLowerCase(), city]));
-  const seen = new Set<string>();
   const stays: TripCityStay[] = [];
 
   for (const entry of value) {
@@ -504,8 +508,7 @@ function sanitizeCityStays(value: unknown, cities: string[]): TripCityStay[] | u
     const item = entry as Partial<TripCityStay>;
     const key = typeof item.city === 'string' ? item.city.trim().toLowerCase() : '';
     const city = byKey.get(key);
-    if (!city || seen.has(key)) continue;
-    seen.add(key);
+    if (!city) continue;
     const days = typeof item.days === 'number' && Number.isFinite(item.days)
       ? Math.max(0, Math.floor(item.days))
       : 0;

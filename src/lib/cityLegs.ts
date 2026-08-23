@@ -12,7 +12,15 @@
  * distance would eventually separate Kyoto from Kobe, but it would also happily
  * hand day three a Kyoto morning and a Kobe afternoon, which is a train ride the
  * traveller never agreed to.
+ *
+ * A city may appear more than once. Osaka → Kyoto → Osaka is a real route, and
+ * the two Osaka stays are two separate bookings that happen to share a city.
+ * {@link CityLeg.legId} is what tells them apart; the city name is what they
+ * still have in common.
  */
+
+/** Normalised city name, for comparison and identity. Never shown to anyone. */
+export const cityKey = (city: string): string => city.trim().toLowerCase();
 
 /** One continuous stay in one city. Day numbers are 1-indexed and inclusive. */
 export interface CityLeg {
@@ -21,6 +29,22 @@ export interface CityLeg {
   endDay: number;
   /** Nights this leg covers. The last leg of a trip ends on a departure day. */
   days: number;
+  /**
+   * Which visit to this city this is, 1-indexed in travel order.
+   *
+   * A route that touches each city once — every route the app could express
+   * before this existed — is all ones.
+   */
+  visitIndex: number;
+  /**
+   * Identity of this stay: `osaka#1`, `kyoto#1`, `osaka#2`.
+   *
+   * **Derived, never persisted.** It is a pure function of the stay plan, so
+   * reordering the route renumbers it, and nothing outside a single build or
+   * edit may hold on to one. Storing a leg id somewhere would create a
+   * reference that silently retargets the moment the traveller moves a stay.
+   */
+  legId: string;
 }
 
 export interface CityLegPlan {
@@ -49,12 +73,49 @@ export function orderedCities(cities: Array<string | undefined | null>): string[
   for (const raw of cities) {
     const city = (raw || '').trim();
     if (!city) continue;
-    const key = city.toLowerCase();
+    const key = cityKey(city);
     if (seen.has(key)) continue;
     seen.add(key);
     ordered.push(city);
   }
   return ordered;
+}
+
+/**
+ * Every *stop* on the route, in order, blanks dropped — repeats kept.
+ *
+ * The sibling of {@link orderedCities}, and deliberately not a replacement for
+ * it. Deduplicating is right for anything asking "which cities is this trip
+ * about": one Osaka deck, one Osaka centre, one Osaka row in settings. It is
+ * wrong for anything asking "where does the traveller sleep, in what order",
+ * where a second Osaka is a second hotel booking rather than a typo. Callers
+ * pick the question they are actually asking.
+ */
+export function routeStops(cities: Array<string | undefined | null>): string[] {
+  const stops: string[] = [];
+  for (const raw of cities) {
+    const city = (raw || '').trim();
+    if (city) stops.push(city);
+  }
+  return stops;
+}
+
+/**
+ * Stamp derived identity onto legs that already have their days.
+ *
+ * Counting occurrences in travel order is what makes the id meaningful: the
+ * first Osaka stay is `osaka#1` whether it is leg one or leg five.
+ */
+export function withLegIdentity(
+  legs: Array<Omit<CityLeg, 'legId' | 'visitIndex'>>,
+): CityLeg[] {
+  const visits = new Map<string, number>();
+  return legs.map((leg) => {
+    const key = cityKey(leg.city);
+    const visitIndex = (visits.get(key) ?? 0) + 1;
+    visits.set(key, visitIndex);
+    return { ...leg, visitIndex, legId: key + '#' + visitIndex };
+  });
 }
 
 /**
@@ -66,6 +127,10 @@ export function orderedCities(cities: Array<string | undefined | null>): string[
  * are dropped rather than the last ones — a traveller who shortlisted twelve
  * places in Kyoto and one in Kobe meant to spend the trip in Kyoto, whichever
  * order they typed them in. Order is preserved among the survivors.
+ *
+ * Inference only ever sees a deduplicated city list, so every leg it produces
+ * is that city's first visit. A repeated route is something the traveller
+ * stated, and a stated plan never reaches this function.
  */
 export function planCityLegs(
   cities: string[],
@@ -82,9 +147,9 @@ export function planCityLegs(
   let dropped: string[] = [];
   if (ordered.length > dayCount) {
     const ranked = [...ordered].sort((a, b) => weightOf(b) - weightOf(a));
-    const survivors = new Set(ranked.slice(0, dayCount).map((city) => city.toLowerCase()));
-    kept = ordered.filter((city) => survivors.has(city.toLowerCase()));
-    dropped = ordered.filter((city) => !survivors.has(city.toLowerCase()));
+    const survivors = new Set(ranked.slice(0, dayCount).map((city) => cityKey(city)));
+    kept = ordered.filter((city) => survivors.has(cityKey(city)));
+    dropped = ordered.filter((city) => !survivors.has(cityKey(city)));
   }
 
   const totalWeight = kept.reduce((total, city) => total + weightOf(city), 0);
@@ -125,16 +190,16 @@ export function planCityLegs(
     remaining += 1;
   }
 
-  const legs: CityLeg[] = [];
+  const bare: Array<Omit<CityLeg, 'legId' | 'visitIndex'>> = [];
   let day = 1;
   kept.forEach((city, index) => {
     const days = allocation[index];
     if (days <= 0) return;
-    legs.push({ city, startDay: day, endDay: day + days - 1, days });
+    bare.push({ city, startDay: day, endDay: day + days - 1, days });
     day += days;
   });
 
-  return { legs, dropped };
+  return { legs: withLegIdentity(bare), dropped };
 }
 
 /** Which city day `dayNumber` belongs to, or `''` when the trip has no legs. */
@@ -144,10 +209,24 @@ export function cityForDay(legs: CityLeg[], dayNumber: number): string {
 }
 
 /**
+ * Which *stay* day `dayNumber` belongs to.
+ *
+ * The counterpart of {@link cityForDay}, for the callers that need to tell a
+ * city's second visit from its first. Day seven of Osaka → Kyoto → Osaka is in
+ * Osaka either way; only this says which Osaka.
+ */
+export function legForDay(legs: CityLeg[], dayNumber: number): CityLeg | undefined {
+  return legs.find((entry) => dayNumber >= entry.startDay && dayNumber <= entry.endDay);
+}
+
+/**
  * A traveller-facing summary of the division: "Osaka 3 days · Kyoto 3 · Nara 1".
  *
  * Written out because the allocation is a judgement the app made on the
  * traveller's behalf, and a judgement made silently cannot be disagreed with.
+ *
+ * A repeated city is listed once per stay, in travel order, because that is
+ * what the traveller is doing. The ids stay out of it — they are plumbing.
  */
 export function describeCityLegs(legs: CityLeg[]): string {
   return legs

@@ -13,7 +13,7 @@
  * React, and nothing about places.
  */
 import type { CityLeg } from './cityLegs';
-import { orderedCities } from './cityLegs';
+import { cityKey, orderedCities, withLegIdentity } from './cityLegs';
 import { addDays, isIsoDate } from './dateRange';
 import type { TripCityStay } from './tripProfile';
 
@@ -62,11 +62,16 @@ export function reconcileCityStays(
   const kept: TripCityStay[] = [];
   // Preserve the traveller's ordering for cities they have already placed, then
   // append anything new at the end, where a newly added city naturally goes.
+  //
+  // Every stay survives, including a second stay in a city already on the
+  // route. Osaka → Kyoto → Osaka is a route, not a duplicate: dropping the
+  // repeat here is what used to turn a complete seven-day plan into a
+  // six-day one, which the planner then read as unfinished and replaced
+  // with its own inference.
   for (const stay of stays ?? []) {
-    const match = ordered.find((city) => city.toLowerCase() === stay.city.trim().toLowerCase());
-    if (match && !kept.some((entry) => entry.city === match)) {
-      kept.push({ city: match, days: Math.max(0, Math.floor(stay.days)) });
-    }
+    const match = ordered.find((city) => cityKey(city) === cityKey(stay.city));
+    if (!match) continue;
+    kept.push({ city: match, days: Math.max(0, Math.floor(stay.days)) });
   }
   for (const city of ordered) {
     if (byCity.has(city.toLowerCase())) continue;
@@ -102,44 +107,49 @@ export function cityStayStatus(stays: TripCityStay[], dayCount: number): CitySta
 }
 
 /**
- * Move `delta` days on or off one city, without letting the plan exceed the
+ * Move `delta` days on or off one stay, without letting the plan exceed the
  * trip. Days come from and go back to the unassigned pool rather than being
  * taken from a neighbour — a traveller adding a night in Kyoto has not said
  * which other city should lose one, and guessing would undo their earlier work.
+ *
+ * Addressed by position, not by city name. On a route that returns to Osaka
+ * there are two Osaka rows, and a name would edit both at once — silently
+ * doubling every change the traveller made to either.
  */
 export function adjustCityStay(
   stays: TripCityStay[],
-  city: string,
+  index: number,
   delta: number,
   dayCount: number,
 ): TripCityStay[] {
   const remaining = dayCount - cityStayTotal(stays);
-  return stays.map((stay) => {
-    if (stay.city !== city) return stay;
+  return stays.map((stay, position) => {
+    if (position !== index) return stay;
     const room = delta > 0 ? Math.min(delta, Math.max(0, remaining)) : delta;
     return { ...stay, days: Math.max(0, stay.days + room) };
   });
 }
 
 /**
- * Set one city's days outright — what typing into the counter does.
+ * Set one stay's days outright — what typing into the counter does.
  *
- * Same pool rule as {@link adjustCityStay}: the typed value cannot steal from
- * another city, and cannot invent days the trip does not have. Anything above
- * what is still free is clamped; anything below zero becomes zero.
+ * Same pool rule as {@link adjustCityStay}, and the same addressing: the typed
+ * value cannot steal from another stay, and cannot invent days the trip does
+ * not have. Anything above what is still free is clamped; anything below zero
+ * becomes zero.
  */
 export function setCityStayDays(
   stays: TripCityStay[],
-  city: string,
+  index: number,
   days: number,
   dayCount: number,
 ): TripCityStay[] {
   const wanted = Number.isFinite(days) ? Math.floor(days) : 0;
-  const current = stays.find((stay) => stay.city === city)?.days ?? 0;
+  const current = stays[index]?.days ?? 0;
   const others = cityStayTotal(stays) - current;
-  const maxForCity = Math.max(0, dayCount - others);
-  const next = Math.max(0, Math.min(wanted, maxForCity));
-  return stays.map((stay) => (stay.city === city ? { ...stay, days: next } : stay));
+  const maxForStay = Math.max(0, dayCount - others);
+  const next = Math.max(0, Math.min(wanted, maxForStay));
+  return stays.map((stay, position) => (position === index ? { ...stay, days: next } : stay));
 }
 
 /** Reorder the route by moving one stay up or down. */
@@ -195,17 +205,30 @@ export function fitCityStays(stays: TripCityStay[], dayCount: number): TripCityS
  * Turn a stay plan into legs with real day numbers, dropping cities given no
  * days. Returns `[]` for a plan that does not cover the trip, so a caller can
  * fall back rather than build days from a half-answered question.
+ *
+ * A city the traveller returns to becomes a second leg with its own identity.
+ * Two stays *in a row* in the same city do not: there is no Osaka → Osaka
+ * hotel move, and splitting them would invent a transfer day the traveller
+ * never makes and a second leg that never moves anywhere. They merge into one
+ * stay of the combined length, which is unambiguously what was meant.
  */
 export function legsFromCityStays(stays: TripCityStay[], dayCount: number): CityLeg[] {
   if (!cityStayStatus(stays, dayCount).complete) return [];
-  const legs: CityLeg[] = [];
+  const bare: Array<Omit<CityLeg, 'legId' | 'visitIndex'>> = [];
   let day = 1;
   for (const stay of stays) {
     if (stay.days <= 0) continue;
-    legs.push({ city: stay.city, startDay: day, endDay: day + stay.days - 1, days: stay.days });
+    const previous = bare[bare.length - 1];
+    if (previous && cityKey(previous.city) === cityKey(stay.city)) {
+      previous.endDay += stay.days;
+      previous.days += stay.days;
+      day += stay.days;
+      continue;
+    }
+    bare.push({ city: stay.city, startDay: day, endDay: day + stay.days - 1, days: stay.days });
     day += stay.days;
   }
-  return legs;
+  return withLegIdentity(bare);
 }
 
 /**

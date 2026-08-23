@@ -10,6 +10,7 @@ import {
   reconcileCityStays,
   setCityStayDays,
 } from '../../lib/cityStays';
+import { cityKey } from '../../lib/cityLegs';
 import type { TripCityStay } from '../../lib/tripProfile';
 
 interface CityStayPlannerProps {
@@ -23,6 +24,8 @@ interface CityStayPlannerProps {
 
 interface DayCountInputProps {
   city: string;
+  /** Which row this is. The stay's address — see {@link setCityStayDays}. */
+  index: number;
   days: number;
   dayCount: number;
   stays: TripCityStay[];
@@ -38,7 +41,7 @@ interface DayCountInputProps {
  * does not briefly commit zero and scramble the other cities. Blur / Enter
  * hand the value to {@link setCityStayDays}, which clamps to the free pool.
  */
-function DayCountInput({ city, days, dayCount, stays, onCommit }: DayCountInputProps) {
+function DayCountInput({ city, index, days, dayCount, stays, onCommit }: DayCountInputProps) {
   const [draft, setDraft] = useState(String(days));
   const [focused, setFocused] = useState(false);
 
@@ -50,8 +53,8 @@ function DayCountInput({ city, days, dayCount, stays, onCommit }: DayCountInputP
 
   const commit = (raw: string) => {
     const parsed = raw.trim() === '' ? 0 : Number.parseInt(raw, 10);
-    const next = setCityStayDays(stays, city, Number.isFinite(parsed) ? parsed : 0, dayCount);
-    const committed = next.find((stay) => stay.city === city)?.days ?? 0;
+    const next = setCityStayDays(stays, index, Number.isFinite(parsed) ? parsed : 0, dayCount);
+    const committed = next[index]?.days ?? 0;
     setDraft(String(committed));
     if (committed !== days) onCommit(next);
   };
@@ -109,6 +112,42 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
   // rather than dates, because a date that will move is worse than no date.
   const legs = legsFromCityStays(stays, dayCount);
 
+  /**
+   * Which leg each row is showing, found by the row's own first day.
+   *
+   * Not a positional match: `legsFromCityStays` skips rows with no days and
+   * merges two adjacent stays in the same city, so the two lists are different
+   * lengths. Walking the day counter gets the same answer without repeating
+   * those rules here. Empty while the plan is incomplete, which is when rows
+   * deliberately show day counts rather than dates.
+   */
+  const legForStay = (() => {
+    const startDays: number[] = [];
+    let day = 1;
+    for (const stay of stays) {
+      startDays.push(day);
+      day += Math.max(0, stay.days);
+    }
+    return stays.map((stay, index) => (stay.days <= 0
+      ? undefined
+      : legs.find((leg) => startDays[index] >= leg.startDay && startDays[index] <= leg.endDay)));
+  })();
+
+  /**
+   * A row's React key. The city name alone stops being unique the moment a
+   * route returns to a city, and duplicate keys would let React reuse the
+   * wrong row's typing state.
+   */
+  const rowKeys = (() => {
+    const visits = new Map<string, number>();
+    return stays.map((stay) => {
+      const key = cityKey(stay.city);
+      const visit = (visits.get(key) ?? 0) + 1;
+      visits.set(key, visit);
+      return key + '#' + visit;
+    });
+  })();
+
   if (cities.length < 2 || dayCount <= 0) return null;
 
   const set = (next: TripCityStay[]) => onChange(next);
@@ -134,10 +173,10 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
 
       <ol className="city-stay-list">
         {stays.map((stay, index) => {
-          const leg = legs.find((entry) => entry.city === stay.city);
+          const leg = legForStay[index];
           return (
             <li
-              key={stay.city}
+              key={rowKeys[index]}
               className="city-stay-row adaptive-surface adaptive-surface-compact-card"
               data-empty={stay.days === 0 ? 'true' : undefined}
             >
@@ -177,7 +216,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
                 <button
                   type="button"
                   className="adaptive-button"
-                  onClick={() => set(adjustCityStay(stays, stay.city, -1, dayCount))}
+                  onClick={() => set(adjustCityStay(stays, index, -1, dayCount))}
                   disabled={stay.days === 0}
                   aria-label={`One day fewer in ${stay.city}`}
                 >
@@ -185,6 +224,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
                 </button>
                 <DayCountInput
                   city={stay.city}
+                  index={index}
                   days={stay.days}
                   dayCount={dayCount}
                   stays={stays}
@@ -193,7 +233,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
                 <button
                   type="button"
                   className="adaptive-button"
-                  onClick={() => set(adjustCityStay(stays, stay.city, 1, dayCount))}
+                  onClick={() => set(adjustCityStay(stays, index, 1, dayCount))}
                   disabled={status.remaining <= 0}
                   aria-label={`One more day in ${stay.city}`}
                 >

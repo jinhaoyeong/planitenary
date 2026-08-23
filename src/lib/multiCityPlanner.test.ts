@@ -185,10 +185,10 @@ describe('the traveller\'s stay plan overrules the planner', () => {
     const { cityLegs } = build(profile);
 
     expect(cityLegs).toEqual([
-      { city: 'Osaka', startDay: 1, endDay: 1, days: 1 },
-      { city: 'Nara', startDay: 2, endDay: 2, days: 1 },
-      { city: 'Kyoto', startDay: 3, endDay: 7, days: 5 },
-      { city: 'Kobe', startDay: 8, endDay: 8, days: 1 },
+      { city: 'Osaka', startDay: 1, endDay: 1, days: 1, visitIndex: 1, legId: 'osaka#1' },
+      { city: 'Nara', startDay: 2, endDay: 2, days: 1, visitIndex: 1, legId: 'nara#1' },
+      { city: 'Kyoto', startDay: 3, endDay: 7, days: 5, visitIndex: 1, legId: 'kyoto#1' },
+      { city: 'Kobe', startDay: 8, endDay: 8, days: 1, visitIndex: 1, legId: 'kobe#1' },
     ]);
   });
 
@@ -264,8 +264,8 @@ describe('the traveller\'s stay plan overrules the planner', () => {
       );
 
       expect(cityLegs).toEqual([
-        { city: 'Osaka', startDay: 1, endDay: 4, days: 4 },
-        { city: 'Kyoto', startDay: 5, endDay: 9, days: 5 },
+        { city: 'Osaka', startDay: 1, endDay: 4, days: 4, visitIndex: 1, legId: 'osaka#1' },
+        { city: 'Kyoto', startDay: 5, endDay: 9, days: 5, visitIndex: 1, legId: 'kyoto#1' },
       ]);
     });
 
@@ -292,8 +292,8 @@ describe('the traveller\'s stay plan overrules the planner', () => {
       );
 
       expect(cityLegs).toEqual([
-        { city: 'Osaka', startDay: 1, endDay: 4, days: 4 },
-        { city: 'Kyoto', startDay: 5, endDay: 6, days: 2 },
+        { city: 'Osaka', startDay: 1, endDay: 4, days: 4, visitIndex: 1, legId: 'osaka#1' },
+        { city: 'Kyoto', startDay: 5, endDay: 6, days: 2, visitIndex: 1, legId: 'kyoto#1' },
       ]);
       expect(warnings.some((warning) => warning.includes('2 days shorter than your stay plan'))).toBe(true);
     });

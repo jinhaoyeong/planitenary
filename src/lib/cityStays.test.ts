@@ -119,7 +119,7 @@ describe('editing the plan', () => {
   const stays = [{ city: 'Osaka', days: 3 }, { city: 'Kyoto', days: 3 }];
 
   it('adds a day from the unplaced pool', () => {
-    expect(adjustCityStay(stays, 'Kyoto', 1, 8)).toEqual([
+    expect(adjustCityStay(stays, 1, 1, 8)).toEqual([
       { city: 'Osaka', days: 3 },
       { city: 'Kyoto', days: 4 },
     ]);
@@ -129,21 +129,21 @@ describe('editing the plan', () => {
     // The pool is empty at 8 of 8. Adding to Kyoto must do nothing rather than
     // quietly shorten Osaka — that is the traveller's call, not ours.
     const full = [{ city: 'Osaka', days: 5 }, { city: 'Kyoto', days: 3 }];
-    expect(adjustCityStay(full, 'Kyoto', 1, 8)).toEqual(full);
+    expect(adjustCityStay(full, 1, 1, 8)).toEqual(full);
   });
 
   it('returns a removed day to the pool', () => {
-    const next = adjustCityStay(stays, 'Osaka', -1, 8);
+    const next = adjustCityStay(stays, 0, -1, 8);
     expect(next[0].days).toBe(2);
     expect(cityStayStatus(next, 8).remaining).toBe(3);
   });
 
   it('never goes below zero', () => {
-    expect(adjustCityStay([{ city: 'Osaka', days: 0 }], 'Osaka', -1, 8)[0].days).toBe(0);
+    expect(adjustCityStay([{ city: 'Osaka', days: 0 }], 0, -1, 8)[0].days).toBe(0);
   });
 
   it('sets a typed day count without touching the other cities', () => {
-    expect(setCityStayDays(stays, 'Osaka', 5, 8)).toEqual([
+    expect(setCityStayDays(stays, 0, 5, 8)).toEqual([
       { city: 'Osaka', days: 5 },
       { city: 'Kyoto', days: 3 },
     ]);
@@ -151,11 +151,11 @@ describe('editing the plan', () => {
 
   it('clamps a typed count to what the trip still has free', () => {
     // Osaka wants 10; Kyoto already holds 3 of 8, so Osaka can take at most 5.
-    expect(setCityStayDays(stays, 'Osaka', 10, 8)[0].days).toBe(5);
+    expect(setCityStayDays(stays, 0, 10, 8)[0].days).toBe(5);
   });
 
   it('treats a blank or nonsense typed value as zero', () => {
-    expect(setCityStayDays(stays, 'Osaka', Number.NaN, 8)[0].days).toBe(0);
+    expect(setCityStayDays(stays, 0, Number.NaN, 8)[0].days).toBe(0);
   });
 
   it('reorders the route', () => {
@@ -177,9 +177,9 @@ describe('turning a plan into legs', () => {
     ], 8);
 
     expect(legs).toEqual([
-      { city: 'Osaka', startDay: 1, endDay: 3, days: 3 },
-      { city: 'Nara', startDay: 4, endDay: 4, days: 1 },
-      { city: 'Kyoto', startDay: 5, endDay: 8, days: 4 },
+      { city: 'Osaka', startDay: 1, endDay: 3, days: 3, visitIndex: 1, legId: 'osaka#1' },
+      { city: 'Nara', startDay: 4, endDay: 4, days: 1, visitIndex: 1, legId: 'nara#1' },
+      { city: 'Kyoto', startDay: 5, endDay: 8, days: 4, visitIndex: 1, legId: 'kyoto#1' },
     ]);
   });
 
@@ -196,6 +196,90 @@ describe('turning a plan into legs', () => {
     // question.
     expect(legsFromCityStays([{ city: 'Osaka', days: 3 }], 8)).toEqual([]);
     expect(legsFromCityStays([{ city: 'Osaka', days: 9 }], 8)).toEqual([]);
+  });
+});
+
+describe('a route that returns to a city', () => {
+  /**
+   * Osaka → Kyoto → Kobe day trip → Kyoto → Osaka airport, as a stay plan.
+   * Seven days, and Osaka is two separate bookings rather than one six-day
+   * block with a Kyoto interruption.
+   */
+  const RETURN_ROUTE = [
+    { city: 'Osaka', days: 3 },
+    { city: 'Kyoto', days: 3 },
+    { city: 'Osaka', days: 1 },
+  ];
+
+  it('keeps the second stay instead of tidying it away', () => {
+    // The bug this stage exists to fix: the repeat used to be dropped here,
+    // which turned a complete 7-day plan into an unfinished 6-day one.
+    const kept = reconcileCityStays(RETURN_ROUTE, ['Osaka', 'Kyoto']);
+    expect(kept).toEqual(RETURN_ROUTE);
+    expect(cityStayTotal(kept)).toBe(7);
+  });
+
+  it('reads as a finished plan, so the planner will follow it', () => {
+    expect(cityStayStatus(reconcileCityStays(RETURN_ROUTE, ['Osaka', 'Kyoto']), 7).complete)
+      .toBe(true);
+  });
+
+  it('still drops a repeated city that left the trip entirely', () => {
+    // Membership is unchanged: repeats survive, cities that are no longer
+    // destinations do not.
+    expect(reconcileCityStays(RETURN_ROUTE, ['Kyoto'])).toEqual([{ city: 'Kyoto', days: 3 }]);
+  });
+
+  it('becomes two Osaka legs with their own identities', () => {
+    expect(legsFromCityStays(RETURN_ROUTE, 7)).toEqual([
+      { city: 'Osaka', startDay: 1, endDay: 3, days: 3, visitIndex: 1, legId: 'osaka#1' },
+      { city: 'Kyoto', startDay: 4, endDay: 6, days: 3, visitIndex: 1, legId: 'kyoto#1' },
+      { city: 'Osaka', startDay: 7, endDay: 7, days: 1, visitIndex: 2, legId: 'osaka#2' },
+    ]);
+  });
+
+  it('edits one Osaka stay without touching the other', () => {
+    // The reason these functions take a position rather than a city name. By
+    // name, both Osaka rows would move together and the traveller would watch
+    // their airport day grow every time they added a night at the start.
+    expect(setCityStayDays(RETURN_ROUTE, 2, 2, 8).map((stay) => stay.days)).toEqual([3, 3, 2]);
+    expect(adjustCityStay(RETURN_ROUTE, 0, 1, 8).map((stay) => stay.days)).toEqual([4, 3, 1]);
+  });
+
+  it('takes the pool from the whole plan, counting both stays', () => {
+    // 7 of 7 placed, so there is nothing free and an increase must do nothing.
+    expect(adjustCityStay(RETURN_ROUTE, 0, 1, 7)).toEqual(RETURN_ROUTE);
+  });
+});
+
+describe('two stays in a row in the same city', () => {
+  it('merges them into one, because there is no Osaka to Osaka move', () => {
+    // Splitting these would invent a transfer day the traveller never makes,
+    // and a second leg that never goes anywhere.
+    expect(legsFromCityStays([{ city: 'Osaka', days: 2 }, { city: 'Osaka', days: 2 }], 4))
+      .toEqual([
+        { city: 'Osaka', startDay: 1, endDay: 4, days: 4, visitIndex: 1, legId: 'osaka#1' },
+      ]);
+  });
+
+  it('merges across a stay given no days at all', () => {
+    // Kyoto is on the list but unplaced, so Osaka is still adjacent to Osaka.
+    const legs = legsFromCityStays([
+      { city: 'Osaka', days: 2 },
+      { city: 'Kyoto', days: 0 },
+      { city: 'Osaka', days: 2 },
+    ], 4);
+    expect(legs.map((leg) => leg.legId)).toEqual(['osaka#1']);
+    expect(legs[0].days).toBe(4);
+  });
+
+  it('does not merge two stays a real leg apart', () => {
+    const legs = legsFromCityStays([
+      { city: 'Osaka', days: 2 },
+      { city: 'Kyoto', days: 1 },
+      { city: 'Osaka', days: 1 },
+    ], 4);
+    expect(legs.map((leg) => leg.legId)).toEqual(['osaka#1', 'kyoto#1', 'osaka#2']);
   });
 });
 

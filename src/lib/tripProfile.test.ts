@@ -75,3 +75,57 @@ describe('flight times captured on the profile', () => {
     );
   });
 });
+
+describe('a stay plan that returns to a city', () => {
+  const kansai = (overrides: Partial<TripProfile> = {}): TripProfile => ({
+    ...createEmptyProfile('MYR'),
+    destinations: [manualDestination('Osaka', 'Japan'), manualDestination('Kyoto', 'Japan')],
+    startDate: '2026-04-01',
+    endDate: '2026-04-07',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    cityStays: [
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Osaka', days: 1 },
+    ],
+    cityStayDayCount: 7,
+    ...overrides,
+  });
+
+  it('keeps both Osaka stays across a save and reload', () => {
+    // sanitizeTripProfile used to drop the repeat, which is where a complete
+    // seven-day plan quietly became an unfinished six-day one. The planner
+    // then read it as abandoned and inferred its own split instead.
+    const saved = JSON.parse(JSON.stringify(kansai()));
+    expect(sanitizeTripProfile(saved)?.cityStays).toEqual([
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Osaka', days: 1 },
+    ]);
+  });
+
+  it('reloads a plan that still adds up to the trip', () => {
+    const reloaded = sanitizeTripProfile(JSON.parse(JSON.stringify(kansai())));
+    const total = (reloaded?.cityStays ?? []).reduce((sum, stay) => sum + stay.days, 0);
+    expect(total).toBe(reloaded?.dayCount);
+  });
+
+  it('still refuses a stay in a city the trip does not have', () => {
+    // Membership is the check that stayed. Repeats are a route; Kobe is not
+    // on this trip at all.
+    const reloaded = sanitizeTripProfile(JSON.parse(JSON.stringify(kansai({
+      cityStays: [{ city: 'Osaka', days: 6 }, { city: 'Kobe', days: 1 }],
+    }))));
+    expect(reloaded?.cityStays).toEqual([{ city: 'Osaka', days: 6 }]);
+  });
+
+  it('leaves a plan with no repeats exactly as it was', () => {
+    const reloaded = sanitizeTripProfile(JSON.parse(JSON.stringify(kansai({
+      cityStays: [{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }],
+    }))));
+    expect(reloaded?.cityStays).toEqual([
+      { city: 'Osaka', days: 4 },
+      { city: 'Kyoto', days: 3 },
+    ]);
+  });
+});
