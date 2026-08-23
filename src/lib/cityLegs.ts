@@ -119,6 +119,39 @@ export function withLegIdentity(
 }
 
 /**
+ * Divide `total` things between legs in proportion to how long each one is.
+ *
+ * What a city is worth to a traveller is a fact about the city, but a stay can
+ * only use as much of it as it has days for. Three Osaka days and a single
+ * airport night are not equal claims on the same twelve Osaka places: they are
+ * a nine and a three. An even split would give the departure day as much to do
+ * as the whole first stay, which is exactly the unrealistic day this avoids.
+ *
+ * Largest remainder, so the parts always add back up to `total` — nothing is
+ * invented and nothing quietly disappears. Ties go to the earlier stay, so the
+ * result never depends on sort stability.
+ */
+export function shareByLegDays(total: number, legDays: number[]): number[] {
+  if (legDays.length === 0) return [];
+  const totalDays = legDays.reduce((sum, days) => sum + Math.max(0, days), 0);
+  if (total <= 0 || totalDays <= 0) return legDays.map(() => 0);
+
+  const exact = legDays.map((days) => (Math.max(0, days) / totalDays) * total);
+  const shares = exact.map((share) => Math.floor(share));
+  let left = total - shares.reduce((sum, share) => sum + share, 0);
+
+  const byRemainder = exact
+    .map((share, index) => ({ index, remainder: share - Math.floor(share) }))
+    .sort((a, b) => (b.remainder - a.remainder) || (a.index - b.index));
+
+  for (let cursor = 0; left > 0 && cursor < byRemainder.length; cursor += 1) {
+    shares[byRemainder[cursor].index] += 1;
+    left -= 1;
+  }
+  return shares;
+}
+
+/**
  * Divide `dayCount` days between `cities`, in order.
  *
  * Largest-remainder apportionment over the weights, with a floor of one day per

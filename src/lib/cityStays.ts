@@ -162,13 +162,61 @@ export function moveCityStay(stays: TripCityStay[], index: number, direction: -1
 }
 
 /**
+ * Whether the final stay is a return to somewhere the route has already been,
+ * for a single day — the shape of an airport night before a morning flight.
+ *
+ * Structural, not lexical: nothing here looks for the word "airport". What
+ * makes this stay different is that it is last, it is one day, and its city
+ * already had a real stay earlier in the trip. A traveller who ends where they
+ * began, for one night, is positioning for departure.
+ */
+export function isTerminalReturnStay(stays: TripCityStay[], index: number): boolean {
+  const placed = stays.filter((stay) => stay.days > 0);
+  const stay = stays[index];
+  if (!stay || stay.days !== 1) return false;
+  if (placed.length < 2 || stays[index] !== placed[placed.length - 1]) return false;
+  return placed
+    .slice(0, placed.length - 1)
+    .some((earlier) => cityKey(earlier.city) === cityKey(stay.city));
+}
+
+/**
+ * Which stay should absorb days a lengthened trip has spare.
+ *
+ * The last stay is the usual answer and stays the default — a trip extension
+ * normally means more time at the end. It is the wrong answer when the last
+ * stay is a one-day return to a city already visited: growing that turns a
+ * night by the airport into a three-day stay nobody asked for, in a city the
+ * traveller had already finished with.
+ *
+ * So a terminal return stay is skipped and the days go to the **longest**
+ * remaining stay, ties broken by route order so the result never depends on
+ * sort stability. Returns `-1` for a plan with nothing to grow.
+ */
+export function driftTargetIndex(stays: TripCityStay[]): number {
+  const indices = stays
+    .map((stay, index) => ({ stay, index }))
+    .filter((entry) => entry.stay.days > 0);
+  if (indices.length === 0) return -1;
+
+  const last = indices[indices.length - 1];
+  if (!isTerminalReturnStay(stays, last.index)) return last.index;
+
+  const eligible = indices.slice(0, indices.length - 1);
+  if (eligible.length === 0) return last.index;
+
+  return eligible.reduce((best, entry) => (entry.stay.days > best.stay.days ? entry : best)).index;
+}
+
+/**
  * Stretch or trim a plan to a trip whose length has changed.
  *
  * Adding a day to a trip that already has a stay plan must not throw the plan
  * away — the traveller placed those nights deliberately, and one extra day is
- * not a reason to re-decide the other eight. The extra days go to the **last**
- * stay, which is where a trip extension usually lands, and the caller says so.
- * Shortening takes days off the end for the same reason, and never below zero.
+ * not a reason to re-decide the other eight. The extra days go to whichever
+ * stay {@link driftTargetIndex} names — normally the last, but never a one-day
+ * return to a city the trip already finished with. Shortening still takes days
+ * off the end, because a shortened trip really does lose its final nights.
  *
  * This is a fallback for a plan the traveller has not revisited yet, not a
  * substitute for asking: the planner still says what it did, and the stay
@@ -183,10 +231,9 @@ export function fitCityStays(stays: TripCityStay[], dayCount: number): TripCityS
 
   if (total < dayCount) {
     const grown = [...placed];
-    grown[grown.length - 1] = {
-      ...grown[grown.length - 1],
-      days: grown[grown.length - 1].days + (dayCount - total),
-    };
+    const target = driftTargetIndex(grown);
+    if (target < 0) return placed;
+    grown[target] = { ...grown[target], days: grown[target].days + (dayCount - total) };
     return grown;
   }
 

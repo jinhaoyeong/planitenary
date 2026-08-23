@@ -26,14 +26,32 @@ import {
   type SimulatedDay,
 } from './humanScheduler';
 import { scorePlaces, STYLE_TAGS, type ScoringInputs } from './placeIntelligence';
-import { cityForDay as cityForLegDay, describeCityLegs, orderedCities, planCityLegs, type CityLeg } from './cityLegs';
-import { cityStayTotal, fitCityStays, legsFromCityStays, reconcileCityStays } from './cityStays';
+import {
+  cityForDay as cityForLegDay,
+  describeCityLegs,
+  legForDay,
+  orderedCities,
+  planCityLegs,
+  shareByLegDays,
+  type CityLeg,
+} from './cityLegs';
+import {
+  cityStayTotal,
+  driftTargetIndex,
+  fitCityStays,
+  legsFromCityStays,
+  reconcileCityStays,
+} from './cityStays';
 import { distanceMeters } from './placeIdentity';
 import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
 } from '../../supabase/functions/_shared/itineraryEdgeTiming';
-import { activityCitiesFrom, parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
+import {
+  activityCitiesFrom,
+  authorizedDayTransfer,
+  parseDayTransfer,
+} from '../../supabase/functions/_shared/dayCitySemantics';
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -1018,11 +1036,16 @@ export function buildDestinationItinerary(
     return !legCityKeys.has(cityKey(city)) && cityKey(dayTripBase(candidate)) === cityKey(legCity);
   };
   const cityOfDayIndex = (index: number) => cityForLegDay(legs, index + 1) || primaryCity;
-  const legOfDayIndex = (index: number) => {
-    const city = cityOfDayIndex(index);
-    const leg = legs.find((entry) => index + 1 >= entry.startDay && index + 1 <= entry.endDay);
-    return leg ? `${leg.startDay}-${leg.city}` : city;
-  };
+  /**
+   * Which stay a day belongs to, as an identity rather than a place name.
+   *
+   * The city alone cannot answer this on a route that returns somewhere: the
+   * first and last Osaka days would look like one stay, and a stop could drift
+   * across the Kyoto days between them. This used to be a positional key built
+   * here; it is now the leg's own id, so there is one format for it.
+   */
+  const legOfDayIndex = (index: number) =>
+    legForDay(legs, index + 1)?.legId ?? cityOfDayIndex(index);
   const transportMode = profile.transport.includes('public-transport')
     ? 'public transport'
     : 'walking / public transport';
@@ -1053,6 +1076,41 @@ export function buildDestinationItinerary(
    */
   const orderMustDoFirst = (cluster: PlaceCandidate[]) =>
     [...cluster].sort((a, b) => Number(mustDo.has(b.id)) - Number(mustDo.has(a.id)));
+
+  /**
+   * Which shortlisted places each stay may draw from.
+   *
+   * A city visited twice has one pool of places, one centre and one deck: the
+   * geography does not change because the traveller comes back. What changes is
+   * *when* a place can be scheduled, so a city's pool is divided between its
+   * stays in proportion to their length. Three Osaka days and a single airport
+   * night split twelve Osaka places nine and three — an even split would hand
+   * the departure day as much to do as the whole first stay.
+   *
+   * Dividing rather than sharing is also what stops one place being offered to
+   * both stays. A city visited once keeps its whole pool, which is every route
+   * the app could express before repeated stays existed.
+   */
+  const sightsForLeg = new Map<string, PlaceCandidate[]>();
+  const legsByCity = new Map<string, CityLeg[]>();
+  for (const leg of legs) {
+    const key = cityKey(leg.city);
+    legsByCity.set(key, [...(legsByCity.get(key) ?? []), leg]);
+  }
+  for (const cityLegs of legsByCity.values()) {
+    const pool = sights.filter((candidate) => belongsToLeg(candidate, cityLegs[0].city));
+    if (cityLegs.length === 1) {
+      sightsForLeg.set(cityLegs[0].legId, pool);
+      continue;
+    }
+    const shares = shareByLegDays(pool.length, cityLegs.map((leg) => leg.days));
+    let taken = 0;
+    cityLegs.forEach((leg, index) => {
+      sightsForLeg.set(leg.legId, pool.slice(taken, taken + shares[index]));
+      taken += shares[index];
+    });
+  }
+
   const clusters: PlaceCandidate[][] = Array.from({ length: dayCount }, () => []);
 
   if (legs.length === 0) {
@@ -1063,7 +1121,7 @@ export function buildDestinationItinerary(
     ).forEach((cluster, index) => { clusters[index] = cluster; });
   } else {
     for (const leg of legs) {
-      const legSights = sights.filter((candidate) => belongsToLeg(candidate, leg.city));
+      const legSights = sightsForLeg.get(leg.legId) ?? [];
       const legWetDays = (options.weatherRiskDays || [])
         .filter((day) => day >= leg.startDay && day <= leg.endDay)
         // `assignClustersToDays` counts from one *within the days it is given*.
@@ -1283,15 +1341,37 @@ export function buildDestinationItinerary(
       ...dayPlaces.map((place) => place.city),
     ], stayCity);
 
+    const dayActivities = [...protectedActivities, ...discoveredActivities]
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    /**
+     * A transfer is not something the stay plan can assert on its own.
+     *
+     * The plan is authority for *where the traveller sleeps*, and a new leg is
+     * built from it without argument. `transfer` says something stronger — that
+     * the traveller was carried from one city to another that day — and that
+     * stays the transport's claim to make. Deriving one from the leg boundary
+     * alone would hand every ordinary multi-city plan transfers nobody booked,
+     * and would quietly weaken the guard that stops a base moving unauthorized.
+     *
+     * The evidence is read from the day as it will be saved, not as it arrived:
+     * a transport row that this rebuild is about to drop cannot vouch for
+     * anything that outlives it.
+     */
+    const legOfDay = legForDay(legs, index + 1);
+    const startsALeg = Boolean(legOfDay && legOfDay.startDay === index + 1 && index > 0);
+    const transfer = parseDayTransfer(existing?.transfer, stayCity)
+      ?? (startsALeg ? authorizedDayTransfer(dayActivities, cityOfDayIndex(index - 1), stayCity) : undefined);
+
     days.push({
       day: existing?.day || index + 1,
       date: existing?.date || '',
       stayCity,
       activityCities,
-      transfer: parseDayTransfer(existing?.transfer, stayCity),
+      transfer,
       city: stayCity,
       title,
-      activities: [...protectedActivities, ...discoveredActivities].sort((a, b) => a.time.localeCompare(b.time)),
+      activities: dayActivities,
       photos: existing?.photos,
     });
     dayLoads.push(simulated.load);
@@ -1339,8 +1419,19 @@ export function buildDestinationItinerary(
    */
   if (stayPlanDrift !== 0 && legs.length > 0) {
     const lastCity = legs[legs.length - 1].city;
+    /**
+     * Name the stay that actually grew, not the last one.
+     *
+     * They are usually the same. They are not when the trip ends with a single
+     * night back where it started: those days go to the longest real stay
+     * instead, and a warning that named the departure city would send the
+     * traveller to fix the wrong row.
+     */
+    const placedStays = reconciledStays.filter((stay) => stay.days > 0);
+    const grownIndex = driftTargetIndex(placedStays);
+    const grownCity = grownIndex >= 0 ? placedStays[grownIndex].city : lastCity;
     warnings.add(stayPlanDrift > 0
-      ? `Your trip is ${stayPlanDrift} ${stayPlanDrift === 1 ? 'day' : 'days'} longer than your stay plan, so ${stayPlanDrift === 1 ? 'it was' : 'they were'} added to ${lastCity}. Change this in Settings if ${stayPlanDrift === 1 ? 'that day belongs' : 'those days belong'} elsewhere.`
+      ? `Your trip is ${stayPlanDrift} ${stayPlanDrift === 1 ? 'day' : 'days'} longer than your stay plan, so ${stayPlanDrift === 1 ? 'it was' : 'they were'} added to ${grownCity}. Change this in Settings if ${stayPlanDrift === 1 ? 'that day belongs' : 'those days belong'} elsewhere.`
       : `Your trip is ${Math.abs(stayPlanDrift)} ${Math.abs(stayPlanDrift) === 1 ? 'day' : 'days'} shorter than your stay plan, so the last ${Math.abs(stayPlanDrift) === 1 ? 'day was' : 'days were'} taken off the end. Change this in Settings if you would rather lose ${Math.abs(stayPlanDrift) === 1 ? 'a day' : 'days'} somewhere else.`);
   }
   if (droppedCities.length > 0) {
