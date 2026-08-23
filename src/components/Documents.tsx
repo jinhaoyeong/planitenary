@@ -694,13 +694,10 @@ export const Documents = ({ itineraryId = 'default' }: { itineraryId?: string })
             <FileText className="w-8 h-8 shrink-0" style={{ color: 'var(--accent)' }} />
             <div>
               <h2 className="font-display text-2xl md:text-3xl" style={{ color: 'var(--ink)' }}>
-                Documents
+                Documents are unavailable right now.
               </h2>
               <p className="mt-2 text-sm md:text-base leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                Add your Supabase URL and anon key in <code className="text-xs">.env.local</code>, then run{' '}
-                <code className="text-xs">supabase_documents.sql</code> in the Supabase SQL editor to
-                create the table, bucket, and sync rules. After that, PDFs and images you upload here
-                stay in sync for both of you.
+                Your trip is still safe. Continue planning and try this section again when shared document storage is available.
               </p>
             </div>
           </div>

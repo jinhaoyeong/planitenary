@@ -1751,19 +1751,21 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   if (selectedDay === null) {
     return (
       <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        {/* Search Bar */}
-        <div className="max-w-2xl mx-auto relative">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search className="h-5 w-5 text-slate-400" />
+        {/* Search is useful only after the itinerary has days to search. */}
+        {customItinerary.days.length > 0 && (
+          <div className="max-w-2xl mx-auto relative">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <Search className="h-5 w-5 text-slate-400" />
+            </div>
+            <input
+              type="text"
+              className="editorial-input block w-full" style={{ paddingLeft: '2.75rem' }}
+              placeholder={customItinerary.searchPlaceholder || 'Search itinerary, phrases, locations...'}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
-          <input
-            type="text"
-            className="editorial-input block w-full" style={{ paddingLeft: '2.75rem' }}
-            placeholder={customItinerary.searchPlaceholder || 'Search itinerary, phrases, locations...'}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
+        )}
 
         <div className="text-center space-y-4">
           <span className="eyebrow">{customItinerary.overviewEyebrow || 'The itinerary · day by day'}</span>
@@ -1800,7 +1802,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 }
               }}
             >
-              {customItinerary.name || `${customItinerary.days.length}-Day Adventure`}
+              {customItinerary.name || (customItinerary.days.length > 0 ? `${customItinerary.days.length}-Day Adventure` : 'Your itinerary')}
               {isEditingMode && <Edit2 className="w-5 h-5 opacity-50" />}
             </h2>
           )}
@@ -1809,6 +1811,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             <span>
               {customItinerary.overviewDescription ? (
                 customItinerary.overviewDescription
+              ) : customItinerary.days.length === 0 ? (
+                'Start with the trip settings, then shape each day at your own pace.'
               ) : (
                 <>
                   A slow, day-by-day field guide for <span className="font-display-italic">{customItinerary.cities.join(' & ')}</span> — good food, quiet sights, and enough breathing room to just wander.
@@ -2316,11 +2320,23 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           </Droppable>
         </DragDropContext>
         
-        {filteredDays.length === 0 && (
-          <div className="text-center py-20 text-slate-400">
-            No days found matching "{searchQuery}"
+        {customItinerary.days.length === 0 ? (
+          <section className="itinerary-zero-state" aria-labelledby="itinerary-zero-title">
+            <h3 id="itinerary-zero-title" className="font-display text-3xl md:text-4xl">Your itinerary is ready for its first day.</h3>
+            <p className="mt-3 max-w-xl text-sm md:text-base leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+              Add the trip dates and destinations first. Planitenary will turn them into a day-by-day handbook you can refine.
+            </p>
+            {onOpenTripSettings && (
+              <button type="button" className="pill-btn pill-primary mt-6" onClick={onOpenTripSettings}>
+                Set up itinerary days
+              </button>
+            )}
+          </section>
+        ) : filteredDays.length === 0 ? (
+          <div className="itinerary-filter-empty" role="status">
+            No itinerary days match “{searchQuery}”. Try a different search.
           </div>
-        )}
+        ) : null}
       </div>
     );
   }

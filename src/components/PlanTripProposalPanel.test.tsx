@@ -145,6 +145,18 @@ describe('Plan my trip proposal panel', () => {
     expect(mockedApply).not.toHaveBeenCalled();
   });
 
+  it('keeps truthful progress primary while reserving the approved Smart Plan artwork slot', async () => {
+    mockedPlan.mockImplementation(() => new Promise(() => {}));
+    const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" itinerary={plannedTrip} />);
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Improve day 1$/ }));
+
+    const progress = await screen.findByRole('progressbar', { name: 'Smart Plan progress' });
+    expect(progress).toHaveAttribute('aria-valuenow', '1');
+    expect(screen.getByText('Turning notes into a route.')).toBeInTheDocument();
+    expect(document.querySelector('[data-future-illustration="smart-plan-route"]')).toBeInTheDocument();
+  });
+
   /**
    * The catalogue replaces a row of chips that used to live on the itinerary
    * page. It must arrive compact: rows and chips, not one card per capability.

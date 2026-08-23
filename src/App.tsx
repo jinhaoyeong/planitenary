@@ -77,13 +77,8 @@ import {
 import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
-import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
-import defaultTravelHero from './assets/default-travel-hero.jpg';
 import { safeGetItem, safeSetItem } from './lib/safeLocalStorage';
-
-const heroImages = {
-  'cq-cd': cqCdHero
-};
+import { appShellVisualMode } from './lib/appVisualHierarchy';
 
 /**
  * Short decorative travel marks for the immersive hero. These are visual
@@ -263,6 +258,10 @@ function App() {
     [isDemoUser, demoItinerary, activeItineraryId],
   );
   const displayItinerary = customItinerary || activeItinerary;
+  const showFullTripHero = appShellVisualMode(activeTab) === 'full-hero';
+  const compactTripContext = displayItinerary.cities.length > 0
+    ? displayItinerary.cities.join(' · ')
+    : displayItinerary.name || 'Your travel handbook';
   const dayBadge = resolveDisplayedDayBadge(displayItinerary);
   const dayBadgeValue = dayBadge.value;
   const showDayBadge = dayBadge.visible || isHomeHeroEditing;
@@ -660,6 +659,7 @@ function App() {
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'profile', label: 'Profile', icon: UserRound },
   ] as const;
+  const activeSectionLabel = tabs.find((tab) => tab.id === activeTab)?.label || 'Trip';
 
   /** Documents/settings/profile appear in the hamburger Quick Menu on small screens, not the bottom pill. */
   const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos' && tab.id !== 'profile' && tab.id !== 'settings');
@@ -1240,7 +1240,9 @@ function App() {
       </header>
 
       {/* Hero — split editorial layout */}
+      {showFullTripHero ? <>
       <section
+        data-testid="full-trip-hero"
         className="handbook-home-hero max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-20 pb-8 md:pb-16"
         data-immersive={isImmersiveHero ? 'true' : undefined}
       >
@@ -1374,23 +1376,28 @@ function App() {
                 className="relative overflow-hidden handbook-cover-frame z-[1]"
                 data-cover-layout={visualIdentity?.coverLayout || 'journal'}
               >
-                {displayItinerary.cities.length > 0 ? (
-                  <img
-                    src={heroImages[activeItineraryId as keyof typeof heroImages] || defaultTravelHero}
-                    alt={displayItinerary.cities.join(' & ')}
-                    className="w-full h-[280px] md:h-[420px] object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-[280px] md:h-[420px] flex items-center justify-center text-center px-8" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink-muted)' }}>
-                    <span
-                      className="font-display-italic text-3xl cursor-text rounded px-1 outline-none focus:bg-white/10"
-                      contentEditable={isHomeHeroEditing}
-                      suppressContentEditableWarning
-                      onBlur={(event) => commitHeroText('coverHeadline', event.currentTarget.textContent || '')}
-                      title="Click to edit"
-                    >{displayItinerary.coverHeadline || 'Add a cover when your story takes shape.'}</span>
-                  </div>
-                )}
+                <div className="handbook-cover-fallback h-[280px] md:h-[420px] px-7 py-8 md:px-10 md:py-11">
+                  <span className="handbook-cover-fallback-label">
+                    {displayItinerary.coverLabel || 'Travel handbook'}
+                  </span>
+                  <span
+                    className="handbook-cover-fallback-title cursor-text rounded px-1 outline-none focus:bg-white/10"
+                    contentEditable={isHomeHeroEditing}
+                    suppressContentEditableWarning
+                    onBlur={(event) => commitHeroText('coverHeadline', event.currentTarget.textContent || '')}
+                    title="Click to edit"
+                  >
+                    {displayItinerary.coverHeadline || (displayItinerary.cities.length > 0
+                      ? displayItinerary.cities.join(' · ')
+                      : 'Your next journey')}
+                  </span>
+                  <span className="handbook-cover-fallback-meta">
+                    {displayItinerary.days.length > 0
+                      ? `${displayItinerary.days.length} ${displayItinerary.days.length === 1 ? 'day' : 'days'} · ${displayItinerary.cities.length || 1} ${displayItinerary.cities.length === 1 ? 'city' : 'cities'}`
+                      : 'A blank field guide, ready to take shape'}
+                  </span>
+                  <span className="handbook-cover-fallback-rule" aria-hidden="true" />
+                </div>
               </div>
               <div className="relative z-[2] flex items-center justify-between px-2 pt-3 pb-1">
                 <span className="font-display-italic text-lg" style={{ color: 'var(--ink)' }}>
@@ -1441,9 +1448,28 @@ function App() {
         items={displayItinerary.marqueeItems?.length ? displayItinerary.marqueeItems : DEFAULT_MARQUEE_ITEMS}
         onItemChange={isHomeHeroEditing ? (index, value) => commitMarqueeItem(index, value) : undefined}
       />
+      </> : (
+        <section
+          className="operational-chapter-header max-w-7xl mx-auto px-4 sm:px-6 md:px-10"
+          data-testid="compact-operational-header"
+          aria-label={`${activeSectionLabel} chapter`}
+        >
+          <div className="operational-chapter-header-inner">
+            <span className="operational-chapter-name">{activeSectionLabel}</span>
+            <span className="operational-chapter-context" title={compactTripContext}>{compactTripContext}</span>
+          </div>
+        </section>
+      )}
 
       {/* Main Content Area */}
-      <main id="main-content" data-adaptive-handbook-content="true" className="max-w-7xl mx-auto px-4 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10">
+      <main
+        id="main-content"
+        data-adaptive-handbook-content="true"
+        className={clsx(
+          'max-w-7xl mx-auto px-4 md:px-10 pb-24 md:pb-20 relative z-10',
+          showFullTripHero ? 'pt-8 md:pt-14' : 'pt-6 md:pt-8',
+        )}
+      >
         
         {/* Tab Content Wrapper with Glass Effect for overlapping sections */}
         <AnimatePresence mode="wait">

@@ -145,3 +145,29 @@ describe('reading day semantics in the itinerary cards', () => {
     expect(screen.getByText('Osaka')).toBeInTheDocument();
   });
 });
+
+describe('itinerary empty-state semantics', () => {
+  it('uses a dedicated zero-itinerary state with a setup action', () => {
+    const onOpenTripSettings = vi.fn();
+    render(
+      <ItineraryView
+        itinerary={{ ...emptyItinerary, id: 'empty-trip', name: '', cities: [], days: [] }}
+        onOpenTripSettings={onOpenTripSettings}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Your itinerary is ready for its first day.' })).toBeInTheDocument();
+    expect(screen.queryByText(/No days found matching/i)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Search itinerary/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Set up itinerary days' }));
+    expect(onOpenTripSettings).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a filtered-empty itinerary distinct from a trip with no days', () => {
+    render(<ItineraryView itinerary={trip()} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/Search itinerary/i), { target: { value: 'not-on-this-trip' } });
+    expect(screen.getByRole('status')).toHaveTextContent('No itinerary days match “not-on-this-trip”.');
+    expect(screen.queryByText('Your itinerary is ready for its first day.')).not.toBeInTheDocument();
+  });
+});
