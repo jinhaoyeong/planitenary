@@ -27,6 +27,7 @@ import {
 } from '../lib/plannerCapabilities';
 import { tripBudgetHint } from '../lib/tripBudgetHint';
 import type { Itinerary } from '../data';
+import smartPlanRouteIllustration from '../assets/illustrations/smart-plan-route.webp';
 
 interface PlanTripProposalPanelProps {
   tripId: string;
@@ -652,9 +653,16 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                           Day themes are drafted first. Planitenary then calculates clocks, routes, buffers, opening windows, and conflicts from your trip data.
                         </p>
                       </div>
-                      <div
-                        className="future-illustration-slot future-illustration-slot-smart-plan"
-                        data-future-illustration="smart-plan-route"
+                      <img
+                        src={smartPlanRouteIllustration}
+                        alt=""
+                        width={600}
+                        height={450}
+                        loading="lazy"
+                        decoding="async"
+                        draggable={false}
+                        className="editorial-illustration smart-plan-route-illustration"
+                        data-illustration="smart-plan-route"
                         aria-hidden="true"
                       />
                     </div>

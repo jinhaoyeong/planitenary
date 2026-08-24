@@ -3211,12 +3211,14 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   width: 100%;
 }
 
-/* Phase 1A reserves image proportions without inventing temporary artwork. */
-.future-illustration-slot {
-  width: 100%;
-  border: 1px dashed color-mix(in srgb, var(--accent) 32%, var(--border));
-  border-radius: var(--radius-media, 1rem);
-  background-color: color-mix(in srgb, var(--accent-soft) 36%, var(--bg));
+/* Editorial illustrations stay transparent so the surrounding theme remains authoritative. */
+.editorial-illustration {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
 }
 
 .trip-empty-state {
@@ -3233,9 +3235,9 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   max-width: 36rem;
 }
 
-.future-illustration-slot-trip {
+.trip-empty-illustration {
   width: min(100%, 13.75rem);
-  aspect-ratio: 3 / 2;
+  justify-self: center;
 }
 
 .trip-dashboard-hero {
@@ -3305,9 +3307,8 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   font-size: 1rem;
 }
 
-.future-illustration-slot-welcome {
+.welcome-field-guide-illustration {
   width: min(100%, 13.75rem);
-  aspect-ratio: 1;
   justify-self: center;
 }
 
@@ -3326,9 +3327,8 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   min-width: 0;
 }
 
-.future-illustration-slot-smart-plan {
-  width: min(100%, 17.5rem);
-  aspect-ratio: 4 / 3;
+.smart-plan-route-illustration {
+  width: min(100%, 10rem);
   justify-self: center;
 }
 
@@ -3950,7 +3950,7 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
     gap: 4rem;
   }
 
-  .future-illustration-slot-trip {
+  .trip-empty-illustration {
     width: 100%;
   }
 }
@@ -3960,17 +3960,21 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
     grid-template-columns: minmax(0, 1fr) minmax(20rem, 30rem);
   }
 
-  .future-illustration-slot-welcome {
+  .welcome-field-guide-illustration {
     width: min(100%, 30rem);
   }
 
   .smart-plan-loading-state {
     grid-template-columns: minmax(0, 1fr) minmax(13rem, 17.5rem);
   }
+
+  .smart-plan-route-illustration {
+    width: min(100%, 17.5rem);
+  }
 }
 
 @media (max-height: 700px) {
-  .future-illustration-slot-smart-plan {
+  .smart-plan-route-illustration {
     display: none;
   }
 

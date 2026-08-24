@@ -12,6 +12,7 @@ import type { Itinerary } from '../data';
 import { tripStorageCleanupKeys } from '../lib/tripDeletion';
 import { pruneOrphanTripStorage } from '../lib/tripStorageOrphans';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
+import tripEmptyIllustration from '../assets/illustrations/trip-empty.webp';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -364,9 +365,16 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                 Plan a new trip
               </button>
             </div>
-            <div
-              className="future-illustration-slot future-illustration-slot-trip"
-              data-future-illustration="trip-empty"
+            <img
+              src={tripEmptyIllustration}
+              alt=""
+              width={640}
+              height={427}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              className="editorial-illustration trip-empty-illustration"
+              data-illustration="trip-empty"
               aria-hidden="true"
             />
           </section>

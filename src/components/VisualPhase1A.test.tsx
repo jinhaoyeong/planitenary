@@ -23,12 +23,17 @@ beforeEach(() => {
 });
 
 describe('Visual Phase 1A entry states', () => {
-  it('keeps the first-trip CTA primary and reserves the approved 3:2 asset slot', async () => {
+  it('keeps the first-trip CTA primary and renders the decorative 3:2 illustration only in the empty state', async () => {
     render(<TripDashboard onOpenTrip={vi.fn()} onOpenProfile={vi.fn()} />);
 
     expect(await screen.findByRole('heading', { name: 'Your first trip starts here.' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Plan a new trip' })).toBeInTheDocument();
-    expect(document.querySelector('[data-future-illustration="trip-empty"]')).toBeInTheDocument();
+    const illustration = document.querySelector<HTMLImageElement>('img[data-illustration="trip-empty"]');
+    expect(illustration).toBeInTheDocument();
+    expect(illustration).toHaveAttribute('alt', '');
+    expect(illustration).toHaveAttribute('aria-hidden', 'true');
+    expect(illustration).toHaveAttribute('width', '640');
+    expect(illustration).toHaveAttribute('height', '427');
   });
 
   it('leaves a populated trip shelf free of the empty illustration slot', async () => {
@@ -46,18 +51,23 @@ describe('Visual Phase 1A entry states', () => {
 
     expect(await screen.findByText('Osaka in autumn')).toBeInTheDocument();
     await waitFor(() => {
-      expect(document.querySelector('[data-future-illustration="trip-empty"]')).not.toBeInTheDocument();
+      expect(document.querySelector('img[data-illustration="trip-empty"]')).not.toBeInTheDocument();
     });
   });
 
-  it('keeps Welcome copy and CTA ahead of its secondary artwork slot', () => {
+  it('keeps Welcome copy and CTA ahead of its decorative illustration', () => {
     const { container } = render(<WelcomeScreen onStart={vi.fn()} />);
     const action = screen.getByRole('button', { name: 'Continue to account' });
-    const slot = container.querySelector('[data-future-illustration="welcome-field-guide"]');
+    const illustration = container.querySelector<HTMLImageElement>('img[data-illustration="welcome-field-guide"]');
 
     expect(screen.getByRole('heading', { name: /Hello,\s*wanderers\./i })).toBeInTheDocument();
     expect(action).toBeInTheDocument();
-    expect(slot).toBeInTheDocument();
-    expect(action.compareDocumentPosition(slot as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(illustration).toBeInTheDocument();
+    expect(illustration).toHaveAttribute('alt', '');
+    expect(illustration).toHaveAttribute('aria-hidden', 'true');
+    expect(illustration).toHaveAttribute('loading', 'eager');
+    expect(illustration).toHaveAttribute('width', '960');
+    expect(illustration).toHaveAttribute('height', '960');
+    expect(action.compareDocumentPosition(illustration as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
