@@ -23,7 +23,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, LayoutDashboard, UserRound, Settings, Save } from 'lucide-react';
+import { MoreHorizontal, X, Moon, Sun, RefreshCw, LayoutDashboard, Save } from 'lucide-react';
 import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
@@ -79,6 +79,8 @@ import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
 import { safeGetItem, safeSetItem } from './lib/safeLocalStorage';
 import { appShellVisualMode } from './lib/appVisualHierarchy';
+import { ALL_NAV_ITEMS, MORE_NAV_GROUPS, PRIMARY_NAV_ITEMS, isMoreNavigationTab } from './lib/appNavigation';
+import type { AppTabId } from './lib/appNavigation';
 
 /**
  * Short decorative travel marks for the immersive hero. These are visual
@@ -128,7 +130,6 @@ interface CloudBackupVersion {
   summaryText: string;
 }
 
-
 function App() {
   const {
     user,
@@ -141,9 +142,12 @@ function App() {
   } = useAuth();
   const [selectedTripId, setSelectedTripId] = useState<string | null>(() => isDemoUser ? 'cq-cd' : null);
   const activeItineraryId = isDemoUser ? 'cq-cd' : (selectedTripId ?? 'pending-trip');
-  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'profile' | 'settings'>('itinerary');
+  const [activeTab, setActiveTab] = useState<AppTabId>('itinerary');
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const desktopMoreTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileMoreTriggerRef = useRef<HTMLButtonElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const [showWelcome, setShowWelcome] = useState(() => !safeGetItem('hasVisited'));
   const [showPets, setShowPets] = useState(() => {
     const stored = safeGetItem('showPets');
@@ -596,11 +600,14 @@ function App() {
       const headerHeight = header ? header.getBoundingClientRect().height : 0;
       
       const targetElement = targetId ? document.getElementById(targetId) : null;
+      const operationalTab = appShellVisualMode(newTab) === 'compact-chapter';
       const targetY = targetElement
         ? Math.max(0, targetElement.getBoundingClientRect().top + window.scrollY - headerHeight - 16)
-        : mainContent
-          ? Math.max(0, mainContent.getBoundingClientRect().top + window.scrollY - headerHeight - 8)
-        : 0;
+        : operationalTab
+          ? 0
+          : mainContent
+            ? Math.max(0, mainContent.getBoundingClientRect().top + window.scrollY - headerHeight - 8)
+            : 0;
         
       const startY = window.scrollY;
       const distance = Math.abs(targetY - startY);
@@ -648,22 +655,64 @@ function App() {
     }, 50); // 50ms delay lets the new tab's DOM render first so heights are accurate
   };
 
-  const tabs = [
-    { id: 'itinerary', label: 'Itinerary', icon: Calendar },
-    { id: 'maps', label: 'Maps', icon: Map },
-    { id: 'draft', label: 'Draft', icon: BookOpen },
-    { id: 'budget', label: 'Budget', icon: Wallet },
-    { id: 'checklist', label: 'Checklist', icon: CheckSquare },
-    { id: 'documents', label: 'Documents', icon: FileText },
-    { id: 'photos', label: 'Photo Wall', icon: ImageIcon },
-    { id: 'settings', label: 'Settings', icon: Settings },
-    { id: 'profile', label: 'Profile', icon: UserRound },
-  ] as const;
-  const activeSectionLabel = tabs.find((tab) => tab.id === activeTab)?.label || 'Trip';
+  const activeSectionLabel = ALL_NAV_ITEMS.find((tab) => tab.id === activeTab)?.label || 'Trip';
+  const isMoreActive = isMoreNavigationTab(activeTab);
 
-  /** Documents/settings/profile appear in the hamburger Quick Menu on small screens, not the bottom pill. */
-  const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos' && tab.id !== 'profile' && tab.id !== 'settings');
-  const desktopTabs = tabs.filter((tab) => tab.id !== 'settings' && tab.id !== 'profile');
+  const focusMoreTrigger = useCallback(() => {
+    const visibleTrigger = [mobileMoreTriggerRef.current, desktopMoreTriggerRef.current]
+      .find((trigger) => trigger && trigger.getClientRects().length > 0);
+    visibleTrigger?.focus();
+  }, []);
+
+  const closeMoreMenu = useCallback((restoreFocus = true) => {
+    setIsMenuOpen(false);
+    if (restoreFocus) {
+      window.setTimeout(focusMoreTrigger, 0);
+    }
+  }, [focusMoreTrigger]);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    const getFocusableElements = () => Array.from(
+      moreMenuRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+      ) || [],
+    ).filter((element) => element.getClientRects().length > 0);
+
+    const focusFirstItem = () => getFocusableElements()[0]?.focus();
+    const focusTimer = window.setTimeout(focusFirstItem, 0);
+    const handleMenuKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMoreMenu();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = getFocusableElements();
+      if (!focusableElements.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleMenuKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('keydown', handleMenuKeyDown);
+    };
+  }, [closeMoreMenu, isMenuOpen]);
 
   const buildCloudSnapshot = async (): Promise<CloudBackupSnapshot> => {
     const itineraryData = loadFromStorage<Itinerary>(itineraryStorageKey) || customItinerary || activeItinerary;
@@ -1131,8 +1180,9 @@ function App() {
               }
             }}
             className="app-primary-nav hidden xl:flex items-center gap-1"
+            aria-label="Primary travel navigation"
           >
-            {desktopTabs.map(tab => (
+            {PRIMARY_NAV_ITEMS.map(tab => (
               <motion.button
                 key={tab.id}
                 variants={{
@@ -1140,8 +1190,9 @@ function App() {
                   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } }
                 }}
                 onClick={() => handleTabChange(tab.id)}
-                className="relative shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold tracking-tight transition-colors"
+                className="relative shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#14110F]"
                 style={{ color: activeTab === tab.id ? 'var(--ink)' : 'var(--ink-muted)' }}
+                aria-current={activeTab === tab.id ? 'page' : undefined}
               >
                 {tab.label}
                 {activeTab === tab.id && (
@@ -1153,6 +1204,34 @@ function App() {
                 )}
               </motion.button>
             ))}
+            <motion.button
+              ref={desktopMoreTriggerRef}
+              type="button"
+              variants={{
+                hidden: { opacity: 0, y: -10 },
+                visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+              }}
+              onClick={() => setIsMenuOpen(true)}
+              className={clsx(
+                'relative inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#14110F]',
+                isMoreActive ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]',
+              )}
+              aria-label="More navigation"
+              aria-haspopup="dialog"
+              aria-expanded={isMenuOpen}
+              aria-controls="planitenary-more-menu"
+              data-active={isMoreActive ? 'true' : undefined}
+            >
+              <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
+              <span>More</span>
+              {isMoreActive && (
+                <motion.span
+                  layoutId="nav-underline"
+                  className="absolute left-3 right-3 -bottom-1 h-[3px] rounded-full"
+                  style={{ backgroundColor: 'var(--accent)' }}
+                />
+              )}
+            </motion.button>
           </motion.nav>
 
           {/*
@@ -1184,57 +1263,6 @@ function App() {
               reachable from Quick Menu, and duplicating them in the bar was what
               squeezed the trip name into three wrapped lines on a phone.
             */}
-            <div className="app-utility-cluster">
-              <motion.button
-                onClick={toggleTheme}
-                className="hidden sm:inline-flex"
-                style={{ color: 'var(--ink)' }}
-                aria-label="Toggle theme"
-                whileTap={{ scale: 0.9, rotate: -12 }}
-              >
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </motion.button>
-              <motion.button
-                onClick={openRestoreModal}
-                className="hidden xl:inline-flex"
-                style={{ color: 'var(--ink)' }}
-                whileTap={{ scale: 0.95 }}
-                aria-label="Restore backup"
-                title="Restore backup"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </motion.button>
-              <motion.button
-                onClick={() => handleTabChange('settings')}
-                className="hidden xl:inline-flex"
-                style={{ color: activeTab === 'settings' ? 'var(--accent)' : 'var(--ink)' }}
-                whileTap={{ scale: 0.9 }}
-                aria-label="Open app settings"
-                title="App settings"
-              >
-                <Settings className="w-4 h-4" />
-              </motion.button>
-              <motion.button
-                onClick={() => handleTabChange('profile')}
-                className="hidden xl:inline-flex"
-                style={{ color: activeTab === 'profile' ? 'var(--accent)' : 'var(--ink)' }}
-                whileTap={{ scale: 0.9 }}
-                aria-label="Open profile settings"
-                title="Profile settings"
-              >
-                <UserRound className="w-4 h-4" />
-              </motion.button>
-              <motion.button
-                className="inline-flex xl:hidden"
-                style={{ color: 'var(--ink)' }}
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
-                whileTap={{ scale: 0.9 }}
-                aria-label="Menu"
-                aria-expanded={isMenuOpen}
-              >
-                {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-              </motion.button>
-            </div>
           </div>
         </div>
       </header>
@@ -1657,23 +1685,25 @@ function App() {
 
       {/* Mobile Bottom Nav — cream pill with pink active circle */}
       {!isMenuOpen && (
-      <div className="md:hidden fixed bottom-[calc(1rem+var(--app-safe-bottom))] left-4 right-4 z-50">
+      <div className="xl:hidden fixed bottom-[calc(1rem+var(--app-safe-bottom))] left-4 right-4 z-50">
         <nav
-          className="flex justify-between items-center p-2 rounded-full"
+          className="flex justify-between items-center gap-1 p-2 rounded-full"
           style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lift)' }}
+          aria-label="Primary travel navigation"
         >
-          {tabsMobileBottom.map(tab => {
+          {PRIMARY_NAV_ITEMS.map(tab => {
             const active = activeTab === tab.id;
             return (
               <motion.button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
-                className="relative flex-1 flex flex-col items-center justify-center py-1.5 rounded-full min-w-0"
+                className="relative flex-1 flex flex-col items-center justify-center gap-0.5 py-1 rounded-full min-w-0 min-h-[3.25rem] px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
                 whileTap={{ scale: 0.9 }}
                 aria-label={tab.label}
+                aria-current={active ? 'page' : undefined}
               >
                 <div
-                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-colors shrink-0"
+                  className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0"
                   style={{
                     backgroundColor: active ? 'var(--accent)' : 'transparent',
                     color: active ? 'var(--accent-ink)' : 'var(--ink-muted)',
@@ -1681,9 +1711,40 @@ function App() {
                 >
                   <tab.icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
                 </div>
+                <span className="text-[0.65rem] font-semibold leading-none truncate max-w-full" style={{ color: active ? 'var(--ink)' : 'var(--ink-muted)' }}>
+                  {tab.label}
+                </span>
               </motion.button>
             );
           })}
+          <motion.button
+            ref={mobileMoreTriggerRef}
+            type="button"
+            onClick={() => setIsMenuOpen(true)}
+            className={clsx(
+              'relative flex-1 flex flex-col items-center justify-center gap-0.5 py-1 rounded-full min-w-0 min-h-[3.25rem] px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset',
+              isMoreActive && 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]',
+            )}
+            whileTap={{ scale: 0.9 }}
+            aria-label="More navigation"
+            aria-haspopup="dialog"
+            aria-expanded={isMenuOpen}
+            aria-controls="planitenary-more-menu"
+            data-active={isMoreActive ? 'true' : undefined}
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0"
+              style={{
+                backgroundColor: isMoreActive ? 'var(--accent)' : 'transparent',
+                color: isMoreActive ? 'var(--accent-ink)' : 'var(--ink-muted)',
+              }}
+            >
+              <MoreHorizontal className="w-5 h-5" strokeWidth={isMoreActive ? 2.5 : 2} aria-hidden="true" />
+            </div>
+            <span className="text-[0.65rem] font-semibold leading-none truncate max-w-full" style={{ color: isMoreActive ? 'var(--ink)' : 'var(--ink-muted)' }}>
+              More
+            </span>
+          </motion.button>
         </nav>
       </div>
       )}
@@ -1695,25 +1756,31 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 xl:hidden flex items-start justify-center px-4 pt-[calc(5rem+var(--app-safe-top))]"
-            onClick={() => setIsMenuOpen(false)}
+            className="fixed inset-0 z-40 flex items-start justify-center xl:justify-end px-4 xl:px-8 pt-[calc(5rem+var(--app-safe-top))]"
+            onClick={() => closeMoreMenu()}
           >
             <motion.div
+              ref={moreMenuRef}
               initial={{ opacity: 0, y: -10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.98 }}
-              className="w-full max-w-sm rounded-3xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl p-4 space-y-3"
+              id="planitenary-more-menu"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="planitenary-more-menu-title"
+              tabIndex={-1}
+              className="w-full max-w-sm xl:max-w-md max-h-[calc(100dvh-6rem)] overflow-y-auto rounded-3xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl p-4 sm:p-5 space-y-4"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Quick Menu</h2>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Navigation shortcuts</p>
+                  <h2 id="planitenary-more-menu-title" className="font-display text-2xl leading-none" style={{ color: 'var(--ink)' }}>More</h2>
+                  <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>Trip tools and app settings</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsMenuOpen(false)}
-                  className="inline-flex items-center justify-center rounded-full p-2 transition-colors hover:bg-slate-100 dark:hover:bg-white/10"
+                  onClick={() => closeMoreMenu()}
+                  className="inline-flex items-center justify-center rounded-full p-2 transition-colors hover:bg-slate-100 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                   style={{
                     color: 'var(--ink)',
                     border: '1px solid var(--border)',
@@ -1725,42 +1792,76 @@ function App() {
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                {tabs.map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      handleTabChange(tab.id);
-                      setIsMenuOpen(false);
-                    }}
-                    className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 p-3 rounded-xl flex flex-col items-center gap-2 transition-colors border border-slate-200 dark:border-slate-700"
-                  >
-                    <tab.icon className="w-5 h-5 text-rose-500" />
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{tab.label}</span>
-                  </button>
+              <div className="space-y-4">
+                {MORE_NAV_GROUPS.map((group) => (
+                  <section key={group.label} aria-labelledby={`more-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+                    <h3
+                      id={`more-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                      className="eyebrow mb-1.5 px-2"
+                    >
+                      {group.label}
+                    </h3>
+                    <div className="space-y-1">
+                      {group.items.map((item) => {
+                        const active = activeTab === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              handleTabChange(item.id);
+                              closeMoreMenu();
+                            }}
+                            className={clsx(
+                              'w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+                              active
+                                ? 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]'
+                                : 'hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)]',
+                            )}
+                            style={{ color: active ? 'var(--ink)' : 'var(--ink-muted)' }}
+                            aria-current={active ? 'page' : undefined}
+                            data-active={active ? 'true' : undefined}
+                          >
+                            <item.icon className="w-5 h-5 shrink-0" strokeWidth={active ? 2.5 : 2} aria-hidden="true" />
+                            <span className={clsx('text-sm', active ? 'font-semibold' : 'font-medium')}>{item.label}</span>
+                            {active && <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--accent)' }} aria-hidden="true" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
                 ))}
+
+                <section aria-labelledby="more-group-preferences-actions">
+                  <h3 id="more-group-preferences-actions" className="eyebrow mb-1.5 px-2">Preferences &amp; actions</h3>
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={toggleTheme}
+                      className="w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                      style={{ color: 'var(--ink-muted)' }}
+                    >
+                      {theme === 'dark' ? <Sun className="w-5 h-5 shrink-0" aria-hidden="true" /> : <Moon className="w-5 h-5 shrink-0" aria-hidden="true" />}
+                      <span className="text-sm font-medium">{theme === 'dark' ? 'Switch to light' : 'Switch to dark'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeMoreMenu(false);
+                        openRestoreModal();
+                      }}
+                      className="w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                      style={{ color: 'var(--ink-muted)' }}
+                    >
+                      <RefreshCw className="w-5 h-5 shrink-0" aria-hidden="true" />
+                      <span className="text-sm font-medium">Restore backup</span>
+                    </button>
+                  </div>
+                  <p className="text-[0.7rem] leading-relaxed mt-2 px-2" style={{ color: 'var(--ink-muted)' }}>
+                    Install options appear here when the browser makes them available.
+                  </p>
+                </section>
               </div>
-
-              {/* The header hides the theme toggle on phones, so it lives here. */}
-              <button
-                onClick={toggleTheme}
-                className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-colors"
-                style={{ color: 'var(--ink)', borderColor: 'var(--border)' }}
-              >
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                {theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-              </button>
-
-              <button
-                onClick={() => {
-                  openRestoreModal();
-                  setIsMenuOpen(false);
-                }}
-                className="w-full px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 rounded-xl text-sm font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors flex items-center justify-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Restore Backup Data
-              </button>
             </motion.div>
           </motion.div>
         )}
