@@ -125,6 +125,22 @@ beforeEach(() => {
 });
 
 describe('Plan my trip proposal panel', () => {
+  it('renders the approved Smart Plan illustration only while planning is loading', async () => {
+    mockedPlan.mockImplementation(() => new Promise(() => {}));
+    const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" itinerary={plannedTrip} />);
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Improve day 1$/ }));
+
+    await waitFor(() => {
+      const illustration = document.querySelector<HTMLImageElement>('img[data-illustration="smart-plan-route"]');
+      expect(illustration).toBeInTheDocument();
+      expect(illustration).toHaveAttribute('alt', '');
+      expect(illustration).toHaveAttribute('aria-hidden', 'true');
+      expect(illustration).toHaveAttribute('width', '600');
+      expect(illustration).toHaveAttribute('height', '450');
+    });
+  });
+
   it('opens Smart plan without generating a proposal', async () => {
     const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" />);
     fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));

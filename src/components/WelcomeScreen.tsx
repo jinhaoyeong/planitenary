@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
+import welcomeFieldGuideIllustration from '../assets/illustrations/welcome-field-guide.webp';
 
 export const WelcomeScreen = ({ onStart }: { onStart: () => void }) => {
   return (
@@ -54,6 +55,18 @@ export const WelcomeScreen = ({ onStart }: { onStart: () => void }) => {
           Continue to account
           <ArrowRight className="w-5 h-5" />
         </button>
+        <img
+          src={welcomeFieldGuideIllustration}
+          alt=""
+          width={960}
+          height={960}
+          loading="eager"
+          decoding="async"
+          draggable={false}
+          className="reduced-welcome-illustration"
+          data-illustration="welcome-field-guide"
+          aria-hidden="true"
+        />
       </motion.div>
     </motion.div>
   );

@@ -4030,3 +4030,47 @@ html[data-design-recipe='modern-metropolitan'] [data-adaptive-handbook] .handboo
   padding-right: 2rem;
   background-position: right 0.6rem center;
 }
+
+/* The approved editorial assets are deliberately scoped to their existing
+   entry/loading states; they do not alter the rest of the product shell. */
+.reduced-trip-empty-illustration,
+.reduced-welcome-illustration,
+.reduced-smart-plan-illustration {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.reduced-trip-empty-illustration {
+  width: min(100%, 14rem);
+  margin: 2rem auto 0;
+}
+
+.reduced-welcome-illustration {
+  width: min(100%, 14rem);
+  margin: 2rem auto 0;
+}
+
+.reduced-smart-plan-illustration {
+  width: min(100%, 11rem);
+  margin: 2rem auto 0;
+}
+
+@media (min-width: 768px) {
+  .reduced-trip-empty-illustration,
+  .reduced-welcome-illustration {
+    width: min(100%, 20rem);
+  }
+
+  .reduced-smart-plan-illustration {
+    width: min(100%, 17.5rem);
+  }
+}
+
+@media (max-height: 700px) {
+  .reduced-smart-plan-illustration {
+    display: none;
+  }
+}

@@ -12,6 +12,7 @@ import type { Itinerary } from '../data';
 import { tripStorageCleanupKeys } from '../lib/tripDeletion';
 import { pruneOrphanTripStorage } from '../lib/tripStorageOrphans';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
+import tripEmptyIllustration from '../assets/illustrations/trip-empty.webp';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -361,6 +362,18 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
             >
               Plan a new trip
             </button>
+            <img
+              src={tripEmptyIllustration}
+              alt=""
+              width={640}
+              height={427}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              className="reduced-trip-empty-illustration"
+              data-illustration="trip-empty"
+              aria-hidden="true"
+            />
           </> : <>
             <Archive className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
             <h2 className="font-display text-3xl">No archived trips.</h2>
