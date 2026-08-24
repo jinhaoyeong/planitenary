@@ -23,7 +23,7 @@ const getAuthErrorMessage = (err: AuthError | null | undefined) => {
   const code = err?.code ?? '';
 
   if (message.includes('Failed to fetch')) {
-    return 'Planitenary could not reach the account service. Check your connection and try again.';
+    return 'Connection failed. Restart the dev server after editing `.env`, then try again.';
   }
 
   if (code === 'otp_expired' || message.toLowerCase().includes('link is invalid or has expired')) {
@@ -119,11 +119,11 @@ export const Auth = () => {
           if (import.meta.env.DEV) {
             const localSignIn = signInLocal(email, password);
             if (localSignIn.success) {
-              setLocalFallbackMessage('Local test account active. Cloud sync is unavailable, so this account is stored on this device only.');
+              setLocalFallbackMessage('Local test account active. Supabase was not configured, so this account is stored on this device only.');
               return;
             }
           }
-          setError('Account access is unavailable in this build. You can continue with the demo or try again later.');
+          setError('Cloud authentication is not configured. Add the Supabase environment variables before signing in.');
           return;
         }
 
@@ -134,12 +134,12 @@ export const Auth = () => {
           if (import.meta.env.DEV) {
             const localSignUp = signUpLocal(email, password);
             if (localSignUp.success) {
-              setLocalFallbackMessage('Local test account created. Cloud sync is unavailable, so this account is stored on this device only.');
+              setLocalFallbackMessage('Local test account created. Supabase was not configured, so this account is stored on this device only.');
             } else {
               setError(localSignUp.error || 'Unable to create local test account.');
             }
           } else {
-            setError('Account creation is unavailable in this build. You can continue with the demo or try again later.');
+            setError('Cloud authentication is not configured. Add the Supabase environment variables before creating an account.');
           }
           return;
         }
@@ -169,8 +169,8 @@ export const Auth = () => {
         if (localResult.success) {
           setLocalFallbackMessage(
             isLogin
-              ? 'Local test account active. Cloud sync is unavailable, so this account is stored on this device only.'
-              : 'Local test account created. Cloud signup is unavailable, so this account is stored on this device only.',
+              ? 'Local test account active. Supabase was unavailable, so this account is stored on this device only.'
+              : 'Local test account created. Supabase signup was unavailable, so this account is stored on this device only.',
           );
           return;
         }
@@ -321,7 +321,7 @@ export const Auth = () => {
           <form onSubmit={handleSubmit} className="mt-8 space-y-5 text-left">
             {!supabaseReady && (
               <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-sm">
-                Account access is unavailable in this build. You can still explore Planitenary with the demo.
+                Cloud auth needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` before you can create or access an account.
               </div>
             )}
             {error && (

@@ -23,7 +23,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { Download, MoreHorizontal, X, Moon, Sun, RefreshCw, LayoutDashboard, Save } from 'lucide-react';
+import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, LayoutDashboard, UserRound, Settings, Save } from 'lucide-react';
 import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
@@ -77,10 +77,13 @@ import {
 import { resolveDisplayedDayBadge } from './lib/trips';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
+import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
+import defaultTravelHero from './assets/default-travel-hero.jpg';
 import { safeGetItem, safeSetItem } from './lib/safeLocalStorage';
-import { appShellVisualMode } from './lib/appVisualHierarchy';
-import { ALL_NAV_ITEMS, MORE_NAV_GROUPS, PRIMARY_NAV_ITEMS, isMoreNavigationTab } from './lib/appNavigation';
-import type { AppTabId } from './lib/appNavigation';
+
+const heroImages = {
+  'cq-cd': cqCdHero
+};
 
 /**
  * Short decorative travel marks for the immersive hero. These are visual
@@ -130,10 +133,6 @@ interface CloudBackupVersion {
   summaryText: string;
 }
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
 
 function App() {
   const {
@@ -147,13 +146,9 @@ function App() {
   } = useAuth();
   const [selectedTripId, setSelectedTripId] = useState<string | null>(() => isDemoUser ? 'cq-cd' : null);
   const activeItineraryId = isDemoUser ? 'cq-cd' : (selectedTripId ?? 'pending-trip');
-  const [activeTab, setActiveTab] = useState<AppTabId>('itinerary');
+  const [activeTab, setActiveTab] = useState<'itinerary' | 'draft' | 'budget' | 'maps' | 'checklist' | 'documents' | 'photos' | 'profile' | 'settings'>('itinerary');
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const desktopMoreTriggerRef = useRef<HTMLButtonElement>(null);
-  const mobileMoreTriggerRef = useRef<HTMLButtonElement>(null);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
   const [showWelcome, setShowWelcome] = useState(() => !safeGetItem('hasVisited'));
   const [showPets, setShowPets] = useState(() => {
     const stored = safeGetItem('showPets');
@@ -268,10 +263,6 @@ function App() {
     [isDemoUser, demoItinerary, activeItineraryId],
   );
   const displayItinerary = customItinerary || activeItinerary;
-  const showFullTripHero = appShellVisualMode(activeTab) === 'full-hero';
-  const compactTripContext = displayItinerary.cities.length > 0
-    ? displayItinerary.cities.join(' · ')
-    : displayItinerary.name || 'Your travel handbook';
   const dayBadge = resolveDisplayedDayBadge(displayItinerary);
   const dayBadgeValue = dayBadge.value;
   const showDayBadge = dayBadge.visible || isHomeHeroEditing;
@@ -606,14 +597,11 @@ function App() {
       const headerHeight = header ? header.getBoundingClientRect().height : 0;
       
       const targetElement = targetId ? document.getElementById(targetId) : null;
-      const operationalTab = appShellVisualMode(newTab) === 'compact-chapter';
       const targetY = targetElement
         ? Math.max(0, targetElement.getBoundingClientRect().top + window.scrollY - headerHeight - 16)
-        : operationalTab
-          ? 0
-          : mainContent
-            ? Math.max(0, mainContent.getBoundingClientRect().top + window.scrollY - headerHeight - 8)
-            : 0;
+        : mainContent
+          ? Math.max(0, mainContent.getBoundingClientRect().top + window.scrollY - headerHeight - 8)
+        : 0;
         
       const startY = window.scrollY;
       const distance = Math.abs(targetY - startY);
@@ -661,89 +649,21 @@ function App() {
     }, 50); // 50ms delay lets the new tab's DOM render first so heights are accurate
   };
 
-  const activeSectionLabel = ALL_NAV_ITEMS.find((tab) => tab.id === activeTab)?.label || 'Trip';
-  const isMoreActive = isMoreNavigationTab(activeTab);
+  const tabs = [
+    { id: 'itinerary', label: 'Itinerary', icon: Calendar },
+    { id: 'maps', label: 'Maps', icon: Map },
+    { id: 'draft', label: 'Draft', icon: BookOpen },
+    { id: 'budget', label: 'Budget', icon: Wallet },
+    { id: 'checklist', label: 'Checklist', icon: CheckSquare },
+    { id: 'documents', label: 'Documents', icon: FileText },
+    { id: 'photos', label: 'Photo Wall', icon: ImageIcon },
+    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'profile', label: 'Profile', icon: UserRound },
+  ] as const;
 
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPromptEvent(event as BeforeInstallPromptEvent);
-    };
-    const handleAppInstalled = () => setInstallPromptEvent(null);
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
-  }, []);
-
-  const handleInstallApp = useCallback(async () => {
-    if (!installPromptEvent) return;
-    try {
-      await installPromptEvent.prompt();
-      await installPromptEvent.userChoice;
-    } finally {
-      setInstallPromptEvent(null);
-    }
-  }, [installPromptEvent]);
-
-  const focusMoreTrigger = useCallback(() => {
-    const visibleTrigger = [mobileMoreTriggerRef.current, desktopMoreTriggerRef.current]
-      .find((trigger) => trigger && trigger.getClientRects().length > 0);
-    visibleTrigger?.focus();
-  }, []);
-
-  const closeMoreMenu = useCallback((restoreFocus = true) => {
-    setIsMenuOpen(false);
-    if (restoreFocus) {
-      window.setTimeout(focusMoreTrigger, 0);
-    }
-  }, [focusMoreTrigger]);
-
-  useEffect(() => {
-    if (!isMenuOpen) return;
-
-    const getFocusableElements = () => Array.from(
-      moreMenuRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
-      ) || [],
-    ).filter((element) => element.getClientRects().length > 0);
-
-    const focusFirstItem = () => getFocusableElements()[0]?.focus();
-    const focusTimer = window.setTimeout(focusFirstItem, 0);
-    const handleMenuKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeMoreMenu();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const focusableElements = getFocusableElements();
-      if (!focusableElements.length) {
-        event.preventDefault();
-        return;
-      }
-
-      const first = focusableElements[0];
-      const last = focusableElements[focusableElements.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleMenuKeyDown);
-    return () => {
-      window.clearTimeout(focusTimer);
-      document.removeEventListener('keydown', handleMenuKeyDown);
-    };
-  }, [closeMoreMenu, isMenuOpen]);
+  /** Documents/settings/profile appear in the hamburger Quick Menu on small screens, not the bottom pill. */
+  const tabsMobileBottom = tabs.filter((tab) => tab.id !== 'documents' && tab.id !== 'photos' && tab.id !== 'profile' && tab.id !== 'settings');
+  const desktopTabs = tabs.filter((tab) => tab.id !== 'settings' && tab.id !== 'profile');
 
   const buildCloudSnapshot = async (): Promise<CloudBackupSnapshot> => {
     const itineraryData = loadFromStorage<Itinerary>(itineraryStorageKey) || customItinerary || activeItinerary;
@@ -1115,7 +1035,7 @@ function App() {
   return (
     <TripIntelligenceUiProvider key={activeItineraryId} tripId={activeItineraryId} surface={surfaceFromAppTab(activeTab)} selectedCurrency={currency}>
     <div
-      className="adaptive-handbook-root min-h-screen font-sans pb-[calc(6rem+var(--app-safe-bottom))] xl:pb-0 overflow-x-hidden"
+      className="adaptive-handbook-root min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
       data-adaptive-handbook="true"
       style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}
     >
@@ -1175,8 +1095,12 @@ function App() {
           willChange: 'transform',
         }}
       >
-        {/* The header keeps the editorial brand, primary travel navigation, and
-            contextual planning actions in one calm row. */}
+        {/*
+          Wider than the page content at 2xl only, which is where the action
+          buttons reveal their labels. The header is a utility bar rather than
+          reading content, and the extra 96px is what lets all seven tabs stay
+          visible instead of scrolling once those labels appear.
+        */}
         <div className="app-header-inner max-w-7xl 2xl:max-w-[92rem] mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 shrink min-w-0">
             {!isDemoUser && (
@@ -1207,9 +1131,8 @@ function App() {
               }
             }}
             className="app-primary-nav hidden xl:flex items-center gap-1"
-            aria-label="Primary travel navigation"
           >
-            {PRIMARY_NAV_ITEMS.map(tab => (
+            {desktopTabs.map(tab => (
               <motion.button
                 key={tab.id}
                 variants={{
@@ -1217,9 +1140,8 @@ function App() {
                   visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } }
                 }}
                 onClick={() => handleTabChange(tab.id)}
-                className="relative shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#14110F]"
+                className="relative shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold tracking-tight transition-colors"
                 style={{ color: activeTab === tab.id ? 'var(--ink)' : 'var(--ink-muted)' }}
-                aria-current={activeTab === tab.id ? 'page' : undefined}
               >
                 {tab.label}
                 {activeTab === tab.id && (
@@ -1231,35 +1153,6 @@ function App() {
                 )}
               </motion.button>
             ))}
-            <motion.button
-              ref={desktopMoreTriggerRef}
-              type="button"
-              variants={{
-                hidden: { opacity: 0, y: -10 },
-                visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
-              }}
-              onClick={() => setIsMenuOpen(true)}
-              className={clsx(
-                'relative inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#14110F]',
-                isMoreActive ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]',
-              )}
-              aria-label="More navigation"
-              aria-haspopup="dialog"
-              aria-expanded={isMenuOpen}
-              aria-controls="planitenary-more-menu"
-              aria-current={isMoreActive ? 'page' : undefined}
-              data-active={isMoreActive ? 'true' : undefined}
-            >
-              <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
-              <span>More</span>
-              {isMoreActive && (
-                <motion.span
-                  layoutId="nav-underline"
-                  className="absolute left-3 right-3 -bottom-1 h-[3px] rounded-full"
-                  style={{ backgroundColor: 'var(--accent)' }}
-                />
-              )}
-            </motion.button>
           </motion.nav>
 
           {/*
@@ -1286,18 +1179,68 @@ function App() {
               two things a traveller actually came for — plan, and ask — read as
               the actions and everything else reads as settings.
 
-              Account and preference actions stay in More at every breakpoint;
-              the header keeps only contextual planning actions so the trip title
-              remains readable.
+              Restore, app settings and profile only appear from `xl`, which is
+              exactly where the menu button disappears. Below that they are all
+              reachable from Quick Menu, and duplicating them in the bar was what
+              squeezed the trip name into three wrapped lines on a phone.
             */}
+            <div className="app-utility-cluster">
+              <motion.button
+                onClick={toggleTheme}
+                className="hidden sm:inline-flex"
+                style={{ color: 'var(--ink)' }}
+                aria-label="Toggle theme"
+                whileTap={{ scale: 0.9, rotate: -12 }}
+              >
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </motion.button>
+              <motion.button
+                onClick={openRestoreModal}
+                className="hidden xl:inline-flex"
+                style={{ color: 'var(--ink)' }}
+                whileTap={{ scale: 0.95 }}
+                aria-label="Restore backup"
+                title="Restore backup"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </motion.button>
+              <motion.button
+                onClick={() => handleTabChange('settings')}
+                className="hidden xl:inline-flex"
+                style={{ color: activeTab === 'settings' ? 'var(--accent)' : 'var(--ink)' }}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Open app settings"
+                title="App settings"
+              >
+                <Settings className="w-4 h-4" />
+              </motion.button>
+              <motion.button
+                onClick={() => handleTabChange('profile')}
+                className="hidden xl:inline-flex"
+                style={{ color: activeTab === 'profile' ? 'var(--accent)' : 'var(--ink)' }}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Open profile settings"
+                title="Profile settings"
+              >
+                <UserRound className="w-4 h-4" />
+              </motion.button>
+              <motion.button
+                className="inline-flex xl:hidden"
+                style={{ color: 'var(--ink)' }}
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Menu"
+                aria-expanded={isMenuOpen}
+              >
+                {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+              </motion.button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Hero — split editorial layout */}
-      {showFullTripHero ? <>
       <section
-        data-testid="full-trip-hero"
         className="handbook-home-hero max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-20 pb-8 md:pb-16"
         data-immersive={isImmersiveHero ? 'true' : undefined}
       >
@@ -1431,28 +1374,23 @@ function App() {
                 className="relative overflow-hidden handbook-cover-frame z-[1]"
                 data-cover-layout={visualIdentity?.coverLayout || 'journal'}
               >
-                <div className="handbook-cover-fallback h-[280px] md:h-[420px] px-7 py-8 md:px-10 md:py-11">
-                  <span className="handbook-cover-fallback-label">
-                    {displayItinerary.coverLabel || 'Travel handbook'}
-                  </span>
-                  <span
-                    className="handbook-cover-fallback-title cursor-text rounded px-1 outline-none focus:bg-white/10"
-                    contentEditable={isHomeHeroEditing}
-                    suppressContentEditableWarning
-                    onBlur={(event) => commitHeroText('coverHeadline', event.currentTarget.textContent || '')}
-                    title="Click to edit"
-                  >
-                    {displayItinerary.coverHeadline || (displayItinerary.cities.length > 0
-                      ? displayItinerary.cities.join(' · ')
-                      : 'Your next journey')}
-                  </span>
-                  <span className="handbook-cover-fallback-meta">
-                    {displayItinerary.days.length > 0
-                      ? `${displayItinerary.days.length} ${displayItinerary.days.length === 1 ? 'day' : 'days'} · ${displayItinerary.cities.length || 1} ${displayItinerary.cities.length === 1 ? 'city' : 'cities'}`
-                      : 'A blank field guide, ready to take shape'}
-                  </span>
-                  <span className="handbook-cover-fallback-rule" aria-hidden="true" />
-                </div>
+                {displayItinerary.cities.length > 0 ? (
+                  <img
+                    src={heroImages[activeItineraryId as keyof typeof heroImages] || defaultTravelHero}
+                    alt={displayItinerary.cities.join(' & ')}
+                    className="w-full h-[280px] md:h-[420px] object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-[280px] md:h-[420px] flex items-center justify-center text-center px-8" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink-muted)' }}>
+                    <span
+                      className="font-display-italic text-3xl cursor-text rounded px-1 outline-none focus:bg-white/10"
+                      contentEditable={isHomeHeroEditing}
+                      suppressContentEditableWarning
+                      onBlur={(event) => commitHeroText('coverHeadline', event.currentTarget.textContent || '')}
+                      title="Click to edit"
+                    >{displayItinerary.coverHeadline || 'Add a cover when your story takes shape.'}</span>
+                  </div>
+                )}
               </div>
               <div className="relative z-[2] flex items-center justify-between px-2 pt-3 pb-1">
                 <span className="font-display-italic text-lg" style={{ color: 'var(--ink)' }}>
@@ -1503,28 +1441,9 @@ function App() {
         items={displayItinerary.marqueeItems?.length ? displayItinerary.marqueeItems : DEFAULT_MARQUEE_ITEMS}
         onItemChange={isHomeHeroEditing ? (index, value) => commitMarqueeItem(index, value) : undefined}
       />
-      </> : (
-        <section
-          className="operational-chapter-header max-w-7xl mx-auto px-4 sm:px-6 md:px-10"
-          data-testid="compact-operational-header"
-          aria-label={`${activeSectionLabel} chapter`}
-        >
-          <div className="operational-chapter-header-inner">
-            <span className="operational-chapter-name">{activeSectionLabel}</span>
-            <span className="operational-chapter-context" title={compactTripContext}>{compactTripContext}</span>
-          </div>
-        </section>
-      )}
 
       {/* Main Content Area */}
-      <main
-        id="main-content"
-        data-adaptive-handbook-content="true"
-        className={clsx(
-          'max-w-7xl mx-auto px-4 md:px-10 pb-24 md:pb-20 relative z-10',
-          showFullTripHero ? 'pt-8 md:pt-14' : 'pt-6 md:pt-8',
-        )}
-      >
+      <main id="main-content" data-adaptive-handbook-content="true" className="max-w-7xl mx-auto px-4 md:px-10 pt-8 md:pt-14 pb-24 md:pb-20 relative z-10">
         
         {/* Tab Content Wrapper with Glass Effect for overlapping sections */}
         <AnimatePresence mode="wait">
@@ -1712,25 +1631,23 @@ function App() {
 
       {/* Mobile Bottom Nav — cream pill with pink active circle */}
       {!isMenuOpen && (
-      <div className="xl:hidden fixed bottom-[calc(1rem+var(--app-safe-bottom))] left-4 right-4 z-50">
+      <div className="md:hidden fixed bottom-[calc(1rem+var(--app-safe-bottom))] left-4 right-4 z-50">
         <nav
-          className="flex justify-between items-center gap-1 p-2 rounded-full"
+          className="flex justify-between items-center p-2 rounded-full"
           style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lift)' }}
-          aria-label="Primary travel navigation"
         >
-          {PRIMARY_NAV_ITEMS.map(tab => {
+          {tabsMobileBottom.map(tab => {
             const active = activeTab === tab.id;
             return (
               <motion.button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
-                className="relative flex-1 flex flex-col items-center justify-center gap-0.5 py-1 rounded-full min-w-0 min-h-[3.25rem] px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
+                className="relative flex-1 flex flex-col items-center justify-center py-1.5 rounded-full min-w-0"
                 whileTap={{ scale: 0.9 }}
                 aria-label={tab.label}
-                aria-current={active ? 'page' : undefined}
               >
                 <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0"
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-colors shrink-0"
                   style={{
                     backgroundColor: active ? 'var(--accent)' : 'transparent',
                     color: active ? 'var(--accent-ink)' : 'var(--ink-muted)',
@@ -1738,41 +1655,9 @@ function App() {
                 >
                   <tab.icon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
                 </div>
-                <span className="text-[0.65rem] font-semibold leading-none truncate max-w-full" style={{ color: active ? 'var(--ink)' : 'var(--ink-muted)' }}>
-                  {tab.label}
-                </span>
               </motion.button>
             );
           })}
-          <motion.button
-            ref={mobileMoreTriggerRef}
-            type="button"
-            onClick={() => setIsMenuOpen(true)}
-            className={clsx(
-              'relative flex-1 flex flex-col items-center justify-center gap-0.5 py-1 rounded-full min-w-0 min-h-[3.25rem] px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset',
-              isMoreActive && 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]',
-            )}
-            whileTap={{ scale: 0.9 }}
-            aria-label="More navigation"
-            aria-haspopup="dialog"
-            aria-expanded={isMenuOpen}
-            aria-controls="planitenary-more-menu"
-            aria-current={isMoreActive ? 'page' : undefined}
-            data-active={isMoreActive ? 'true' : undefined}
-          >
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0"
-              style={{
-                backgroundColor: isMoreActive ? 'var(--accent)' : 'transparent',
-                color: isMoreActive ? 'var(--accent-ink)' : 'var(--ink-muted)',
-              }}
-            >
-              <MoreHorizontal className="w-5 h-5" strokeWidth={isMoreActive ? 2.5 : 2} aria-hidden="true" />
-            </div>
-            <span className="text-[0.65rem] font-semibold leading-none truncate max-w-full" style={{ color: isMoreActive ? 'var(--ink)' : 'var(--ink-muted)' }}>
-              More
-            </span>
-          </motion.button>
         </nav>
       </div>
       )}
@@ -1784,37 +1669,25 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 flex items-start justify-center xl:justify-end px-4 xl:px-8 pt-[calc(5rem+var(--app-safe-top))]"
-            style={{ backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.45)' : 'rgba(15,14,13,0.18)' }}
-            onClick={() => closeMoreMenu()}
+            className="fixed inset-0 z-40 xl:hidden flex items-start justify-center px-4 pt-[calc(5rem+var(--app-safe-top))]"
+            onClick={() => setIsMenuOpen(false)}
           >
             <motion.div
-              ref={moreMenuRef}
               initial={{ opacity: 0, y: -10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.98 }}
-              id="planitenary-more-menu"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="planitenary-more-menu-title"
-              tabIndex={-1}
-              className="w-full max-w-sm xl:max-w-md max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-[1.5rem] border p-4 sm:p-5 space-y-4"
-              style={{
-                backgroundColor: theme === 'dark' ? '#171310' : '#FAF7F2',
-                borderColor: 'var(--border)',
-                boxShadow: 'var(--shadow-lift)',
-              }}
+              className="w-full max-w-sm rounded-3xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl p-4 space-y-3"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 id="planitenary-more-menu-title" className="font-display text-2xl leading-none" style={{ color: 'var(--ink)' }}>More</h2>
-                  <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>Supporting tools for this trip</p>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Quick Menu</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Navigation shortcuts</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => closeMoreMenu()}
-                  className="inline-flex items-center justify-center rounded-full p-2 transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="inline-flex items-center justify-center rounded-full p-2 transition-colors hover:bg-slate-100 dark:hover:bg-white/10"
                   style={{
                     color: 'var(--ink)',
                     border: '1px solid var(--border)',
@@ -1826,94 +1699,42 @@ function App() {
                 </button>
               </div>
 
-              <div className="space-y-4">
-                {MORE_NAV_GROUPS.map((group, groupIndex) => (
-                  <section
-                    key={group.label}
-                    className={clsx(groupIndex > 0 && 'pt-3 border-t')}
-                    style={groupIndex > 0 ? { borderColor: 'var(--border)' } : undefined}
-                    aria-labelledby={`more-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+              <div className="grid grid-cols-2 gap-2">
+                {tabs.map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      handleTabChange(tab.id);
+                      setIsMenuOpen(false);
+                    }}
+                    className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 p-3 rounded-xl flex flex-col items-center gap-2 transition-colors border border-slate-200 dark:border-slate-700"
                   >
-                    <h3
-                      id={`more-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
-                      className="eyebrow mb-1.5 px-2"
-                    >
-                      {group.label}
-                    </h3>
-                    <div className="space-y-1">
-                      {group.items.map((item) => {
-                        const active = activeTab === item.id;
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => {
-                              handleTabChange(item.id);
-                              closeMoreMenu();
-                            }}
-                            className={clsx(
-                              'w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
-                              active
-                                ? 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]'
-                                : 'hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)]',
-                            )}
-                            style={{ color: active ? 'var(--ink)' : 'var(--ink-muted)' }}
-                            aria-current={active ? 'page' : undefined}
-                            data-active={active ? 'true' : undefined}
-                          >
-                            <item.icon className="w-5 h-5 shrink-0" strokeWidth={active ? 2.5 : 2} aria-hidden="true" />
-                            <span className={clsx('text-sm', active ? 'font-semibold' : 'font-medium')}>{item.label}</span>
-                            {active && <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--accent)' }} aria-hidden="true" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
+                    <tab.icon className="w-5 h-5 text-rose-500" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{tab.label}</span>
+                  </button>
                 ))}
-
-                <section className="pt-3 border-t" style={{ borderColor: 'var(--border)' }} aria-labelledby="more-group-preferences">
-                  <h3 id="more-group-preferences" className="eyebrow mb-1.5 px-2">Preferences</h3>
-                  <div className="space-y-1">
-                    <button
-                      type="button"
-                      onClick={toggleTheme}
-                      className="w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                      style={{ color: 'var(--ink-muted)' }}
-                      aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                    >
-                      {theme === 'dark' ? <Sun className="w-5 h-5 shrink-0" aria-hidden="true" /> : <Moon className="w-5 h-5 shrink-0" aria-hidden="true" />}
-                      <span className="text-sm font-medium">Theme</span>
-                      <span className="ml-auto text-xs" style={{ color: 'var(--ink-muted)' }}>{theme === 'dark' ? 'Dark' : 'Light'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        closeMoreMenu(false);
-                        openRestoreModal();
-                      }}
-                      className="w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                      style={{ color: 'var(--ink-muted)' }}
-                    >
-                      <RefreshCw className="w-5 h-5 shrink-0" aria-hidden="true" />
-                      <span className="text-sm font-medium">Restore backup</span>
-                    </button>
-                    {installPromptEvent && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          closeMoreMenu(false);
-                          void handleInstallApp();
-                        }}
-                        className="w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                        style={{ color: 'var(--ink-muted)' }}
-                      >
-                        <Download className="w-5 h-5 shrink-0" aria-hidden="true" />
-                        <span className="text-sm font-medium">Install Planitenary</span>
-                      </button>
-                    )}
-                  </div>
-                </section>
               </div>
+
+              {/* The header hides the theme toggle on phones, so it lives here. */}
+              <button
+                onClick={toggleTheme}
+                className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-colors"
+                style={{ color: 'var(--ink)', borderColor: 'var(--border)' }}
+              >
+                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+              </button>
+
+              <button
+                onClick={() => {
+                  openRestoreModal();
+                  setIsMenuOpen(false);
+                }}
+                className="w-full px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 rounded-xl text-sm font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Restore Backup Data
+              </button>
             </motion.div>
           </motion.div>
         )}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { KeyboardEvent, MouseEvent } from 'react';
-import { Archive, ArrowRight, CalendarDays, MapPin, Pencil, Plus, RefreshCw, RotateCcw, Trash2, UserRound } from 'lucide-react';
+import { Archive, ArrowRight, CalendarDays, MapPin, Pencil, Plus, RefreshCw, Sparkles, RotateCcw, Trash2, UserRound } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,7 +12,6 @@ import type { Itinerary } from '../data';
 import { tripStorageCleanupKeys } from '../lib/tripDeletion';
 import { pruneOrphanTripStorage } from '../lib/tripStorageOrphans';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
-import tripEmptyIllustration from '../assets/illustrations/trip-empty.webp';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -349,42 +348,25 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       {loading ? (
         <div className="flex items-center gap-3 py-16" style={{ color: 'var(--ink-muted)' }}><RefreshCw className="w-5 h-5 animate-spin" /> Loading your trips…</div>
       ) : visibleTrips.length === 0 ? (
-        shelf === 'active' ? (
-          <section className="trip-empty-state" data-testid="first-trip-empty-state">
-            <div className="trip-empty-state-copy">
-              <h2 className="font-display text-4xl md:text-5xl leading-[1.02]">Your first trip starts here.</h2>
-              <p className="mt-4 max-w-md text-base md:text-lg leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
-                Choose where and when you are going. Planitenary will shape the first pages around your journey.
-              </p>
-              <button
-                type="button"
-                className="pill-btn pill-primary mt-7"
-                style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
-                onClick={() => setWizardOpen(true)}
-              >
-                Plan a new trip
-              </button>
-            </div>
-            <img
-              src={tripEmptyIllustration}
-              alt=""
-              width={640}
-              height={427}
-              loading="lazy"
-              decoding="async"
-              draggable={false}
-              className="editorial-illustration trip-empty-illustration"
-              data-illustration="trip-empty"
-              aria-hidden="true"
-            />
-          </section>
-        ) : (
-          <div className="editorial-card p-8 md:p-12 text-center" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+        <div className="editorial-card p-8 md:p-12 text-center" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+          {shelf === 'active' ? <>
+            <Sparkles className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
+            <h2 className="font-display text-3xl">Your first trip starts here.</h2>
+            <p className="max-w-md mx-auto mt-3" style={{ color: 'var(--ink-muted)' }}>Tell the app where and when you are going, and it writes the handbook around it.</p>
+            <button
+              type="button"
+              className="pill-btn pill-primary mt-6"
+              style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-ink)' }}
+              onClick={() => setWizardOpen(true)}
+            >
+              Plan a new trip
+            </button>
+          </> : <>
             <Archive className="mx-auto w-8 h-8 mb-4" style={{ color: 'var(--accent)' }} />
             <h2 className="font-display text-3xl">No archived trips.</h2>
             <p className="max-w-md mx-auto mt-3" style={{ color: 'var(--ink-muted)' }}>Archived trips will stay here until you restore them.</p>
-          </div>
-        )
+          </>}
+        </div>
       ) : (
         <motion.div layout className="trip-grid grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           <AnimatePresence mode="popLayout" initial={false}>

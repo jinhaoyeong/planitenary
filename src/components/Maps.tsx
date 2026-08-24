@@ -8,7 +8,6 @@ import L from 'leaflet';
 import { lookupCityCenter } from '../lib/destinations';
 import { destinationPoints, sanitizeTripProfile } from '../lib/tripProfile';
 import { useTripIntelligenceUi } from '../lib/tripIntelligenceUi';
-import { mapEmptyStateCopy } from '../lib/appVisualHierarchy';
 
 // Fix for default marker icons in React Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -449,7 +448,6 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
     const typeMatch = selectedType === 'All Locations' || activityTypeLabels[item.activity.type] === selectedType;
     return cityMatch && typeMatch;
   });
-  const emptyStateCopy = mapEmptyStateCopy(allLocations.length);
 
   // Destinations captured when the trip was created drive the default view.
   const tripStops = useMemo(() => {
@@ -746,8 +744,8 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
       {filteredLocations.length === 0 && (
         <div className="text-center py-20 bg-slate-50 dark:bg-slate-900 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
           <MapPin className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-slate-600 dark:text-slate-300">{emptyStateCopy.title}</h3>
-          <p className="mt-1 text-slate-400 dark:text-slate-500">{emptyStateCopy.detail}</p>
+          <h3 className="text-lg font-medium text-slate-600 dark:text-slate-300">No locations found</h3>
+          <p className="text-slate-400 dark:text-slate-500">Try adjusting your filters.</p>
         </div>
       )}
 

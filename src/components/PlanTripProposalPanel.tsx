@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Clock3, Loader2, MapPin, Route, ShieldCheck, Sparkles, Undo2, X } from 'lucide-react';
 import { planTripProposal, type PlanTripResult } from '../lib/planTripProposal';
 import {
@@ -27,7 +27,6 @@ import {
 } from '../lib/plannerCapabilities';
 import { tripBudgetHint } from '../lib/tripBudgetHint';
 import type { Itinerary } from '../data';
-import smartPlanRouteIllustration from '../assets/illustrations/smart-plan-route.webp';
 
 interface PlanTripProposalPanelProps {
   tripId: string;
@@ -84,7 +83,7 @@ const modeLabel = (mode: string) => mode === 'public-transport'
   ? 'Transit'
   : mode.charAt(0).toUpperCase() + mode.slice(1);
 
-function PlanningStepMarker({ active, done, index, reduceMotion }: { active: boolean; done: boolean; index: number; reduceMotion: boolean }) {
+function PlanningStepMarker({ active, done, index }: { active: boolean; done: boolean; index: number }) {
   if (done) {
     return (
       <span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
@@ -95,7 +94,7 @@ function PlanningStepMarker({ active, done, index, reduceMotion }: { active: boo
   if (active) {
     return (
       <span className="grid h-8 w-8 place-items-center rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
-        <Loader2 className={`h-4 w-4 ${reduceMotion ? '' : 'animate-spin'}`} />
+        <Loader2 className="h-4 w-4 animate-spin" />
       </span>
     );
   }
@@ -129,7 +128,6 @@ function changeSummary(staged: StagedChange): string[] {
 }
 
 export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, onNavigate }: PlanTripProposalPanelProps) {
-  const reduceMotion = useReducedMotion();
   const intelligence = useTripIntelligenceUi();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'menu' | 'proposal'>('menu');
@@ -616,55 +614,28 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                   )}
 
                   {showingProposal && loading && (
-                    <div className="smart-plan-loading-state" aria-live="polite">
-                      <div className="smart-plan-loading-copy">
-                        <h3 className="font-display text-3xl leading-tight">Turning notes into a route.</h3>
-                        <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                          Your saved places stay in view while Planitenary builds a practical day-by-day structure.
-                        </p>
-                        <div
-                          className="relative mt-7 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
-                          role="progressbar"
-                          aria-label="Smart Plan progress"
-                          aria-valuemin={1}
-                          aria-valuemax={PLANNING_STEPS.length}
-                          aria-valuenow={progress + 1}
-                          aria-valuetext={PLANNING_STEPS[progress]}
-                        >
-                          <motion.span
-                            className="absolute inset-y-0 left-0 rounded-full bg-rose-500"
-                            animate={{ width: `${((progress + 1) / PLANNING_STEPS.length) * 100}%` }}
-                            transition={{ duration: reduceMotion ? 0 : 0.25, ease: [0.16, 1, 0.3, 1] }}
-                          />
-                        </div>
-                        <div className="mt-7 grid gap-3">
-                          {PLANNING_STEPS.map((step, index) => {
-                            const active = index === progress;
-                            const done = index < progress;
-                            return (
-                              <div key={step} className="flex items-center gap-3">
-                                <PlanningStepMarker active={active} done={done} index={index} reduceMotion={Boolean(reduceMotion)} />
-                                <span className={`text-sm ${active ? 'font-semibold text-slate-950 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>{step}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <p className="mt-7 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                          Day themes are drafted first. Planitenary then calculates clocks, routes, buffers, opening windows, and conflicts from your trip data.
-                        </p>
+                    <div className="mx-auto flex min-h-[65vh] max-w-md flex-col justify-center">
+                      <div className="relative h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                        <motion.span
+                          className="absolute inset-y-0 left-0 rounded-full bg-rose-500"
+                          animate={{ width: `${((progress + 1) / PLANNING_STEPS.length) * 100}%` }}
+                        />
                       </div>
-                      <img
-                        src={smartPlanRouteIllustration}
-                        alt=""
-                        width={600}
-                        height={450}
-                        loading="lazy"
-                        decoding="async"
-                        draggable={false}
-                        className="editorial-illustration smart-plan-route-illustration"
-                        data-illustration="smart-plan-route"
-                        aria-hidden="true"
-                      />
+                      <div className="mt-8 grid gap-4">
+                        {PLANNING_STEPS.map((step, index) => {
+                          const active = index === progress;
+                          const done = index < progress;
+                          return (
+                            <div key={step} className="flex items-center gap-3">
+                              <PlanningStepMarker active={active} done={done} index={index} />
+                              <span className={`text-sm ${active ? 'font-semibold text-slate-950 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>{step}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-8 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                        Day themes are drafted first. Planitenary then calculates clocks, routes, buffers, opening windows, and conflicts from your trip data.
+                      </p>
                     </div>
                   )}
 
