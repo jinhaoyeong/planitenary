@@ -23,7 +23,7 @@ export const PRIMARY_NAV_ITEMS: NavigationItem[] = [
 
 export const MORE_NAV_GROUPS: NavigationGroup[] = [
   {
-    label: 'Trip tools',
+    label: 'Trip',
     items: [
       { id: 'checklist', label: 'Checklist', icon: CheckSquare },
       { id: 'documents', label: 'Documents', icon: FileText },
@@ -31,7 +31,7 @@ export const MORE_NAV_GROUPS: NavigationGroup[] = [
     ],
   },
   {
-    label: 'Account & app',
+    label: 'Account',
     items: [
       { id: 'profile', label: 'Profile', icon: UserRound },
       { id: 'settings', label: 'Settings', icon: Settings },

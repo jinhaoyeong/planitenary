@@ -3370,6 +3370,15 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   color: var(--ink);
 }
 
+@media (max-width: 639px) {
+  /* Keep the cover's readable label and trip metadata above the fixed mobile
+     navigation without shrinking the editorial type or cover frame. */
+  .handbook-cover-fallback {
+    justify-content: flex-start;
+    gap: 1.5rem;
+  }
+}
+
 .handbook-cover-fallback-label {
   font-size: 0.7rem;
   font-weight: 700;

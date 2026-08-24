@@ -21,8 +21,8 @@ describe('Planitenary navigation hierarchy', () => {
       label: group.label,
       items: group.items.map((item) => item.id),
     }))).toEqual([
-      { label: 'Trip tools', items: ['checklist', 'documents', 'photos'] },
-      { label: 'Account & app', items: ['profile', 'settings'] },
+      { label: 'Trip', items: ['checklist', 'documents', 'photos'] },
+      { label: 'Account', items: ['profile', 'settings'] },
     ]);
     expect(ALL_NAV_ITEMS.map((item) => item.id)).toEqual([
       'itinerary',

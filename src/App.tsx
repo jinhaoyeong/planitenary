@@ -23,7 +23,7 @@ import { WelcomeScreen } from './components/WelcomeScreen';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { MoreHorizontal, X, Moon, Sun, RefreshCw, LayoutDashboard, Save } from 'lucide-react';
+import { Download, MoreHorizontal, X, Moon, Sun, RefreshCw, LayoutDashboard, Save } from 'lucide-react';
 import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
@@ -130,6 +130,11 @@ interface CloudBackupVersion {
   summaryText: string;
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 function App() {
   const {
     user,
@@ -145,6 +150,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<AppTabId>('itinerary');
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const desktopMoreTriggerRef = useRef<HTMLButtonElement>(null);
   const mobileMoreTriggerRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -658,6 +664,31 @@ function App() {
   const activeSectionLabel = ALL_NAV_ITEMS.find((tab) => tab.id === activeTab)?.label || 'Trip';
   const isMoreActive = isMoreNavigationTab(activeTab);
 
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPromptEvent(event as BeforeInstallPromptEvent);
+    };
+    const handleAppInstalled = () => setInstallPromptEvent(null);
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = useCallback(async () => {
+    if (!installPromptEvent) return;
+    try {
+      await installPromptEvent.prompt();
+      await installPromptEvent.userChoice;
+    } finally {
+      setInstallPromptEvent(null);
+    }
+  }, [installPromptEvent]);
+
   const focusMoreTrigger = useCallback(() => {
     const visibleTrigger = [mobileMoreTriggerRef.current, desktopMoreTriggerRef.current]
       .find((trigger) => trigger && trigger.getClientRects().length > 0);
@@ -1084,7 +1115,7 @@ function App() {
   return (
     <TripIntelligenceUiProvider key={activeItineraryId} tripId={activeItineraryId} surface={surfaceFromAppTab(activeTab)} selectedCurrency={currency}>
     <div
-      className="adaptive-handbook-root min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
+      className="adaptive-handbook-root min-h-screen font-sans pb-[calc(6rem+var(--app-safe-bottom))] xl:pb-0 overflow-x-hidden"
       data-adaptive-handbook="true"
       style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}
     >
@@ -1144,12 +1175,8 @@ function App() {
           willChange: 'transform',
         }}
       >
-        {/*
-          Wider than the page content at 2xl only, which is where the action
-          buttons reveal their labels. The header is a utility bar rather than
-          reading content, and the extra 96px is what lets all seven tabs stay
-          visible instead of scrolling once those labels appear.
-        */}
+        {/* The header keeps the editorial brand, primary travel navigation, and
+            contextual planning actions in one calm row. */}
         <div className="app-header-inner max-w-7xl 2xl:max-w-[92rem] mx-auto px-4 sm:px-6 md:px-10 py-3 md:py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 shrink min-w-0">
             {!isDemoUser && (
@@ -1220,6 +1247,7 @@ function App() {
               aria-haspopup="dialog"
               aria-expanded={isMenuOpen}
               aria-controls="planitenary-more-menu"
+              aria-current={isMoreActive ? 'page' : undefined}
               data-active={isMoreActive ? 'true' : undefined}
             >
               <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
@@ -1258,10 +1286,9 @@ function App() {
               two things a traveller actually came for — plan, and ask — read as
               the actions and everything else reads as settings.
 
-              Restore, app settings and profile only appear from `xl`, which is
-              exactly where the menu button disappears. Below that they are all
-              reachable from Quick Menu, and duplicating them in the bar was what
-              squeezed the trip name into three wrapped lines on a phone.
+              Account and preference actions stay in More at every breakpoint;
+              the header keeps only contextual planning actions so the trip title
+              remains readable.
             */}
           </div>
         </div>
@@ -1730,6 +1757,7 @@ function App() {
             aria-haspopup="dialog"
             aria-expanded={isMenuOpen}
             aria-controls="planitenary-more-menu"
+            aria-current={isMoreActive ? 'page' : undefined}
             data-active={isMoreActive ? 'true' : undefined}
           >
             <div
@@ -1757,6 +1785,7 @@ function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-40 flex items-start justify-center xl:justify-end px-4 xl:px-8 pt-[calc(5rem+var(--app-safe-top))]"
+            style={{ backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.45)' : 'rgba(15,14,13,0.18)' }}
             onClick={() => closeMoreMenu()}
           >
             <motion.div
@@ -1769,18 +1798,23 @@ function App() {
               aria-modal="true"
               aria-labelledby="planitenary-more-menu-title"
               tabIndex={-1}
-              className="w-full max-w-sm xl:max-w-md max-h-[calc(100dvh-6rem)] overflow-y-auto rounded-3xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl p-4 sm:p-5 space-y-4"
+              className="w-full max-w-sm xl:max-w-md max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-[1.5rem] border p-4 sm:p-5 space-y-4"
+              style={{
+                backgroundColor: theme === 'dark' ? '#171310' : '#FAF7F2',
+                borderColor: 'var(--border)',
+                boxShadow: 'var(--shadow-lift)',
+              }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between">
                 <div>
                   <h2 id="planitenary-more-menu-title" className="font-display text-2xl leading-none" style={{ color: 'var(--ink)' }}>More</h2>
-                  <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>Trip tools and app settings</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--ink-muted)' }}>Supporting tools for this trip</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => closeMoreMenu()}
-                  className="inline-flex items-center justify-center rounded-full p-2 transition-colors hover:bg-slate-100 dark:hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  className="inline-flex items-center justify-center rounded-full p-2 transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                   style={{
                     color: 'var(--ink)',
                     border: '1px solid var(--border)',
@@ -1793,8 +1827,13 @@ function App() {
               </div>
 
               <div className="space-y-4">
-                {MORE_NAV_GROUPS.map((group) => (
-                  <section key={group.label} aria-labelledby={`more-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+                {MORE_NAV_GROUPS.map((group, groupIndex) => (
+                  <section
+                    key={group.label}
+                    className={clsx(groupIndex > 0 && 'pt-3 border-t')}
+                    style={groupIndex > 0 ? { borderColor: 'var(--border)' } : undefined}
+                    aria-labelledby={`more-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                  >
                     <h3
                       id={`more-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
                       className="eyebrow mb-1.5 px-2"
@@ -1832,17 +1871,19 @@ function App() {
                   </section>
                 ))}
 
-                <section aria-labelledby="more-group-preferences-actions">
-                  <h3 id="more-group-preferences-actions" className="eyebrow mb-1.5 px-2">Preferences &amp; actions</h3>
+                <section className="pt-3 border-t" style={{ borderColor: 'var(--border)' }} aria-labelledby="more-group-preferences">
+                  <h3 id="more-group-preferences" className="eyebrow mb-1.5 px-2">Preferences</h3>
                   <div className="space-y-1">
                     <button
                       type="button"
                       onClick={toggleTheme}
                       className="w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                       style={{ color: 'var(--ink-muted)' }}
+                      aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
                     >
                       {theme === 'dark' ? <Sun className="w-5 h-5 shrink-0" aria-hidden="true" /> : <Moon className="w-5 h-5 shrink-0" aria-hidden="true" />}
-                      <span className="text-sm font-medium">{theme === 'dark' ? 'Switch to light' : 'Switch to dark'}</span>
+                      <span className="text-sm font-medium">Theme</span>
+                      <span className="ml-auto text-xs" style={{ color: 'var(--ink-muted)' }}>{theme === 'dark' ? 'Dark' : 'Light'}</span>
                     </button>
                     <button
                       type="button"
@@ -1856,10 +1897,21 @@ function App() {
                       <RefreshCw className="w-5 h-5 shrink-0" aria-hidden="true" />
                       <span className="text-sm font-medium">Restore backup</span>
                     </button>
+                    {installPromptEvent && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          closeMoreMenu(false);
+                          void handleInstallApp();
+                        }}
+                        className="w-full min-h-11 inline-flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--ink)_6%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                        style={{ color: 'var(--ink-muted)' }}
+                      >
+                        <Download className="w-5 h-5 shrink-0" aria-hidden="true" />
+                        <span className="text-sm font-medium">Install Planitenary</span>
+                      </button>
+                    )}
                   </div>
-                  <p className="text-[0.7rem] leading-relaxed mt-2 px-2" style={{ color: 'var(--ink-muted)' }}>
-                    Install options appear here when the browser makes them available.
-                  </p>
                 </section>
               </div>
             </motion.div>
