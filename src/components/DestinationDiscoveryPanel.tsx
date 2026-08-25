@@ -1571,6 +1571,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           photoThumbnailUrl: photo.thumbnailUrl,
           photoAttribution: photo.attribution,
           photoSourcePage: photo.sourcePage,
+          photoLicense: photo.licence,
+          photoLicenseUrl: photo.licenceUrl,
+          photoImageKey: photo.imageKey,
         };
       }));
     };

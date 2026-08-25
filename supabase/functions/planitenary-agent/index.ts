@@ -92,11 +92,22 @@ import {
 } from '../_shared/intelligenceContext.ts';
 import {
   buildPlanningMaterial,
+  planningPlaceFromDiscoveryCandidate,
+  planningPreflight,
   runItineraryProposalEngine,
+  scopePlanningMaterial,
   type PlanningMaterial,
+  type PlanningPlace,
+  type TripItineraryProposal,
   type ProposalRouteMode,
   type RouteMatrixLeg,
 } from '../_shared/itineraryProposal.ts';
+import {
+  parsePlanningRequest,
+  type PlanningPreflight,
+  type PlanningProgressEvent,
+  type PlanningRequest,
+} from '../_shared/planningIntent.ts';
 import {
   cachedItineraryProposalEnvelope,
   generationDisabledRefusal,
@@ -125,6 +136,7 @@ interface AgentBody {
   question?: string;
   uiContext?: unknown;
   conversation?: unknown;
+  planningRequest?: unknown;
 }
 
 /** A traveller's question. Long enough for a real one, short enough to bound. */
@@ -134,6 +146,109 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
 const asArray = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+
+const plannerCountryByCity = (itinerary: Record<string, unknown> | null): Map<string, string> => {
+  const profile = asRecord(itinerary?.tripProfile);
+  const map = new Map<string, string>();
+  for (const entry of asArray(profile?.destinations)) {
+    const destination = asRecord(entry);
+    const city = typeof destination?.city === 'string' ? destination.city.trim().toLowerCase() : '';
+    const countryCode = typeof destination?.countryCode === 'string'
+      ? destination.countryCode.trim().toUpperCase()
+      : '';
+    if (city && /^[A-Z]{2}$/.test(countryCode)) map.set(city, countryCode);
+  }
+  return map;
+};
+
+/**
+ * Fill a planning gap from the same factual discovery/image authorities the
+ * browse deck uses. The model never supplies or repairs an identity here.
+ */
+async function discoverPlanningPlaces(input: {
+  itinerary: Record<string, unknown> | null;
+  material: PlanningMaterial;
+  request: PlanningRequest;
+  authHeader: string;
+  functionsBaseUrl: string;
+  limit: number;
+}): Promise<PlanningPlace[]> {
+  if (input.limit <= 0 || input.request.sourcePolicy !== 'saved-plus-suggestions') return [];
+  const countryByCity = plannerCountryByCity(input.itinerary);
+  const targetDays = input.request.scope.type === 'day'
+    ? input.material.days.filter((day) => day.day === input.request.scope.day)
+    : input.material.days;
+  const cities = [...new Set(targetDays.flatMap((day) => [day.stayCity, ...day.activityCities])
+    .map((city) => city.trim()).filter(Boolean))].slice(0, 4);
+  const interests = [...input.material.styles, ...input.material.tripTypes, ...input.material.moods].slice(0, 12);
+  const callFunction = async (name: string, payload: unknown): Promise<unknown> => {
+    const response = await fetch(`${input.functionsBaseUrl}/${name}`, {
+      method: 'POST',
+      headers: { Authorization: input.authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`${name} responded ${response.status}`);
+    return response.json();
+  };
+  const rawCandidates: Record<string, unknown>[] = [];
+  const perCity = Math.max(2, Math.ceil(input.limit / Math.max(1, cities.length)));
+  for (const city of cities) {
+    try {
+      const payload = await callFunction('travel-discover', {
+        city,
+        countryCode: countryByCity.get(city.toLowerCase()) ?? '',
+        interests,
+        hiddenGems: input.material.preferences.hiddenGems === true,
+        limit: perCity,
+      });
+      rawCandidates.push(...asArray(payload).flatMap((entry) => asRecord(entry) ?? []).slice(0, perCity));
+    } catch (error) {
+      console.warn('[planitenary-agent] factual planning discovery unavailable:', error);
+    }
+  }
+
+  // Resolve only the bounded candidates that carry image leads. Wikimedia is
+  // best-effort; identity remains usable if a photo cannot be proved.
+  const byLinkProvider = new Map<string, Record<string, unknown>[]>();
+  for (const candidate of rawCandidates) {
+    const ref = parseStructuredPlaceRef(candidate.placeRef);
+    if (!ref || asArray(candidate.imageLeads).length === 0) continue;
+    const group = byLinkProvider.get(ref.provider) ?? [];
+    group.push(candidate);
+    byLinkProvider.set(ref.provider, group);
+  }
+  const images = new Map<string, unknown>();
+  for (const [provider, candidates] of byLinkProvider) {
+    try {
+      const payload = asRecord(await callFunction('travel-images', {
+        provider,
+        placeIds: candidates.map((candidate) => parseStructuredPlaceRef(candidate.placeRef)!.providerPlaceId),
+        placeLeads: candidates.map((candidate) => asArray(candidate.imageLeads)),
+      }));
+      const imageMap = asRecord(payload?.images);
+      for (const candidate of candidates) {
+        const providerPlaceId = parseStructuredPlaceRef(candidate.placeRef)!.providerPlaceId;
+        const first = asArray(imageMap?.[providerPlaceId])[0];
+        if (first) images.set(providerPlaceId, first);
+      }
+    } catch (error) {
+      console.warn('[planitenary-agent] factual planning images unavailable:', error);
+    }
+  }
+
+  const seen = new Set<string>();
+  return rawCandidates.flatMap((candidate) => {
+    const ref = parseStructuredPlaceRef(candidate.placeRef);
+    if (!ref || seen.has(ref.canonicalPlaceId)) return [];
+    const place = planningPlaceFromDiscoveryCandidate({
+      ...candidate,
+      image: images.get(ref.providerPlaceId),
+    });
+    if (!place) return [];
+    seen.add(ref.canonicalPlaceId);
+    return [place];
+  }).slice(0, input.limit);
+}
 
 /** Flatten the real sibling-function matrix into traceable route legs. */
 const routeLegsFromTool = (value: unknown): RouteMatrixLeg[] => {
@@ -525,10 +640,76 @@ Deno.serve(async (request) => {
    * work. A miss continues into the paid path below.
    */
   let itineraryProposalMaterial: PlanningMaterial | undefined;
+  let itineraryProposalPreflight: PlanningPreflight | undefined;
+  const itineraryProposalProgress: PlanningProgressEvent[] = [];
+  let previousItineraryProposal: TripItineraryProposal | undefined;
   if (operation === 'build-itinerary') {
+    const planningRequest = parsePlanningRequest(body.planningRequest);
+    itineraryProposalProgress.push({ stage: 'planning_started' });
+    const baseMaterial = await buildPlanningMaterial(trip.tripId, itinerary);
+    const initialPreflight = planningPreflight(baseMaterial, planningRequest);
+    itineraryProposalProgress.push({
+      stage: 'preflight_complete',
+      count: initialPreflight.eligibleSavedPlaces,
+      detail: `${initialPreflight.eligibleSavedPlaces} eligible saved places`,
+    });
+
+    let suggestions: PlanningPlace[] = [];
+    const suggestionGap = Math.max(0, initialPreflight.targetCapacity - initialPreflight.eligibleSavedPlaces);
+    if (planningRequest.sourcePolicy === 'saved-plus-suggestions' && suggestionGap > 0) {
+      const planningToken = bearerToken(request);
+      const planningSupabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
+      if (planningToken && planningSupabaseUrl) {
+        itineraryProposalProgress.push({ stage: 'discovery_started' });
+        suggestions = await discoverPlanningPlaces({
+          itinerary,
+          material: baseMaterial,
+          request: planningRequest,
+          authHeader: `Bearer ${planningToken}`,
+          functionsBaseUrl: `${planningSupabaseUrl}/functions/v1`,
+          limit: Math.min(12, Math.max(3, suggestionGap + 2)),
+        });
+        itineraryProposalProgress.push({
+          stage: 'discovery_complete',
+          count: suggestions.length,
+          detail: `${suggestions.length} verified suggestions`,
+        });
+      }
+    }
+
+    itineraryProposalPreflight = planningPreflight(baseMaterial, planningRequest, suggestions);
+    const usableCount = itineraryProposalPreflight.eligibleSavedPlaces + itineraryProposalPreflight.suggestedPlaces;
+    if (usableCount === 0) {
+      const outcome = itineraryProposalPreflight.missingCanonicalIdentity > 0
+        || itineraryProposalPreflight.missingCoordinates > 0
+        ? 'unresolvable_places' as const
+        : planningRequest.sourcePolicy === 'saved-only'
+          ? 'needs_places' as const
+          : 'no_verified_candidates' as const;
+      const detail = outcome === 'unresolvable_places'
+        ? 'Saved places are missing canonical identity or coordinates and cannot be scheduled safely.'
+        : outcome === 'needs_places'
+          ? 'There are no eligible saved places in this planning scope.'
+          : 'No verified place candidates were available for this planning scope.';
+      return json({
+        operation,
+        tripId: trip.tripId,
+        status: 'refused',
+        outcome,
+        detail,
+        preflight: itineraryProposalPreflight,
+        progress: itineraryProposalProgress,
+        applied: false,
+        budget: { modelRounds: 0, toolCalls: 0, webSearches: 0, routeCalls: 0, placeLookups: 0 },
+        spend: UNMETERED_SPEND,
+      });
+    }
+
+    const material = await scopePlanningMaterial(baseMaterial, planningRequest, suggestions);
     const lookup = await lookupExactItineraryProposalCache({
       tripId: trip.tripId,
       itinerary,
+      material,
       maxInputChars: limits.maxInputChars,
       readCache: (ownedTripId, materialRevision) =>
         readItineraryProposalCache(cache, ownedTripId, materialRevision),
@@ -539,7 +720,18 @@ Deno.serve(async (request) => {
       }, 413);
     }
     if (lookup.kind === 'hit') {
-      return json(cachedItineraryProposalEnvelope(lookup.proposal, limits));
+      previousItineraryProposal = !planningRequest.previousProposalId
+        || planningRequest.previousProposalId === lookup.proposal.id
+        ? lookup.proposal
+        : undefined;
+      if (planningRequest.cachePolicy === 'prefer-cache') {
+        return json(cachedItineraryProposalEnvelope(
+          lookup.proposal,
+          limits,
+          itineraryProposalPreflight,
+          [...itineraryProposalProgress, { stage: 'proposal_ready' }],
+        ));
+      }
     }
     itineraryProposalMaterial = lookup.material;
   }
@@ -548,7 +740,11 @@ Deno.serve(async (request) => {
   if (operation === 'build-itinerary' && (
     resolution.status === 'unconfigured' || isGenerationKillSwitch(openaiModel())
   )) {
-    return json(generationDisabledRefusal(trip.tripId), 503);
+    return json({
+      ...generationDisabledRefusal(trip.tripId),
+      preflight: itineraryProposalPreflight,
+      progress: itineraryProposalProgress,
+    }, 503);
   }
   /**
    * A misconfiguration is an operator's problem, and it was being handed to
@@ -631,14 +827,28 @@ Deno.serve(async (request) => {
     userId: authentication.caller.userId,
     itinerary,
     uiFocus,
-    seedTrustedPlaces: recentTrusted.places.map((place) => ({
-      alias: place.alias,
-      name: place.name,
-      provider: place.provider,
-      providerPlaceId: place.providerPlaceId,
-      city: place.city,
-      coordinates: place.coordinates,
-    })),
+    seedTrustedPlaces: [
+      ...recentTrusted.places.map((place) => ({
+        alias: place.alias,
+        name: place.name,
+        provider: place.provider,
+        providerPlaceId: place.providerPlaceId,
+        city: place.city,
+        coordinates: place.coordinates,
+      })),
+      ...(itineraryProposalMaterial?.places ?? []).flatMap((place) =>
+        place.source === 'suggested' && place.placeRef
+          ? [{
+              alias: place.id,
+              name: place.name,
+              provider: place.placeRef.provider,
+              providerPlaceId: place.placeRef.providerPlaceId,
+              city: place.city,
+              countryCode: place.countryCode,
+              coordinates: place.coordinates,
+            }]
+          : []),
+    ],
   });
   const executeTool = toolSession.execute;
 
@@ -810,14 +1020,48 @@ Deno.serve(async (request) => {
           transcript.push({ tool: 'get_route_matrix', ok: result.ok, detail: result.ok ? undefined : result.detail });
           return result.ok ? routeLegsFromTool(result.result) : [];
         },
+        onProgress: (stage) => itineraryProposalProgress.push({ stage }),
       });
-      await writeItineraryProposalCache(cache, proposal);
+      const semanticallyReady = proposal.status === 'valid' && proposal.meta.assignedCount > 0;
+      if (semanticallyReady && previousItineraryProposal
+        && previousItineraryProposal.meta.arrangementFingerprint === proposal.meta.arrangementFingerprint) {
+        return json({
+          operation,
+          tripId: trip.tripId,
+          status: 'answered',
+          outcome: 'no_alternative',
+          detail: 'No meaningfully different valid arrangement was found with the current places and constraints.',
+          itineraryProposal: { ...previousItineraryProposal, meta: { ...previousItineraryProposal.meta, source: 'cache' } },
+          preflight: itineraryProposalPreflight,
+          progress: itineraryProposalProgress,
+          applied: false,
+          cached: true,
+          transcript,
+          budget: {
+            modelRounds,
+            toolCalls: transcript.length,
+            webSearches: 0,
+            routeCalls: transcript.filter((entry) => entry.tool === 'get_route_matrix').length,
+            placeLookups: 0,
+          },
+          limits,
+          spend: await session.report(),
+        });
+      }
+      if (semanticallyReady) await writeItineraryProposalCache(cache, proposal);
+      if (semanticallyReady) itineraryProposalProgress.push({ stage: 'proposal_ready' });
 
       return json({
         operation,
         tripId: trip.tripId,
-        status: proposal.status === 'valid' ? 'answered' : 'partial',
+        status: semanticallyReady ? 'answered' : 'partial',
+        outcome: semanticallyReady ? 'ready' : 'failed',
+        detail: semanticallyReady
+          ? undefined
+          : 'The planner could not produce a semantically valid proposal from the verified material.',
         itineraryProposal: proposal,
+        preflight: itineraryProposalPreflight,
+        progress: itineraryProposalProgress,
         applied: false,
         cached: false,
         transcript,

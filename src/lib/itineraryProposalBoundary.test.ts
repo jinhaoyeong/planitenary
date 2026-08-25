@@ -73,8 +73,16 @@ describe('Phase 2A server boundary', () => {
     expect(modelGate).toBeGreaterThan(cacheLookup);
     expect(reserve).toBeGreaterThan(modelGate);
     expect(provider).toBeGreaterThan(reserve);
-    expect(handler).toContain('cachedItineraryProposalEnvelope(lookup.proposal, limits)');
+    expect(handler).toContain('cachedItineraryProposalEnvelope(');
     expect(handler).toContain('generationDisabledRefusal(trip.tripId)');
+  });
+
+  it('bypasses only proposal reuse for a fresh alternative and keeps the metered path', () => {
+    expect(handler).toContain("planningRequest.cachePolicy === 'prefer-cache'");
+    expect(handler).toContain("planningRequest.previousProposalId === lookup.proposal.id");
+    expect(handler).toContain('reserveAiReasoningAttempt(cache');
+    expect(handler).toContain('const outcome = await meteredModelCall(');
+    expect(handler).toContain('previousItineraryProposal.meta.arrangementFingerprint === proposal.meta.arrangementFingerprint');
   });
 
   it('adds a server-only, RLS-protected preview cache without destructive SQL', () => {

@@ -29,6 +29,18 @@ const payload = {
   omittedPlaceIds: [],
   routeSummary: { matrixCalls: 1, confirmedLegs: 0, unavailableLegs: 0, allDurationsProviderDerived: true },
   repairIterations: 0,
+  meta: {
+    planningRunId: 'planning-run-1',
+    scope: { type: 'trip' },
+    source: 'fresh',
+    savedPlaceCount: 1,
+    suggestedPlaceCount: 0,
+    assignedCount: 1,
+    omittedCount: 0,
+    routedLegCount: 0,
+    validationVersion: 2,
+    arrangementFingerprint: 'arrangement-1',
+  },
 };
 
 describe('Plan my trip client boundary', () => {
@@ -38,7 +50,7 @@ describe('Plan my trip client boundary', () => {
   });
 
   it('calls only the read-only build operation and never asks to save', async () => {
-    const invoke = vi.fn().mockResolvedValue({ status: 'answered', itineraryProposal: payload, applied: false });
+    const invoke = vi.fn().mockResolvedValue({ status: 'answered', outcome: 'ready', itineraryProposal: payload, applied: false });
     const result = await planTripProposal('trip-1', invoke);
 
     expect(result.status).toBe('answered');
@@ -47,13 +59,24 @@ describe('Plan my trip client boundary', () => {
       operation: 'build-itinerary',
       tripId: 'trip-1',
       question: 'Build a complete proposal from my saved trip material.',
+      planningRequest: {
+        scope: { type: 'trip' },
+        sourcePolicy: 'saved-plus-suggestions',
+        cachePolicy: 'prefer-cache',
+      },
     });
     expect(JSON.stringify(invoke.mock.calls)).not.toMatch(/save_itinerary|apply_changes|update_activity/);
   });
 
   it('fails safely on malformed output', async () => {
     const result = await planTripProposal('trip-1', vi.fn().mockResolvedValue({ status: 'answered', itineraryProposal: { applied: true } }));
-    expect(result).toEqual({ status: 'refused', detail: 'The planner returned a malformed proposal, so it was not shown.' });
+    expect(result).toEqual({
+      status: 'refused',
+      outcome: 'failed',
+      detail: 'The planner returned a malformed proposal, so it was not shown.',
+      progress: [],
+      cached: false,
+    });
   });
 
   it('never displays an ORS walking duration as public transport', () => {

@@ -11,6 +11,7 @@ import {
   type PlanningMaterial,
   type TripItineraryProposal,
 } from './itineraryProposal.ts';
+import type { PlanningPreflight, PlanningProgressEvent } from './planningIntent.ts';
 
 export type ExactProposalCacheReader = (
   tripId: string,
@@ -56,6 +57,9 @@ export function usableCachedItineraryProposal(
     && value.tripId === tripId
     && value.materialRevision === materialRevision
     && value.applied === false
+    && value.status === 'valid'
+    && value.meta?.validationVersion >= 2
+    && value.meta.assignedCount > 0
     ? value
     : null;
 }
@@ -63,10 +67,11 @@ export function usableCachedItineraryProposal(
 export async function lookupExactItineraryProposalCache(input: {
   tripId: string;
   itinerary: unknown;
+  material?: PlanningMaterial;
   maxInputChars: number;
   readCache: ExactProposalCacheReader;
 }): Promise<ExactProposalCacheLookup> {
-  const material = await buildPlanningMaterial(input.tripId, input.itinerary);
+  const material = input.material ?? await buildPlanningMaterial(input.tripId, input.itinerary);
   const materialChars = JSON.stringify(material).length;
   if (materialChars > input.maxInputChars) {
     return { kind: 'too-large', materialChars, limit: input.maxInputChars };
@@ -86,12 +91,18 @@ export function paidGenerationShouldRun(kind: ExactProposalCacheLookup['kind']):
 export function cachedItineraryProposalEnvelope(
   proposal: TripItineraryProposal,
   limits: CachedProposalLimits,
+  preflight?: PlanningPreflight,
+  progress: PlanningProgressEvent[] = [],
 ) {
+  const cachedProposal = { ...proposal, meta: { ...proposal.meta, source: 'cache' as const } };
   return {
     operation: 'build-itinerary' as const,
     tripId: proposal.tripId,
     status: proposal.status === 'valid' ? 'answered' as const : 'partial' as const,
-    itineraryProposal: proposal,
+    outcome: 'ready' as const,
+    preflight,
+    progress,
+    itineraryProposal: cachedProposal,
     applied: false as const,
     cached: true as const,
     transcript: [] as const,
@@ -106,6 +117,7 @@ export function generationDisabledRefusal(tripId: string) {
     operation: 'build-itinerary' as const,
     tripId,
     status: 'refused' as const,
+    outcome: 'generation_unavailable' as const,
     applied: false as const,
     refusal: 'generation-disabled' as const,
     detail: GENERATION_DISABLED_DETAIL,

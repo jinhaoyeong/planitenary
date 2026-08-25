@@ -47,6 +47,11 @@ import type {
 } from '../data';
 import { sanitizeTripProfile } from './tripProfile';
 import { sanitizeFieldSources } from './identityFields';
+import {
+  parseTripCoverRef,
+  parseVerifiedImageAsset,
+  VERIFIED_IMAGE_VALIDATION_VERSION,
+} from './verifiedImage';
 
 
 // Regular accounts start from a genuinely blank handbook. Demo Mode alone
@@ -339,6 +344,17 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
           createdAt: source.voiceNote.createdAt,
         }
       : undefined;
+  const placeRef = parseStructuredPlaceRef(source.placeRef);
+  const verifiedPhoto = parseVerifiedImageAsset({
+    imageKey: source.photoImageKey || source.photoSourcePage,
+    url: source.photoUrl,
+    thumbnailUrl: source.photoThumbnailUrl,
+    sourcePageUrl: source.photoSourcePage,
+    attribution: source.photoAttribution,
+    license: source.photoLicense,
+    licenseUrl: source.photoLicenseUrl,
+    validationVersion: VERIFIED_IMAGE_VALIDATION_VERSION,
+  });
 
   return {
     id: typeof source.id === 'string' && source.id.trim() ? source.id.trim() : legacyActivityId(scope, name, time, location || '', index),
@@ -382,6 +398,14 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
     // exactly one render before the first save erased it.
     indoorOutdoor: isIndoorOutdoor(source.indoorOutdoor) ? source.indoorOutdoor : undefined,
     providerPlaceId: typeof source.providerPlaceId === 'string' && source.providerPlaceId.trim() ? source.providerPlaceId.trim() : undefined,
+    placeRef,
+    photoUrl: verifiedPhoto?.url,
+    photoThumbnailUrl: verifiedPhoto?.thumbnailUrl,
+    photoAttribution: verifiedPhoto?.attribution,
+    photoSourcePage: verifiedPhoto?.sourcePageUrl,
+    photoLicense: verifiedPhoto?.license,
+    photoLicenseUrl: verifiedPhoto?.licenseUrl,
+    photoImageKey: verifiedPhoto?.imageKey,
     sourceReferences: Array.isArray(source.sourceReferences)
       ? source.sourceReferences.flatMap((reference) => reference && typeof reference === 'object'
         && typeof reference.label === 'string' && typeof reference.url === 'string'
@@ -626,6 +650,7 @@ export const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerar
 
   return {
     id: fallback.id,
+    tripCover: parseTripCoverRef(source.tripCover) ?? parseTripCoverRef(fallback.tripCover),
     tripProfile: sanitizeTripProfile(source.tripProfile) ?? sanitizeTripProfile(fallback.tripProfile) ?? undefined,
     fieldSources: sanitizeFieldSources(source.fieldSources) ?? sanitizeFieldSources(fallback.fieldSources),
     schemaVersion: typeof source.schemaVersion === 'number' ? Math.max(1, Math.round(source.schemaVersion)) : 1,

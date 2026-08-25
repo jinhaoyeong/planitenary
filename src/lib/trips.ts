@@ -1,4 +1,5 @@
 import type { DayPlan, Itinerary } from '../data';
+import { resolveTripCover, type TripCoverRef } from './verifiedImage';
 import {
   GENERATED_FIELDS,
   applyIdentityProposal,
@@ -42,6 +43,7 @@ export interface TripSummary {
   updatedAt: string;
   dayCount: number;
   cityCount: number;
+  cover: TripCoverRef;
 }
 
 export const createTripId = () => `trip-${crypto.randomUUID()}`;
@@ -368,4 +370,5 @@ export const toTripSummary = (itinerary: Itinerary, updatedAt = new Date().toISO
   updatedAt,
   dayCount: itinerary.days.length,
   cityCount: itinerary.cities.length,
+  cover: resolveTripCover(itinerary),
 });

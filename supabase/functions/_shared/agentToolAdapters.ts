@@ -134,6 +134,7 @@ export interface AgentToolContext {
     provider: string;
     providerPlaceId: string;
     city?: string;
+    countryCode?: string;
     coordinates?: [number, number];
   }>;
   /** Injected in tests; production resolves only server-side provider secrets. */
@@ -585,6 +586,7 @@ export function createToolExecutor(context: AgentToolContext): AgentToolSession 
       provider: seeded.provider,
       providerPlaceId: seeded.providerPlaceId,
       city: seeded.city,
+      countryCode: seeded.countryCode,
       coordinates: seeded.coordinates,
     });
   }

@@ -124,6 +124,9 @@ export interface PlaceCandidate {
   photoAttribution?: string;
   /** The Commons file page, where the full licence and author text live. */
   photoSourcePage?: string;
+  photoLicense?: string;
+  photoLicenseUrl?: string;
+  photoImageKey?: string;
   /** Internal discovery provenance; deliberately ignored by traveller-facing UI. */
   discoveryTrace?: DiscoveryTrace;
   /**
@@ -346,6 +349,14 @@ export function candidateToActivity(candidate: PlaceCandidate): Activity {
     source: 'imported',
     provider: candidate.provider,
     providerPlaceId: candidate.providerPlaceId,
+    placeRef: candidate.placeRef,
+    photoUrl: candidate.photoUrl,
+    photoThumbnailUrl: candidate.photoThumbnailUrl,
+    photoAttribution: candidate.photoAttribution,
+    photoSourcePage: candidate.photoSourcePage,
+    photoLicense: candidate.photoLicense,
+    photoLicenseUrl: candidate.photoLicenseUrl,
+    photoImageKey: candidate.photoImageKey,
     coordinates: candidate.coordinates,
     indoorOutdoor: candidate.indoorOutdoor,
     openingHours: candidate.openingHours?.periods[0],

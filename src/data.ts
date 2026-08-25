@@ -3,6 +3,8 @@ import type { FieldSourceMap } from './lib/identityFields';
 // rather than via `destinationIntelligence`, which imports this file.
 import type { PlaceAdmission } from '../supabase/functions/_shared/placeCost';
 import type { DayTransfer } from '../supabase/functions/_shared/dayCitySemantics';
+import type { StructuredPlaceRef } from '../supabase/functions/_shared/placeReference';
+import type { TripCoverRef } from './lib/verifiedImage';
 
 export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 'travel' | 'flight' | 'cafe' | 'shop' | 'nightlife' | 'other';
 
@@ -89,6 +91,16 @@ export interface Activity {
   generatedMetadata?: ActivityGeneratedMetadata;
   provider?: DiscoveryProvider;
   providerPlaceId?: string;
+  /** Canonical server-owned identity captured with a factual discovery result. */
+  placeRef?: StructuredPlaceRef;
+  /** Verified Wikimedia media. All fields travel together or the image is dropped. */
+  photoUrl?: string;
+  photoThumbnailUrl?: string;
+  photoAttribution?: string;
+  photoSourcePage?: string;
+  photoLicense?: string;
+  photoLicenseUrl?: string;
+  photoImageKey?: string;
   sourceReferences?: Array<{ label: string; url: string }>;
   lastVerifiedAt?: string;
   rating?: number;
@@ -165,8 +177,6 @@ export type DiscoveryUnscheduledReason =
   | SchedulerRejectionReason
   /** The trip ran out of days before this place could be placed anywhere. */
   | 'no-viable-day';
-
-import type { StructuredPlaceRef } from '../supabase/functions/_shared/placeReference';
 
 export interface DiscoveryUnscheduledCandidate {
   candidateId: string;
@@ -296,6 +306,8 @@ export interface Itinerary {
   name: string;
   cities: string[];
   description: string;
+  /** Persistent cover identity shared by the handbook hero and trip shelf. */
+  tripCover?: TripCoverRef;
   /** Structured trip identity captured at creation; drives generated copy. */
   tripProfile?: unknown;
   /** Handbook brand shown in the top nav, e.g. "Kyoto Journal". */

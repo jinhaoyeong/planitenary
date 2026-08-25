@@ -58,7 +58,7 @@ export type PlannerCapabilityId =
  *
  * `history` is neither: it reverses a change that has already been applied.
  */
-export type PlannerCapabilityRoute = 'local-proposal' | 'ask' | 'history';
+export type PlannerCapabilityRoute = 'local-proposal' | 'server-proposal' | 'ask' | 'history';
 
 /** What the trip currently offers, derived once and passed to every predicate. */
 export interface PlannerTripSignals {
@@ -250,8 +250,8 @@ export const PLANNER_CAPABILITIES: readonly PlannerCapability[] = [
   {
     id: 'complete-trip',
     label: 'Complete my trip',
-    description: 'Fill the gaps in days that are still thin.',
-    route: 'ask',
+    description: 'Fill thin days from saved places and verified suggestions.',
+    route: 'server-proposal',
     askExample: 'What is still missing from my trip?',
     available: (signals) => signals.dayCount > 0,
   },

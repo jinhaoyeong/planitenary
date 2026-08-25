@@ -28,6 +28,7 @@ import {
 import { tripBudgetHint } from '../lib/tripBudgetHint';
 import type { Itinerary } from '../data';
 import smartPlanRouteIllustration from '../assets/illustrations/smart-plan-route.webp';
+import type { PlanningRequest } from '../../supabase/functions/_shared/planningIntent';
 
 interface PlanTripProposalPanelProps {
   tripId: string;
@@ -73,38 +74,9 @@ const noticeFromWrite = (write: WritePhase): PlanTripWriteNotice | null => {
 const adoptWriteNotice = (notice: PlanTripWriteNotice): WritePhase =>
   notice.kind === 'blocked' ? { phase: 'blocked', reasons: notice.reasons } : { phase: notice.kind };
 
-const PLANNING_STEPS = [
-  'Arranging your saved places',
-  'Checking one route matrix',
-  'Fitting hours and trip edges',
-  'Validating every day',
-] as const;
-
 const modeLabel = (mode: string) => mode === 'public-transport'
   ? 'Transit'
   : mode.charAt(0).toUpperCase() + mode.slice(1);
-
-function PlanningStepMarker({ active, done, index }: { active: boolean; done: boolean; index: number }) {
-  if (done) {
-    return (
-      <span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-        <Check className="h-4 w-4" />
-      </span>
-    );
-  }
-  if (active) {
-    return (
-      <span className="grid h-8 w-8 place-items-center rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
-        <Loader2 className="h-4 w-4 animate-spin" />
-      </span>
-    );
-  }
-  return (
-    <span className="grid h-8 w-8 place-items-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-      <span className="text-xs font-semibold">{index + 1}</span>
-    </span>
-  );
-}
 
 /** One readable line per structured change atom. Wording only; the facts are the diff. */
 function changeSummary(staged: StagedChange): string[] {
@@ -133,8 +105,12 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'menu' | 'proposal'>('menu');
   const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<PlanTripResult | null>(null);
+  const [planningRequest, setPlanningRequest] = useState<PlanningRequest>({
+    scope: { type: 'trip' },
+    sourcePolicy: 'saved-plus-suggestions',
+    cachePolicy: 'prefer-cache',
+  });
   const [write, setWrite] = useState<WritePhase>({ phase: 'idle' });
   const [writeError, setWriteError] = useState<string | null>(null);
 
@@ -201,12 +177,6 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
   }, [tripId, cardKeySignature]);
 
   useEffect(() => {
-    if (!loading) return;
-    const timer = window.setInterval(() => setProgress((current) => Math.min(current + 1, PLANNING_STEPS.length - 1)), 2_300);
-    return () => window.clearInterval(timer);
-  }, [loading]);
-
-  useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !busy) setOpen(false);
@@ -215,14 +185,14 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [busy, open]);
 
-  const generate = async () => {
+  const generate = async (request: PlanningRequest = planningRequest, preserveCurrent = false) => {
     if (loading) return;
     setLoading(true);
-    setProgress(0);
-    setResult(null);
+    setPlanningRequest(request);
+    if (!preserveCurrent) setResult(null);
     setWrite({ phase: 'idle' });
     setWriteError(null);
-    const next = await planTripProposal(tripId);
+    const next = await planTripProposal(tripId, request);
     setResult(next);
     setLoading(false);
   };
@@ -339,13 +309,21 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
 
   const runSmartAction = (action: SmartAction) => {
     if (action.mode === 'proposal') {
+      const request: PlanningRequest = {
+        scope: action.scope === 'day' && dayNumber
+          ? { type: 'day', day: dayNumber }
+          : { type: 'trip' },
+        sourcePolicy: action.id === 'organise-saved'
+          ? 'saved-only'
+          : 'saved-plus-suggestions',
+        cachePolicy: 'prefer-cache',
+      };
       setView('proposal');
-      void generate();
+      void generate(request);
       return;
     }
     setOpen(false);
     if (action.id === 'ask') intelligence?.openAsk();
-    if (action.id === 'organise-saved') onNavigate?.('itinerary');
     if (action.id === 'review-budget') onNavigate?.('budget');
   };
 
@@ -358,6 +336,16 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
    * rather than asking it — the traveller still presses Send.
    */
   const runCapability = (capability: PlannerCapability) => {
+    if (capability.route === 'server-proposal') {
+      const request: PlanningRequest = {
+        scope: { type: 'trip' },
+        sourcePolicy: 'saved-plus-suggestions',
+        cachePolicy: 'prefer-cache',
+      };
+      setView('proposal');
+      void generate(request);
+      return;
+    }
     setOpen(false);
     if (capability.route === 'ask') {
       intelligence?.openAsk(capability.askExample);
@@ -616,26 +604,24 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
 
                   {showingProposal && loading && (
                     <div className="mx-auto flex min-h-[65vh] max-w-md flex-col justify-center">
-                      <div className="relative h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                      <div className="flex items-center gap-3">
+                        <span className="grid h-10 w-10 place-items-center rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                        </span>
+                        <div>
+                          <h3 className="font-semibold text-slate-950 dark:text-white">Building your proposal</h3>
+                          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">This may include verified place discovery and route checks.</p>
+                        </div>
+                      </div>
+                      <div className="relative mt-7 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" aria-hidden="true">
                         <motion.span
-                          className="absolute inset-y-0 left-0 rounded-full bg-rose-500"
-                          animate={{ width: `${((progress + 1) / PLANNING_STEPS.length) * 100}%` }}
+                          className="absolute inset-y-0 w-1/3 rounded-full bg-rose-500"
+                          animate={{ x: ['-110%', '310%'] }}
+                          transition={{ duration: 1.35, repeat: Infinity, ease: 'easeInOut' }}
                         />
                       </div>
-                      <div className="mt-8 grid gap-4">
-                        {PLANNING_STEPS.map((step, index) => {
-                          const active = index === progress;
-                          const done = index < progress;
-                          return (
-                            <div key={step} className="flex items-center gap-3">
-                              <PlanningStepMarker active={active} done={done} index={index} />
-                              <span className={`text-sm ${active ? 'font-semibold text-slate-950 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>{step}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
                       <p className="mt-8 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                        Day themes are drafted first. Planitenary then calculates clocks, routes, buffers, opening windows, and conflicts from your trip data.
+                        The app will only report a completed planning stage when the server actually performed it. If live stage streaming is unavailable, this remains intentionally indeterminate.
                       </p>
                       <img
                         src={smartPlanRouteIllustration}
@@ -655,18 +641,31 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                   {showingProposal && !loading && result && !proposal && (
                     <div className="mx-auto max-w-lg py-16 text-center">
                       <AlertTriangle className="mx-auto h-7 w-7 text-amber-500" />
-                      <h3 className="mt-4 text-lg font-semibold">No proposal was generated</h3>
+                      <h3 className="mt-4 text-lg font-semibold">
+                        {result.outcome === 'needs_places' ? 'No saved places to organise'
+                          : result.outcome === 'unresolvable_places' ? 'Some saved places need details'
+                            : result.outcome === 'no_verified_candidates' ? 'No verified places were found'
+                              : result.outcome === 'generation_unavailable' ? 'Planning is unavailable right now'
+                                : 'No proposal was generated'}
+                      </h3>
                       <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                         {result.detail || 'The planner stopped safely before producing an incomplete itinerary.'}
                       </p>
-                      <button type="button" className="mt-6 rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white dark:bg-white dark:text-slate-950" onClick={() => void generate()}>
-                        Try again
+                      <button type="button" className="mt-6 rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white dark:bg-white dark:text-slate-950" onClick={() => result.outcome === 'needs_places' ? returnToSmartPlan() : void generate()}>
+                        {result.outcome === 'needs_places' ? 'Back to Smart plan' : 'Try again'}
                       </button>
                     </div>
                   )}
 
                   {showingProposal && !loading && proposal && (
                     <div className="space-y-8">
+                      {result?.outcome === 'no_alternative' && result.detail && (
+                        <section role="status" className="rounded-2xl bg-slate-100 p-4 text-sm leading-6 text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                          <p className="font-semibold">No different valid arrangement found</p>
+                          <p className="mt-1">{result.detail}</p>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Add more places, change the pace, or change a Must do decision to open up another result.</p>
+                        </section>
+                      )}
                       {notice && (
                         <section role="alert" className="plan-trip-notice rounded-2xl bg-rose-50 p-4 text-rose-950 dark:bg-rose-950/40 dark:text-rose-100">
                           <div className="flex items-start gap-2 text-sm font-semibold">
@@ -787,14 +786,20 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                       <section className="grid gap-4 border-b border-slate-200 pb-6 dark:border-slate-800 sm:grid-cols-[1fr_auto] sm:items-end">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${proposal.status === 'valid' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'}`}>
-                              {proposal.status === 'valid' ? 'Validated proposal' : `${errorCount} conflicts need review`}
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                              {proposal.meta.source === 'cache' ? 'Saved preview' : 'Fresh proposal'}
+                            </span>
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${proposal.status === 'valid' && proposal.meta.assignedCount > 0 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'}`}>
+                              {proposal.status === 'valid' && proposal.meta.assignedCount > 0 ? 'Validated' : `${errorCount} conflicts need review`}
                             </span>
                             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-600 dark:bg-slate-900 dark:text-slate-300">{proposal.pace} pace</span>
                           </div>
                           <h3 className="mt-3 font-display text-3xl tracking-[-0.025em]">Proposed itinerary</h3>
                           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                            {proposal.routeSummary.confirmedLegs} routed legs · {proposal.routeSummary.matrixCalls} batched matrix {proposal.routeSummary.matrixCalls === 1 ? 'call' : 'calls'} · {proposal.repairIterations} repairs
+                            {proposal.meta.assignedCount} places · {proposal.meta.routedLegCount} travel legs · {proposal.meta.omittedCount} omitted
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            Generated {new Date(proposal.createdAt).toLocaleString()} · {proposal.meta.suggestedPlaceCount} verified suggestions
                           </p>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -882,8 +887,17 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                     </button>
                     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
                       {!recovering && (
-                        <button type="button" className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900" onClick={() => void generate()} disabled={busy}>
-                          Regenerate proposal
+                        <button
+                          type="button"
+                          className="rounded-full border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+                          onClick={() => void generate({
+                            ...planningRequest,
+                            cachePolicy: 'fresh-alternative',
+                            previousProposalId: proposal!.id,
+                          }, true)}
+                          disabled={busy}
+                        >
+                          Try another arrangement
                         </button>
                       )}
                       {recovering && notice ? (
@@ -899,8 +913,8 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                         <button
                           type="button"
                           onClick={() => void prepare()}
-                          disabled={busy || !proposal || proposal.status !== 'valid' || applyLocked}
-                          title={proposal?.status === 'valid' ? 'Review the changes before saving them' : 'Resolve the conflicts above first'}
+                          disabled={busy || !proposal || proposal.status !== 'valid' || proposal.meta.assignedCount <= 0 || applyLocked}
+                          title={proposal?.status === 'valid' && proposal.meta.assignedCount > 0 ? 'Review the changes before saving them' : 'Resolve the conflicts above first'}
                           className="inline-flex items-center justify-center gap-2 rounded-full bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                         >
                           {write.phase === 'staging' ? 'Preparing…' : 'Apply plan…'}

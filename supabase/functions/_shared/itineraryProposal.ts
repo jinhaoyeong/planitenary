@@ -38,6 +38,16 @@ import {
   sameCity,
   type DayTransfer,
 } from './dayCitySemantics.ts';
+import { parseStructuredPlaceRef, type StructuredPlaceRef } from './placeReference.ts';
+import { parsePlaceImage, type PlaceImage } from './placeImages.ts';
+import {
+  DEFAULT_PLANNING_REQUEST,
+  planningRequestKey,
+  type PlanningRequest,
+  type PlanningPreflight,
+  type PlanningProgressStage,
+  type ProposalMeta,
+} from './planningIntent.ts';
 
 export { ARRIVAL_SETTLING_MINUTES, DEPARTURE_LEAD_MINUTES };
 
@@ -57,6 +67,7 @@ export interface PlanningPlace {
   id: string;
   name: string;
   city: string;
+  countryCode?: string;
   cluster: string;
   coordinates?: [number, number];
   categories: string[];
@@ -70,6 +81,11 @@ export interface PlanningPlace {
   fixedStartTime?: string;
   locked: boolean;
   reservation: boolean;
+  source: 'saved' | 'suggested';
+  /** Existing day membership; suggestions and inbox places have none. */
+  currentDay?: number;
+  placeRef?: StructuredPlaceRef;
+  image?: PlaceImage;
 }
 
 export type FixedTransportRole = 'arrival' | 'departure' | 'transfer';
@@ -138,6 +154,9 @@ export interface PlanningMaterial {
   baseCoordinates?: [number, number];
   days: PlanningDayMaterial[];
   places: PlanningPlace[];
+  intent: PlanningRequest;
+  savedPlaceCount: number;
+  suggestedPlaceCount: number;
   /** Required places outside the bounded provider matrix, reported as errors. */
   excludedRequiredPlaces: Array<{ id: string; name: string }>;
   clusters: Array<{ id: string; city: string; placeIds: string[] }>;
@@ -205,6 +224,22 @@ export interface ProposedItineraryItem {
   locked?: boolean;
   /** Provider/planner-backed place city. Absent means unknown, never the stay. */
   activityCity?: string;
+  /** Server-owned factual material used to create a suggested activity on Apply. */
+  suggestedPlace?: SuggestedPlaceMaterial;
+}
+
+export interface SuggestedPlaceMaterial {
+  ref: StructuredPlaceRef;
+  name: string;
+  city: string;
+  countryCode?: string;
+  location?: string;
+  coordinates: [number, number];
+  categories: string[];
+  durationMinutes: number;
+  openingHours: PlanningHoursWindow[];
+  sourceUrls: string[];
+  image?: PlaceImage;
 }
 
 export interface ProposedItineraryDay {
@@ -249,7 +284,8 @@ export type ProposalConflictCode =
   | 'activity-city-mismatch'
   | 'unauthorized-base-change'
   | 'unknown-place'
-  | 'duplicate-place';
+  | 'duplicate-place'
+  | 'empty-proposal';
 
 export interface ProposalConflict {
   code: ProposalConflictCode;
@@ -280,6 +316,7 @@ export interface TripItineraryProposal {
     allDurationsProviderDerived: boolean;
   };
   repairIterations: number;
+  meta: ProposalMeta;
 }
 
 export interface ProposalEngineDeps {
@@ -293,6 +330,8 @@ export interface ProposalEngineDeps {
     placeIds: string[];
     mode: ProposalRouteMode;
   }) => Promise<RouteMatrixLeg[]>;
+  onProgress?: (stage: Extract<PlanningProgressStage,
+    'routing_started' | 'routing_complete' | 'scheduling_started' | 'validation_started' | 'validation_complete'>) => void;
   now?: () => string;
 }
 
@@ -856,6 +895,17 @@ const isLockedPlace = (activity: Record<string, unknown>): boolean =>
 const isExcludedPlanningDecision = (decision: string | undefined): decision is 'skip' | 'visited' =>
   decision === 'skip' || decision === 'visited';
 
+const imageFromActivity = (activity: Record<string, unknown>): PlaceImage | undefined => parsePlaceImage({
+  url: activity.photoUrl,
+  thumbnailUrl: activity.photoThumbnailUrl,
+  sourcePage: activity.photoSourcePage,
+  attribution: activity.photoAttribution,
+  licence: activity.photoLicense,
+  licenceUrl: activity.photoLicenseUrl,
+  source: 'wikimedia-commons',
+  lead: 'wikidata',
+});
+
 const resolvedDecision = (
   activity: Record<string, unknown>,
   decisions: Record<string, unknown>,
@@ -922,6 +972,10 @@ const activityPlace = (
     fixedStartTime: fixed ? text(activity.time, 5) : undefined,
     locked: fixed,
     reservation: activity.bookingStatus === 'confirmed' || activity.reservationRequirement === 'required',
+    source: 'saved',
+    currentDay: options.day,
+    placeRef: parseStructuredPlaceRef(activity.placeRef),
+    image: imageFromActivity(activity),
   };
 };
 
@@ -1094,6 +1148,9 @@ export async function buildPlanningMaterial(
     preferences,
     days,
     places,
+    intent: DEFAULT_PLANNING_REQUEST,
+    savedPlaceCount: places.length,
+    suggestedPlaceCount: 0,
     excludedRequiredPlaces,
     excludedPlanningPlaces: [...excludedPlanningPlaces]
       .map(([id, decision]) => ({ id, decision }))
@@ -1118,9 +1175,143 @@ export async function buildPlanningMaterial(
     baseCoordinates,
     days,
     places,
+    intent: DEFAULT_PLANNING_REQUEST,
+    savedPlaceCount: places.length,
+    suggestedPlaceCount: 0,
     excludedRequiredPlaces,
     clusters: [...byCluster.values()],
     limits: { maxPlaces: MAX_PLACES, maxDays: MAX_DAYS, maxRepairIterations: MAX_REPAIR_ITERATIONS },
+  };
+}
+
+/** Convert one discovery result into factual planner material. */
+export function planningPlaceFromDiscoveryCandidate(value: unknown): PlanningPlace | undefined {
+  const raw = asRecord(value);
+  const ref = parseStructuredPlaceRef(raw?.placeRef);
+  const name = text(raw?.name, 160);
+  const city = cleanCity(raw?.city);
+  const point = coordinates(raw?.coordinates);
+  if (!ref || !name || !city || !point) return undefined;
+  const duration = Math.max(15, Math.min(720, Math.round(number(raw?.estimatedVisitMinutes) ?? 90)));
+  const hoursRecord = asRecord(raw?.openingHours);
+  const periods = asArray(hoursRecord?.periods).flatMap((entry): PlanningHoursWindow[] => {
+    const period = asRecord(entry);
+    const opensAt = text(period?.opensAt, 5);
+    const closesAt = text(period?.closesAt, 5);
+    if (clockToMinutes(opensAt) === undefined || clockToMinutes(closesAt) === undefined) return [];
+    return [{
+      opensAt: opensAt!,
+      closesAt: closesAt!,
+      days: asArray(period?.daysOfWeek).filter((day): day is number =>
+        typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6),
+    }];
+  });
+  const sourceUrls = asArray(raw?.sourceReferences).flatMap((entry) => {
+    const url = cleanUrl(asRecord(entry)?.url);
+    return url ? [url] : [];
+  }).slice(0, 6);
+  const location = text(raw?.neighbourhood, 120) ?? text(raw?.address, 120);
+  return {
+    id: `suggested:${ref.canonicalPlaceId}`,
+    name,
+    city,
+    countryCode: text(raw?.countryCode, 2)?.toUpperCase(),
+    cluster: location ?? city,
+    coordinates: point,
+    categories: asArray(raw?.categories).filter((entry): entry is string => typeof entry === 'string').slice(0, 12),
+    priority: 'optional',
+    durationRangeMinutes: [duration, duration],
+    openingHours: periods,
+    sourceUrls,
+    imageUrl: parsePlaceImage(raw?.image)?.url,
+    indoorOutdoor: ['indoor', 'outdoor', 'mixed'].includes(String(raw?.indoorOutdoor))
+      ? raw?.indoorOutdoor as PlanningPlace['indoorOutdoor']
+      : undefined,
+    locked: false,
+    reservation: false,
+    source: 'suggested',
+    placeRef: ref,
+    image: parsePlaceImage(raw?.image),
+  };
+}
+
+const placeFitsIntent = (place: PlanningPlace, days: PlanningDayMaterial[], request: PlanningRequest): boolean => {
+  if (request.scope.type === 'trip') return true;
+  const targetDay = request.scope.day;
+  const target = days.find((day) => day.day === targetDay);
+  if (!target) return false;
+  if (place.currentDay !== undefined && place.currentDay !== target.day) return false;
+  return place.currentDay === target.day
+    || [target.stayCity, ...target.activityCities].some((city) => sameCity(city, place.city));
+};
+
+const usablePlanningPlace = (place: PlanningPlace): boolean =>
+  Boolean(place.placeRef && place.coordinates && cleanCity(place.city));
+
+export function planningPreflight(
+  base: PlanningMaterial,
+  request: PlanningRequest,
+  suggestions: PlanningPlace[] = [],
+): PlanningPreflight {
+  const targetDay = request.scope.type === 'day' ? request.scope.day : undefined;
+  const days = targetDay !== undefined
+    ? base.days.filter((day) => day.day === targetDay)
+    : base.days;
+  const saved = base.places.filter((place) => place.source === 'saved' && placeFitsIntent(place, days, request));
+  const suggested = suggestions.filter((place) => place.source === 'suggested' && placeFitsIntent(place, days, request));
+  return {
+    eligibleSavedPlaces: saved.filter(usablePlanningPlace).length,
+    suggestedPlaces: suggested.filter(usablePlanningPlace).length,
+    missingCanonicalIdentity: saved.filter((place) => !place.placeRef).length,
+    missingCoordinates: saved.filter((place) => !place.coordinates).length,
+    targetCapacity: days.reduce((total, day) => total + day.maxMainActivities, 0),
+    discoveryAvailable: request.sourcePolicy === 'saved-plus-suggestions',
+  };
+}
+
+/** Bind scope and server-owned suggestions into an independently cached material revision. */
+export async function scopePlanningMaterial(
+  base: PlanningMaterial,
+  request: PlanningRequest,
+  suggestions: PlanningPlace[] = [],
+): Promise<PlanningMaterial> {
+  const targetDay = request.scope.type === 'day' ? request.scope.day : undefined;
+  const days = targetDay !== undefined
+    ? base.days.filter((day) => day.day === targetDay)
+    : base.days;
+  const sourcePlaces = [
+    ...base.places.filter((place) => place.source === 'saved'),
+    ...(request.sourcePolicy === 'saved-plus-suggestions' ? suggestions : []),
+  ].filter((place) => placeFitsIntent(place, days, request) && usablePlanningPlace(place));
+  const seenCanonical = new Set<string>();
+  const places = sourcePlaces.filter((place) => {
+    const key = place.placeRef?.canonicalPlaceId ?? place.id;
+    if (seenCanonical.has(key)) return false;
+    seenCanonical.add(key);
+    return true;
+  }).slice(0, base.limits.maxPlaces);
+  const byCluster = new Map<string, { id: string; city: string; placeIds: string[] }>();
+  for (const place of places) {
+    const id = `${place.city.toLowerCase()}::${place.cluster.toLowerCase()}`;
+    const cluster = byCluster.get(id) ?? { id, city: place.city, placeIds: [] };
+    cluster.placeIds.push(place.id);
+    byCluster.set(id, cluster);
+  }
+  const revision = `plan-v2-${await canonicalFingerprint({
+    baseRevision: base.revision,
+    intent: planningRequestKey(request),
+    days,
+    places,
+  })}`;
+  return {
+    ...base,
+    revision,
+    days,
+    places,
+    intent: request,
+    savedPlaceCount: places.filter((place) => place.source === 'saved').length,
+    suggestedPlaceCount: places.filter((place) => place.source === 'suggested').length,
+    clusters: [...byCluster.values()],
   };
 }
 
@@ -1284,6 +1475,7 @@ function composeSchedule(
       locked: true,
       reservation: false,
       coordinates: event.coordinates,
+      source: 'saved',
     });
     let clock = dayStart;
     let previous: PlanningPlace | undefined = inboundEvent?.coordinates ? asAnchor(inboundEvent) : undefined;
@@ -1497,6 +1689,21 @@ function composeSchedule(
         priority: place.priority,
         locked: place.locked,
         activityCity: cleanCity(place.city),
+        suggestedPlace: place.source === 'suggested' && place.placeRef && place.coordinates
+          ? {
+              ref: place.placeRef,
+              name: place.name,
+              city: place.city,
+              countryCode: place.countryCode,
+              location: place.cluster,
+              coordinates: place.coordinates,
+              categories: place.categories,
+              durationMinutes: duration,
+              openingHours: place.openingHours,
+              sourceUrls: place.sourceUrls,
+              image: place.image,
+            }
+          : undefined,
       });
       scheduled.add(place.id);
       previous = place;
@@ -1773,25 +1980,39 @@ export async function runItineraryProposalEngine(
   let repairIterations = 0;
 
   for (let attempt = 0; attempt <= MAX_REPAIR_ITERATIONS; attempt += 1) {
+    deps.onProgress?.('scheduling_started');
     const raw = await deps.chooseComposition({ material, round: attempt + 1, conflicts, previous });
     const composition = parseModelComposition(raw, material) ?? defaultComposition(material);
     const placeIds = [...new Set([
       ...composition.days.flatMap((day) => day.placeIds),
       ...material.days.flatMap((day) => (day.fixedEvents ?? []).flatMap((event) => event.coordinates ? [event.id] : [])),
     ])];
+    if (placeIds.length >= 2) deps.onProgress?.('routing_started');
     routeLegs = placeIds.length >= 2
       ? await deps.getRouteMatrix({ placeIds, mode: 'walking' })
       : [];
+    if (placeIds.length >= 2) deps.onProgress?.('routing_complete');
     if (placeIds.length >= 2) matrixCalls += 1;
     const built = composeSchedule(material, composition, routeLegs);
     finalDays = built.days;
+    deps.onProgress?.('validation_started');
     conflicts = dedupeConflicts([...built.conflicts, ...validateItineraryProposal(finalDays, material)]);
+    deps.onProgress?.('validation_complete');
     previous = composition;
     if (!conflicts.some((conflict) => conflict.severity === 'error')) break;
     if (attempt < MAX_REPAIR_ITERATIONS) repairIterations += 1;
   }
 
   const scheduled = new Set(finalDays.flatMap((day) => day.items.flatMap((item) => item.placeId ? [item.placeId] : [])));
+  if (scheduled.size === 0) {
+    conflicts = dedupeConflicts([...conflicts, {
+      code: 'empty-proposal',
+      severity: 'error',
+      message: material.places.length > 0
+        ? 'No eligible place was assigned, so this cannot be treated as a validated proposal.'
+        : 'There was no eligible place material to plan.',
+    }]);
+  }
   const confirmedLegs = finalDays.reduce((total, day) => total + day.items.filter((item) => item.travelFromPrevious?.status === 'confirmed').length, 0);
   const unavailableLegs = finalDays.reduce((total, day) => total + day.items.filter((item) => item.travelFromPrevious?.status === 'unavailable').length, 0);
   const now = deps.now?.() ?? new Date().toISOString();
@@ -1805,6 +2026,29 @@ export async function runItineraryProposalEngine(
       item.travelFromPrevious?.durationMinutes === undefined
       || item.travelFromPrevious.source === 'provider'
       || item.travelFromPrevious.source === 'cache')),
+  };
+  const arrangementFingerprint = await canonicalFingerprint(finalDays.map((day) => ({
+    day: day.day,
+    places: day.items.flatMap((item, order) => item.placeId
+      ? [{ placeId: item.placeId, order, startTime: item.startTime, endTime: item.endTime }]
+      : []),
+  })));
+  const planningRunId = `planning-run-${await canonicalFingerprint({
+    tripId: material.tripId,
+    materialRevision: material.revision,
+    createdAt: now,
+  })}`;
+  const meta: ProposalMeta = {
+    planningRunId,
+    scope: material.intent.scope,
+    source: 'fresh',
+    savedPlaceCount: material.savedPlaceCount,
+    suggestedPlaceCount: material.suggestedPlaceCount,
+    assignedCount: scheduled.size,
+    omittedCount: omittedPlaceIds.length,
+    routedLegCount: confirmedLegs,
+    validationVersion: 2,
+    arrangementFingerprint,
   };
   /**
    * The ID is a fingerprint of the plan, not of the moment it was made.
@@ -1835,6 +2079,7 @@ export async function runItineraryProposalEngine(
     omittedPlaceIds,
     routeSummary,
     repairIterations,
+    meta,
   });
   return {
     kind: 'itinerary-proposal-v1',
@@ -1851,5 +2096,6 @@ export async function runItineraryProposalEngine(
     omittedPlaceIds,
     routeSummary,
     repairIterations,
+    meta,
   };
 }

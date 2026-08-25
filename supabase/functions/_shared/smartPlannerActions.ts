@@ -226,7 +226,7 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
     push({
       id: 'improve-day',
       title: `Plan day ${focusDay}`,
-      reason: `Day ${focusDay} has no sightseeing yet.`,
+      reason: `Day ${focusDay} has no sightseeing yet. Uses saved places and can fill gaps with verified suggestions.`,
       scope: 'day',
       mode: 'proposal',
     });
@@ -244,9 +244,9 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
     push({
       id: 'organise-saved',
       title: 'Organise saved places',
-      reason: `You have ${interestedCount} Interested places. Review which ones belong in the plan.`,
+      reason: `Build a proposal using only your ${interestedCount} Interested places.`,
       scope: 'place',
-      mode: 'read',
+      mode: 'proposal',
     });
   }
 
@@ -278,7 +278,7 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
     push({
       id: 'plan-trip',
       title: 'Plan my trip',
-      reason: 'Build a route-aware proposal from your saved places. Nothing changes until you apply it.',
+      reason: 'Build a route-aware proposal from saved places and verified suggestions. Nothing changes until you apply it.',
       scope: 'trip',
       mode: 'proposal',
     });
@@ -286,7 +286,7 @@ export function deriveSmartActions(input: SmartActionInput): SmartAction[] {
     push({
       id: 'plan-trip',
       title: 'Plan my trip',
-      reason: 'Build a complete, validated proposal from the current trip.',
+      reason: 'Build a complete proposal from saved places and verified suggestions.',
       scope: 'trip',
       mode: 'proposal',
     });

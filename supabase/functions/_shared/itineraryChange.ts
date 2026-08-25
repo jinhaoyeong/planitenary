@@ -139,6 +139,46 @@ const scheduledActivity = (
   return next;
 };
 
+/** Materialise a factual server-owned suggestion only after explicit Apply. */
+const suggestedActivity = (item: ProposedItineraryItem): Record<string, unknown> | undefined => {
+  const place = item.suggestedPlace;
+  if (!place || !item.placeId) return undefined;
+  const image = place.image;
+  return {
+    id: item.placeId,
+    kind: 'place',
+    time: item.startTime,
+    durationMinutes: item.visitDurationMinutes,
+    name: place.name,
+    description: `${place.categories.join(', ') || 'Suggested place'} in ${place.city}.`,
+    type: 'sight',
+    city: place.city,
+    location: place.location ?? place.city,
+    coordinates: place.coordinates,
+    provider: place.ref.provider,
+    providerPlaceId: place.ref.providerPlaceId,
+    placeRef: place.ref,
+    source: 'imported',
+    bookingStatus: 'none',
+    locked: false,
+    lockedFields: [],
+    openingHours: place.openingHours[0],
+    openingHoursWeek: place.openingHours.map((window) => ({
+      opensAt: window.opensAt,
+      closesAt: window.closesAt,
+      days: window.days,
+    })),
+    sourceReferences: place.sourceUrls.map((url) => ({ label: 'Place source', url })),
+    photoUrl: image?.url,
+    photoThumbnailUrl: image?.thumbnailUrl,
+    photoAttribution: image?.attribution,
+    photoSourcePage: image?.sourcePage,
+    photoLicense: image?.licence,
+    photoLicenseUrl: image?.licenceUrl,
+    photoImageKey: image?.sourcePage,
+  };
+};
+
 export interface AppliedItineraryResult {
   itinerary: Record<string, unknown>;
   /** Places the proposal did not schedule; moved to the inbox, never deleted. */
@@ -209,12 +249,13 @@ export function applyProposalToItinerary(
     const rebuilt = proposed.items.flatMap((item, itemIndex): Record<string, unknown>[] => {
       if (item.type === 'place' || item.type === 'reservation') {
         const ref = item.placeId ? byPlaceId.get(item.placeId) : undefined;
-        if (!ref) {
+        const source = ref?.activity ?? suggestedActivity(item);
+        if (!source) {
           if (item.placeId) unresolvedPlaceIds.push(item.placeId);
           return [];
         }
-        scheduled.add(ref.placeId);
-        return [scheduledActivity(ref.activity, item)];
+        if (item.placeId) scheduled.add(item.placeId);
+        return [scheduledActivity(source, item)];
       }
       return [windowActivity(item, dayNumber, itemIndex, proposal.createdAt)];
     });

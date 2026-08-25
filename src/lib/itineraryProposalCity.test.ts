@@ -52,6 +52,7 @@ const place = (id: string, city: string, override: Partial<PlanningPlace> = {}):
   locked: false,
   reservation: false,
   ...override,
+  source: override.source ?? 'saved',
 });
 
 /** Four days based in Osaka, then two based in Kyoto — the shape on screen. */
@@ -77,6 +78,9 @@ const kansai = (override: Partial<PlanningMaterial> = {}): PlanningMaterial => (
   clusters: [],
   limits: { maxPlaces: 25, maxDays: 21, maxRepairIterations: 2 },
   ...override,
+  intent: override.intent ?? { scope: { type: 'trip' }, sourcePolicy: 'saved-only', cachePolicy: 'prefer-cache' },
+  savedPlaceCount: override.savedPlaceCount ?? 3,
+  suggestedPlaceCount: override.suggestedPlaceCount ?? 0,
 });
 
 const item = (placeId: string, name: string, startTime: string, endTime: string) => ({

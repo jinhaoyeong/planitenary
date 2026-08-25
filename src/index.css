@@ -3238,6 +3238,12 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   flex-direction: column;
 }
 
+.trip-card-cover {
+  aspect-ratio: 16 / 9;
+  min-height: 8.25rem;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+}
+
 .trip-card > div:last-child {
   margin-top: auto;
 }

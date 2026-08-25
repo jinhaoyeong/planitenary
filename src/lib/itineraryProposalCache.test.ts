@@ -65,6 +65,18 @@ const stored = (over: Partial<TripItineraryProposal> = {}): TripItineraryProposa
   routeSummary: { matrixCalls: 1, confirmedLegs: 1, unavailableLegs: 0, allDurationsProviderDerived: true },
   repairIterations: 0,
   ...over,
+  meta: over.meta ?? {
+    planningRunId: 'run-1',
+    scope: { type: 'trip' },
+    source: 'fresh',
+    savedPlaceCount: 1,
+    suggestedPlaceCount: 0,
+    assignedCount: 1,
+    omittedCount: 0,
+    routedLegCount: 1,
+    validationVersion: 2,
+    arrangementFingerprint: 'arrangement-1',
+  },
 });
 
 const limits = AGENT_LIMITS['build-itinerary'];
@@ -101,6 +113,8 @@ describe('exact proposal cache before the model gate', () => {
 
     const envelope = cachedItineraryProposalEnvelope(lookup.proposal, limits);
     expect(envelope.cached).toBe(true);
+    expect(envelope.outcome).toBe('ready');
+    expect(envelope.itineraryProposal.meta.source).toBe('cache');
     expect(envelope.applied).toBe(false);
     expect(envelope.budget).toEqual({
       modelRounds: 0, toolCalls: 0, webSearches: 0, routeCalls: 0, placeLookups: 0,
@@ -148,6 +162,15 @@ describe('exact proposal cache before the model gate', () => {
     expect(material.revision).not.toBe(stale.materialRevision);
     expect(usableCachedItineraryProposal(stale, 'trip-1', material.revision)).toBeNull();
     expect(lookup.kind).toBe('miss');
+  });
+
+  it('does not reuse a semantically empty proposal as a successful cache hit', async () => {
+    const material = await buildPlanningMaterial('trip-1', itinerary());
+    const empty = stored({
+      materialRevision: material.revision,
+      meta: { ...stored().meta, assignedCount: 0 },
+    });
+    expect(usableCachedItineraryProposal(empty, 'trip-1', material.revision)).toBeNull();
   });
 
   it('does not return another trip\'s stored proposal', async () => {

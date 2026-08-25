@@ -51,6 +51,20 @@ const plannedTrip: Itinerary = {
 const appliedItinerary: Itinerary = { ...emptyItinerary, id: 'trip-1', name: 'Applied trip', revision: 9 };
 const restoredItinerary: Itinerary = { ...emptyItinerary, id: 'trip-1', name: 'Restored trip', revision: 8 };
 
+const proposalMeta = (override: Record<string, unknown> = {}) => ({
+  planningRunId: 'planning-run-1',
+  scope: { type: 'day' as const, day: 1 },
+  source: 'fresh' as const,
+  savedPlaceCount: 2,
+  suggestedPlaceCount: 0,
+  assignedCount: 2,
+  omittedCount: 0,
+  routedLegCount: 1,
+  validationVersion: 2,
+  arrangementFingerprint: 'arrangement-1',
+  ...override,
+});
+
 const stagedOk = {
   ok: true as const,
   staged: {
@@ -106,6 +120,9 @@ beforeEach(() => {
   });
   mockedPlan.mockResolvedValue({
     status: 'answered',
+    outcome: 'ready',
+    progress: [],
+    cached: false,
     proposal: {
       kind: 'itinerary-proposal-v1', id: 'p1', tripId: 'trip-1', materialRevision: 'r1',
       createdAt: '2026-08-16T08:00:00Z', status: 'valid', applied: false, pace: 'balanced',
@@ -120,6 +137,7 @@ beforeEach(() => {
       conflicts: [], warnings: [], omittedPlaceIds: [],
       routeSummary: { matrixCalls: 1, confirmedLegs: 1, unavailableLegs: 0, allDurationsProviderDerived: true },
       repairIterations: 0,
+      meta: proposalMeta(),
     },
   });
 });
@@ -138,6 +156,9 @@ describe('Plan my trip proposal panel', () => {
       expect(illustration).toHaveAttribute('aria-hidden', 'true');
       expect(illustration).toHaveAttribute('width', '600');
       expect(illustration).toHaveAttribute('height', '450');
+      expect(screen.getByText('Building your proposal')).toBeInTheDocument();
+      expect(screen.queryByText('Checking one route matrix')).not.toBeInTheDocument();
+      expect(screen.queryByText('Validating every day')).not.toBeInTheDocument();
     });
   });
 
@@ -159,6 +180,30 @@ describe('Plan my trip proposal panel', () => {
     expect(mockedPlan).not.toHaveBeenCalled();
     expect(mockedStage).not.toHaveBeenCalled();
     expect(mockedApply).not.toHaveBeenCalled();
+  });
+
+  it('organises saved places with the saved-only source policy', async () => {
+    const itinerary = {
+      ...plannedTrip,
+      discoveryState: {
+        decisions: {
+          one: 'interested',
+          two: 'interested',
+          three: 'interested',
+          four: 'interested',
+        },
+      },
+    } as unknown as Itinerary;
+    const view = render(<PlanTripProposalPanel tripId="trip-1" tripName="Osaka days" itinerary={itinerary} />);
+    fireEvent.click(view.getByRole('button', { name: /^Smart plan$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Organise saved places$/ }));
+
+    await waitFor(() => expect(mockedPlan).toHaveBeenCalledTimes(1));
+    expect(mockedPlan.mock.calls[0][1]).toMatchObject({
+      scope: { type: 'trip' },
+      sourcePolicy: 'saved-only',
+      cachePolicy: 'prefer-cache',
+    });
   });
 
   /**
@@ -261,10 +306,14 @@ describe('Plan my trip proposal panel', () => {
     expect(mockedApply).not.toHaveBeenCalled();
   });
 
-  it('regenerates only after the traveller asks', async () => {
+  it('tries another arrangement only after the traveller asks', async () => {
     await openPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Regenerate proposal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try another arrangement' }));
     await waitFor(() => expect(mockedPlan).toHaveBeenCalledTimes(2));
+    expect(mockedPlan.mock.calls[1][1]).toMatchObject({
+      cachePolicy: 'fresh-alternative',
+      previousProposalId: 'p1',
+    });
   });
 
   it('requires a second, explicit confirmation before it writes', async () => {
@@ -402,6 +451,9 @@ describe('Plan my trip proposal panel', () => {
 
     mockedPlan.mockResolvedValue({
       status: 'answered',
+      outcome: 'ready',
+      progress: [],
+      cached: true,
       proposal: {
         kind: 'itinerary-proposal-v1', id: 'p-cached', tripId: 'trip-1', materialRevision: 'r2',
         createdAt: '2026-08-16T09:00:00Z', status: 'valid', applied: false, pace: 'balanced',
@@ -415,6 +467,7 @@ describe('Plan my trip proposal panel', () => {
         conflicts: [], warnings: [], omittedPlaceIds: [],
         routeSummary: { matrixCalls: 0, confirmedLegs: 0, unavailableLegs: 0, allDurationsProviderDerived: true },
         repairIterations: 0,
+        meta: proposalMeta({ source: 'cache', assignedCount: 1, routedLegCount: 0 }),
       },
     });
 
@@ -437,11 +490,14 @@ describe('Plan my trip proposal panel', () => {
 
     mockedPlan.mockResolvedValue({
       status: 'refused',
+      outcome: 'generation_unavailable',
+      progress: [],
+      cached: false,
       detail: GENERATION_DISABLED_DETAIL,
     });
 
     fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Create fresh plan' }));
-    expect(await screen.findByText('No proposal was generated')).toBeInTheDocument();
+    expect(await screen.findByText('Planning is unavailable right now')).toBeInTheDocument();
     expect(screen.getByText(GENERATION_DISABLED_DETAIL)).toBeInTheDocument();
     expect(mockedPlan).toHaveBeenCalledTimes(2);
     expect(mockedStage).toHaveBeenCalledTimes(1);
@@ -570,16 +626,20 @@ describe('Plan my trip proposal panel', () => {
     await openPanel();
     mockedPlan.mockResolvedValue({
       status: 'answered',
+      outcome: 'ready',
+      progress: [],
+      cached: false,
       proposal: {
         kind: 'itinerary-proposal-v1', id: 'p2-regenerated', tripId: 'trip-1', materialRevision: 'r1',
         createdAt: '2026-08-16T09:00:00Z', status: 'valid', applied: false, pace: 'balanced',
         days: [], conflicts: [], warnings: [], omittedPlaceIds: [],
         routeSummary: { matrixCalls: 1, confirmedLegs: 0, unavailableLegs: 0, allDurationsProviderDerived: true },
         repairIterations: 0,
+        meta: proposalMeta({ assignedCount: 1, routedLegCount: 0, arrangementFingerprint: 'arrangement-2' }),
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Regenerate proposal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try another arrangement' }));
     await waitFor(() => expect(mockedPlan).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('button', { name: /Apply plan/ }));
 
@@ -591,6 +651,9 @@ describe('Plan my trip proposal panel', () => {
   it('does not offer Apply while the proposal has conflicts to resolve', async () => {
     mockedPlan.mockResolvedValue({
       status: 'partial',
+      outcome: 'failed',
+      progress: [],
+      cached: false,
       proposal: {
         kind: 'itinerary-proposal-v1', id: 'p2', tripId: 'trip-1', materialRevision: 'r1',
         createdAt: '2026-08-16T08:00:00Z', status: 'needs-review', applied: false, pace: 'balanced',
@@ -599,6 +662,7 @@ describe('Plan my trip proposal panel', () => {
         warnings: [], omittedPlaceIds: [],
         routeSummary: { matrixCalls: 1, confirmedLegs: 0, unavailableLegs: 0, allDurationsProviderDerived: true },
         repairIterations: 2,
+        meta: proposalMeta({ assignedCount: 0, routedLegCount: 0 }),
       },
     });
     await openPanel();

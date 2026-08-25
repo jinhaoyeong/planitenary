@@ -12,6 +12,7 @@ import type { Itinerary } from '../data';
 import { tripStorageCleanupKeys } from '../lib/tripDeletion';
 import { pruneOrphanTripStorage } from '../lib/tripStorageOrphans';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
+import { parseTripCoverRef, resolveTripCover, tripCoverSurface } from '../lib/verifiedImage';
 import tripEmptyIllustration from '../assets/illustrations/trip-empty.webp';
 
 interface TripDashboardProps {
@@ -25,7 +26,14 @@ const readLocalTrips = (userId: string): TripSummary[] => {
   try {
     const parsed = JSON.parse(safeGetItem(localTripsKey(userId)) || '[]');
     return Array.isArray(parsed)
-      ? parsed.map((trip) => ({ ...trip, status: trip.status === 'archived' ? 'archived' : 'active' }))
+      ? parsed.map((trip) => ({
+          ...trip,
+          status: trip.status === 'archived' ? 'archived' : 'active',
+          cover: parseTripCoverRef(trip.cover) ?? {
+            type: 'generated-surface' as const,
+            selectedAt: new Date(0).toISOString(),
+          },
+        }))
       : [];
   } catch {
     return [];
@@ -62,7 +70,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
 
     const { data, error: queryError } = await supabase
       .from('trip_registry')
-      .select('id,title,description,status,updated_at,day_count,city_count')
+      .select('id,title,description,status,updated_at,day_count,city_count,cover_ref')
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false });
 
@@ -78,6 +86,10 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
         updatedAt: row.updated_at,
         dayCount: row.day_count,
         cityCount: row.city_count,
+        cover: parseTripCoverRef(row.cover_ref) ?? {
+          type: 'generated-surface' as const,
+          selectedAt: new Date(0).toISOString(),
+        },
       }));
       setTrips(rows);
       // The registry is authoritative here, and it lists archived trips too, so
@@ -117,7 +129,8 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     setCreating(true);
     setError(null);
     const itinerary = profile ? createItineraryFromProfile(profile) : createBlankItinerary();
-    const summary = toTripSummary(itinerary);
+    const usedImageKeys = new Set(trips.flatMap((trip) => trip.cover.asset?.imageKey ? [trip.cover.asset.imageKey] : []));
+    const summary = { ...toTripSummary(itinerary), cover: resolveTripCover(itinerary, usedImageKeys) };
     // Cache locally either way so the handbook opens with its identity intact
     // before any cloud round trip completes.
     safeSetItem(`itinerary-${user.id}-${itinerary.id}`, JSON.stringify(itinerary));
@@ -140,6 +153,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       status: 'active',
       day_count: summary.dayCount,
       city_count: summary.cityCount,
+      cover_ref: summary.cover,
     });
     const { error: itineraryError } = await supabase.from('itineraries').insert({
       id: itinerary.id,
@@ -405,6 +419,30 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                 className="trip-card text-left editorial-card p-5 sm:p-6 cursor-pointer"
                 style={{ backgroundColor: 'var(--bg-elevated)' }}
               >
+              <div
+                className="trip-card-cover relative mb-5 overflow-hidden rounded-[0.875rem]"
+                style={trip.cover.asset
+                  ? undefined
+                  : tripCoverSurface(trip.id, trip.cover.city || trip.title)}
+              >
+                {trip.cover.asset ? (
+                  <>
+                    <img
+                      src={trip.cover.asset.thumbnailUrl || trip.cover.asset.url}
+                      alt={trip.cover.city ? `${trip.cover.city} trip cover` : `${trip.title} trip cover`}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                    <small className="absolute inset-x-0 bottom-0 bg-slate-950/70 px-2 py-1 text-[9px] leading-tight text-white">
+                      {trip.cover.asset.attribution}
+                    </small>
+                  </>
+                ) : (
+                  <div className="flex h-full items-end p-4">
+                    <span className="font-display text-2xl leading-none">{trip.cover.city || trip.title}</span>
+                  </div>
+                )}
+              </div>
               <div className="flex items-start justify-between gap-4">
                 <span className="font-display text-5xl" style={{ color: 'var(--accent)' }} data-accent-swatch="trip-number">{String(index + 1).padStart(2, '0')}</span>
                 <div className="flex items-center gap-1">

@@ -88,7 +88,7 @@ describe('the registry is coherent', () => {
 
   it('routes the genuinely open-ended ones into the conversation', () => {
     expect(plannerCapability('more-local')?.route).toBe('ask');
-    expect(plannerCapability('complete-trip')?.route).toBe('ask');
+    expect(plannerCapability('complete-trip')?.route).toBe('server-proposal');
   });
 
   it('keeps undo out of both, because it reverses rather than proposes', () => {

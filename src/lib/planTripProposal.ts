@@ -4,14 +4,30 @@ import type {
   ProposalConflict,
   ProposedItineraryDay,
   ProposedItineraryItem,
+  SuggestedPlaceMaterial,
   TripItineraryProposal,
 } from '../../supabase/functions/_shared/itineraryProposal';
+import {
+  DEFAULT_PLANNING_REQUEST,
+  parsePlanningRequest,
+  type PlanningOutcomeCode,
+  type PlanningPreflight,
+  type PlanningProgressEvent,
+  type PlanningRequest,
+  type ProposalMeta,
+} from '../../supabase/functions/_shared/planningIntent';
+import { parseStructuredPlaceRef } from '../../supabase/functions/_shared/placeReference';
+import { parsePlaceImage } from '../../supabase/functions/_shared/placeImages';
 import { activityCitiesFrom, parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
 
 export interface PlanTripResult {
   status: 'answered' | 'partial' | 'refused';
+  outcome: PlanningOutcomeCode;
   proposal?: TripItineraryProposal;
   detail?: string;
+  preflight?: PlanningPreflight;
+  progress: PlanningProgressEvent[];
+  cached: boolean;
 }
 
 const text = (value: unknown, max = 500): string | undefined =>
@@ -34,6 +50,48 @@ const providerModeMatches = (requestedMode: string, providerMode: string | undef
     'public-transport': ['TRANSIT'],
   };
   return supported[requestedMode]?.includes(providerMode) === true;
+};
+
+const parseSuggestedPlace = (value: unknown): SuggestedPlaceMaterial | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const ref = parseStructuredPlaceRef(raw.ref);
+  const name = text(raw.name, 180);
+  const city = text(raw.city, 160);
+  const coordinates = Array.isArray(raw.coordinates) && raw.coordinates.length === 2
+    && raw.coordinates.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
+    ? raw.coordinates as [number, number]
+    : undefined;
+  const duration = finite(raw.durationMinutes);
+  if (!ref || !name || !city || !coordinates || duration === undefined) return undefined;
+  const openingHours = Array.isArray(raw.openingHours) ? raw.openingHours.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const window = entry as Record<string, unknown>;
+    const opensAt = text(window.opensAt, 5);
+    const closesAt = text(window.closesAt, 5);
+    if (!opensAt || !closesAt) return [];
+    return [{
+      opensAt,
+      closesAt,
+      days: Array.isArray(window.days)
+        ? window.days.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6)
+        : undefined,
+      sourceUrl: text(window.sourceUrl, 1000),
+    }];
+  }) : [];
+  return {
+    ref,
+    name,
+    city,
+    countryCode: text(raw.countryCode, 2)?.toUpperCase(),
+    location: text(raw.location, 160),
+    coordinates,
+    categories: strings(raw.categories, 12),
+    durationMinutes: Math.max(15, Math.round(duration)),
+    openingHours,
+    sourceUrls: strings(raw.sourceUrls, 12).filter((entry) => /^https?:\/\//i.test(entry)),
+    image: parsePlaceImage(raw.image),
+  };
 };
 
 const parseItem = (value: unknown): ProposedItineraryItem | undefined => {
@@ -98,6 +156,7 @@ const parseItem = (value: unknown): ProposedItineraryItem | undefined => {
     priority: ['must-do', 'interested', 'optional', 'locked'].find((entry) => entry === raw.priority) as ProposedItineraryItem['priority'],
     locked: raw.locked === true,
     activityCity: text(raw.activityCity, 160),
+    suggestedPlace: parseSuggestedPlace(raw.suggestedPlace),
   };
 };
 
@@ -147,6 +206,61 @@ const parseConflict = (value: unknown): ProposalConflict | undefined => {
   };
 };
 
+const parseProposalMeta = (value: unknown): ProposalMeta | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const planningRunId = text(raw.planningRunId, 180);
+  const arrangementFingerprint = text(raw.arrangementFingerprint, 180);
+  const source = raw.source === 'cache' || raw.source === 'fresh' ? raw.source : undefined;
+  const validationVersion = finite(raw.validationVersion);
+  const parsedIntent = parsePlanningRequest({ scope: raw.scope });
+  if (!planningRunId || !arrangementFingerprint || !source || validationVersion === undefined) return undefined;
+  return {
+    planningRunId,
+    scope: parsedIntent.scope,
+    source,
+    savedPlaceCount: Math.max(0, Math.round(finite(raw.savedPlaceCount) ?? 0)),
+    suggestedPlaceCount: Math.max(0, Math.round(finite(raw.suggestedPlaceCount) ?? 0)),
+    assignedCount: Math.max(0, Math.round(finite(raw.assignedCount) ?? 0)),
+    omittedCount: Math.max(0, Math.round(finite(raw.omittedCount) ?? 0)),
+    routedLegCount: Math.max(0, Math.round(finite(raw.routedLegCount) ?? 0)),
+    validationVersion: Math.round(validationVersion),
+    arrangementFingerprint,
+  };
+};
+
+const parsePreflight = (value: unknown): PlanningPreflight | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  return {
+    eligibleSavedPlaces: Math.max(0, Math.round(finite(raw.eligibleSavedPlaces) ?? 0)),
+    suggestedPlaces: Math.max(0, Math.round(finite(raw.suggestedPlaces) ?? 0)),
+    missingCanonicalIdentity: Math.max(0, Math.round(finite(raw.missingCanonicalIdentity) ?? 0)),
+    missingCoordinates: Math.max(0, Math.round(finite(raw.missingCoordinates) ?? 0)),
+    targetCapacity: Math.max(0, Math.round(finite(raw.targetCapacity) ?? 0)),
+    discoveryAvailable: raw.discoveryAvailable === true,
+  };
+};
+
+const PROGRESS_STAGES = new Set<PlanningProgressEvent['stage']>([
+  'planning_started', 'preflight_complete', 'discovery_started', 'discovery_complete',
+  'routing_started', 'routing_complete', 'scheduling_started', 'validation_started',
+  'validation_complete', 'proposal_ready',
+]);
+
+const parseProgress = (value: unknown): PlanningProgressEvent[] => Array.isArray(value)
+  ? value.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+      const raw = entry as Record<string, unknown>;
+      if (!PROGRESS_STAGES.has(raw.stage as PlanningProgressEvent['stage'])) return [];
+      return [{
+        stage: raw.stage as PlanningProgressEvent['stage'],
+        detail: text(raw.detail, 240),
+        count: finite(raw.count),
+      }];
+    }).slice(0, 30)
+  : [];
+
 export function parseTripProposal(payload: unknown): TripItineraryProposal | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
   const raw = payload as Record<string, unknown>;
@@ -157,10 +271,11 @@ export function parseTripProposal(payload: unknown): TripItineraryProposal | und
   const createdAt = text(raw.createdAt, 80);
   const pace = raw.pace === 'relaxed' || raw.pace === 'balanced' || raw.pace === 'fast' ? raw.pace : undefined;
   const status = raw.status === 'valid' || raw.status === 'needs-review' ? raw.status : undefined;
+  const meta = parseProposalMeta(raw.meta);
   const route = raw.routeSummary && typeof raw.routeSummary === 'object'
     ? raw.routeSummary as Record<string, unknown>
     : {};
-  if (!id || !tripId || !materialRevision || !createdAt || !pace || !status) return undefined;
+  if (!id || !tripId || !materialRevision || !createdAt || !pace || !status || !meta) return undefined;
   return {
     kind: 'itinerary-proposal-v1',
     id,
@@ -181,30 +296,62 @@ export function parseTripProposal(payload: unknown): TripItineraryProposal | und
       allDurationsProviderDerived: route.allDurationsProviderDerived === true,
     },
     repairIterations: Math.max(0, Math.round(finite(raw.repairIterations) ?? 0)),
+    meta,
   };
 }
 
 export async function planTripProposal(
   tripId: string,
-  invoke: (name: string, body: unknown) => Promise<unknown> = invokeTravelFunction,
+  requestOrInvoke: PlanningRequest | ((name: string, body: unknown) => Promise<unknown>) = DEFAULT_PLANNING_REQUEST,
+  invokeOverride: (name: string, body: unknown) => Promise<unknown> = invokeTravelFunction,
 ): Promise<PlanTripResult> {
-  if (!tripId) return { status: 'refused', detail: 'A trip is required.' };
+  const request = typeof requestOrInvoke === 'function'
+    ? DEFAULT_PLANNING_REQUEST
+    : parsePlanningRequest(requestOrInvoke);
+  const invoke = typeof requestOrInvoke === 'function' ? requestOrInvoke : invokeOverride;
+  if (!tripId) return { status: 'refused', outcome: 'failed', detail: 'A trip is required.', progress: [], cached: false };
   try {
     const response = await invoke('planitenary-agent', {
       operation: 'build-itinerary',
       tripId,
       question: 'Build a complete proposal from my saved trip material.',
+      planningRequest: request,
     });
     const envelope = response && typeof response === 'object' ? response as Record<string, unknown> : {};
     const proposal = parseTripProposal(envelope.itineraryProposal);
+    const allowedOutcomes: PlanningOutcomeCode[] = [
+      'ready', 'needs_places', 'unresolvable_places', 'no_verified_candidates',
+      'generation_unavailable', 'no_alternative', 'failed',
+    ];
+    const outcome = allowedOutcomes.find((entry) => entry === envelope.outcome)
+      ?? (proposal?.status === 'valid' && proposal.meta.assignedCount > 0 ? 'ready' : 'failed');
     const status = envelope.status === 'answered' || envelope.status === 'partial' || envelope.status === 'refused'
       ? envelope.status
       : proposal ? (proposal.status === 'valid' ? 'answered' : 'partial') : 'refused';
-    if (!proposal && status !== 'refused') {
-      return { status: 'refused', detail: 'The planner returned a malformed proposal, so it was not shown.' };
+    const progress = parseProgress(envelope.progress);
+    const cached = envelope.cached === true || proposal?.meta.source === 'cache';
+    if (outcome === 'ready' && (!proposal || proposal.status !== 'valid' || proposal.meta.assignedCount <= 0)) {
+      return { status: 'refused', outcome: 'failed', detail: 'The planner returned an empty or malformed proposal, so it was not shown.', progress, cached };
     }
-    return { status, proposal, detail: text(envelope.detail, 500) };
+    if (!proposal && status !== 'refused') {
+      return { status: 'refused', outcome: 'failed', detail: 'The planner returned a malformed proposal, so it was not shown.', progress, cached };
+    }
+    return {
+      status,
+      outcome,
+      proposal,
+      detail: text(envelope.detail, 500),
+      preflight: parsePreflight(envelope.preflight),
+      progress,
+      cached,
+    };
   } catch (error) {
-    return { status: 'refused', detail: error instanceof Error ? error.message : 'The proposal planner is unavailable.' };
+    return {
+      status: 'refused',
+      outcome: 'failed',
+      detail: error instanceof Error ? error.message : 'The proposal planner is unavailable.',
+      progress: [],
+      cached: false,
+    };
   }
 }

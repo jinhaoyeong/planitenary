@@ -75,15 +75,10 @@ import {
   sanitizeItinerary,
 } from './lib/itinerarySanitize';
 import { resolveDisplayedDayBadge } from './lib/trips';
+import { resolveTripCover, tripCoverSurface } from './lib/verifiedImage';
 import { useTripIdentityTheme } from './hooks/useTripIdentityTheme';
 import { usePullToRefresh } from './hooks/usePullToRefresh';
-import cqCdHero from './assets/6-DayIn-DepthPureTourofChongqingChengdu.jpg';
-import defaultTravelHero from './assets/default-travel-hero.jpg';
 import { safeGetItem, safeSetItem } from './lib/safeLocalStorage';
-
-const heroImages = {
-  'cq-cd': cqCdHero
-};
 
 /**
  * Short decorative travel marks for the immersive hero. These are visual
@@ -263,6 +258,7 @@ function App() {
     [isDemoUser, demoItinerary, activeItineraryId],
   );
   const displayItinerary = customItinerary || activeItinerary;
+  const displayCover = resolveTripCover(displayItinerary);
   const dayBadge = resolveDisplayedDayBadge(displayItinerary);
   const dayBadgeValue = dayBadge.value;
   const showDayBadge = dayBadge.visible || isHomeHeroEditing;
@@ -560,6 +556,7 @@ function App() {
         status: 'active',
         day_count: itineraryToSync.days.length,
         city_count: itineraryToSync.cities.length,
+        cover_ref: resolveTripCover(itineraryToSync),
         updated_at: new Date().toISOString(),
       });
       if (registryError) console.error('Error syncing trip registry:', registryError);
@@ -785,6 +782,7 @@ function App() {
           status: 'active',
           day_count: itineraryData.days?.length || 0,
           city_count: itineraryData.cities?.length || 0,
+          cover_ref: resolveTripCover(itineraryData),
           updated_at: new Date().toISOString(),
         });
       }
@@ -1374,12 +1372,31 @@ function App() {
                 className="relative overflow-hidden handbook-cover-frame z-[1]"
                 data-cover-layout={visualIdentity?.coverLayout || 'journal'}
               >
-                {displayItinerary.cities.length > 0 ? (
-                  <img
-                    src={heroImages[activeItineraryId as keyof typeof heroImages] || defaultTravelHero}
-                    alt={displayItinerary.cities.join(' & ')}
-                    className="w-full h-[280px] md:h-[420px] object-cover"
-                  />
+                {displayItinerary.cities.length > 0 && displayCover.asset ? (
+                  <div className="relative h-[280px] md:h-[420px]">
+                    <img
+                      src={displayCover.asset.url}
+                      alt={`${displayCover.city || displayItinerary.cities[0]} trip cover`}
+                      className="h-full w-full object-cover"
+                    />
+                    <a
+                      href={displayCover.asset.sourcePageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="absolute inset-x-0 bottom-0 bg-slate-950/75 px-3 py-2 text-[10px] leading-tight text-white underline-offset-2 hover:underline"
+                    >
+                      {displayCover.asset.attribution} · {displayCover.asset.license}
+                    </a>
+                  </div>
+                ) : displayItinerary.cities.length > 0 ? (
+                  <div
+                    className="flex h-[280px] items-end px-7 py-8 md:h-[420px] md:px-10 md:py-11"
+                    style={tripCoverSurface(displayItinerary.id, displayCover.city || displayItinerary.cities[0])}
+                  >
+                    <span className="font-display text-5xl leading-none md:text-7xl">
+                      {displayCover.city || displayItinerary.cities[0]}
+                    </span>
+                  </div>
                 ) : (
                   <div className="w-full h-[280px] md:h-[420px] flex items-center justify-center text-center px-8" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink-muted)' }}>
                     <span

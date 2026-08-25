@@ -182,6 +182,29 @@ describe('deterministic Smart Plan actions', () => {
     expect(actions.map((action) => action.id)).not.toContain('review-budget');
   });
 
+  it('treats organising Interested places as a saved-only proposal action', () => {
+    const actions = deriveSmartActions({
+      itinerary: {
+        days: [{ day: 1, activities: [park] }],
+        discoveryState: {
+          decisions: {
+            one: 'interested',
+            two: 'interested',
+            three: 'interested',
+            four: 'interested',
+          },
+        },
+      },
+      surface: 'itinerary',
+      dayNumber: 1,
+    });
+
+    expect(actions.find((action) => action.id === 'organise-saved')).toMatchObject({
+      mode: 'proposal',
+      scope: 'place',
+    });
+  });
+
   it('shows Review budget on the budget surface only when a wallet exists', () => {
     const without = deriveSmartActions({
       itinerary: { days: [{ day: 1, activities: [park] }] },

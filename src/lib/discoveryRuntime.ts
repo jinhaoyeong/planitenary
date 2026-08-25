@@ -384,6 +384,9 @@ export interface PlacePhoto {
    * actually needs.
    */
   thumbnailUrl?: string;
+  licence: string;
+  licenceUrl?: string;
+  imageKey: string;
 }
 
 /**
@@ -422,6 +425,9 @@ function parsePhotos(payload: unknown, candidates: PlaceCandidate[]): Record<str
         attribution: image.attribution,
         sourcePage: image.sourcePage,
         thumbnailUrl: image.thumbnailUrl,
+        licence: image.licence,
+        licenceUrl: image.licenceUrl,
+        imageKey: image.sourcePage,
       };
       break;
     }

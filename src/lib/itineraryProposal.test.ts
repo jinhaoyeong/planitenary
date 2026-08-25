@@ -27,6 +27,7 @@ const place = (id: string, override: Partial<PlanningPlace> = {}): PlanningPlace
   locked: false,
   reservation: false,
   ...override,
+  source: override.source ?? 'saved',
 });
 
 const material = (override: Partial<PlanningMaterial> = {}): PlanningMaterial => ({
@@ -50,6 +51,9 @@ const material = (override: Partial<PlanningMaterial> = {}): PlanningMaterial =>
   clusters: [{ id: 'osaka::central', city: 'Osaka', placeIds: ['a', 'b'] }],
   limits: { maxPlaces: 25, maxDays: 21, maxRepairIterations: 2 },
   ...override,
+  intent: override.intent ?? { scope: { type: 'trip' }, sourcePolicy: 'saved-only', cachePolicy: 'prefer-cache' },
+  savedPlaceCount: override.savedPlaceCount ?? 2,
+  suggestedPlaceCount: override.suggestedPlaceCount ?? 0,
 });
 
 const matrix = (ids: string[], duration = 27): RouteMatrixLeg[] => ids.flatMap((from) =>
