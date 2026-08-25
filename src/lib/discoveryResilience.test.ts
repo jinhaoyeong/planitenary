@@ -199,8 +199,32 @@ describe('deployed discovery boundaries', () => {
   });
 
   it('gives interactive planning a shorter source deadline than browsing', () => {
-    expect(discoverSource).toContain('OVERPASS_TIMEOUT_MS = { browse: 45_000, planning: 12_000 }');
-    expect(discoverSource).toContain('OVERPASS_FOOD_TIMEOUT_MS = { browse: 35_000, planning: 9_000 }');
+    const budget = (name: string) => {
+      const match = discoverSource.match(
+        new RegExp(`${name} = \\{ browse: ([\\d_]+), planning: ([\\d_]+) \\}`),
+      );
+      if (!match) throw new Error(`${name} budgets not found`);
+      return { browse: Number(match[1].replace(/_/g, '')), planning: Number(match[2].replace(/_/g, '')) };
+    };
+    const sights = budget('OVERPASS_TIMEOUT_MS');
+    const food = budget('OVERPASS_FOOD_TIMEOUT_MS');
+
+    expect(sights.planning).toBeLessThan(sights.browse);
+    expect(food.planning).toBeLessThan(food.browse);
+    /**
+     * Measured Overpass runs for a single city took 10.8s and 19.0s on a query
+     * lighter than production's. A planning budget under that is not "fast", it
+     * is a guaranteed timeout — which is exactly what shipped first and made
+     * every production fill report the sources as unreachable.
+     */
+    expect(sights.planning).toBeGreaterThanOrEqual(20_000);
+  });
+
+  it('asks Overpass for fewer rows when planning than when browsing', () => {
+    const cap = discoverSource.match(/OVERPASS_RESULT_CAP = \{ browse: (\d+), planning: (\d+) \}/);
+    expect(cap).not.toBeNull();
+    expect(Number(cap![2])).toBeLessThan(Number(cap![1]));
+    expect(discoverSource).toContain('out center tags ${OVERPASS_RESULT_CAP[mode]};');
   });
 
   it('separates an unreachable source from a city with nothing in it', () => {

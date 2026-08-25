@@ -671,8 +671,17 @@ const overpassClausesFor = (categories: readonly string[], scope: string): strin
  * request, it is an abandoned one — production showed ~47s Overpass failures
  * three times over inside a single 149s planning call.
  */
-const OVERPASS_TIMEOUT_MS = { browse: 45_000, planning: 12_000 } as const;
-const OVERPASS_FOOD_TIMEOUT_MS = { browse: 35_000, planning: 9_000 } as const;
+const OVERPASS_TIMEOUT_MS = { browse: 45_000, planning: 22_000 } as const;
+const OVERPASS_FOOD_TIMEOUT_MS = { browse: 35_000, planning: 12_000 } as const;
+/**
+ * Planning asks for fewer results as well as sooner.
+ *
+ * Waiting less only helps if the query is also cheaper — a measured Overpass
+ * run for one city took 10.8s and 19.0s for a query lighter than Browse's, so
+ * a short deadline over a heavy query is just a guaranteed timeout. Smart Plan
+ * fills a handful of gaps, not a deck, so it asks for a fraction of the rows.
+ */
+const OVERPASS_RESULT_CAP = { browse: 400, planning: 120 } as const;
 export type DiscoveryMode = keyof typeof OVERPASS_TIMEOUT_MS;
 
 async function fetchOverpassPlaces(
@@ -690,7 +699,7 @@ async function fetchOverpassPlaces(
 (
   ${clauses.join('\n  ')}
 );
-out center tags 400;`;
+out center tags ${OVERPASS_RESULT_CAP[mode]};`;
 
   const payload = await fetchJson(
     secrets.overpassEndpoint(),

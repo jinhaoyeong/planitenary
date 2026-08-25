@@ -159,7 +159,7 @@ const asArray = (value: unknown): unknown[] => Array.isArray(value) ? value : []
  * planning call ran ~149s before reporting zero suggestions. Two cities at a
  * time under one shared deadline bounds that at something a person waits for.
  */
-const PLANNING_DISCOVERY_DEADLINE_MS = 25_000;
+const PLANNING_DISCOVERY_DEADLINE_MS = 40_000;
 const PLANNING_DISCOVERY_CONCURRENCY = 2;
 const PLANNING_IMAGE_TIMEOUT_MS = 6_000;
 
