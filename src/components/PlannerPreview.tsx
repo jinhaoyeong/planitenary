@@ -155,7 +155,10 @@ export function PlannerPreview({ itinerary, profile, onItineraryChange }: Planne
     intelligence?.clearPlannerRequest();
     runCapability(request.id);
     // The proposal opens below the fold when the drawer closes over it.
-    window.setTimeout(() => previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    // `scrollIntoView` is optional-called because this fires on a timer: the
+    // node can outlive the environment that owns the method (jsdom never
+    // implements it), and a convenience scroll must never throw when absent.
+    window.setTimeout(() => previewRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
     // Only the nonce may re-trigger this. Depending on the itinerary or the
     // handlers would re-run a capability every time its own proposal changed
     // the trip, which is the one thing a request channel must never do.
