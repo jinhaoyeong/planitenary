@@ -67,11 +67,14 @@ import {
 import { readOwnedTrip } from '../_shared/tripOwnership.ts';
 import {
   finalizeAiSpendAttempt,
+  readCanonicalPlaceCoordinates,
+  readCanonicalPlaceIds,
   readItineraryProposalCache,
   readSpendToDate,
   serviceClient,
   writeItineraryProposalCache,
 } from '../_shared/cache.ts';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { reserveAiReasoningAttempt } from '../_shared/quota.ts';
 import { SpendSession, meteredModelCall, type MeteredDeps } from '../_shared/meteredModel.ts';
 import { runAgent, type AgentModelPayload } from '../_shared/agentRuntime.ts';
@@ -108,6 +111,7 @@ import {
   type PlanningProgressEvent,
   type PlanningRequest,
 } from '../_shared/planningIntent.ts';
+import { mapWithConcurrency } from '../_shared/discoveryResilience.ts';
 import {
   cachedItineraryProposalEnvelope,
   generationDisabledRefusal,
@@ -147,19 +151,147 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 
 const asArray = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 
-const plannerCountryByCity = (itinerary: Record<string, unknown> | null): Map<string, string> => {
+/**
+ * The whole factual-fill budget for one planning request.
+ *
+ * Sized against what went wrong in production: three cities were discovered
+ * one after another, each failing near Overpass's 45s ceiling, and a single
+ * planning call ran ~149s before reporting zero suggestions. Two cities at a
+ * time under one shared deadline bounds that at something a person waits for.
+ */
+const PLANNING_DISCOVERY_DEADLINE_MS = 25_000;
+const PLANNING_DISCOVERY_CONCURRENCY = 2;
+const PLANNING_IMAGE_TIMEOUT_MS = 6_000;
+
+/**
+ * Recover identity for saved places written before canonical refs existed.
+ *
+ * Old activities carry `provider` + `providerPlaceId` but no `placeRef` and
+ * sometimes no coordinates, so preflight rejects the whole trip as
+ * unresolvable — which is how a traveller with ten real saved places gets told
+ * none of them can be scheduled. The link table already knows the answer.
+ *
+ * Deterministic only: identity comes from `(provider, providerPlaceId)` against
+ * `place_provider_links`, coordinates from `canonical_places`. Never a
+ * name-similarity guess, and never the model — a place wrongly identified is
+ * worse than a place left out, so anything unmatched stays unresolvable.
+ *
+ * Read-only. Repairs live for this proposal; nothing is written to the trip
+ * outside the existing authorised Apply path.
+ */
+async function repairSavedPlaceIdentity(
+  cache: SupabaseClient | null,
+  material: PlanningMaterial,
+): Promise<{ material: PlanningMaterial; repaired: number }> {
+  if (!cache) return { material, repaired: 0 };
+  const needing = material.places.filter((place) =>
+    place.source === 'saved' && (!place.placeRef || !place.coordinates) && Boolean(place.providerPlaceId));
+  if (needing.length === 0) return { material, repaired: 0 };
+
+  const byProvider = new Map<string, string[]>();
+  for (const place of needing) {
+    const provider = place.placeRef?.provider ?? place.provider;
+    if (!provider || !place.providerPlaceId) continue;
+    byProvider.set(provider, [...(byProvider.get(provider) ?? []), place.providerPlaceId]);
+  }
+
+  const canonicalByKey = new Map<string, string>();
+  for (const [provider, ids] of byProvider) {
+    const links = await readCanonicalPlaceIds(cache, provider, ids);
+    for (const [providerPlaceId, canonicalId] of links) {
+      canonicalByKey.set(`${provider}:${providerPlaceId}`, canonicalId);
+    }
+  }
+  const coordinates = await readCanonicalPlaceCoordinates(cache, [...canonicalByKey.values()]);
+
+  let repaired = 0;
+  const places = material.places.map((place) => {
+    if (place.source !== 'saved' || (place.placeRef && place.coordinates)) return place;
+    const provider = place.placeRef?.provider ?? place.provider;
+    if (!provider || !place.providerPlaceId) return place;
+    const canonicalPlaceId = canonicalByKey.get(`${provider}:${place.providerPlaceId}`);
+    if (!canonicalPlaceId) return place;
+    const point = coordinates.get(canonicalPlaceId);
+    const nextCoordinates = place.coordinates
+      ?? (point ? [point.lat, point.lng] as [number, number] : undefined);
+    // Identity alone is not enough to schedule: a place still needs a location.
+    if (!nextCoordinates) return place;
+    repaired += 1;
+    return {
+      ...place,
+      placeRef: place.placeRef
+        ?? { canonicalPlaceId, provider, providerPlaceId: place.providerPlaceId },
+      coordinates: nextCoordinates,
+    };
+  });
+
+  if (repaired > 0) {
+    console.info(`[planitenary-agent] saved_place_identity_repaired count=${repaired}`);
+  }
+  return { material: repaired > 0 ? { ...material, places } : material, repaired };
+}
+
+/** A discovery call that failed, carrying enough to tell outage from absence. */
+class DiscoveryCallError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) {
+    super(message);
+    this.name = 'DiscoveryCallError';
+  }
+}
+
+interface PlannerDestinationFacts {
+  countryCode?: string;
+  lat?: number;
+  lng?: number;
+}
+
+/**
+ * What the trip already knows about each destination.
+ *
+ * The coordinates matter as much as the country: `travel-discover` skips its
+ * Nominatim city lookup entirely when given a centre, and a geocode we do not
+ * need is latency Smart Plan cannot spend.
+ */
+const plannerDestinationsByCity = (
+  itinerary: Record<string, unknown> | null,
+): Map<string, PlannerDestinationFacts> => {
   const profile = asRecord(itinerary?.tripProfile);
-  const map = new Map<string, string>();
+  const map = new Map<string, PlannerDestinationFacts>();
   for (const entry of asArray(profile?.destinations)) {
     const destination = asRecord(entry);
     const city = typeof destination?.city === 'string' ? destination.city.trim().toLowerCase() : '';
-    const countryCode = typeof destination?.countryCode === 'string'
+    if (!city) continue;
+    const rawCountry = typeof destination?.countryCode === 'string'
       ? destination.countryCode.trim().toUpperCase()
       : '';
-    if (city && /^[A-Z]{2}$/.test(countryCode)) map.set(city, countryCode);
+    const lat = typeof destination?.lat === 'number' && Number.isFinite(destination.lat)
+      ? destination.lat
+      : undefined;
+    const lng = typeof destination?.lng === 'number' && Number.isFinite(destination.lng)
+      ? destination.lng
+      : undefined;
+    // Never infer a centre: only a stated, in-range pair is passed on.
+    const usable = lat !== undefined && lng !== undefined
+      && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    map.set(city, {
+      countryCode: /^[A-Z]{2}$/.test(rawCountry) ? rawCountry : undefined,
+      lat: usable ? lat : undefined,
+      lng: usable ? lng : undefined,
+    });
   }
   return map;
 };
+
+/** Why a planning discovery produced nothing, kept apart from how many it found. */
+export interface PlanningDiscoveryResult {
+  places: PlanningPlace[];
+  attemptedCities: string[];
+  succeededCities: string[];
+  failedCities: string[];
+  /** True when a city failed because its factual sources were unreachable. */
+  sourcesUnavailable: boolean;
+}
+
 
 /**
  * Fill a planning gap from the same factual discovery/image authorities the
@@ -172,40 +304,94 @@ async function discoverPlanningPlaces(input: {
   authHeader: string;
   functionsBaseUrl: string;
   limit: number;
-}): Promise<PlanningPlace[]> {
-  if (input.limit <= 0 || input.request.sourcePolicy !== 'saved-plus-suggestions') return [];
-  const countryByCity = plannerCountryByCity(input.itinerary);
+  deadlineMs?: number;
+}): Promise<PlanningDiscoveryResult> {
+  const empty: PlanningDiscoveryResult = {
+    places: [], attemptedCities: [], succeededCities: [], failedCities: [], sourcesUnavailable: false,
+  };
+  if (input.limit <= 0 || input.request.sourcePolicy !== 'saved-plus-suggestions') return empty;
+  const destinations = plannerDestinationsByCity(input.itinerary);
   const targetDays = input.request.scope.type === 'day'
     ? input.material.days.filter((day) => day.day === input.request.scope.day)
     : input.material.days;
   const cities = [...new Set(targetDays.flatMap((day) => [day.stayCity, ...day.activityCities])
     .map((city) => city.trim()).filter(Boolean))].slice(0, 4);
   const interests = [...input.material.styles, ...input.material.tripTypes, ...input.material.moods].slice(0, 12);
-  const callFunction = async (name: string, payload: unknown): Promise<unknown> => {
-    const response = await fetch(`${input.functionsBaseUrl}/${name}`, {
-      method: 'POST',
-      headers: { Authorization: input.authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error(`${name} responded ${response.status}`);
-    return response.json();
+  /**
+   * One deadline for the whole fill, not one per city. Three cities that each
+   * fail slowly must not add up to a planning request nobody waits for.
+   */
+  const deadline = Date.now() + (input.deadlineMs ?? PLANNING_DISCOVERY_DEADLINE_MS);
+  const callFunction = async (name: string, payload: unknown, timeoutMs: number): Promise<unknown> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${input.functionsBaseUrl}/${name}`, {
+        method: 'POST',
+        headers: { Authorization: input.authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        const code = asRecord(detail)?.code;
+        throw new DiscoveryCallError(
+          `${name} responded ${response.status}`,
+          response.status,
+          typeof code === 'string' ? code : undefined,
+        );
+      }
+      return await response.json();
+    } finally {
+      clearTimeout(timer);
+    }
   };
+
   const rawCandidates: Record<string, unknown>[] = [];
+  const succeededCities: string[] = [];
+  const failedCities: string[] = [];
+  let sourcesUnavailable = false;
   const perCity = Math.max(2, Math.ceil(input.limit / Math.max(1, cities.length)));
-  for (const city of cities) {
+
+  await mapWithConcurrency(cities, PLANNING_DISCOVERY_CONCURRENCY, async (city) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      failedCities.push(city);
+      console.warn(`[planitenary-agent] planning_discovery deadline_exceeded city=${city}`);
+      return;
+    }
+    const facts = destinations.get(city.toLowerCase());
+    const startedAt = Date.now();
     try {
       const payload = await callFunction('travel-discover', {
         city,
-        countryCode: countryByCity.get(city.toLowerCase()) ?? '',
+        countryCode: facts?.countryCode ?? '',
+        lat: facts?.lat,
+        lng: facts?.lng,
         interests,
         hiddenGems: input.material.preferences.hiddenGems === true,
         limit: perCity,
-      });
-      rawCandidates.push(...asArray(payload).flatMap((entry) => asRecord(entry) ?? []).slice(0, perCity));
+        mode: 'planning',
+      }, remaining);
+      const found = asArray(payload).flatMap((entry) => asRecord(entry) ?? []).slice(0, perCity);
+      rawCandidates.push(...found);
+      succeededCities.push(city);
+      console.info(
+        `[planitenary-agent] planning_discovery success city=${city}`
+        + ` candidates=${found.length} geocodeSkipped=${facts?.lat !== undefined} ms=${Date.now() - startedAt}`,
+      );
     } catch (error) {
-      console.warn('[planitenary-agent] factual planning discovery unavailable:', error);
+      failedCities.push(city);
+      // A 404 is the city honestly holding nothing; anything else is an outage.
+      const unavailable = !(error instanceof DiscoveryCallError) || error.status !== 404;
+      if (unavailable) sourcesUnavailable = true;
+      console.warn(
+        `[planitenary-agent] planning_discovery ${unavailable ? 'sources_unavailable' : 'no_candidates'}`
+        + ` city=${city} ms=${Date.now() - startedAt}:`,
+        error,
+      );
     }
-  }
+  });
 
   // Resolve only the bounded candidates that carry image leads. Wikimedia is
   // best-effort; identity remains usable if a photo cannot be proved.
@@ -219,12 +405,15 @@ async function discoverPlanningPlaces(input: {
   }
   const images = new Map<string, unknown>();
   for (const [provider, candidates] of byLinkProvider) {
+    // A photograph is decoration for planning; identity and coordinates are not.
+    const imageBudget = Math.min(PLANNING_IMAGE_TIMEOUT_MS, Math.max(0, deadline - Date.now()));
+    if (imageBudget <= 0) break;
     try {
       const payload = asRecord(await callFunction('travel-images', {
         provider,
         placeIds: candidates.map((candidate) => parseStructuredPlaceRef(candidate.placeRef)!.providerPlaceId),
         placeLeads: candidates.map((candidate) => asArray(candidate.imageLeads)),
-      }));
+      }, imageBudget));
       const imageMap = asRecord(payload?.images);
       for (const candidate of candidates) {
         const providerPlaceId = parseStructuredPlaceRef(candidate.placeRef)!.providerPlaceId;
@@ -237,7 +426,7 @@ async function discoverPlanningPlaces(input: {
   }
 
   const seen = new Set<string>();
-  return rawCandidates.flatMap((candidate) => {
+  const places = rawCandidates.flatMap((candidate) => {
     const ref = parseStructuredPlaceRef(candidate.placeRef);
     if (!ref || seen.has(ref.canonicalPlaceId)) return [];
     const place = planningPlaceFromDiscoveryCandidate({
@@ -248,6 +437,19 @@ async function discoverPlanningPlaces(input: {
     seen.add(ref.canonicalPlaceId);
     return [place];
   }).slice(0, input.limit);
+
+  return {
+    places,
+    attemptedCities: cities,
+    succeededCities,
+    failedCities,
+    /**
+     * Only an outage that actually cost us candidates is worth telling the
+     * traveller about. A city that failed while another answered is degraded,
+     * not unavailable, and the proposal it produced is still real.
+     */
+    sourcesUnavailable: sourcesUnavailable && places.length === 0,
+  };
 }
 
 /** Flatten the real sibling-function matrix into traceable route legs. */
@@ -646,22 +848,27 @@ Deno.serve(async (request) => {
   if (operation === 'build-itinerary') {
     const planningRequest = parsePlanningRequest(body.planningRequest);
     itineraryProposalProgress.push({ stage: 'planning_started' });
-    const baseMaterial = await buildPlanningMaterial(trip.tripId, itinerary);
+    const rawMaterial = await buildPlanningMaterial(trip.tripId, itinerary);
+    // Recover what the link table can prove before calling anything unresolvable.
+    const { material: baseMaterial, repaired } = await repairSavedPlaceIdentity(cache, rawMaterial);
     const initialPreflight = planningPreflight(baseMaterial, planningRequest);
     itineraryProposalProgress.push({
       stage: 'preflight_complete',
       count: initialPreflight.eligibleSavedPlaces,
-      detail: `${initialPreflight.eligibleSavedPlaces} eligible saved places`,
+      detail: repaired > 0
+        ? `${initialPreflight.eligibleSavedPlaces} eligible saved places (${repaired} recovered)`
+        : `${initialPreflight.eligibleSavedPlaces} eligible saved places`,
     });
 
     let suggestions: PlanningPlace[] = [];
+    let discovery: PlanningDiscoveryResult | undefined;
     const suggestionGap = Math.max(0, initialPreflight.targetCapacity - initialPreflight.eligibleSavedPlaces);
     if (planningRequest.sourcePolicy === 'saved-plus-suggestions' && suggestionGap > 0) {
       const planningToken = bearerToken(request);
       const planningSupabaseUrl = Deno.env.get('SUPABASE_URL')?.replace(/\/$/, '');
       if (planningToken && planningSupabaseUrl) {
         itineraryProposalProgress.push({ stage: 'discovery_started' });
-        suggestions = await discoverPlanningPlaces({
+        discovery = await discoverPlanningPlaces({
           itinerary,
           material: baseMaterial,
           request: planningRequest,
@@ -669,10 +876,14 @@ Deno.serve(async (request) => {
           functionsBaseUrl: `${planningSupabaseUrl}/functions/v1`,
           limit: Math.min(12, Math.max(3, suggestionGap + 2)),
         });
+        suggestions = discovery.places;
         itineraryProposalProgress.push({
           stage: 'discovery_complete',
           count: suggestions.length,
-          detail: `${suggestions.length} verified suggestions`,
+          detail: discovery.failedCities.length > 0 && suggestions.length > 0
+            ? `${suggestions.length} verified suggestions (${discovery.failedCities.length} of `
+              + `${discovery.attemptedCities.length} cities unavailable)`
+            : `${suggestions.length} verified suggestions`,
         });
       }
     }
@@ -680,17 +891,35 @@ Deno.serve(async (request) => {
     itineraryProposalPreflight = planningPreflight(baseMaterial, planningRequest, suggestions);
     const usableCount = itineraryProposalPreflight.eligibleSavedPlaces + itineraryProposalPreflight.suggestedPlaces;
     if (usableCount === 0) {
-      const outcome = itineraryProposalPreflight.missingCanonicalIdentity > 0
-        || itineraryProposalPreflight.missingCoordinates > 0
-        ? 'unresolvable_places' as const
-        : planningRequest.sourcePolicy === 'saved-only'
-          ? 'needs_places' as const
-          : 'no_verified_candidates' as const;
-      const detail = outcome === 'unresolvable_places'
-        ? 'Saved places are missing canonical identity or coordinates and cannot be scheduled safely.'
-        : outcome === 'needs_places'
-          ? 'There are no eligible saved places in this planning scope.'
-          : 'No verified place candidates were available for this planning scope.';
+      /**
+       * Order matters, and it is not the obvious one.
+       *
+       * A source outage is checked before the saved-place complaint because it
+       * is the fact the traveller can act on differently: "come back in a
+       * minute" is not "go fix your saved places". Production shipped the
+       * reverse for a day, so a Smart Plan that had failed to reach Overpass
+       * told people their saved places were at fault — true, but not the
+       * reason they got nothing.
+       */
+      const outcome = discovery?.sourcesUnavailable
+        ? 'discovery_unavailable' as const
+        : itineraryProposalPreflight.missingCanonicalIdentity > 0
+          || itineraryProposalPreflight.missingCoordinates > 0
+          ? 'unresolvable_places' as const
+          : planningRequest.sourcePolicy === 'saved-only'
+            ? 'needs_places' as const
+            : 'no_verified_candidates' as const;
+      const needsRepair = itineraryProposalPreflight.missingCanonicalIdentity > 0
+        || itineraryProposalPreflight.missingCoordinates > 0;
+      const detail = outcome === 'discovery_unavailable'
+        ? needsRepair
+          ? 'The place sources could not be reached just now, and your saved places are also missing location details.'
+          : 'The place sources could not be reached just now, so no verified suggestions could be gathered.'
+        : outcome === 'unresolvable_places'
+          ? 'Saved places are missing canonical identity or coordinates and cannot be scheduled safely.'
+          : outcome === 'needs_places'
+            ? 'There are no eligible saved places in this planning scope.'
+            : 'No verified place candidates were available for this planning scope.';
       return json({
         operation,
         tripId: trip.tripId,

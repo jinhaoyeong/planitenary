@@ -645,8 +645,9 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                         {result.outcome === 'needs_places' ? 'No saved places to organise'
                           : result.outcome === 'unresolvable_places' ? 'Some saved places need details'
                             : result.outcome === 'no_verified_candidates' ? 'No verified places were found'
-                              : result.outcome === 'generation_unavailable' ? 'Planning is unavailable right now'
-                                : 'No proposal was generated'}
+                              : result.outcome === 'discovery_unavailable' ? 'Could not reach the place sources'
+                                : result.outcome === 'generation_unavailable' ? 'Planning is unavailable right now'
+                                  : 'No proposal was generated'}
                       </h3>
                       <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                         {result.detail || 'The planner stopped safely before producing an incomplete itinerary.'}

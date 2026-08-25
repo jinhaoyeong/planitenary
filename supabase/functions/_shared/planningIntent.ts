@@ -55,6 +55,13 @@ export type PlanningOutcomeCode =
   | 'needs_places'
   | 'unresolvable_places'
   | 'no_verified_candidates'
+  /**
+   * The factual sources could not be reached. Distinct from
+   * `no_verified_candidates`, which is a claim about the city rather than
+   * about us: saying "no verified places exist" when Overpass merely timed
+   * out tells the traveller something false about where they are going.
+   */
+  | 'discovery_unavailable'
   | 'generation_unavailable'
   | 'no_alternative'
   | 'failed';

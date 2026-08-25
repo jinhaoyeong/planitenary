@@ -321,7 +321,7 @@ export async function planTripProposal(
     const proposal = parseTripProposal(envelope.itineraryProposal);
     const allowedOutcomes: PlanningOutcomeCode[] = [
       'ready', 'needs_places', 'unresolvable_places', 'no_verified_candidates',
-      'generation_unavailable', 'no_alternative', 'failed',
+      'discovery_unavailable', 'generation_unavailable', 'no_alternative', 'failed',
     ];
     const outcome = allowedOutcomes.find((entry) => entry === envelope.outcome)
       ?? (proposal?.status === 'valid' && proposal.meta.assignedCount > 0 ? 'ready' : 'failed');

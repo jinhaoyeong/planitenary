@@ -64,6 +64,12 @@ import {
   type DiscoveryTrace,
   type PlannedDiscoveryQuery,
 } from '../_shared/discoveryPlan.ts';
+import {
+  emptySourceReport,
+  factualDiscoveryOutcome,
+  settleFactualSource,
+  type DiscoverySourceReport,
+} from '../_shared/discoveryResilience.ts';
 
 interface DiscoverBody {
   city?: string;
@@ -81,6 +87,11 @@ interface DiscoverBody {
    */
   lat?: number;
   lng?: number;
+  /**
+   * Who is waiting. Smart Plan discovers several cities to answer one press,
+   * so it asks for tighter source deadlines than a Browse deck does.
+   */
+  mode?: DiscoveryMode;
 }
 
 const selectPlannedRecords = <T extends DiscoveryCandidateLike>(
@@ -651,12 +662,31 @@ const overpassClausesFor = (categories: readonly string[], scope: string): strin
   return clauses;
 };
 
-async function fetchOverpassPlaces(area: CityArea, categories: readonly string[]): Promise<OsmElement[]> {
+/**
+ * How long a factual source may hold a request, by what is waiting on it.
+ *
+ * Browse can afford a slow, thorough sweep: the traveller asked for a deck and
+ * is watching it load. Smart Plan cannot. Planning discovers several cities to
+ * answer one press of "Plan day 1", so a 45s ceiling per city is not a slow
+ * request, it is an abandoned one — production showed ~47s Overpass failures
+ * three times over inside a single 149s planning call.
+ */
+const OVERPASS_TIMEOUT_MS = { browse: 45_000, planning: 12_000 } as const;
+const OVERPASS_FOOD_TIMEOUT_MS = { browse: 35_000, planning: 9_000 } as const;
+export type DiscoveryMode = keyof typeof OVERPASS_TIMEOUT_MS;
+
+async function fetchOverpassPlaces(
+  area: CityArea,
+  categories: readonly string[],
+  mode: DiscoveryMode = 'browse',
+): Promise<OsmElement[]> {
   const [lat, lng] = area.centre;
   const scope = `(around:${area.radiusMetres},${lat},${lng})`;
   const clauses = overpassClausesFor(categories, scope);
   if (clauses.length === 0) return [];
-  const query = `[out:json][timeout:40];
+  // Keep Overpass's own budget under our abort, so it answers rather than hangs.
+  const serverTimeout = Math.max(5, Math.round(OVERPASS_TIMEOUT_MS[mode] / 1000) - 5);
+  const query = `[out:json][timeout:${serverTimeout}];
 (
   ${clauses.join('\n  ')}
 );
@@ -669,7 +699,7 @@ out center tags 400;`;
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
       body: `data=${encodeURIComponent(query)}`,
     },
-    45_000,
+    OVERPASS_TIMEOUT_MS[mode],
   );
   const elements = (payload as { elements?: OsmElement[] } | null)?.elements;
   return Array.isArray(elements) ? elements : [];
@@ -691,11 +721,12 @@ out center tags 400;`;
  * Wikivoyage's `eat` listings are merged on top of this and rank higher, being
  * hand-picked rather than merely present.
  */
-async function fetchOverpassFood(area: CityArea): Promise<OsmElement[]> {
+async function fetchOverpassFood(area: CityArea, mode: DiscoveryMode = 'browse'): Promise<OsmElement[]> {
   const [lat, lng] = area.centre;
   // Tighter than the sights radius: nobody crosses a city for an average lunch.
   const radius = Math.min(area.radiusMetres, 8_000);
-  const query = `[out:json][timeout:30];
+  const serverTimeout = Math.max(5, Math.round(OVERPASS_FOOD_TIMEOUT_MS[mode] / 1000) - 5);
+  const query = `[out:json][timeout:${serverTimeout}];
 (
   nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["name"]["cuisine"](around:${radius},${lat},${lng});
   nwr["amenity"="marketplace"]["name"](around:${radius},${lat},${lng});
@@ -709,7 +740,7 @@ out center tags 150;`;
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
       body: `data=${encodeURIComponent(query)}`,
     },
-    35_000,
+    OVERPASS_FOOD_TIMEOUT_MS[mode],
   ).catch(() => null);
 
   const elements = (payload as { elements?: OsmElement[] } | null)?.elements;
@@ -759,22 +790,49 @@ async function searchOsm(
   travelStartsInDays: number | undefined,
   plan: DiscoveryQueryPlan,
   coordinates?: { lat?: number; lng?: number },
+  mode: DiscoveryMode = 'browse',
+  report?: DiscoverySourceReport,
 ) {
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const area = await resolveCityArea(city, countryCode, coordinates?.lat, coordinates?.lng);
 
   const usedListings = new Set<WikivoyageListing>();
-  const listings = await fetchWikivoyageListings(city).catch(() => [] as WikivoyageListing[]);
+  const listings = await settleFactualSource(
+    () => fetchWikivoyageListings(city),
+    [] as WikivoyageListing[],
+    (error) => {
+      if (report) report.wikivoyageFailed = true;
+      console.warn(`[travel-discover] wikivoyage_error city=${city}:`, error);
+    },
+  );
 
   const fetchBatch = async (queries: readonly PlannedDiscoveryQuery[]): Promise<Array<DiscoveryQueryEntry<OpenCandidate>>> => {
     if (queries.length === 0) return [];
     const categories = [...new Set(queries.flatMap((query) => query.categories))];
     const wantsFood = categories.some((category) => FOOD_CATEGORIES.includes(category));
-    // Independent sources, so one being down must not sink the other.
+    /**
+     * Independent sources, so one being down must not sink the other.
+     *
+     * This comment was here before the catch was. `fetchOverpassPlaces` sat
+     * unprotected inside the `Promise.all` while only the food query was
+     * guarded, so an Overpass timeout rejected the batch and threw away the
+     * Wikivoyage listings already fetched above — turning a single source
+     * outage into a total discovery failure, a 502, and, upstream, a Smart
+     * Plan that silently believed no verified place existed.
+     */
     const [elements, food] = await Promise.all([
-      fetchOverpassPlaces(area, categories),
-      wantsFood ? fetchOverpassFood(area).catch(() => [] as OsmElement[]) : Promise.resolve([] as OsmElement[]),
+      settleFactualSource(
+        () => fetchOverpassPlaces(area, categories, mode),
+        [] as OsmElement[],
+        (error) => {
+          if (report) report.overpassFailed = true;
+          console.warn(`[travel-discover] overpass_error city=${city}:`, error);
+        },
+      ),
+      wantsFood
+        ? settleFactualSource(() => fetchOverpassFood(area, mode), [] as OsmElement[])
+        : Promise.resolve([] as OsmElement[]),
     ]);
     const byKey = new Map<string, OpenCandidate>();
 
@@ -1076,15 +1134,46 @@ Deno.serve(async (request) => {
       }
     }
 
+    const mode: DiscoveryMode = body.mode === 'planning' ? 'planning' : 'browse';
+    const sourceReport: DiscoverySourceReport = emptySourceReport();
     const candidates = selectedProvider === 'amap'
       ? await searchAmap(city, countryCode, limit, body.travelStartsInDays, plan)
       : selectedProvider === 'baidu'
         ? await searchBaidu(city, countryCode, limit, body.travelStartsInDays, plan)
         : selectedProvider === 'osm'
-          ? await searchOsm(city, countryCode, limit, body.travelStartsInDays, plan, { lat: body.lat, lng: body.lng })
+          ? await searchOsm(
+            city,
+            countryCode,
+            limit,
+            body.travelStartsInDays,
+            plan,
+            { lat: body.lat, lng: body.lng },
+            mode,
+            sourceReport,
+          )
           : await searchGoogle(city, countryCode, limit, body.travelStartsInDays, plan);
     if (candidates.length === 0) {
-      return json({ error: `No places were returned for ${city}.` }, 404);
+      /**
+       * An outage is not an absence, and the difference is the whole point.
+       *
+       * "No places were returned" is a factual claim about the city. It may
+       * only be made when the sources actually answered. When they failed,
+       * say so, so the planner can tell a traveller the sources were
+       * unreachable rather than that their city holds nothing worth seeing.
+       */
+      const verdict = factualDiscoveryOutcome({ candidateCount: candidates.length, report: sourceReport });
+      console.warn(
+        `[travel-discover] ${verdict === 'sources-unavailable' ? 'sources_unavailable' : 'no_candidates'}`
+        + ` city=${city} provider=${selectedProvider} mode=${mode}`
+        + ` overpassFailed=${sourceReport.overpassFailed} wikivoyageFailed=${sourceReport.wikivoyageFailed}`,
+      );
+      return verdict === 'sources-unavailable'
+        ? json({
+          error: `Place sources could not be reached for ${city}.`,
+          code: 'discovery-sources-unavailable',
+          sourceReport,
+        }, 503)
+        : json({ error: `No places were returned for ${city}.` }, 404);
     }
 
     if (cache) {

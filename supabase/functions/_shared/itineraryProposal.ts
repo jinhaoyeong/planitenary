@@ -85,6 +85,13 @@ export interface PlanningPlace {
   /** Existing day membership; suggestions and inbox places have none. */
   currentDay?: number;
   placeRef?: StructuredPlaceRef;
+  /**
+   * Provider identity as saved on the activity, kept even when `placeRef` is
+   * absent: for trips written before canonical refs existed, this pair is the
+   * only deterministic route back to a canonical place.
+   */
+  provider?: string;
+  providerPlaceId?: string;
   image?: PlaceImage;
 }
 
@@ -975,6 +982,8 @@ const activityPlace = (
     source: 'saved',
     currentDay: options.day,
     placeRef: parseStructuredPlaceRef(activity.placeRef),
+    provider: text(activity.provider, 40),
+    providerPlaceId: text(activity.providerPlaceId, 200),
     image: imageFromActivity(activity),
   };
 };
