@@ -1,6 +1,7 @@
 import { parseStructuredPlaceRef, type StructuredPlaceRef } from '../../supabase/functions/_shared/placeReference';
 import { parsePlaceImage } from '../../supabase/functions/_shared/placeImages';
 import type { Activity, Itinerary } from '../data';
+import { resolveTripCountry } from './tripCountry';
 
 export const VERIFIED_IMAGE_VALIDATION_VERSION = 3;
 
@@ -20,6 +21,8 @@ export interface TripCoverRef {
   selectedAt: string;
   canonicalPlaceId?: string;
   city?: string;
+  countryCode?: string;
+  countryName?: string;
   asset?: VerifiedImageAsset;
   placeRef?: StructuredPlaceRef;
 }
@@ -72,6 +75,8 @@ export function parseTripCoverRef(value: unknown): TripCoverRef | undefined {
     selectedAt,
     canonicalPlaceId: text(raw.canonicalPlaceId, 120),
     city: text(raw.city, 120),
+    countryCode: text(raw.countryCode, 2)?.toUpperCase(),
+    countryName: text(raw.countryName, 120),
     asset,
     placeRef: parseStructuredPlaceRef(raw.placeRef),
   };
@@ -114,7 +119,14 @@ export function resolveTripCover(
   usedImageKeys: ReadonlySet<string> = new Set(),
 ): TripCoverRef {
   const explicit = parseTripCoverRef(itinerary.tripCover);
-  if (explicit?.type === 'user') return explicit;
+  const tripCountry = resolveTripCountry(itinerary);
+  if (explicit?.type === 'user') {
+    return {
+      ...explicit,
+      countryCode: tripCountry?.code || explicit.countryCode,
+      countryName: tripCountry?.name || explicit.countryName,
+    };
+  }
 
   const primaryCity = itinerary.cities[0]?.trim();
   const tripCities = new Set(itinerary.cities.map((city) => city.trim().toLowerCase()).filter(Boolean));
@@ -148,6 +160,8 @@ export function resolveTripCover(
       selectedAt: itinerary.tripCover?.selectedAt || new Date(0).toISOString(),
       canonicalPlaceId: selected.ref.canonicalPlaceId,
       city: selected.activity.city,
+      countryCode: tripCountry?.code,
+      countryName: tripCountry?.name,
       asset: selected.asset,
       placeRef: selected.ref,
     };
@@ -157,6 +171,8 @@ export function resolveTripCover(
     type: 'generated-surface',
     selectedAt: itinerary.tripCover?.selectedAt || new Date(0).toISOString(),
     city: primaryCity,
+    countryCode: tripCountry?.code,
+    countryName: tripCountry?.name,
   };
 }
 

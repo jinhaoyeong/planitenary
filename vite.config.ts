@@ -57,7 +57,24 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg}'],
+        // There are country covers for the entire destination picker. Keep the
+        // app shell lean and cache only the covers a traveller actually sees.
+        globIgnores: ['**/country-*.jpg'],
         runtimeCaching: [
+          {
+            urlPattern: /\/assets\/country-[^/]+\.jpg$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'country-artwork-cache',
+              expiration: {
+                maxEntries: 16,
+                maxAgeSeconds: 60 * 60 * 24 * 90,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'CacheFirst',

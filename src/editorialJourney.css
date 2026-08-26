@@ -1183,7 +1183,7 @@ html[data-theme='dark'] .journey-day-place-preview > img { filter: saturate(.82)
   border-left: 1px solid var(--journey-line);
   background:
     linear-gradient(to bottom, transparent 74%, rgba(16,47,38,.22)),
-    url('./assets/journey/train-lake.jpg') center / cover no-repeat;
+    url('./assets/journey/trip-planning-start.jpg') center / cover no-repeat;
   pointer-events: none;
 }
 

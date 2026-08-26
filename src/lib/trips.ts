@@ -43,6 +43,8 @@ export interface TripSummary {
   updatedAt: string;
   dayCount: number;
   cityCount: number;
+  countryCode?: string;
+  countryName?: string;
   cover: TripCoverRef;
 }
 
@@ -362,13 +364,18 @@ export function createItineraryFromProfile(profile: TripProfile, id = createTrip
   return applyIdentityToNewItinerary({ ...createBlankItinerary(id), days }, safeProfile, identity);
 }
 
-export const toTripSummary = (itinerary: Itinerary, updatedAt = new Date().toISOString()): TripSummary => ({
-  id: itinerary.id,
-  title: itinerary.name || 'Untitled trip',
-  description: itinerary.description || 'A new travel handbook.',
-  status: 'active',
-  updatedAt,
-  dayCount: itinerary.days.length,
-  cityCount: itinerary.cities.length,
-  cover: resolveTripCover(itinerary),
-});
+export const toTripSummary = (itinerary: Itinerary, updatedAt = new Date().toISOString()): TripSummary => {
+  const cover = resolveTripCover(itinerary);
+  return {
+    id: itinerary.id,
+    title: itinerary.name || 'Untitled trip',
+    description: itinerary.description || 'A new travel handbook.',
+    status: 'active',
+    updatedAt,
+    dayCount: itinerary.days.length,
+    cityCount: itinerary.cities.length,
+    countryCode: cover.countryCode,
+    countryName: cover.countryName,
+    cover,
+  };
+};

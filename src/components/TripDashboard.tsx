@@ -13,10 +13,9 @@ import { tripStorageCleanupKeys } from '../lib/tripDeletion';
 import { pruneOrphanTripStorage } from '../lib/tripStorageOrphans';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
 import { parseTripCoverRef, resolveTripCover, tripCoverSurface } from '../lib/verifiedImage';
+import { countryArtworkForSummary } from '../lib/countryArtwork';
+import { resolveCountryIdentity, resolveTripCountry } from '../lib/tripCountry';
 import tripEmptyIllustration from '../assets/illustrations/trip-empty.webp';
-import busFieldsIllustration from '../assets/journey/bus-fields.jpg';
-import riversideIllustration from '../assets/journey/riverside-garden.jpg';
-import kyotoIllustration from '../assets/journey/kyoto-day-night.jpg';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -32,14 +31,33 @@ const readLocalTrips = (userId: string): TripSummary[] => {
     const parsed = JSON.parse(safeGetItem(localTripsKey(userId)) || '[]');
     return Array.isArray(parsed)
       ? parsed
-        .map((trip) => ({
-          ...trip,
-          status: trip.status === 'archived' ? 'archived' : 'active',
-          cover: parseTripCoverRef(trip.cover) ?? {
+        .map((trip) => {
+          const cover = parseTripCoverRef(trip.cover) ?? {
             type: 'generated-surface' as const,
             selectedAt: new Date(0).toISOString(),
-          },
-        }))
+          };
+          // As on the signed-in path, the stored plan is only opened for trips
+          // saved before covers began carrying the country.
+          let country = resolveCountryIdentity(
+            trip.countryCode || cover.countryCode,
+            trip.countryName || cover.countryName,
+          );
+          if (!country) {
+            try {
+              const stored = safeGetItem(`itinerary-${userId}-${trip.id}`);
+              country = stored ? resolveTripCountry(JSON.parse(stored) as Itinerary) : undefined;
+            } catch {
+              country = undefined;
+            }
+          }
+          return {
+            ...trip,
+            status: trip.status === 'archived' ? 'archived' : 'active',
+            countryCode: country?.code,
+            countryName: country?.name,
+            cover,
+          };
+        })
         .sort(recentFirst)
       : [];
   } catch {
@@ -85,19 +103,48 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       setError('Your trip dashboard could not load. Please try again.');
       console.error('Failed to load trip dashboard:', queryError);
     } else {
-      const rows = (data || []).map((row) => ({
-        id: row.id,
-        title: row.title,
-        description: row.description,
-        status: (row.status === 'archived' ? 'archived' : 'active') as TripSummary['status'],
-        updatedAt: row.updated_at,
-        dayCount: row.day_count,
-        cityCount: row.city_count,
-        cover: parseTripCoverRef(row.cover_ref) ?? {
+      const registryRows = data || [];
+      // A cover saved since country art shipped already names the country, so
+      // only the rows still missing it need their plan fetched. Reading every
+      // trip's full itinerary here would pull megabytes to fill one field.
+      const parsedRows = registryRows.map((row) => {
+        const cover = parseTripCoverRef(row.cover_ref) ?? {
           type: 'generated-surface' as const,
           selectedAt: new Date(0).toISOString(),
-        },
-      }));
+        };
+        return { row, cover, coverCountry: resolveCountryIdentity(cover.countryCode, cover.countryName) };
+      });
+      const unresolvedIds = parsedRows.filter((entry) => !entry.coverCountry).map((entry) => entry.row.id);
+      const itineraryById = new Map<string, Itinerary>();
+      if (unresolvedIds.length > 0) {
+        const { data: itineraryRows, error: itineraryQueryError } = await supabase
+          .from('itineraries')
+          .select('id,data')
+          .eq('user_id', user.id)
+          .in('id', unresolvedIds);
+        if (itineraryQueryError) {
+          console.warn('Trip country artwork could not be hydrated from itineraries:', itineraryQueryError);
+        } else {
+          (itineraryRows || []).forEach((row) => {
+            if (row.id && row.data) itineraryById.set(row.id, row.data as Itinerary);
+          });
+        }
+      }
+      const rows = parsedRows.map(({ row, cover, coverCountry }) => {
+        const country = coverCountry || resolveTripCountry(itineraryById.get(row.id));
+        return {
+          id: row.id,
+          title: row.title,
+          description: row.description,
+          status: (row.status === 'archived' ? 'archived' : 'active') as TripSummary['status'],
+          updatedAt: row.updated_at,
+          dayCount: row.day_count,
+          cityCount: row.city_count,
+          countryCode: country?.code,
+          countryName: country?.name,
+          cover,
+        };
+      });
       setTrips(rows);
       // The registry is authoritative here, and it lists archived trips too, so
       // anything trip-scoped left in this browser for an id outside it belongs
@@ -305,7 +352,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
   const visibleTrips = trips.filter((trip) => trip.status === shelf).sort(recentFirst);
   const currentTrip = visibleTrips[0];
   const otherTrips = visibleTrips.slice(1);
-  const tripArtwork = [riversideIllustration, kyotoIllustration, busFieldsIllustration];
+  const currentArtwork = currentTrip ? countryArtworkForSummary(currentTrip) : undefined;
 
   return (
     <main
@@ -381,8 +428,8 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                 </div>
                 <div className="journey-current-art">
                   <img
-                    src={busFieldsIllustration}
-                    alt="A green bus travelling through yellow fields beside the coast"
+                    src={currentArtwork?.src}
+                    alt={currentArtwork?.alt}
                     width={1536}
                     height={1024}
                     loading="eager"
@@ -395,7 +442,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
 
               <motion.div layout className="journey-trip-list">
                 <AnimatePresence mode="popLayout" initial={false}>
-                  {otherTrips.map((trip, index) => (
+                  {otherTrips.map((trip) => (
                     <motion.article
                       key={`${shelf}-${trip.id}`}
                       layout
@@ -408,7 +455,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                       onClick={() => void openTrip(trip)}
                       onKeyDown={(event) => onCardKeyDown(event, trip)}
                     >
-                      <img src={tripArtwork[index % tripArtwork.length]} alt="" aria-hidden="true" />
+                      <img src={countryArtworkForSummary(trip).src} alt="" aria-hidden="true" />
                       <div className="journey-trip-row-copy">
                         <h3>{trip.title}</h3>
                         <div><span><CalendarDays /> {trip.dayCount || '—'} days</span><span><MapPin /> {trip.cityCount || '—'} {trip.cityCount === 1 ? 'city' : 'cities'}</span></div>

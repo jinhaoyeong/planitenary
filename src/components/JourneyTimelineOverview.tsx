@@ -2,8 +2,8 @@ import { useRef, useState } from 'react';
 import { BedDouble, CalendarDays, ChevronRight, Clock3, MapPin, PencilLine, Route, TrainFront } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Activity, DayPhoto, DayPlan, Itinerary } from '../data';
+import { countryArtworkForItinerary } from '../lib/countryArtwork';
 import { sanitizeTripProfile } from '../lib/tripProfile';
-import trainLakeIllustration from '../assets/journey/train-lake.jpg';
 
 interface JourneyTimelineOverviewProps {
   itinerary: Itinerary;
@@ -101,6 +101,7 @@ const durationLabel = (day: DayPlan) => {
 
 export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}, onEditRoute, actions }: JourneyTimelineOverviewProps) {
   const segments = staySegments(itinerary);
+  const countryArtwork = countryArtworkForItinerary(itinerary);
   const [activeSegment, setActiveSegment] = useState(0);
   const segmentRefs = useRef<Array<HTMLElement | null>>([]);
   const verifiedSources = itinerary.days.reduce((total, day) => total + day.activities.filter((activity) => activity.sourceReferences?.length || activity.lastVerifiedAt).length, 0);
@@ -115,8 +116,8 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
       <section className="journey-itinerary-intro">
         <div className="journey-itinerary-art">
           <img
-            src={trainLakeIllustration}
-            alt="A regional train crossing yellow flower fields beside a lake and mountains"
+            src={countryArtwork.src}
+            alt={countryArtwork.alt}
             width={1536}
             height={1024}
             loading="eager"
