@@ -1,10 +1,24 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
+import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { defineConfig, searchForWorkspaceRoot } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    fs: {
+      // An isolated Git worktree may share the installed dependencies through
+      // a directory junction. Allow both the worktree path and its resolved
+      // target so Vite can serve local font files during visual QA.
+      allow: [
+        searchForWorkspaceRoot(process.cwd()),
+        resolve(process.cwd(), 'node_modules'),
+        realpathSync(resolve(process.cwd(), 'node_modules')),
+      ],
+    },
+  },
   test: {
     /**
      * `node` stays the default so the pure `src/lib` suites keep running in

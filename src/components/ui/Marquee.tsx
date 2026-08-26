@@ -27,7 +27,7 @@ export const Marquee = ({ items, separator = '✦', onItemChange }: Props) => {
 
   return (
     <div
-      className="relative w-full overflow-hidden border-y bg-[color:var(--bg)] py-4"
+      className="journey-marquee relative w-full overflow-hidden border-y bg-[color:var(--bg)] py-4"
       style={{ borderColor: 'var(--ink)' }}
     >
       <motion.div

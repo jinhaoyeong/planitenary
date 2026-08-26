@@ -12,6 +12,7 @@ import '@fontsource/instrument-serif/400.css';
 import '@fontsource/instrument-serif/400-italic.css';
 import 'leaflet/dist/leaflet.css';
 import './index.css'
+import './editorialJourney.css'
 import App from './App.tsx'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { CurrencyProvider } from './contexts/CurrencyContext'

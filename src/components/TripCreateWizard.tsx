@@ -115,7 +115,7 @@ const STEPS = [
   { id: 'style', title: 'What will you spend time on?', hint: 'Choose the experiences you want to make room for.' },
   { id: 'mood', title: 'What should it feel like?', hint: 'Set the mood for the writing in your handbook.' },
   { id: 'practical', title: 'How will you travel?', hint: 'Budget, transport, and where you stay.' },
-  { id: 'identity', title: 'Your handbook identity', hint: 'Generated from everything above.' },
+  { id: 'identity', title: 'Review your trip', hint: 'Check the essentials before building the first draft.' },
 ] as const;
 
 export function TripCreateWizard({
@@ -716,8 +716,8 @@ export function TripCreateWizard({
 
               <div className="space-y-2">
                 <ToggleRow
-                  label="Name the handbook after the trip"
-                  description={`Otherwise it stays “Travel Handbook”.`}
+                  label="Show the trip name in the app header"
+                  description="Otherwise the header stays Planitenary."
                   checked={profile.brandAfterDestination}
                   onChange={(checked) => update({ brandAfterDestination: checked })}
                 />
@@ -735,7 +735,7 @@ export function TripCreateWizard({
               <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center gap-2">
                   <Wand2 className="w-4 h-4" style={{ color: 'var(--accent)' }} />
-                  <span className="eyebrow m-0">Copy preview</span>
+                  <span className="eyebrow m-0">Trip preview</span>
                 </div>
                 <p className="text-xs uppercase tracking-widest" style={{ color: 'var(--accent)' }}>{identity.heroEyebrow}</p>
                 <p className="font-display handbook-display text-3xl leading-tight">{identity.heroTitle}</p>
@@ -752,13 +752,13 @@ export function TripCreateWizard({
                   ))}
                 </div>
                 <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                  Nav brand: <strong>{identity.brandTitle}</strong> · Badge: <strong>{identity.dayBadgeValue} {identity.dayBadgeUnit}</strong>
+                  Header: <strong>{profile.brandAfterDestination ? identity.brandTitle : 'Planitenary'}</strong> · Duration: <strong>{identity.dayBadgeValue} {identity.dayBadgeUnit}</strong>
                 </p>
               </div>
 
               <p className="text-xs inline-flex items-start gap-2" style={{ color: 'var(--ink-muted)' }}>
                 <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                Everything generated here stays editable later in Settings and the home hero editor.
+                Everything stays editable later. Building the draft will not lock your choices.
               </p>
             </>
           )}
@@ -798,7 +798,7 @@ export function TripCreateWizard({
               disabled={!canContinue || busy}
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : isLast ? <CalendarDays className="w-4 h-4" /> : null}
-              {isLast ? 'Create handbook' : 'Continue'}
+              {isLast ? 'Build first draft' : 'Continue'}
               {!isLast && <ArrowRight className="w-4 h-4" />}
             </button>
           </div>

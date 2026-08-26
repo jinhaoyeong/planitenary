@@ -15,6 +15,7 @@ import { clsx } from 'clsx';
 import { getPhotos, subscribeToPhotoChanges, syncAllPhotosFromRemote } from '../lib/photoStorage';
 import { PhotoGallery } from './PhotoGallery';
 import { PlannerPreview } from './PlannerPreview';
+import { JourneyTimelineOverview, resolvedDayCity } from './JourneyTimelineOverview';
 import { ItineraryChangeHistoryPanel } from './ItineraryChangeHistoryPanel';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
@@ -889,7 +890,7 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
       transition={{ duration: 0.3, ease: 'easeOut' }}
       // z-[41] keeps the roaming pet overlay (fixed, z-40 — see Pets.tsx)
       // walking behind this card instead of across the description text.
-      className="flex gap-4 p-5 bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5 transition-all group relative z-[41]"
+      className="journey-activity-item flex gap-4 p-5 bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5 transition-all group relative z-[41]"
       onTouchStart={handleTouchStart}
       onTouchEnd={clearLongPressTimer}
       onTouchCancel={clearLongPressTimer}
@@ -1504,6 +1505,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
 
   const currentDayIndex = getDayIndexByNumber(selectedDay);
   const currentDay = currentDayIndex >= 0 ? customItinerary.days[currentDayIndex] : null;
+  const currentDayCity = currentDayIndex >= 0 ? resolvedDayCity(customItinerary, currentDayIndex) : '';
   const totalDays = customItinerary.days.length;
 
   useEffect(() => {
@@ -1750,9 +1752,27 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   // Overview Mode (Default)
   if (selectedDay === null) {
     return (
-      <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="journey-itinerary-overview-shell space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="journey-overview-actions">
+          <button
+            type="button"
+            onClick={() => setIsEditingMode((current) => !current)}
+            className={isEditingMode ? 'is-active' : ''}
+          >
+            {isEditingMode ? <Save /> : <Edit2 />}
+            {isEditingMode ? 'Finish editing' : 'Edit itinerary'}
+          </button>
+          {planChanges && (
+            <ItineraryChangeHistoryPanel key={planChanges.tripId} tripId={planChanges.tripId} tripName={planChanges.tripName} />
+          )}
+        </div>
+
+        {!isEditingMode && (
+          <JourneyTimelineOverview itinerary={customItinerary} onSelectDay={setSelectedDay} dayPhotos={dayPhotos} />
+        )}
+
         {/* Search Bar */}
-        <div className="max-w-2xl mx-auto relative">
+        <div className="legacy-itinerary-search max-w-2xl mx-auto relative">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <Search className="h-5 w-5 text-slate-400" />
           </div>
@@ -1765,7 +1785,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           />
         </div>
 
-        <div className="text-center space-y-4">
+        <div className="legacy-itinerary-heading text-center space-y-4">
           <span className="eyebrow">{customItinerary.overviewEyebrow || 'The itinerary · day by day'}</span>
           {isEditingMode && isTitleEditing ? (
             <div className="flex items-center justify-center gap-2">
@@ -2026,7 +2046,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               <div 
                 {...provided.droppableProps}
                 ref={provided.innerRef}
-                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto place-items-center"
+                className={clsx(
+                  "journey-legacy-day-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto place-items-center",
+                  !isEditingMode && "is-hidden",
+                )}
               >
                 {filteredDays.map((day, index) => (
                   <Draggable 
@@ -2345,7 +2368,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+    <div className="journey-day-detail space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
       {/* Navigation Header */}
       <div className="flex items-center justify-between gap-2">
         <button 
@@ -2385,35 +2408,29 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
         </div>
       </div>
 
-      {/* Day Selector (Wrapping) */}
-      <div className="flex flex-wrap gap-2 md:gap-3 justify-center">
+      {/* Day Selector */}
+      <div className="journey-day-selector" role="tablist" aria-label="Choose itinerary day">
         {customItinerary.days.map((day) => (
           <button
             key={day.day}
             onClick={() => setSelectedDay(day.day)}
+            role="tab"
+            aria-selected={selectedDay === day.day}
+            aria-label={`${day.date}, day ${day.day}${day.stayCity ? `, ${day.stayCity}` : ''}`}
             className={clsx(
-              "w-24 md:w-32 p-2 md:p-3 rounded-3xl border transition-all text-center group relative overflow-hidden",
+              "journey-day-selector-item",
               selectedDay === day.day
-                ? "bg-slate-900 dark:bg-rose-600 text-white border-slate-900 dark:border-rose-600 shadow-lg scale-105"
-                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-rose-200 dark:hover:border-rose-500/50 hover:-translate-y-0.5"
+                ? "is-selected"
+                : undefined
             )}
           >
-            <div className={clsx("text-[10px] md:text-xs font-bold uppercase tracking-wider mb-0.5 md:mb-1 opacity-70")}>
+            <div className="journey-day-selector-date">
               {day.date}
             </div>
-            <div className="font-extrabold text-base md:text-xl mb-0.5 md:mb-1">
-              <span className={clsx(
-                selectedDay === day.day 
-                  ? "text-white/70 dark:text-white/75"
-                  : "text-slate-500 dark:text-slate-400"
-              )}>Day</span>{' '}
-              <span className={clsx(
-                selectedDay === day.day
-                  ? "text-rose-300 dark:text-white"
-                  : "text-rose-500 dark:text-rose-400"
-              )}>{day.day}</span>
+            <div className="journey-day-selector-number">
+              <span>Day</span>{' '}<strong>{day.day}</strong>
             </div>
-            <div className="text-[10px] md:text-xs truncate font-medium opacity-80">
+            <div className="journey-day-selector-city">
               {day.stayCity}
             </div>
           </button>
@@ -2488,7 +2505,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                   <div className="p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-sm">
                     <MapPin className="w-3.5 h-3.5 md:w-4 md:h-4 text-rose-500" />
                   </div>
-                  {currentDay.stayCity}
+                  {currentDayCity}
                 </div>
               )}
               <DaySemantics day={currentDay} mode="detail" />
@@ -2552,6 +2569,17 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           )}
 
           <div className="space-y-4">
+            {sortedCurrentActivities.length === 0 && (
+              <section className="journey-empty-day" aria-label={`No activities planned for day ${currentDay.day}`}>
+                <MapPin aria-hidden="true" />
+                <div>
+                  <span>Open space in {currentDayCity}</span>
+                  <h3>No places planned yet.</h3>
+                  <p>Add a place you already know, or ask Smart Plan to propose a sourced day before anything is applied.</p>
+                </div>
+                <button type="button" onClick={() => handleAddActivity(currentDay.day)}><Plus /> Add a place</button>
+              </section>
+            )}
             {sortedCurrentActivities.map(({ activity, originalIndex }, idx) => (
               <motion.div
                 initial={{ opacity: 0, y: 15 }}

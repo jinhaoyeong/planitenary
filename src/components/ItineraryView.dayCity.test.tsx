@@ -125,7 +125,7 @@ describe('reading day semantics in the itinerary cards', () => {
     render(<ItineraryView itinerary={trip()} />);
 
     expect(screen.queryByRole('note')).toBeNull();
-    expect(screen.getByText('Osaka')).toBeInTheDocument();
+    expect(screen.getAllByText('Osaka').length).toBeGreaterThan(0);
   });
 
   it('normalizes a legacy day before the stay/activity presentation reads it', () => {
@@ -142,6 +142,6 @@ describe('reading day semantics in the itinerary cards', () => {
     render(<ItineraryView itinerary={legacy} />);
 
     expect(screen.queryByRole('note')).toBeNull();
-    expect(screen.getByText('Osaka')).toBeInTheDocument();
+    expect(screen.getAllByText('Osaka').length).toBeGreaterThan(0);
   });
 });

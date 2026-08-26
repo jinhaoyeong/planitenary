@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { KeyboardEvent, MouseEvent } from 'react';
-import { Archive, ArrowRight, CalendarDays, MapPin, Pencil, Plus, RefreshCw, Sparkles, RotateCcw, Trash2, UserRound } from 'lucide-react';
+import { Archive, ArrowRight, CalendarDays, ChevronRight, MapPin, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Trash2, UserRound } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,6 +13,9 @@ import { tripStorageCleanupKeys } from '../lib/tripDeletion';
 import { pruneOrphanTripStorage } from '../lib/tripStorageOrphans';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/safeLocalStorage';
 import tripEmptyIllustration from '../assets/illustrations/trip-empty.webp';
+import busFieldsIllustration from '../assets/journey/bus-fields.jpg';
+import riversideIllustration from '../assets/journey/riverside-garden.jpg';
+import kyotoIllustration from '../assets/journey/kyoto-day-night.jpg';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -20,12 +23,16 @@ interface TripDashboardProps {
 }
 
 const localTripsKey = (userId: string) => `trip-registry-${userId}`;
+const recentFirst = (a: TripSummary, b: TripSummary) =>
+  new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
 
 const readLocalTrips = (userId: string): TripSummary[] => {
   try {
     const parsed = JSON.parse(safeGetItem(localTripsKey(userId)) || '[]');
     return Array.isArray(parsed)
-      ? parsed.map((trip) => ({ ...trip, status: trip.status === 'archived' ? 'archived' : 'active' }))
+      ? parsed
+        .map((trip) => ({ ...trip, status: trip.status === 'archived' ? 'archived' : 'active' }))
+        .sort(recentFirst)
       : [];
   } catch {
     return [];
@@ -94,8 +101,13 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
 
   const openTrip = async (summary: TripSummary) => {
     if (!user) return;
+    const openedAt = new Date().toISOString();
     if (localOnly) {
       const stored = safeGetItem(`itinerary-${user.id}-${summary.id}`);
+      const next = trips
+        .map((trip) => trip.id === summary.id ? { ...trip, updatedAt: openedAt } : trip)
+        .sort(recentFirst);
+      persistLocalTrips(next);
       onOpenTrip(stored ? JSON.parse(stored) as Itinerary : createBlankItinerary(summary.id));
       return;
     }
@@ -109,6 +121,12 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       setError('That trip could not be opened.');
       return;
     }
+    const { error: recentError } = await supabase
+      .from('trip_registry')
+      .update({ updated_at: openedAt })
+      .eq('id', summary.id)
+      .eq('user_id', user.id);
+    if (recentError) console.error('Failed to mark the trip as current:', recentError);
     onOpenTrip(data?.data as Itinerary || createBlankItinerary(summary.id));
   };
 
@@ -267,7 +285,13 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     }
   };
 
-  const visibleTrips = trips.filter((trip) => trip.status === shelf);
+  // "Current" means the active trip most recently opened or edited. The same
+  // updated_at ordering is used locally and in Supabase, so the large card is
+  // deterministic across desktop, mobile, refreshes, and devices.
+  const visibleTrips = trips.filter((trip) => trip.status === shelf).sort(recentFirst);
+  const currentTrip = visibleTrips[0];
+  const otherTrips = visibleTrips.slice(1);
+  const tripArtwork = [riversideIllustration, kyotoIllustration, busFieldsIllustration];
 
   return (
     <main
@@ -278,6 +302,120 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
         paddingTop: 'max(1.25rem, var(--app-safe-top))',
       }}
     >
+      <div className="journey-dashboard-injected">
+        <header className="journey-trips-header">
+          <button type="button" className="journey-wordmark" onClick={() => setShelf('active')}>Planitenary</button>
+          <button type="button" onClick={onOpenProfile} className="journey-profile-button" aria-label="Open profile settings" title="Profile settings">
+            <UserRound aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="journey-trips-content">
+          <div className="journey-trips-heading">
+            <div>
+              <span className="journey-cloud-line" aria-hidden="true" />
+              <h1>My Trips</h1>
+            </div>
+            <div className="journey-trips-filter" role="tablist" aria-label="Trip shelf filter">
+              <button type="button" role="tab" aria-selected={shelf === 'active'} onClick={() => setShelf('active')}>Current</button>
+              <button type="button" role="tab" aria-selected={shelf === 'archived'} onClick={() => setShelf('archived')}>Archived</button>
+            </div>
+          </div>
+
+          {error && <div className="journey-alert" role="alert">{error}</div>}
+
+          {loading ? (
+            <div className="journey-loading"><RefreshCw className="animate-spin" /> Loading your trips…</div>
+          ) : !currentTrip ? (
+            <section className="journey-empty-trip">
+              {shelf === 'active' ? (
+                <>
+                  <img src={tripEmptyIllustration} alt="" aria-hidden="true" />
+                  <div>
+                    <span className="journey-kicker">Your first journey</span>
+                    <h2>Give the trip a place to begin.</h2>
+                    <p>Choose where and when. Everything stays editable as the plan takes shape.</p>
+                    <button type="button" className="journey-primary-button" onClick={() => setWizardOpen(true)}>Plan a new trip <ArrowRight /></button>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <Archive />
+                  <h2>No archived trips.</h2>
+                  <p>Trips you archive will stay here until you restore them.</p>
+                </div>
+              )}
+            </section>
+          ) : (
+            <>
+              <motion.section
+                layout
+                className="journey-current-trip"
+                whileHover={{ y: -2 }}
+              >
+                <div className="journey-current-copy">
+                  <span className="journey-kicker"><i />{shelf === 'active' ? 'Current trip · most recently opened' : 'Most recently archived'}</span>
+                  <h2>{currentTrip.title}</h2>
+                  <p>{currentTrip.description || 'A practical itinerary you can keep shaping as the trip gets closer.'}</p>
+                  <div className="journey-current-metrics">
+                    <span><CalendarDays /> {currentTrip.dayCount || '—'} days</span>
+                    <span><MapPin /> {currentTrip.cityCount || '—'} {currentTrip.cityCount === 1 ? 'city' : 'cities'}</span>
+                  </div>
+                  <button type="button" className="journey-primary-button" onClick={(event) => { event.stopPropagation(); void openTrip(currentTrip); }}>
+                    {shelf === 'active' ? 'Continue planning' : 'Open trip'} <ArrowRight />
+                  </button>
+                </div>
+                <div className="journey-current-art">
+                  <img src={busFieldsIllustration} alt="A green bus travelling through yellow fields beside the coast" />
+                </div>
+              </motion.section>
+
+              <motion.div layout className="journey-trip-list">
+                <AnimatePresence mode="popLayout" initial={false}>
+                  {otherTrips.map((trip, index) => (
+                    <motion.article
+                      key={`${shelf}-${trip.id}`}
+                      layout
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      className="journey-trip-row"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => void openTrip(trip)}
+                      onKeyDown={(event) => onCardKeyDown(event, trip)}
+                    >
+                      <img src={tripArtwork[index % tripArtwork.length]} alt="" aria-hidden="true" />
+                      <div className="journey-trip-row-copy">
+                        <h3>{trip.title}</h3>
+                        <div><span><CalendarDays /> {trip.dayCount || '—'} days</span><span><MapPin /> {trip.cityCount || '—'} {trip.cityCount === 1 ? 'city' : 'cities'}</span></div>
+                      </div>
+                      <div className="journey-trip-row-actions">
+                        <button type="button" onClick={(event) => void renameTrip(event, trip)} aria-label={`Rename ${trip.title}`}><Pencil /></button>
+                        {shelf === 'active' ? (
+                          <button type="button" onClick={(event) => void archiveTrip(event, trip)} aria-label={`Archive ${trip.title}`}><Archive /></button>
+                        ) : (
+                          <button type="button" onClick={(event) => void restoreTrip(event, trip)} aria-label={`Restore ${trip.title}`}><RotateCcw /></button>
+                        )}
+                        <button type="button" onClick={(event) => void deleteTrip(event, trip)} disabled={deletingTripId === trip.id} aria-label={`Delete ${trip.title}`}><Trash2 /></button>
+                        <ChevronRight className="journey-row-chevron" aria-hidden="true" />
+                      </div>
+                    </motion.article>
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+
+              <button type="button" className="journey-new-trip" onClick={() => setWizardOpen(true)} disabled={creating}>
+                <span>{creating ? <RefreshCw className="animate-spin" /> : <Plus />}</span>
+                Plan a new trip
+              </button>
+            </>
+          )}
+
+          <p className="journey-preservation-note"><Archive /> Your saved and archived trips remain separate. Nothing is removed without confirmation.</p>
+        </div>
+      </div>
+
       <div className="trip-dashboard-hero mb-8 md:mb-10">
         <div className="flex items-center justify-between gap-3">
           <p className="eyebrow m-0">Your travel shelf</p>

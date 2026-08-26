@@ -27,6 +27,7 @@ import {
 } from '../lib/plannerCapabilities';
 import { tripBudgetHint } from '../lib/tripBudgetHint';
 import type { Itinerary } from '../data';
+import { BUDGET_OPTIONS, sanitizeTripProfile } from '../lib/tripProfile';
 import smartPlanRouteIllustration from '../assets/illustrations/smart-plan-route.webp';
 
 interface PlanTripProposalPanelProps {
@@ -393,6 +394,46 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
   const undoCapability = capabilities.find((capability) => capability.route === 'history');
   const helpCapabilities = capabilities.filter((capability) => capability.route !== 'history');
 
+  const tripBrief = useMemo(() => {
+    const profile = sanitizeTripProfile(itinerary?.tripProfile);
+    const activityCount = itinerary?.days.reduce((total, day) => total + day.activities.length, 0) || 0;
+    const budgetLabel = profile
+      ? BUDGET_OPTIONS.find((option) => option.id === profile.budgetTier)?.label || profile.budgetTier
+      : '';
+    const items = [
+      {
+        label: 'Where to',
+        value: itinerary?.cities.length ? itinerary.cities.join(' · ') : 'Add a destination',
+        complete: Boolean(itinerary?.cities.length),
+      },
+      {
+        label: 'When',
+        value: profile?.startDate && profile?.endDate
+          ? `${profile.startDate} – ${profile.endDate}`
+          : itinerary?.days.length ? `${itinerary.days.length} days saved` : 'Add dates',
+        complete: Boolean((profile?.startDate && profile?.endDate) || itinerary?.days.length),
+      },
+      {
+        label: 'What suits you',
+        value: profile?.styles.length
+          ? profile.styles.slice(0, 3).join(' · ')
+          : profile?.tripTypes.length ? profile.tripTypes.slice(0, 3).join(' · ') : 'Tell me your pace and interests',
+        complete: Boolean(profile?.styles.length || profile?.tripTypes.length),
+      },
+      {
+        label: 'Practical choices',
+        value: profile ? `${budgetLabel} · ${profile.transport.slice(0, 2).join(' · ') || 'transport open'}` : 'Add budget and transport',
+        complete: Boolean(profile),
+      },
+      {
+        label: 'Saved places',
+        value: activityCount ? `${activityCount} stops already in the itinerary` : 'Save a few places or let Smart Plan suggest them',
+        complete: activityCount > 0,
+      },
+    ];
+    return { items, completeCount: items.filter((item) => item.complete).length };
+  }, [itinerary]);
+
   const showingProposal = view === 'proposal';
   const title = showingProposal ? 'Plan my trip' : 'Smart plan';
 
@@ -433,7 +474,7 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="plan-trip-title"
-                className="flex h-full w-full min-w-0 max-w-3xl flex-col overflow-hidden bg-white text-slate-950 shadow-[-18px_0_48px_rgba(15,23,42,0.24)] dark:bg-slate-950 dark:text-white"
+                className="plan-trip-journey-panel flex h-full w-full min-w-0 max-w-3xl flex-col overflow-hidden bg-white text-slate-950 shadow-[-18px_0_48px_rgba(15,23,42,0.24)] dark:bg-slate-950 dark:text-white"
                 initial={{ x: '100%' }}
                 animate={{ x: 0 }}
                 exit={{ x: '100%' }}
@@ -480,7 +521,8 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                   style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
                 >
                   {!showingProposal && !loading && (
-                    <div className="mx-auto max-w-xl">
+                    <div className="plan-trip-start-grid">
+                      <div className="plan-trip-action-column">
                       {write.phase === 'applied' && (
                         <section
                           role="status"
@@ -611,6 +653,35 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                           </button>
                         )}
                       </div>
+                      </div>
+
+                      <aside className="plan-trip-brief" aria-label="Trip brief">
+                        <div className="plan-trip-brief-head">
+                          <span>{tripBrief.completeCount}/5</span>
+                          <div>
+                            <small>Trip brief</small>
+                            <h3>Your plan is taking shape</h3>
+                            <p>{tripBrief.completeCount} of 5 captured</p>
+                          </div>
+                        </div>
+                        <ol>
+                          {tripBrief.items.map((item) => (
+                            <li key={item.label} data-complete={item.complete ? 'true' : 'false'}>
+                              <i>{item.complete ? <Check /> : null}</i>
+                              <span><strong>{item.label}</strong><small>{item.value}</small></span>
+                            </li>
+                          ))}
+                        </ol>
+                        <div className="plan-trip-brief-actions">
+                          <button type="button" onClick={() => { setOpen(false); intelligence?.openAsk('Help me fill the missing parts of my trip brief.'); }}>
+                            Ask about the gaps
+                          </button>
+                          <button type="button" onClick={() => void generate()} disabled={busy}>
+                            <Sparkles /> Build a proposed draft
+                          </button>
+                          <p>Nothing changes until you review and apply the proposal.</p>
+                        </div>
+                      </aside>
                     </div>
                   )}
 
