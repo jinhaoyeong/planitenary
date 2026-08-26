@@ -18,13 +18,14 @@ import { PlanTripProposalPanel } from './components/PlanTripProposalPanel';
 import { TripIntelligenceUiProvider } from './lib/tripIntelligenceUi';
 import { surfaceFromAppTab } from '../supabase/functions/_shared/intelligenceContext';
 import { TripDashboard } from './components/TripDashboard';
+import { JourneyContextBar } from './components/JourneyContextBar';
 import { InstallPrompt } from './components/InstallPrompt';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { Auth } from './components/Auth';
 import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { ReloadPrompt } from './components/ReloadPrompt';
 import { Map, BookOpen, Calendar, Wallet, Menu, X, CheckSquare, Moon, Sun, RefreshCw, FileText, Image as ImageIcon, LayoutDashboard, UserRound, Settings, Save } from 'lucide-react';
-import { motion, AnimatePresence, animate, useScroll, useSpring } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useSpring } from 'framer-motion';
 import { clsx } from 'clsx';
 import { CustomCursor } from './components/motion/CustomCursor';
 import { GrainOverlay } from './components/motion/GrainOverlay';
@@ -267,9 +268,6 @@ function App() {
     ? immersiveTravelMarks[visualIdentity.country.code] || visualIdentity.country.name
     : '';
   const immersiveMotif = visualIdentity?.country.motifs[0] || displayItinerary.cities[0] || 'new streets';
-  const brandWords = (displayItinerary.brandTitle || 'Travel Handbook').trim().split(/\s+/);
-  const brandAccent = brandWords[brandWords.length - 1];
-  const brandLead = brandWords.slice(0, -1).join(' ');
   const itineraryStorageKey = isDemoUser
     ? `itinerary-demo-${activeItineraryId}`
     : `itinerary-${user?.id ?? 'account'}-${activeItineraryId}`;
@@ -586,11 +584,14 @@ function App() {
   const handleTabChange = (newTab: typeof activeTab, targetId?: string) => {
     hapticMedium();
     setActiveTab(newTab);
-    
-    // Defer scroll until React has committed the DOM changes and Framer Motion has begun its mount
-    setTimeout(() => {
+
+    // Every handbook section follows one navigation contract. Waiting for two
+    // frames lets React and AnimatePresence mount the new section before its
+    // position is measured; using one smooth path in both directions avoids
+    // the snap/glitch that appeared when moving between long and empty tabs.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       const mainContent = document.getElementById('main-content');
-      const header = document.querySelector('header');
+      const header = document.querySelector('.editorial-journey-header');
       const headerHeight = header ? header.getBoundingClientRect().height : 0;
       
       const targetElement = targetId ? document.getElementById(targetId) : null;
@@ -606,44 +607,17 @@ function App() {
       if (distance < 2) return;
 
       const lenis = (window as unknown as { __lenis?: { scrollTo: (y: number, o?: object) => void } }).__lenis;
-      
-      // Determine how we want to scroll based on current position
-      const isNearTop = startY < targetY - 100;
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       if (lenis && typeof lenis.scrollTo === 'function') {
-        lenis.scrollTo(targetY, { 
-          duration: isNearTop ? 0.8 : 0, 
+        lenis.scrollTo(targetY, {
+          duration: reducedMotion ? 0 : 0.72,
           easing: (t: number) => 1 - Math.pow(1 - t, 4) 
         });
       } else {
-        // Detect if the user is on a mobile device
-        const isMobile = window.matchMedia('(max-width: 768px)').matches || ('ontouchstart' in window);
-        
-        if (isNearTop) {
-          if (isMobile) {
-            // Mobile devices natively handle CSS smooth scrolling beautifully with momentum
-            window.scrollTo({
-              top: targetY,
-              behavior: 'smooth'
-            });
-          } else {
-            // Framer Motion's animate function creates a buttery smooth, 
-            // perfectly-eased JS scroll that bypasses the choppy native CSS smooth scrolling on PC browsers.
-            animate(startY, targetY, {
-              duration: 0.6,
-              ease: [0.22, 1, 0.36, 1], // Premium easing curve
-              onUpdate: (v) => window.scrollTo(0, v)
-            });
-          }
-        } else {
-          // If we are deep in the content, instantly snap to the top of the tab
-          window.scrollTo({
-            top: targetY,
-            behavior: 'instant'
-          });
-        }
+        window.scrollTo({ top: targetY, behavior: reducedMotion ? 'auto' : 'smooth' });
       }
-    }, 50); // 50ms delay lets the new tab's DOM render first so heights are accurate
+    }));
   };
 
   const tabs = [
@@ -1033,7 +1007,7 @@ function App() {
   return (
     <TripIntelligenceUiProvider key={activeItineraryId} tripId={activeItineraryId} surface={surfaceFromAppTab(activeTab)} selectedCurrency={currency}>
     <div
-      className="adaptive-handbook-root min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
+      className="adaptive-handbook-root editorial-journey-shell min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
       data-adaptive-handbook="true"
       style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}
     >
@@ -1085,7 +1059,7 @@ function App() {
       {showPets && <Pets />}
       {/* Top Nav — editorial minimal */}
       <header
-        className="sticky top-0 z-40 backdrop-blur-md"
+        className="editorial-journey-header sticky top-0 z-40 backdrop-blur-md"
         style={{
           backgroundColor: 'color-mix(in srgb, var(--bg) 85%, transparent)',
           borderBottom: '1px solid var(--border)',
@@ -1113,8 +1087,7 @@ function App() {
               </button>
             )}
             <span className="app-brand font-display text-xl sm:text-2xl md:text-3xl leading-none tracking-tight" style={{ color: 'var(--ink)' }}>
-              {brandLead && `${brandLead} `}
-              <span className="font-display-italic" style={{ color: 'var(--accent)' }}>{brandAccent}</span>
+              Planitenary
             </span>
           </div>
 
@@ -1238,6 +1211,8 @@ function App() {
       </header>
 
       {/* Hero — split editorial layout */}
+      <JourneyContextBar itinerary={displayItinerary} />
+
       <section
         className="handbook-home-hero max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-20 pb-8 md:pb-16"
         data-immersive={isImmersiveHero ? 'true' : undefined}
