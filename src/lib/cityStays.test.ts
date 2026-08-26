@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   addCityStay,
+  addCityStayBorrowingDay,
+  lendingStayIndex,
   adjustCityStay,
   canRemoveCityStay,
   collapseAdjacentStays,
@@ -479,5 +481,68 @@ describe('naming a stay the traveller can find', () => {
   it('says which stay is missing its days', () => {
     expect(cityStayStatus(route, 7).unplacedStays.map((entry) => entry.label))
       .toEqual(['your return stay in Osaka']);
+  });
+});
+
+describe('adding a stay when every night is already placed', () => {
+  it('takes the day from the longest stay and names it', () => {
+    const result = addCityStayBorrowingDay(
+      [{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }, { city: 'Nara', days: 3 }],
+      'Osaka',
+      10,
+    );
+
+    expect(result.borrowedFrom).toBe('Osaka');
+    expect(result.stays).toEqual([
+      { city: 'Osaka', days: 3 },
+      { city: 'Kyoto', days: 3 },
+      { city: 'Nara', days: 3 },
+      { city: 'Osaka', days: 1 },
+    ]);
+    expect(cityStayTotal(result.stays)).toBe(10);
+  });
+
+  it('borrows nothing while the trip still has a spare night', () => {
+    const result = addCityStayBorrowingDay(
+      [{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }],
+      'Osaka',
+      10,
+    );
+
+    expect(result.borrowedFrom).toBeUndefined();
+    expect(result.stays[result.stays.length - 1]).toEqual({ city: 'Osaka', days: 1 });
+  });
+
+  it('never empties a stay to fund another', () => {
+    const result = addCityStayBorrowingDay(
+      [{ city: 'Osaka', days: 1 }, { city: 'Kyoto', days: 1 }],
+      'Osaka',
+      2,
+    );
+
+    expect(result.borrowedFrom).toBeUndefined();
+    expect(result.stays[result.stays.length - 1]).toEqual({ city: 'Osaka', days: 0 });
+  });
+
+  it('leaves a terminal one-day return alone and takes from the longest instead', () => {
+    const stays = [{ city: 'Osaka', days: 5 }, { city: 'Kyoto', days: 3 }, { city: 'Osaka', days: 1 }];
+
+    expect(lendingStayIndex(stays)).toBe(0);
+
+    const result = addCityStayBorrowingDay(stays, 'Kyoto', 9);
+    expect(result.borrowedFrom).toBe('Osaka');
+    expect(result.stays[0]).toEqual({ city: 'Osaka', days: 4 });
+    expect(result.stays[2]).toEqual({ city: 'Osaka', days: 1 });
+  });
+
+  it('does not borrow for an add that will merge straight back', () => {
+    const result = addCityStayBorrowingDay(
+      [{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 6 }],
+      'Kyoto',
+      10,
+    );
+
+    expect(result.borrowedFrom).toBeUndefined();
+    expect(cityStayTotal(result.stays)).toBe(10);
   });
 });

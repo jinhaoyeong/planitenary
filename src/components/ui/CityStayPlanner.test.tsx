@@ -237,21 +237,35 @@ describe('adding a stay the traveller comes back to', () => {
     expect(screen.getByRole('status')).toHaveTextContent('All 7 days placed.');
   });
 
-  it('never shortens a stay the traveller already placed', async () => {
-    // The whole trip is spent. The new stay arrives empty and says so, rather
-    // than quietly funding itself out of the first Osaka.
+  it('funds a return out of the longest stay and says which, when nothing is spare', async () => {
+    // The whole trip is spent. Rather than handing back an empty stay and a
+    // warning to clear up, the day comes from the stay that can most afford
+    // it — named, so the traveller can put it back.
     const user = userEvent.setup();
     render(<Harness initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
 
     await user.click(screen.getByRole('button', { name: '+ Add another stay' }));
     await user.click(within(screen.getByRole('group')).getByRole('button', { name: /Osaka/ }));
 
-    expect(sequence()).toEqual(['Osaka 4', 'Kyoto 3', 'Osaka 0']);
-    expect(rowFor(2)).toHaveTextContent('Needs a day');
-    expect(screen.getByText(/has no days yet/)).toHaveTextContent('Your return stay in Osaka has no days yet.');
+    expect(sequence()).toEqual(['Osaka 3', 'Kyoto 3', 'Osaka 1']);
+    expect(screen.getByText('All 7 days placed.')).toBeInTheDocument();
+    expect(screen.getByText(/Moved a day from/)).toHaveTextContent('Moved a day from Osaka to your return stay.');
+    expect(screen.queryByText(/has no days yet/)).not.toBeInTheDocument();
   });
 
-  it('lets the traveller move the day across themselves', async () => {
+  it('puts the borrowed day back when the traveller undoes it', async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add another stay' }));
+    await user.click(within(screen.getByRole('group')).getByRole('button', { name: /Osaka/ }));
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+
+    expect(sequence()).toEqual(['Osaka 4', 'Kyoto 3']);
+    expect(screen.queryByText(/Moved a day from/)).not.toBeInTheDocument();
+  });
+
+  it('lets the traveller move more days across themselves', async () => {
     const user = userEvent.setup();
     render(<Harness initial={[{ city: 'Osaka', days: 4 }, { city: 'Kyoto', days: 3 }]} />);
 
@@ -260,7 +274,7 @@ describe('adding a stay the traveller comes back to', () => {
     await user.click(within(rowFor(0)).getByRole('button', { name: 'One day fewer in Osaka' }));
     await user.click(within(rowFor(2)).getByRole('button', { name: 'One more day in Osaka' }));
 
-    expect(sequence()).toEqual(['Osaka 3', 'Kyoto 3', 'Osaka 1']);
+    expect(sequence()).toEqual(['Osaka 2', 'Kyoto 3', 'Osaka 2']);
   });
 });
 

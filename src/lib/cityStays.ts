@@ -221,6 +221,74 @@ export function addCityStay(
   return [...stays, { city: trimmed, days: free > 0 ? 1 : 0 }];
 }
 
+export interface AddedCityStay {
+  stays: TripCityStay[];
+  /** The stay a day was taken from, when the trip had none spare. */
+  borrowedFrom?: string;
+}
+
+/**
+ * Which stay can best give up a day.
+ *
+ * The mirror of {@link driftTargetIndex}: that one decides who absorbs a spare
+ * day, this one decides who can afford to lose one. Same two exclusions, for
+ * the same reasons — a terminal one-day return is positioning for departure
+ * and must not be emptied, and no stay may be reduced below a single night,
+ * because a nought-day stay is the very state this is trying to avoid.
+ *
+ * Longest wins, ties broken by route order so the answer never depends on
+ * sort stability. `-1` when no stay can spare anything.
+ */
+export function lendingStayIndex(stays: TripCityStay[]): number {
+  const eligible = stays
+    .map((stay, index) => ({ stay, index }))
+    .filter((entry) => entry.stay.days >= 2 && !isTerminalReturnStay(stays, entry.index));
+  if (eligible.length === 0) return -1;
+  return eligible.reduce((best, entry) => (entry.stay.days > best.stay.days ? entry : best)).index;
+}
+
+/**
+ * Add a stay that is usable the moment it appears.
+ *
+ * {@link addCityStay} leaves the new stay empty once every night is placed,
+ * which is honest but hands the traveller an invalid plan and a warning to
+ * clear up before they can do anything else. Here the day is borrowed from the
+ * stay that can most afford it and the caller is told which, so the traveller
+ * can undo it. The objection to funding a return from an earlier stay was that
+ * doing it *quietly* overrides a deliberate decision; naming the stay and
+ * offering the reversal is what answers that.
+ *
+ * Nothing is borrowed when the city would immediately merge into the stay it
+ * follows — that add is a no-op, and a note about moving a day the traveller
+ * got straight back would only confuse.
+ */
+export function addCityStayBorrowingDay(
+  stays: TripCityStay[],
+  city: string,
+  dayCount: number,
+): AddedCityStay {
+  const trimmed = city.trim();
+  if (!trimmed) return { stays };
+
+  const free = Math.max(0, dayCount - cityStayTotal(stays));
+  if (free > 0) return { stays: [...stays, { city: trimmed, days: 1 }] };
+
+  const last = stays[stays.length - 1];
+  if (last && cityKey(last.city) === cityKey(trimmed)) {
+    return { stays: [...stays, { city: trimmed, days: 0 }] };
+  }
+
+  const lender = lendingStayIndex(stays);
+  if (lender < 0) return { stays: [...stays, { city: trimmed, days: 0 }] };
+
+  const funded = stays.map((stay, index) =>
+    (index === lender ? { ...stay, days: stay.days - 1 } : stay));
+  return {
+    stays: [...funded, { city: trimmed, days: 1 }],
+    borrowedFrom: stays[lender].city,
+  };
+}
+
 /**
  * Whether this stay can be removed here.
  *

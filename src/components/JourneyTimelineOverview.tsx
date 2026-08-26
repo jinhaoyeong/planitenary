@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { BedDouble, CalendarDays, ChevronRight, Clock3, MapPin, Route, TrainFront } from 'lucide-react';
+import { BedDouble, CalendarDays, ChevronRight, Clock3, MapPin, PencilLine, Route, TrainFront } from 'lucide-react';
 import type { Activity, DayPhoto, DayPlan, Itinerary } from '../data';
 import { sanitizeTripProfile } from '../lib/tripProfile';
 import trainLakeIllustration from '../assets/journey/train-lake.jpg';
@@ -8,6 +8,12 @@ interface JourneyTimelineOverviewProps {
   itinerary: Itinerary;
   onSelectDay: (day: number) => void;
   dayPhotos?: Record<number, DayPhoto[]>;
+  /**
+   * Opens the route editor. The strip is where a traveller looks at their
+   * route, so it is where changing it should start from — previously the stay
+   * plan was only reachable by hunting through trip settings.
+   */
+  onEditRoute?: () => void;
 }
 
 interface StaySegment {
@@ -90,7 +96,7 @@ const durationLabel = (day: DayPlan) => {
   return `${activities} ${activities === 1 ? 'activity' : 'activities'}`;
 };
 
-export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {} }: JourneyTimelineOverviewProps) {
+export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}, onEditRoute }: JourneyTimelineOverviewProps) {
   const segments = staySegments(itinerary);
   const [activeSegment, setActiveSegment] = useState(0);
   const segmentRefs = useRef<Array<HTMLElement | null>>([]);
@@ -119,6 +125,7 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
         </div>
       </section>
 
+      <div className="journey-route-row">
       <nav className="journey-city-tabs" aria-label="Route cities">
         {segments.map((segment, index) => (
           <button type="button" className={activeSegment === index ? 'is-active' : ''} aria-current={activeSegment === index ? 'location' : undefined} key={`${segment.city}-${index}`} onClick={() => focusSegment(index)}>
@@ -128,6 +135,13 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
           </button>
         ))}
       </nav>
+      {onEditRoute && (
+        <button type="button" className="journey-route-edit" onClick={onEditRoute}>
+          <PencilLine className="w-3.5 h-3.5" aria-hidden="true" />
+          Edit route
+        </button>
+      )}
+      </div>
 
       <div className="journey-stay-timeline">
         {segments.map((segment, segmentIndex) => (

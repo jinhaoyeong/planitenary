@@ -1570,3 +1570,106 @@ aside.journey-ask-panel {
 .journey-ask-panel textarea::placeholder {
   color: var(--journey-muted) !important;
 }
+
+/* The route strip and its editor entry point share one row, so changing the
+   route starts from where the route is read rather than from trip settings. */
+.journey-route-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.journey-route-row > .journey-city-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.journey-route-edit {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  align-self: center;
+  padding: 10px 15px;
+  border: 1px solid var(--journey-line);
+  border-radius: 11px;
+  background: var(--journey-surface);
+  color: var(--journey-copy);
+  font-size: .78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .18s ease, color .18s ease;
+}
+
+.journey-route-edit:hover {
+  border-color: color-mix(in srgb, var(--journey-green) 45%, var(--journey-line));
+  color: var(--journey-ink);
+}
+
+@media (max-width: 720px) {
+  .journey-route-row { flex-direction: column; }
+  .journey-route-edit { align-self: flex-start; }
+}
+
+/* ---------- Route editor ---------- */
+.journey-route-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(16px, 5vh, 56px) 16px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--journey-ink) 45%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.journey-route-editor {
+  width: min(760px, 100%);
+  border: 1px solid var(--journey-line);
+  border-radius: 16px;
+  background: var(--journey-paper);
+  box-shadow: 0 28px 70px -30px rgba(0, 0, 0, .5);
+}
+
+.journey-route-editor-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--journey-line);
+  border-radius: 16px 16px 0 0;
+  background: var(--journey-surface);
+}
+
+.journey-route-editor-head strong {
+  color: var(--journey-ink);
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 400;
+}
+
+.journey-route-editor-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--journey-line);
+  border-radius: 9px;
+  background: var(--journey-paper);
+  color: var(--journey-copy);
+  cursor: pointer;
+}
+
+.journey-route-editor-close:hover { color: var(--journey-ink); }
+
+.journey-route-editor-body {
+  padding: 22px;
+}

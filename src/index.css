@@ -216,6 +216,20 @@ body.planner-intelligence-active .pet-overlay {
   color: var(--accent);
 }
 
+/* Reverses a day the planner moved on the traveller's behalf. */
+.city-stay-undo {
+  margin-left: 0.15rem;
+  padding: 0 0.15rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: inherit;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .city-stay-list {
   display: grid;
   gap: 0.4rem;
@@ -4078,5 +4092,67 @@ html[data-design-recipe='modern-metropolitan'] [data-adaptive-handbook] .handboo
 @media (max-height: 700px) {
   .reduced-smart-plan-illustration {
     display: none;
+  }
+}
+
+/* ---------- Date range selection motion ----------
+ *
+ * Picking dates is the one place in trip setup where the traveller is doing
+ * something continuous — dragging a range out day by day. The endpoints land
+ * rather than appear, the band fades in behind them, and the whole thing sits
+ * still for anyone who has asked for reduced motion.
+ */
+@keyframes date-range-pop {
+  0%   { transform: translate(-50%, -50%) scale(.55); opacity: 0; }
+  62%  { transform: translate(-50%, -50%) scale(1.07); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+@keyframes date-range-band-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.date-range-day[data-role='start']::before,
+.date-range-day[data-role='end']::before {
+  animation: date-range-pop .3s cubic-bezier(.34, 1.4, .5, 1) both;
+  box-shadow: 0 3px 10px -4px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+.date-range-day[data-role='in-range'] {
+  animation: date-range-band-in .24s ease both;
+  transition: background-color .2s ease;
+}
+
+/* The unselected marker eases up under the cursor instead of snapping on. */
+.date-range-day:not(:disabled):not([data-role='start']):not([data-role='end'])::before {
+  transition: background-color .18s ease, transform .18s ease;
+}
+
+.date-range-day:not(:disabled):not([data-role='start']):not([data-role='end']):hover::before {
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+/* Round the band where each week begins and ends so a multi-week range reads
+   as one ribbon rather than three loose bars. */
+.date-range-day[data-role='in-range']:nth-child(7n + 1) {
+  border-start-start-radius: 999px;
+  border-end-start-radius: 999px;
+}
+
+.date-range-day[data-role='in-range']:nth-child(7n) {
+  border-start-end-radius: 999px;
+  border-end-end-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .date-range-day[data-role='start']::before,
+  .date-range-day[data-role='end']::before,
+  .date-range-day[data-role='in-range'] {
+    animation: none;
+  }
+
+  .date-range-day:not(:disabled):not([data-role='start']):not([data-role='end']):hover::before {
+    transform: translate(-50%, -50%);
   }
 }

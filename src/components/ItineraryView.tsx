@@ -17,6 +17,7 @@ import { PhotoGallery } from './PhotoGallery';
 import { PlannerPreview } from './PlannerPreview';
 import { JourneyTimelineOverview, resolvedDayCity } from './JourneyTimelineOverview';
 import { ItineraryChangeHistoryPanel } from './ItineraryChangeHistoryPanel';
+import { TripIdentityPanel } from './TripIdentityPanel';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
 import { admissionChip } from '../lib/admissionCopy';
@@ -1189,6 +1190,17 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   onOpenTripSettings?: () => void;
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
+  const [routeEditorOpen, setRouteEditorOpen] = useState(false);
+
+  // Hold the page still while the route editor is open, the same way the
+  // assistant panel does, so a scroll that runs past the dialog does not drag
+  // the itinerary underneath it.
+  useEffect(() => {
+    if (!routeEditorOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [routeEditorOpen]);
   const [newActivity, setNewActivity] = useState<Partial<Activity>>({
     type: 'sight',
     time: '10:00',
@@ -1768,7 +1780,57 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
         </div>
 
         {!isEditingMode && (
-          <JourneyTimelineOverview itinerary={customItinerary} onSelectDay={setSelectedDay} dayPhotos={dayPhotos} />
+          <JourneyTimelineOverview
+            itinerary={customItinerary}
+            onSelectDay={setSelectedDay}
+            dayPhotos={dayPhotos}
+            onEditRoute={onItineraryChange ? () => setRouteEditorOpen(true) : undefined}
+          />
+        )}
+
+        {routeEditorOpen && (
+          <div
+            className="journey-route-editor-backdrop"
+            role="presentation"
+            data-lenis-prevent
+            data-lenis-prevent-wheel
+            data-lenis-prevent-touch
+            style={{ touchAction: 'pan-y' }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setRouteEditorOpen(false);
+            }}
+          >
+            <div
+              className="journey-route-editor"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Edit route"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setRouteEditorOpen(false);
+              }}
+            >
+              <div className="journey-route-editor-head">
+                <strong>Edit route</strong>
+                <button
+                  type="button"
+                  className="journey-route-editor-close"
+                  onClick={() => setRouteEditorOpen(false)}
+                  aria-label="Close route editor"
+                >
+                  <X className="w-4 h-4" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="journey-route-editor-body">
+                <TripIdentityPanel
+                  itinerary={customItinerary}
+                  onItineraryChange={(next) => {
+                    setCustomItinerary(next);
+                    onItineraryChange?.(next);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Search Bar */}

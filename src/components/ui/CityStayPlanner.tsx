@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowDown, ArrowUp, Minus, Plus, X } from 'lucide-react';
 import {
-  addCityStay,
+  addCityStayBorrowingDay,
   adjustCityStay,
   canRemoveCityStay,
   cityStayStatus,
@@ -118,6 +118,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
   const [addOpen, setAddOpen] = useState(false);
   /** What the last edit merged, if it merged anything. Cleared by the next one. */
   const [mergeNote, setMergeNote] = useState<string | null>(null);
+  const [borrowed, setBorrowed] = useState<{ city: string; previous: TripCityStay[] } | null>(null);
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const firstAddOptionRef = useRef<HTMLButtonElement | null>(null);
   const addWasOpenedRef = useRef(false);
@@ -187,6 +188,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
   /** An edit that cannot change what is next to what: no merge is possible. */
   const set = (next: TripCityStay[]) => {
     setMergeNote(null);
+    setBorrowed(null);
     onChange(next);
   };
 
@@ -196,6 +198,7 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
    * once rather than asked to approve arithmetic they cannot disagree with.
    */
   const setSequence = (next: TripCityStay[]) => {
+    setBorrowed(null);
     const touching = next.findIndex((stay, index) =>
       index > 0 && cityKey(next[index - 1].city) === cityKey(stay.city));
     if (touching < 0) {
@@ -371,8 +374,11 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
                 type="button"
                 className="city-stay-sheet-option adaptive-button"
                 onClick={() => {
+                  const previous = stays;
+                  const added = addCityStayBorrowingDay(stays, city, dayCount);
                   setAddOpen(false);
-                  setSequence(addCityStay(stays, city, dayCount));
+                  setSequence(added.stays);
+                  setBorrowed(added.borrowedFrom ? { city: added.borrowedFrom, previous } : null);
                 }}
               >
                 <strong>{city}</strong>
@@ -390,6 +396,23 @@ export function CityStayPlanner({ cities, dayCount, startDate, value, onChange }
         >
           + Add another stay
         </button>
+      )}
+
+      {borrowed && (
+        <p className="city-stay-planner-note" role="status">
+          Moved a day from {borrowed.city} to your return stay.{' '}
+          <button
+            type="button"
+            className="city-stay-undo adaptive-button"
+            onClick={() => {
+              onChange(borrowed.previous);
+              setBorrowed(null);
+              setMergeNote(null);
+            }}
+          >
+            Undo
+          </button>
+        </p>
       )}
 
       {mergeNote && <p className="city-stay-planner-note" role="status">{mergeNote}</p>}
