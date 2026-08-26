@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Planitenary Editorial Journey Prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=Instrument+Serif&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="prototype-toolbar" aria-label="Prototype controls">
+    <div class="prototype-title">
+      <strong>Planitenary prototype</strong>
+      <span>Reference-faithful screen demo</span>
+    </div>
+    <nav class="prototype-screens" aria-label="Choose prototype screen">
+      <button type="button" data-screen="trips-motif" aria-pressed="true">My Trips A</button>
+      <button type="button" data-screen="trips-clean" aria-pressed="false">My Trips B</button>
+      <button type="button" data-screen="plan" aria-pressed="false">Plan a Trip</button>
+      <button type="button" data-screen="day" aria-pressed="false">Day Plan</button>
+      <button type="button" data-screen="discover" aria-pressed="false">Choose Places</button>
+    </nav>
+    <div class="prototype-devices" role="group" aria-label="Preview size">
+      <button type="button" data-mode="pair" aria-pressed="true">Pair</button>
+      <button type="button" data-mode="desktop" aria-pressed="false">Desktop</button>
+      <button type="button" data-mode="mobile" aria-pressed="false">Mobile</button>
+    </div>
+  </header>
+
+  <main class="prototype-canvas">
+    <div id="prototype-stage" class="prototype-stage mode-pair" aria-live="polite"></div>
+  </main>
+
+  <dialog id="proposal-dialog" class="proposal-dialog">
+    <form method="dialog">
+      <button class="dialog-close" value="close" aria-label="Close">×</button>
+      <span class="proposal-spark">✦</span>
+      <h2>Make this day lighter</h2>
+      <p>Two proposed changes keep your important stops and create more breathing room.</p>
+      <ol>
+        <li>Move lunch 15 minutes earlier.</li>
+        <li>Shorten the Gion walk by 30 minutes.</li>
+      </ol>
+      <div class="dialog-actions">
+        <button class="button secondary" value="close">Keep current day</button>
+        <button class="button primary" value="apply">Apply 2 changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
