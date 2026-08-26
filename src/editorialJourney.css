@@ -23,9 +23,15 @@
   --journey-soft-green: #e4eadc;
   --journey-soft-yellow: #f7ebc8;
   --journey-shadow: 0 18px 45px -32px rgba(47, 38, 25, 0.42), 0 2px 10px rgba(47, 38, 25, 0.05);
+  /* Page washes and paper grain. These paint over the app background, so they
+     must follow the theme rather than bake in the light paper colour. */
+  --journey-wash: rgba(246, 241, 232, 0.92);
+  --journey-wash-soft: rgba(251, 248, 241, 0.42);
+  --journey-grain: rgba(38, 52, 47, 0.018);
 }
 
-html.dark {
+html.dark,
+html[data-theme='dark'] {
   --journey-paper: #101814;
   --journey-paper-deep: #18241e;
   --journey-surface: #1b2822;
@@ -41,6 +47,9 @@ html.dark {
   --journey-soft-green: #263c31;
   --journey-soft-yellow: #3b3421;
   --journey-shadow: 0 20px 50px -30px rgba(0,0,0,.78), 0 2px 12px rgba(0,0,0,.24);
+  --journey-wash: rgba(16, 24, 20, 0.92);
+  --journey-wash-soft: rgba(27, 40, 34, 0.42);
+  --journey-grain: rgba(244, 239, 227, 0.022);
 }
 
 body {
@@ -50,7 +59,8 @@ body {
     var(--journey-paper);
 }
 
-html.dark body {
+html.dark body,
+html[data-theme='dark'] body {
   background:
     radial-gradient(circle at 22% 18%, rgba(67,94,80,.18), transparent 30rem),
     radial-gradient(circle at 78% 85%, rgba(0,0,0,.26), transparent 34rem),
@@ -90,8 +100,8 @@ html.dark body {
   min-height: 100dvh;
   color: var(--journey-copy);
   background:
-    linear-gradient(rgba(246,241,232,.9), rgba(246,241,232,.9)),
-    repeating-linear-gradient(0deg, transparent 0 3px, rgba(38,52,47,.018) 3px 4px);
+    linear-gradient(var(--journey-wash), var(--journey-wash)),
+    repeating-linear-gradient(0deg, transparent 0 3px, var(--journey-grain) 3px 4px);
 }
 
 .journey-trips-header {
@@ -393,10 +403,10 @@ html.dark body {
   width: 100%;
   min-height: 92px;
   margin-top: 18px;
-  border: 1px dashed #cdbfa9;
+  border: 1px dashed var(--journey-line);
   border-radius: 14px;
   color: var(--journey-copy);
-  background: rgba(251,248,241,.42);
+  background: var(--journey-wash-soft);
   font-size: 1rem;
   cursor: pointer;
 }
@@ -458,8 +468,8 @@ html.dark body {
 
 .editorial-journey-shell {
   background:
-    linear-gradient(rgba(246,241,232,.92), rgba(246,241,232,.92)),
-    repeating-linear-gradient(0deg, transparent 0 3px, rgba(38,52,47,.018) 3px 4px) !important;
+    linear-gradient(var(--journey-wash), var(--journey-wash)),
+    repeating-linear-gradient(0deg, transparent 0 3px, var(--journey-grain) 3px 4px) !important;
 }
 
 .editorial-journey-header {
@@ -910,7 +920,7 @@ html.dark body {
   min-height: 64px;
   margin-top: 10px;
   padding: 10px 16px;
-  border: 1px dashed #cbbca4;
+  border: 1px dashed var(--journey-line);
   border-radius: 12px;
   color: var(--journey-copy);
   background: color-mix(in srgb, var(--journey-soft-yellow) 62%, transparent);
@@ -1103,7 +1113,11 @@ html.dark body {
 html.dark .journey-current-art img,
 html.dark .journey-itinerary-art img,
 html.dark .journey-trip-row > img,
-html.dark .journey-day-place-preview > img { filter: saturate(.82) brightness(.76) contrast(1.04); }
+html.dark .journey-day-place-preview > img,
+html[data-theme='dark'] .journey-current-art img,
+html[data-theme='dark'] .journey-itinerary-art img,
+html[data-theme='dark'] .journey-trip-row > img,
+html[data-theme='dark'] .journey-day-place-preview > img { filter: saturate(.82) brightness(.76) contrast(1.04); }
 
 @media (max-width: 700px) {
   .journey-day-detail > div:first-child > button:first-child { padding-inline: 10px !important; font-size: .68rem; }
