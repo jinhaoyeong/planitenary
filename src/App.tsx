@@ -962,8 +962,15 @@ function App() {
 
   if (!selectedTripId) {
     if (showAccountSettings) {
+      /*
+       * `journey-trips-page` carries the journey tokens. Without it this page
+       * sits outside every token root and `--accent` falls back to the legacy
+       * pink, so Profile settings kept rendering in the old palette while the
+       * rest of the app followed the chosen one. The class injects variables
+       * only — no layout of its own.
+       */
       return (
-        <div className="min-h-screen" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
+        <div className="journey-trips-page min-h-screen" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
           <header
             className="sticky top-0 z-40 backdrop-blur-md"
             style={{
@@ -1191,14 +1198,26 @@ function App() {
                 aria-label="Menu"
                 aria-expanded={isMenuOpen}
               >
-                {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+                {/*
+                  Stays the menu icon while open. The panel carries its own
+                  close button a few pixels below this one, and swapping this to
+                  an X put two identical X's in the same corner. Tapping here
+                  still closes the menu; `aria-expanded` carries the state.
+                */}
+                <Menu className="w-4 h-4" />
               </motion.button>
             </div>
           </div>
         </div>
       </header>
 
-      {!isDemoUser && !isLocalTestUser && user && (
+      {/*
+        The dock is fixed at z-60 and the Quick Menu overlay sits at z-40, so
+        the two action buttons painted straight over the open menu. The menu is
+        the layer that should cover them — and the mobile nav pill below already
+        steps aside the same way while it is open.
+      */}
+      {!isDemoUser && !isLocalTestUser && user && !isMenuOpen && (
         <div className="journey-action-dock">
           <PlanTripProposalPanel
             tripId={activeItineraryId}
