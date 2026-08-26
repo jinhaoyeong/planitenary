@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { Itinerary, Activity, ActivityType } from '../data';
 import { MapPin, Utensils, Camera, Landmark, Footprints, Train, Search, Plus, Calendar, Clock, Tag, X, Save, ExternalLink } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -750,8 +751,9 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
       )}
 
       {/* Add Activity Modal */}
-      <AnimatePresence>
-        {showEditModal && editingLocation && (
+      {createPortal(
+        <AnimatePresence>
+          {showEditModal && editingLocation && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0 }}
@@ -875,9 +877,9 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
               </div>
             </motion.div>
           </div>
-        )}
+          )}
 
-        {showAddModal && (
+          {showAddModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0 }}
@@ -1004,8 +1006,10 @@ export const Maps = ({ itinerary, onItineraryChange }: MapsProps) => {
               </div>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };

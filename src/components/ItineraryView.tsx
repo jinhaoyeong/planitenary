@@ -1937,8 +1937,9 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             </p>
           )}
 
-          <AnimatePresence>
-            {isEditingMode && isDetailsModalOpen && (
+          {createPortal(
+            <AnimatePresence>
+              {isEditingMode && isDetailsModalOpen && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -2033,8 +2034,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                   </div>
                 </motion.div>
               </motion.div>
-            )}
-          </AnimatePresence>
+              )}
+            </AnimatePresence>,
+            document.body
+          )}
 
           <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mt-4">
             <button
@@ -2699,14 +2702,21 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
       {/*
         Add Activity Modal.
 
-        z-[100] because the action dock sits at z-60 and the mobile nav pill at
-        z-50 — at z-50 this dialog was painted over by both, hiding Save
-        Activity behind the nav and putting the two floating buttons in front of
-        the form. The lenis attributes keep a scroll inside the dialog from
-        driving the smooth-scrolled page behind it.
+        Portalled to the body because a z-index alone cannot win here. Two
+        ancestors of this subtree open stacking contexts of their own — the
+        `max-w-7xl` wrapper at `position: relative; z-index: 10`, and a Framer
+        Motion wrapper carrying a transform — so every z-index inside resolves
+        against that z-10 slot, not the page. The action dock (z-60) and the
+        mobile nav pill (z-50) live outside it and won regardless of what this
+        dialog asked for, which is why raising it to z-[100] changed nothing.
+
+        Out at the body it competes at the root, so z-[100] clears both and the
+        backdrop blurs them along with the page. The route editor below is
+        portalled for the same reason.
       */}
-      <AnimatePresence>
-        {showAddModal && (
+      {createPortal(
+        <AnimatePresence>
+          {showAddModal && (
           <div
             className="fixed inset-0 z-[100] flex items-center justify-center p-4"
             data-lenis-prevent
@@ -2940,8 +2950,10 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               </div>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* Photo Gallery Modal */}
       <PhotoGallery
