@@ -1360,3 +1360,108 @@ html[data-theme='dark'] .journey-day-place-preview > img { filter: saturate(.82)
   .plan-trip-brief-actions p { grid-column: 1 / -1; }
   .plan-trip-action-column { padding: 17px; }
 }
+
+/* ---------- Selectable palettes ----------
+ *
+ * A palette is a separate axis from light/dark: it swaps only the tokens that
+ * carry identity — paper, ink, line, accent — so route warnings and verified
+ * badges keep one consistent meaning whichever palette is chosen. Each palette
+ * declares its light values first, then its dark values for both the class and
+ * the attribute the theme switch sets.
+ */
+
+/* --- Warm sand --- */
+html[data-journey-palette='warm-sand'] {
+  --journey-paper: #f7f2e9;
+  --journey-paper-deep: #efe7d9;
+  --journey-surface: #fdfaf4;
+  --journey-ink: #3b2d1d;
+  --journey-copy: #4b3c2b;
+  --journey-muted: #8a7a66;
+  --journey-line: #ddceb6;
+  --journey-green: #9a6b3f;
+  --journey-green-deep: #7d5530;
+  --journey-soft-green: #f0e4d2;
+  --journey-wash: rgba(247, 242, 233, 0.92);
+  --journey-wash-soft: rgba(253, 250, 244, 0.42);
+}
+
+html[data-journey-palette='warm-sand'].dark,
+html[data-journey-palette='warm-sand'][data-theme='dark'] {
+  --journey-paper: #17130e;
+  --journey-paper-deep: #1f1a13;
+  --journey-surface: #241d15;
+  --journey-ink: #f4ece0;
+  --journey-copy: #e2d7c7;
+  --journey-muted: #a89986;
+  --journey-line: #3d3428;
+  --journey-green: #8a5f36;
+  --journey-green-deep: #6f4b29;
+  --journey-soft-green: #33291d;
+  --journey-wash: rgba(23, 19, 14, 0.92);
+  --journey-wash-soft: rgba(36, 29, 21, 0.42);
+}
+
+/* --- Ink navy --- */
+html[data-journey-palette='ink-navy'] {
+  --journey-paper: #f4f6f8;
+  --journey-paper-deep: #e8edf2;
+  --journey-surface: #fbfcfd;
+  --journey-ink: #14263c;
+  --journey-copy: #24374d;
+  --journey-muted: #647b93;
+  --journey-line: #cbd7e3;
+  --journey-green: #1f4e79;
+  --journey-green-deep: #163a5c;
+  --journey-soft-green: #dce7f2;
+  --journey-wash: rgba(244, 246, 248, 0.92);
+  --journey-wash-soft: rgba(251, 252, 253, 0.42);
+}
+
+html[data-journey-palette='ink-navy'].dark,
+html[data-journey-palette='ink-navy'][data-theme='dark'] {
+  --journey-paper: #0d131b;
+  --journey-paper-deep: #141c26;
+  --journey-surface: #18212d;
+  --journey-ink: #eef3f8;
+  --journey-copy: #d9e2ec;
+  --journey-muted: #93a5b8;
+  --journey-line: #2c3a4a;
+  --journey-green: #2f5f92;
+  --journey-green-deep: #234a75;
+  --journey-soft-green: #1d2c3c;
+  --journey-wash: rgba(13, 19, 27, 0.92);
+  --journey-wash-soft: rgba(24, 33, 45, 0.42);
+}
+
+/* --- Vermilion --- */
+html[data-journey-palette='vermilion'] {
+  --journey-paper: #fbf5ef;
+  --journey-paper-deep: #f4e9df;
+  --journey-surface: #fffaf6;
+  --journey-ink: #3a2320;
+  --journey-copy: #4d332e;
+  --journey-muted: #8d746d;
+  --journey-line: #e5d2c6;
+  --journey-green: #b8442c;
+  --journey-green-deep: #97361f;
+  --journey-soft-green: #f7e0d6;
+  --journey-wash: rgba(251, 245, 239, 0.92);
+  --journey-wash-soft: rgba(255, 250, 246, 0.42);
+}
+
+html[data-journey-palette='vermilion'].dark,
+html[data-journey-palette='vermilion'][data-theme='dark'] {
+  --journey-paper: #17100e;
+  --journey-paper-deep: #1f1613;
+  --journey-surface: #251a16;
+  --journey-ink: #f7eae4;
+  --journey-copy: #e6d5cd;
+  --journey-muted: #ab9088;
+  --journey-line: #3f2c26;
+  --journey-green: #a83c26;
+  --journey-green-deep: #8a2f1c;
+  --journey-soft-green: #33201a;
+  --journey-wash: rgba(23, 16, 14, 0.92);
+  --journey-wash-soft: rgba(37, 26, 22, 0.42);
+}

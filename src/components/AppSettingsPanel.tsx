@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, MouseEvent } from 'react';
-import { Coins, Compass, Download, ImagePlus, Link2, PawPrint, Plus, Trash2, Upload, Wand2, type LucideIcon } from 'lucide-react';
+import { Check, Coins, Compass, Download, ImagePlus, Link2, Palette, PawPrint, Plus, Trash2, Upload, Wand2, type LucideIcon } from 'lucide-react';
 import {
   createPetId,
   DEFAULT_PETS,
@@ -12,6 +12,13 @@ import {
   subscribePetPack,
   type PetDefinition,
 } from '../lib/petPack';
+import {
+  JOURNEY_PALETTES,
+  applyJourneyPalette,
+  loadJourneyPalette,
+  saveJourneyPalette,
+  type JourneyPaletteId,
+} from '../lib/journeyPalette';
 import { CurrencyPairSettings } from './CurrencySelector';
 import { TripIdentityPanel } from './TripIdentityPanel';
 import type { Itinerary } from '../data';
@@ -58,6 +65,13 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [palette, setPalette] = useState<JourneyPaletteId>(() => loadJourneyPalette());
+
+  const choosePalette = (next: JourneyPaletteId) => {
+    setPalette(next);
+    saveJourneyPalette(next);
+    applyJourneyPalette(next);
+  };
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const [activeSection, setActiveSection] = useState(
@@ -330,9 +344,68 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
           icon={PawPrint}
           eyebrow="Optional extras"
           title="Personalise the atmosphere"
-          description="Turn on animated companions and manage the pet pack that stays on this device."
+          description="Choose the handbook colour palette, turn on animated companions, and manage the pet pack that stays on this device."
         />
         <div className="editorial-card p-4 sm:p-5 md:p-8 space-y-5">
+        <div
+          className="rounded-2xl p-4"
+          style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
+        >
+          <div className="min-w-0 flex items-start gap-3">
+            <div
+              className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+              style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--accent)' }}
+            >
+              <Palette className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Colour palette</p>
+              <p className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                Choose the paper and ink the handbook is printed in. Light and dark still follow the theme switch.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Colour palette">
+            {JOURNEY_PALETTES.map((option) => {
+              const selected = palette === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => choosePalette(option.id)}
+                  className="flex items-start gap-3 rounded-xl p-3 text-left transition-colors"
+                  style={{
+                    backgroundColor: selected ? 'var(--accent-soft)' : 'var(--bg-elevated)',
+                    border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+                  }}
+                >
+                  <span className="mt-0.5 flex shrink-0 gap-1" aria-hidden="true">
+                    {option.swatches.map((swatch) => (
+                      <span
+                        key={swatch}
+                        className="h-5 w-5 rounded-full"
+                        style={{ backgroundColor: swatch, border: '1px solid rgba(0,0,0,.12)' }}
+                      />
+                    ))}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--ink)' }}>
+                      {option.label}
+                      {selected && <Check className="h-3.5 w-3.5" style={{ color: 'var(--accent)' }} aria-hidden="true" />}
+                    </span>
+                    <span className="mt-1 block text-xs leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
+                      {option.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div
           className="rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
           style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}

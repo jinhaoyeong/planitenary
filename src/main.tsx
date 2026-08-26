@@ -18,6 +18,9 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { CurrencyProvider } from './contexts/CurrencyContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { SmoothScroll } from './components/motion/SmoothScroll'
+import { applyJourneyPalette, loadJourneyPalette } from './lib/journeyPalette'
+
+applyJourneyPalette(loadJourneyPalette())
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>
