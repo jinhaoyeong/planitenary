@@ -39,6 +39,8 @@ const PALETTES: Record<string, DestinationPalette> = {
   aurora: { accent: '#3E8E9B', accentSoft: '#DAF0F2', darkAccent: '#69C3CF', darkAccentSoft: '#152C30' },
   desert: { accent: '#C0844C', accentSoft: '#F8EADA', darkAccent: '#E0A870', darkAccentSoft: '#332618' },
   forest: { accent: '#3C7D4F', accentSoft: '#DCEFE0', darkAccent: '#6FBF87', darkAccentSoft: '#152A1C' },
+  /* The app's own accent, for a trip that has not named a country yet. */
+  journey: { accent: '#174b38', accentSoft: '#e4eadc', darkAccent: '#2f7559', darkAccentSoft: '#263c31' },
 };
 
 const COUNTRIES: CountryProfile[] = [
@@ -105,7 +107,9 @@ const FALLBACK_COUNTRY: CountryProfile = {
   currency: 'USD',
   center: [20, 0],
   motifs: ['new streets', 'local food', 'slow mornings', 'unfamiliar views'],
-  palette: PALETTES.rose,
+  // Before a country is picked there is no destination colour to borrow, so the
+  // trip wears the app's own accent rather than a leftover brand pink.
+  palette: PALETTES.journey,
 };
 
 const normalize = (value: string) => value.trim().toLowerCase();

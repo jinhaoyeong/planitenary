@@ -71,8 +71,9 @@ html[data-theme='dark'] body {
 .editorial-journey-shell,
 .wizard-dialog,
 .plan-trip-journey-panel,
-/* Portalled to the body, so it sits outside the shell and has to be given
-   the journey tokens directly or it falls back to the legacy palette. */
+/* Portalled to the body, so these sit outside the shell and have to be given
+   the journey tokens directly or they fall back to the legacy palette. */
+.country-picker-menu,
 .journey-route-editor-backdrop {
   --bg: var(--journey-paper);
   --bg-elevated: var(--journey-surface);
@@ -1226,7 +1227,10 @@ html[data-theme='dark'] .journey-day-place-preview > img { filter: saturate(.82)
   border-radius: 9px !important;
 }
 
-.wizard-dialog-content button[aria-pressed='true'],
+/* Calendar days are aria-pressed buttons as well, and they already show
+   selection as a circular marker. Filling their cell too stacked a square
+   behind that circle, so they are excluded from the chip treatment. */
+.wizard-dialog-content button[aria-pressed='true']:not(.date-range-day),
 .wizard-dialog-content [role='option'][aria-selected='true'] {
   border-color: var(--journey-green) !important;
   color: var(--journey-ink) !important;

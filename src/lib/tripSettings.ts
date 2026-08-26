@@ -51,8 +51,10 @@ export const DEFAULT_LIGHT_THEME: TripThemeSettings = {
   bgElevated: '#FFFFFF',
   ink: '#0F0E0D',
   inkMuted: '#5C5853',
-  accent: '#EE4D87',
-  accentSoft: '#FFE4EE',
+  /* The journey green is the app's own accent. A trip that has not chosen a
+     palette inherits it, so nothing renders in the legacy pink by default. */
+  accent: '#174b38',
+  accentSoft: '#e4eadc',
 };
 
 export const DEFAULT_DARK_THEME: TripThemeSettings = {
@@ -60,8 +62,8 @@ export const DEFAULT_DARK_THEME: TripThemeSettings = {
   bgElevated: '#1F1A17',
   ink: '#F5EFE4',
   inkMuted: '#A39B8C',
-  accent: '#FF6B9A',
-  accentSoft: '#3A1F2A',
+  accent: '#2f7559',
+  accentSoft: '#263c31',
 };
 
 /** Theme families with paired light + dark variants. One tap applies both. */

@@ -524,22 +524,28 @@ export function TripCreateWizard({
                 </div>
               </div>
 
-              {nights === null && !datesReversed && (
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
-                    Or just the number of days
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={MAX_TRIP_DURATION_DAYS}
-                    className="editorial-input w-full"
-                    value={profile.dayCount || ''}
-                    onChange={(event) => update({ dayCount: Number(event.target.value) || 0 })}
-                    placeholder="7"
-                  />
-                </div>
-              )}
+              {/*
+                * Kept mounted once dates exist rather than unmounted. Dropping
+                * the whole block the moment a range completed collapsed the
+                * dialog under the cursor; disabled and showing the count the
+                * dates imply, the step keeps its height while a range is picked.
+                */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--ink-muted)' }}>
+                  Or just the number of days
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_TRIP_DURATION_DAYS}
+                  className="editorial-input w-full"
+                  value={nights === null ? (profile.dayCount || '') : (duration.days || '')}
+                  onChange={(event) => update({ dayCount: Number(event.target.value) || 0 })}
+                  placeholder="7"
+                  disabled={nights !== null || datesReversed}
+                  title={nights !== null ? 'Taken from the dates above. Clear them to set a length instead.' : undefined}
+                />
+              </div>
 
               {datesReversed && (
                 <p className="text-sm" style={{ color: 'var(--accent)' }}>

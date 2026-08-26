@@ -712,6 +712,9 @@ body.planner-intelligence-active .pet-overlay {
   gap: 0.6rem;
   font-size: 0.7rem;
   color: var(--ink-muted);
+  /* Clear only exists once a day is picked. Reserving the row's height stops
+     the calendar, and the dialog around it, resizing on the first click. */
+  min-height: 1.25rem;
 }
 
 .date-range-clear {
