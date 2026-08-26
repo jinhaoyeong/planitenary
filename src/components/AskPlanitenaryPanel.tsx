@@ -640,7 +640,7 @@ export function AskPlanitenaryPanel({ tripId, tripName, itinerary }: AskPlaniten
               data-lenis-prevent-touch
               onWheel={(event) => event.stopPropagation()}
               onTouchMove={(event) => event.stopPropagation()}
-              className="fixed inset-x-0 bottom-0 z-[90] flex max-h-[88dvh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-[0_-18px_55px_rgba(15,23,42,0.24)] dark:bg-slate-950 md:inset-y-0 md:left-auto md:w-[520px] md:max-h-none md:rounded-none md:shadow-[-18px_0_55px_rgba(15,23,42,0.22)] 2xl:w-[600px]"
+              className="journey-ask-panel fixed inset-x-0 bottom-0 z-[90] flex max-h-[88dvh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-[0_-18px_55px_rgba(15,23,42,0.24)] dark:bg-slate-950 md:inset-y-0 md:left-auto md:w-[520px] md:max-h-none md:rounded-none md:shadow-[-18px_0_55px_rgba(15,23,42,0.22)] 2xl:w-[600px]"
             >
               <header className="relative flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800 sm:px-6 sm:py-5">
                   <div className="min-w-0">

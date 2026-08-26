@@ -1007,7 +1007,7 @@ function App() {
   return (
     <TripIntelligenceUiProvider key={activeItineraryId} tripId={activeItineraryId} surface={surfaceFromAppTab(activeTab)} selectedCurrency={currency}>
     <div
-      className="adaptive-handbook-root editorial-journey-shell min-h-screen font-sans pb-24 md:pb-0 overflow-x-hidden"
+      className="adaptive-handbook-root editorial-journey-shell min-h-screen font-sans pb-24 md:pb-0 overflow-x-clip"
       data-adaptive-handbook="true"
       style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}
     >

@@ -499,7 +499,7 @@ html[data-theme='dark'] body {
 .editorial-journey-header .app-primary-nav button {
   padding-inline: 2px !important;
   color: var(--journey-muted) !important;
-  font-size: .76rem !important;
+  font-size: .875rem !important;
   font-weight: 500 !important;
 }
 
@@ -1464,4 +1464,94 @@ html[data-journey-palette='vermilion'][data-theme='dark'] {
   --journey-soft-green: #33201a;
   --journey-wash: rgba(23, 16, 14, 0.92);
   --journey-wash-soft: rgba(37, 26, 22, 0.42);
+}
+
+/* ---------- Ask Planitenary ----------
+ *
+ * The assistant panel predates the redesign and carries its own slate/rose
+ * Tailwind palette, including paired `dark:` variants. Rather than rewrite a
+ * few hundred utility classes, map them onto journey tokens inside the panel's
+ * own scope — one token per role, so a single rule covers both the light and
+ * the dark variant and every selectable palette follows automatically. The
+ * substring matches deliberately catch the `dark:` and slash-opacity forms.
+ */
+
+aside.journey-ask-panel {
+  color: var(--journey-copy) !important;
+  background: var(--journey-paper) !important;
+  border-left: 1px solid var(--journey-line);
+}
+
+/* Raised surfaces: chips, cards, suggestion buttons, composer. */
+.journey-ask-panel [class*='bg-slate-50'],
+.journey-ask-panel [class*='bg-slate-100'],
+.journey-ask-panel [class*='bg-slate-200'],
+.journey-ask-panel [class*='bg-slate-800'],
+.journey-ask-panel [class*='bg-slate-900'],
+.journey-ask-panel [class*='bg-slate-950'],
+.journey-ask-panel [class*='bg-white'] {
+  background-color: var(--journey-surface) !important;
+}
+
+/* Primary reading colour. */
+.journey-ask-panel [class*='text-slate-950'],
+.journey-ask-panel [class*='text-slate-900'],
+.journey-ask-panel [class*='text-slate-800'],
+.journey-ask-panel [class*='text-slate-100'],
+.journey-ask-panel [class*='text-slate-50'] {
+  color: var(--journey-ink) !important;
+}
+
+/* Body copy. */
+.journey-ask-panel [class*='text-slate-700'],
+.journey-ask-panel [class*='text-slate-600'],
+.journey-ask-panel [class*='text-slate-300'],
+.journey-ask-panel [class*='text-slate-200'] {
+  color: var(--journey-copy) !important;
+}
+
+/* Secondary and hint copy. */
+.journey-ask-panel [class*='text-slate-500'],
+.journey-ask-panel [class*='text-slate-400'] {
+  color: var(--journey-muted) !important;
+}
+
+.journey-ask-panel [class*='border-slate-'] {
+  border-color: var(--journey-line) !important;
+}
+
+/* The assistant's accent follows the chosen palette instead of staying rose. */
+.journey-ask-panel [class*='bg-rose-'] {
+  background-color: var(--journey-green) !important;
+}
+
+.journey-ask-panel [class*='text-rose-'] {
+  color: var(--journey-green) !important;
+}
+
+.journey-ask-panel [class*='ring-rose-'] {
+  --tw-ring-color: var(--journey-green) !important;
+}
+
+/* Send button keeps a legible label on the accent fill. */
+.journey-ask-panel [class*='bg-rose-'][class*='text-white'],
+.journey-ask-panel [class*='bg-rose-'] svg {
+  color: var(--accent-ink, #fffdf7) !important;
+}
+
+.journey-ask-panel h2,
+.journey-ask-panel h3 {
+  color: var(--journey-ink) !important;
+}
+
+.journey-ask-panel input,
+.journey-ask-panel textarea {
+  color: var(--journey-ink) !important;
+  background-color: var(--journey-surface) !important;
+  border-color: var(--journey-line) !important;
+}
+
+.journey-ask-panel input::placeholder,
+.journey-ask-panel textarea::placeholder {
+  color: var(--journey-muted) !important;
 }
