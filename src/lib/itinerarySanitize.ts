@@ -81,6 +81,26 @@ const VALID_ACTIVITY_SOURCES: ActivitySource[] = ['manual', 'generated', 'import
 const VALID_BOOKING_STATUSES: BookingStatus[] = ['none', 'requested', 'confirmed', 'cancelled'];
 const VALID_LOCKED_FIELDS: ActivityLockedField[] = ['schedule', 'location', 'duration', 'cost', 'booking', 'all'];
 const VALID_SCHEDULE_KINDS: ScheduleItemKind[] = ['place', 'reservation', 'transport', 'meal-window', 'rest-window', 'free-time'];
+
+/**
+ * The planner used to write a reserved meal window into every day as an
+ * activity named "<meal> — venue not selected". It carried no venue, no cost
+ * and no booking — only the fact that the time was held — and repeated on each
+ * day of a trip it read as clutter rather than as a plan.
+ *
+ * It is no longer generated, and plans saved before that change are cleaned on
+ * load. Deliberately narrow: only a generated meal window still holding the
+ * placeholder name goes. A meal window the traveller has renamed, given a
+ * venue, or booked has become their content and is kept.
+ */
+const isUnfilledGeneratedMealWindow = (activity: unknown): boolean => {
+  if (!activity || typeof activity !== 'object') return false;
+  const value = activity as { kind?: unknown; source?: unknown; name?: unknown; location?: unknown };
+  return value.kind === 'meal-window'
+    && value.source === 'generated'
+    && typeof value.name === 'string'
+    && /—\s*venue not selected\s*$/.test(value.name);
+};
 /**
  * Written as a keyed record rather than an array so the compiler enforces
  * completeness: adding a provider to {@link DiscoveryProvider} without listing
@@ -522,7 +542,8 @@ export const sanitizeDay = (value: unknown, fallbackDay: DayPlan | undefined, in
     ? fallback.activities
     : [{ time: '09:00', name: 'Untitled activity', description: '', type: 'other' as ActivityType }];
   // An explicitly empty day is valid (generated trip skeletons start blank).
-  const sourceActivities = Array.isArray(source.activities) ? source.activities : activityFallbacks;
+  const sourceActivities = (Array.isArray(source.activities) ? source.activities : activityFallbacks)
+    .filter((activity) => !isUnfilledGeneratedMealWindow(activity));
 
   /**
    * The overnight base, preferring what the day says about itself.

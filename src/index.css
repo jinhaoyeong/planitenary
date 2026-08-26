@@ -4156,3 +4156,46 @@ html[data-design-recipe='modern-metropolitan'] [data-adaptive-handbook] .handboo
     transform: translate(-50%, -50%);
   }
 }
+
+/* ---------- Mid-selection preview ----------
+ *
+ * Once the first day is chosen the band follows the cursor, and every cell it
+ * crosses gains `in-range` in turn. Replaying the landing animation on each of
+ * them is what made gliding across the month feel like it was stuttering, so
+ * while picking the band simply fills toward the cursor — one short wipe per
+ * cell, left to right, which chains into a single bar filling. The landing
+ * animation is kept for the moment the range is actually committed.
+ */
+.date-range-calendar[data-picking='true'] .date-range-day[data-role='in-range'] {
+  animation: none;
+  background-color: transparent;
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent) 16%, transparent) 0 100%
+  );
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 100% 100%;
+  transition: background-size .16s cubic-bezier(.4, 0, .2, 1);
+}
+
+@starting-style {
+  .date-range-calendar[data-picking='true'] .date-range-day[data-role='in-range'] {
+    background-size: 0% 100%;
+  }
+}
+
+/*
+ * The trailing endpoint is wherever the cursor is, so it must not re-land on
+ * every cell. It eases instead, and gets its landing back on commit.
+ */
+.date-range-calendar[data-picking='true'] .date-range-day[data-role='end']::before {
+  animation: none;
+  transition: transform .16s cubic-bezier(.4, 0, .2, 1), box-shadow .16s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .date-range-calendar[data-picking='true'] .date-range-day[data-role='in-range'] {
+    transition: none;
+  }
+}

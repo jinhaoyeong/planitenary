@@ -111,7 +111,16 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
     <div className="journey-itinerary-overview">
       <section className="journey-itinerary-intro">
         <div className="journey-itinerary-art">
-          <img src={trainLakeIllustration} alt="A regional train crossing yellow flower fields beside a lake and mountains" />
+          <img
+            src={trainLakeIllustration}
+            alt="A regional train crossing yellow flower fields beside a lake and mountains"
+            width={1536}
+            height={1024}
+            loading="eager"
+            decoding="async"
+            fetchPriority="high"
+            draggable={false}
+          />
         </div>
         <div className="journey-itinerary-intro-copy">
           <span className="journey-kicker"><i /> Your route</span>

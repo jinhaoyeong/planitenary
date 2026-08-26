@@ -433,3 +433,34 @@ describe('flight duration survives sanitisation', () => {
     expect(saved.days[0].activities[0].durationMinutes).toBeUndefined();
   });
 });
+
+describe('clearing the old venue-less meal windows', () => {
+  const dayWith = (activities: unknown[]) => ({
+    days: [{ day: 1, date: 'Aug 11', title: 'Day one', activities }],
+  });
+
+  it('drops a generated meal window that never got a venue', () => {
+    const result = sanitizeItinerary(dayWith([
+      { id: 'a', name: 'Glico Man Sign', kind: 'place', time: '10:00' },
+      { id: 'b', name: 'Dinner — venue not selected', kind: 'meal-window', source: 'generated', time: '18:30' },
+    ]), emptyItinerary);
+
+    expect(result.days[0].activities.map((activity) => activity.name)).toEqual(['Glico Man Sign']);
+  });
+
+  it('keeps a meal window the traveller gave a venue', () => {
+    const result = sanitizeItinerary(dayWith([
+      { id: 'b', name: 'Dinner at Kuromon Market', kind: 'meal-window', source: 'generated', time: '18:30' },
+    ]), emptyItinerary);
+
+    expect(result.days[0].activities.map((activity) => activity.name)).toEqual(['Dinner at Kuromon Market']);
+  });
+
+  it('keeps a placeholder the traveller wrote themselves', () => {
+    const result = sanitizeItinerary(dayWith([
+      { id: 'b', name: 'Dinner — venue not selected', kind: 'meal-window', source: 'manual', time: '18:30' },
+    ]), emptyItinerary);
+
+    expect(result.days[0].activities).toHaveLength(1);
+  });
+});

@@ -510,7 +510,7 @@ describe('§9.2 — the chosen pace visibly reshapes the plan', () => {
       pace: result.behaviour.pace,
       placesPerDay: result.days.map((d) => d.activities.filter((a) => a.kind === 'place').length),
       firstStart: day.activities[0]?.time ?? '',
-      mealMinutes: day.activities.find((a) => a.kind === 'meal-window')?.durationMinutes ?? 0,
+      mealMinutes: result.dayLoads[0]?.mealMinutes ?? 0,
       walking: result.dayLoads[0]?.walkingMinutes ?? 0,
     };
   };
@@ -533,8 +533,9 @@ describe('§9.2 — the chosen pace visibly reshapes the plan', () => {
   });
 
   it('gives a calm trip longer meals', () => {
-    // Verified: 85 minutes against 55. PACE_DEFAULTS.diningMinutes reaching
-    // the plan, not merely being declared.
+    // PACE_DEFAULTS.diningMinutes reaching the plan, not merely being
+    // declared. Read from the day's load: the reserved window is no longer
+    // written into the itinerary as a venue-less activity.
     expect(planFor(['calm']).mealMinutes).toBeGreaterThan(planFor(['fast-paced']).mealMinutes);
   });
 
@@ -554,13 +555,15 @@ describe('§9.4 — flight times reshape the edges of a real plan', () => {
 
   it('leaves no room for sightseeing on the day a 19:30 flight lands', () => {
     /**
-     * The arrival edge keeps the day at dinner-only capacity. The dinner may
-     * be a real venue or the flexible fallback, but no main sight is invented
+     * The arrival edge keeps the day at dinner-only capacity: the evening is
+     * spent on the reserved dinner window, and no main sight is invented
      * after 21:30.
      */
     const result = buildWithEdges({ arrivalTime: '19:30' });
     expect(result.days[0].activities.filter((activity) => activity.kind === 'place')).toHaveLength(0);
-    expect(result.days[0].activities.filter((activity) => activity.kind === 'meal-window')).toHaveLength(1);
+    // The dinner window still holds the evening — it is reserved on the day's
+    // load rather than shown as an activity with no venue in it.
+    expect(result.dayLoads[0]?.mealMinutes ?? 0).toBeGreaterThan(0);
   });
 
   it('tells the traveller why day one is empty rather than looking broken', () => {

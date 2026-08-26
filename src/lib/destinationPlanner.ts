@@ -441,20 +441,6 @@ export function defaultDiscoveryDecisions(
   return decisions;
 }
 
-const createMealWindow = (day: number, label: string, time: string, durationMinutes: number, neighbourhood: string): Activity => ({
-  id: `discovery-meal-${day}-${label.toLowerCase()}`,
-  kind: 'meal-window',
-  time,
-  durationMinutes,
-  name: `${label} — venue not selected`,
-  description: `Keep this time flexible around ${neighbourhood}.`,
-  type: 'food',
-  location: neighbourhood,
-  source: 'generated',
-  lockedFields: [],
-  generatedMetadata: { source: 'generated', generatedAt: new Date().toISOString(), reason: 'Schedule constraint, not a discovered attraction.', confidence: 'high' },
-});
-
 const createRestBeat = (day: number, time: string, reason: string): Activity => ({
   id: `discovery-rest-${day}`,
   kind: 'meal-window',
@@ -850,15 +836,11 @@ function slotToActivity(
 ): Activity | null {
   const time = toTime(slot.startMinutes);
 
-  if (slot.kind === 'meal') {
-    return createMealWindow(
-      dayNumber,
-      slot.label,
-      time,
-      slot.endMinutes - slot.startMinutes,
-      slot.reason.replace(/^Kept flexible around /, '').split('.')[0],
-    );
-  }
+  // A reserved meal window is a scheduling constraint, not something the
+  // traveller has to read every day. It keeps its time in the simulation and
+  // its minutes on the day's load; it is simply not written into the plan as
+  // an activity with no venue in it.
+  if (slot.kind === 'meal') return null;
   if (slot.kind === 'rest') return createRestBeat(dayNumber, time, slot.reason);
   if (!slot.candidate) return null;
 

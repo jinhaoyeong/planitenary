@@ -121,7 +121,15 @@ export function DateRangeCalendar({
   };
 
   return (
-    <div className="date-range-calendar" role="group" aria-label={label}>
+    <div
+      className="date-range-calendar"
+      role="group"
+      aria-label={label}
+      // Mid-selection the band is a preview that follows the cursor, so it
+      // fills toward the hovered day instead of replaying a landing animation
+      // on every cell it crosses.
+      data-picking={value.start && !value.end ? 'true' : undefined}
+    >
       <div className="date-range-calendar-head">
         <button
           type="button"

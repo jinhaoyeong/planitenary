@@ -380,7 +380,16 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
                   </button>
                 </div>
                 <div className="journey-current-art">
-                  <img src={busFieldsIllustration} alt="A green bus travelling through yellow fields beside the coast" />
+                  <img
+                    src={busFieldsIllustration}
+                    alt="A green bus travelling through yellow fields beside the coast"
+                    width={1536}
+                    height={1024}
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
+                    draggable={false}
+                  />
                 </div>
               </motion.section>
 
