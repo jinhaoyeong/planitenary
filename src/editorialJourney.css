@@ -70,7 +70,10 @@ html[data-theme='dark'] body {
 .journey-trips-page,
 .editorial-journey-shell,
 .wizard-dialog,
-.plan-trip-journey-panel {
+.plan-trip-journey-panel,
+/* Portalled to the body, so it sits outside the shell and has to be given
+   the journey tokens directly or it falls back to the legacy palette. */
+.journey-route-editor-backdrop {
   --bg: var(--journey-paper);
   --bg-elevated: var(--journey-surface);
   --ink: var(--journey-ink);
@@ -1620,26 +1623,29 @@ aside.journey-ask-panel {
   inset: 0;
   z-index: 95;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding: clamp(16px, 5vh, 56px) 16px;
-  overflow-y: auto;
+  padding: clamp(12px, 4vh, 44px) 16px;
+  overflow: hidden;
   background: color-mix(in srgb, var(--journey-ink) 45%, transparent);
   backdrop-filter: blur(3px);
 }
 
 .journey-route-editor {
+  display: flex;
+  flex-direction: column;
   width: min(760px, 100%);
+  max-height: 100%;
+  min-height: 0;
   border: 1px solid var(--journey-line);
   border-radius: 16px;
   background: var(--journey-paper);
   box-shadow: 0 28px 70px -30px rgba(0, 0, 0, .5);
+  overflow: hidden;
 }
 
 .journey-route-editor-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1673,5 +1679,33 @@ aside.journey-ask-panel {
 .journey-route-editor-close:hover { color: var(--journey-ink); }
 
 .journey-route-editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 22px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* On a phone the editor is a sheet: full width, anchored to the bottom, with
+   only its top corners rounded. */
+@media (max-width: 640px) {
+  .journey-route-editor-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .journey-route-editor {
+    max-height: 92dvh;
+    border-width: 1px 0 0;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .journey-route-editor-head {
+    padding: 15px 18px;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .journey-route-editor-body {
+    padding: 16px 14px calc(16px + var(--app-safe-bottom, 0px));
+  }
 }

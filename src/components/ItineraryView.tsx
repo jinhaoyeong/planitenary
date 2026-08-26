@@ -17,6 +17,7 @@ import { PhotoGallery } from './PhotoGallery';
 import { PlannerPreview } from './PlannerPreview';
 import { JourneyTimelineOverview, resolvedDayCity } from './JourneyTimelineOverview';
 import { ItineraryChangeHistoryPanel } from './ItineraryChangeHistoryPanel';
+import { createPortal } from 'react-dom';
 import { TripIdentityPanel } from './TripIdentityPanel';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
@@ -1788,7 +1789,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           />
         )}
 
-        {routeEditorOpen && (
+        {routeEditorOpen && createPortal(
           <div
             className="journey-route-editor-backdrop"
             role="presentation"
@@ -1830,7 +1831,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 />
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
         {/* Search Bar */}
