@@ -1577,11 +1577,20 @@ aside.journey-ask-panel {
 }
 
 /* The route strip and its editor entry point share one row, so changing the
-   route starts from where the route is read rather than from trip settings. */
+   route starts from where the route is read rather than from trip settings.
+
+   `min-width: 0` because this row is a grid item, and a grid item's automatic
+   minimum size is its min-content width. That width comes from the city tabs,
+   whose buttons are `min-width: 140px` each — three cities is 454px, wider than
+   a phone. Without this the row refuses to shrink, carries every descendant out
+   past the viewport, and `overflow-x: clip` on the shell cuts them off with no
+   way to scroll to them. The tabs already scroll on their own; they only get
+   the chance once the row is allowed to be narrower than they are. */
 .journey-route-row {
   display: flex;
   align-items: stretch;
   gap: 10px;
+  min-width: 0;
 }
 
 .journey-route-row > .journey-city-tabs {
@@ -1743,6 +1752,20 @@ aside.journey-ask-panel {
 
 @media (max-width: 520px) {
   .journey-action-dock button { min-height: 42px; padding: 0 14px; font-size: .78rem; }
+}
+
+/* On a phone the labelled pills are a 147x95px slab pinned over the content
+   they are meant to act on — the route description, a day card, a filter chip.
+   Icons carry the same two actions in a third of the space; the accessible name
+   survives because it lives in the `.sr-only` span, which is left alone.
+
+   The dock is fixed, so it still passes over content while scrolling. The extra
+   bottom padding is what guarantees the *end* of the page is never parked
+   underneath it: the dock floats ~197px above the viewport bottom. */
+@media (max-width: 720px) {
+  .journey-action-dock button span:not(.sr-only) { display: none !important; }
+  .journey-action-dock button { width: 46px; padding: 0; justify-content: center; }
+  .editorial-journey-shell #main-content { padding-bottom: 200px !important; }
 }
 
 /* All three trip actions share the route row. */
