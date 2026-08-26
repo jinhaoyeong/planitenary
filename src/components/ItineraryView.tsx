@@ -1193,15 +1193,15 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   const [showAddModal, setShowAddModal] = useState(false);
   const [routeEditorOpen, setRouteEditorOpen] = useState(false);
 
-  // Hold the page still while the route editor is open, the same way the
-  // assistant panel does, so a scroll that runs past the dialog does not drag
-  // the itinerary underneath it.
+  // Hold the page still while the route editor or the Add Activity dialog is
+  // open, the same way the assistant panel does, so a scroll that runs past the
+  // dialog does not drag the itinerary underneath it.
   useEffect(() => {
-    if (!routeEditorOpen) return;
+    if (!routeEditorOpen && !showAddModal) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = previous; };
-  }, [routeEditorOpen]);
+  }, [routeEditorOpen, showAddModal]);
   const [newActivity, setNewActivity] = useState<Partial<Activity>>({
     type: 'sight',
     time: '10:00',
@@ -1944,7 +1944,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
-                className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                className="fixed inset-0 z-[100] flex items-center justify-center p-4"
                 style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
                 onClick={() => setIsDetailsModalOpen(false)}
               >
@@ -2696,22 +2696,39 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
         </motion.div>
       </AnimatePresence>
 
-      {/* Add Activity Modal */}
+      {/*
+        Add Activity Modal.
+
+        z-[100] because the action dock sits at z-60 and the mobile nav pill at
+        z-50 — at z-50 this dialog was painted over by both, hiding Save
+        Activity behind the nav and putting the two floating buttons in front of
+        the form. The lenis attributes keep a scroll inside the dialog from
+        driving the smooth-scrolled page behind it.
+      */}
       <AnimatePresence>
         {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            data-lenis-prevent
+            data-lenis-prevent-wheel
+            data-lenis-prevent-touch
+            onWheel={(event) => event.stopPropagation()}
+          >
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
               onClick={() => setShowAddModal(false)}
             />
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="bg-white dark:bg-slate-900 w-full max-w-md max-h-[min(90dvh,44rem)] overflow-y-auto rounded-2xl shadow-2xl p-6 relative z-10 border border-slate-100 dark:border-slate-800"
+              data-lenis-prevent
+              data-lenis-prevent-wheel
+              data-lenis-prevent-touch
             >
               <button 
                 onClick={() => setShowAddModal(false)}
