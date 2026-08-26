@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { BedDouble, CalendarDays, ChevronRight, Clock3, MapPin, PencilLine, Route, TrainFront } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { Activity, DayPhoto, DayPlan, Itinerary } from '../data';
 import { sanitizeTripProfile } from '../lib/tripProfile';
 import trainLakeIllustration from '../assets/journey/train-lake.jpg';
@@ -14,6 +15,8 @@ interface JourneyTimelineOverviewProps {
    * plan was only reachable by hunting through trip settings.
    */
   onEditRoute?: () => void;
+  /** Trip-level actions shown alongside Edit route. */
+  actions?: ReactNode;
 }
 
 interface StaySegment {
@@ -96,7 +99,7 @@ const durationLabel = (day: DayPlan) => {
   return `${activities} ${activities === 1 ? 'activity' : 'activities'}`;
 };
 
-export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}, onEditRoute }: JourneyTimelineOverviewProps) {
+export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}, onEditRoute, actions }: JourneyTimelineOverviewProps) {
   const segments = staySegments(itinerary);
   const [activeSegment, setActiveSegment] = useState(0);
   const segmentRefs = useRef<Array<HTMLElement | null>>([]);
@@ -144,12 +147,15 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
           </button>
         ))}
       </nav>
-      {onEditRoute && (
-        <button type="button" className="journey-route-edit" onClick={onEditRoute}>
-          <PencilLine className="w-3.5 h-3.5" aria-hidden="true" />
-          Edit route
-        </button>
-      )}
+      <div className="journey-route-actions">
+        {actions}
+        {onEditRoute && (
+          <button type="button" className="journey-route-edit" onClick={onEditRoute}>
+            <PencilLine className="w-3.5 h-3.5" aria-hidden="true" />
+            Edit route
+          </button>
+        )}
+      </div>
       </div>
 
       <div className="journey-stay-timeline">

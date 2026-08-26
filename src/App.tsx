@@ -1133,18 +1133,6 @@ function App() {
             click on "Plan my trip" ended up hitting a tab instead.
           */}
           <div className="relative z-10 flex items-center gap-2 shrink-0">
-            {!isDemoUser && !isLocalTestUser && user && (
-              <>
-                <PlanTripProposalPanel
-                  tripId={activeItineraryId}
-                  tripName={displayItinerary.name}
-                  itinerary={customItinerary || activeItinerary}
-                  onApplied={adoptWrittenItinerary}
-                  onNavigate={(tab) => handleTabChange(tab)}
-                />
-                <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} itinerary={displayItinerary} />
-              </>
-            )}
             {/*
               One segmented control rather than a row of identical pills, so the
               two things a traveller actually came for — plan, and ask — read as
@@ -1209,6 +1197,19 @@ function App() {
           </div>
         </div>
       </header>
+
+      {!isDemoUser && !isLocalTestUser && user && (
+        <div className="journey-action-dock">
+          <PlanTripProposalPanel
+            tripId={activeItineraryId}
+            tripName={displayItinerary.name}
+            itinerary={customItinerary || activeItinerary}
+            onApplied={adoptWrittenItinerary}
+            onNavigate={(tab) => handleTabChange(tab)}
+          />
+          <AskPlanitenaryPanel tripId={activeItineraryId} tripName={displayItinerary.name} itinerary={displayItinerary} />
+        </div>
+      )}
 
       {/* Hero — split editorial layout */}
       <JourneyContextBar itinerary={displayItinerary} />

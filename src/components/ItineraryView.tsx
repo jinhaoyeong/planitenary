@@ -1766,19 +1766,17 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
   if (selectedDay === null) {
     return (
       <div className="journey-itinerary-overview-shell space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <div className="journey-overview-actions">
-          <button
-            type="button"
-            onClick={() => setIsEditingMode((current) => !current)}
-            className={isEditingMode ? 'is-active' : ''}
-          >
-            {isEditingMode ? <Save /> : <Edit2 />}
-            {isEditingMode ? 'Finish editing' : 'Edit itinerary'}
-          </button>
-          {planChanges && (
-            <ItineraryChangeHistoryPanel key={planChanges.tripId} tripId={planChanges.tripId} tripName={planChanges.tripName} />
-          )}
-        </div>
+        {isEditingMode && (
+          <div className="journey-overview-actions">
+            <button type="button" onClick={() => setIsEditingMode(false)} className="is-active">
+              <Save />
+              Finish editing
+            </button>
+            {planChanges && (
+              <ItineraryChangeHistoryPanel key={planChanges.tripId} tripId={planChanges.tripId} tripName={planChanges.tripName} />
+            )}
+          </div>
+        )}
 
         {!isEditingMode && (
           <JourneyTimelineOverview
@@ -1786,6 +1784,17 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             onSelectDay={setSelectedDay}
             dayPhotos={dayPhotos}
             onEditRoute={onItineraryChange ? () => setRouteEditorOpen(true) : undefined}
+            actions={(
+              <>
+                <button type="button" className="journey-route-action" onClick={() => setIsEditingMode(true)}>
+                  <Edit2 />
+                  Edit itinerary
+                </button>
+                {planChanges && (
+                  <ItineraryChangeHistoryPanel key={planChanges.tripId} tripId={planChanges.tripId} tripName={planChanges.tripName} />
+                )}
+              </>
+            )}
           />
         )}
 
