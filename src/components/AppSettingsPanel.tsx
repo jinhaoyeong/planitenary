@@ -213,24 +213,22 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
 
   return (
     <section className="w-full">
-      <div className="grid grid-cols-1 xl:grid-cols-[14rem_minmax(0,1fr)] items-start gap-6 xl:gap-10 xl:-ml-[16.5rem] xl:w-[calc(100%+16.5rem)]">
-        <aside
-          className="rounded-3xl p-3 xl:sticky xl:top-24"
-          style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
-        >
-          <div className="px-2">
+      <div className="settings-layout grid grid-cols-1 lg:grid-cols-[13.5rem_minmax(0,1fr)] items-start gap-5 lg:gap-8">
+        <aside className="settings-rail lg:rounded-3xl lg:p-3 lg:sticky lg:top-24">
+          {/* The heading earns its place beside a column of categories; above a
+              scrolling strip on a phone it is one more thing to scroll past. */}
+          <div className="hidden lg:block px-2">
             <div className="eyebrow">Settings menu</div>
             <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
               Jump to a category.
             </p>
           </div>
-          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-visible xl:pb-0" aria-label="Settings categories">
+          <nav className="settings-rail-nav lg:mt-4 flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible" aria-label="Settings categories">
             {itinerary && onItineraryChange && (
               <a
                 href="#settings-trip"
                 onClick={handleSectionNavigate}
-                className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-trip' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
-                style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-trip' ? 'var(--accent-soft)' : 'transparent' }}
+                className={`settings-rail-link${activeSection === 'settings-trip' ? ' is-active' : ''}`}
               >
                 <Compass className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
                 <span>Trip planning</span>
@@ -240,8 +238,7 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
               <a
                 href="#settings-design"
                 onClick={handleSectionNavigate}
-                className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-design' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
-                style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-design' ? 'var(--accent-soft)' : 'transparent' }}
+                className={`settings-rail-link${activeSection === 'settings-design' ? ' is-active' : ''}`}
               >
                 <Wand2 className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
                 <span>Handbook design</span>
@@ -250,8 +247,7 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
             <a
               href="#settings-money"
               onClick={handleSectionNavigate}
-              className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-money' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
-              style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-money' ? 'var(--accent-soft)' : 'transparent' }}
+              className={`settings-rail-link${activeSection === 'settings-money' ? ' is-active' : ''}`}
             >
               <Coins className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
               <span>Money</span>
@@ -259,8 +255,7 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
             <a
               href="#settings-extras"
               onClick={handleSectionNavigate}
-              className={`flex min-w-max items-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-semibold no-underline transition-colors xl:min-w-0 ${activeSection === 'settings-extras' ? '' : 'hover:bg-[color:var(--accent-soft)]'}`}
-              style={{ color: 'var(--ink)', backgroundColor: activeSection === 'settings-extras' ? 'var(--accent-soft)' : 'transparent' }}
+              className={`settings-rail-link${activeSection === 'settings-extras' ? ' is-active' : ''}`}
             >
               <PawPrint className="h-4 w-4 shrink-0" style={{ color: 'var(--accent)' }} aria-hidden="true" />
               <span>Optional extras</span>
