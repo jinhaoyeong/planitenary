@@ -252,20 +252,23 @@ export const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-[color:var(--bg)]" style={{ color: 'var(--ink)' }}>
+    /* journey-trips-page carries the journey tokens. Without it the sign-in
+       screen sits outside every token root and renders in the legacy palette
+       while the rest of the app follows the chosen one. */
+    <div className="journey-trips-page min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bg)', color: 'var(--ink)' }}>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md"
       >
-        <div className="editorial-card p-5 sm:p-8 text-center mb-8 bg-white dark:bg-slate-900">
-          <div className="mx-auto w-16 h-16 bg-rose-100 dark:bg-rose-900/30 rounded-full flex items-center justify-center mb-6">
-            <Plane className="w-8 h-8 text-rose-500" />
+        <div className="editorial-card p-5 sm:p-8 text-center mb-8" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+          <div className="mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-6" style={{ backgroundColor: 'var(--accent-soft)' }}>
+            <Plane className="w-8 h-8" style={{ color: 'var(--accent)' }} />
           </div>
-          <h1 className="font-display text-3xl sm:text-4xl mb-2 text-slate-900 dark:text-white">
-            Travel <span className="font-display-italic text-rose-500">Handbook</span>
+          <h1 className="font-display text-3xl sm:text-4xl mb-2" style={{ color: 'var(--ink)' }}>
+            Plani<span className="font-display-italic" style={{ color: 'var(--accent)' }}>tenary</span>
           </h1>
-          <p className="text-slate-500 dark:text-slate-400">
+          <p className="text-sm" style={{ color: 'var(--ink-muted)' }}>
             {needsMfaVerification
               ? 'Enter the 6-digit code from your authenticator app.'
               : isLogin
@@ -282,7 +285,7 @@ export const Auth = () => {
               </div>
             )}
             <div className="space-y-1.5">
-              <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Authenticator code</label>
+              <label className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Authenticator code</label>
               <div className="relative">
                 <input
                   type="text"
@@ -295,13 +298,13 @@ export const Auth = () => {
                   className="editorial-input w-full !pl-11 tracking-[0.35em] text-center font-semibold"
                   placeholder="000000"
                 />
-                <Lock className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-400" />
+                <Lock className="w-5 h-5 absolute left-3.5 top-3.5" style={{ color: 'var(--ink-muted)' }} />
               </div>
             </div>
             <button
               type="submit"
               disabled={loading || mfaCode.length !== 6}
-              className="w-full py-3.5 rounded-xl bg-slate-900 dark:bg-rose-600 text-white font-bold hover:bg-slate-800 dark:hover:bg-rose-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="auth-submit w-full py-3.5 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Verifying…' : 'Verify and continue'}
             </button>
@@ -312,7 +315,7 @@ export const Auth = () => {
                 setError(null);
                 void signOut();
               }}
-              className="w-full py-3 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:border-rose-500 hover:text-rose-500 transition-colors"
+              className="w-full py-3 rounded-xl border text-sm font-semibold transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}
             >
               Cancel and sign out
             </button>
@@ -356,7 +359,7 @@ export const Auth = () => {
             )}
 
             <div className="space-y-1.5">
-              <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Email Address</label>
+              <label className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Email Address</label>
               <div className="relative">
                 <input
                   type="email"
@@ -366,12 +369,12 @@ export const Auth = () => {
                   className="editorial-input w-full !pl-11"
                   placeholder="you@example.com"
                 />
-                <Mail className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-400" />
+                <Mail className="w-5 h-5 absolute left-3.5 top-3.5" style={{ color: 'var(--ink-muted)' }} />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-bold text-slate-700 dark:text-slate-300">Password</label>
+              <label className="text-sm font-bold" style={{ color: 'var(--ink)' }}>Password</label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -381,11 +384,11 @@ export const Auth = () => {
                   className="editorial-input w-full !pl-11 !pr-11"
                   placeholder={isLogin ? "••••••••" : "Min. 8 chars, 1 uppercase, 1 number"}
                 />
-                <Lock className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-400" />
+                <Lock className="w-5 h-5 absolute left-3.5 top-3.5" style={{ color: 'var(--ink-muted)' }} />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  className="absolute right-3.5 top-3.5" style={{ color: 'var(--ink-muted)' }}
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -404,11 +407,11 @@ export const Auth = () => {
                     type="checkbox"
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
-                    className="rounded border-slate-300 text-rose-500 focus:ring-rose-500"
+                    className="rounded accent-[color:var(--accent)]" style={{ borderColor: 'var(--border)' }}
                   />
-                  <span className="text-sm text-slate-600 dark:text-slate-400">Remember me</span>
+                  <span className="text-sm" style={{ color: 'var(--ink-muted)' }}>Remember me</span>
                 </label>
-                <button type="button" onClick={() => void handleForgotPassword()} className="text-sm font-semibold text-rose-500 hover:text-rose-600">Forgot password?</button>
+                <button type="button" onClick={() => void handleForgotPassword()} className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>Forgot password?</button>
               </div>
             )}
 
@@ -430,18 +433,18 @@ export const Auth = () => {
                 setLocalFallbackMessage(null);
                 signInDemo();
               }}
-              className="w-full py-3 rounded-xl border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:border-rose-500 hover:text-rose-500 transition-colors"
+              className="w-full py-3 rounded-xl border text-sm font-semibold transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--ink)' }}
             >
               Enter Demo Mode
             </button>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
               Demo Mode uses a local sample trip on this device only.
             </p>
           </form>
           )}
 
           {!needsMfaVerification && (
-          <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400">
+          <div className="mt-8 pt-6 border-t text-sm" style={{ borderColor: 'var(--border)', color: 'var(--ink-muted)' }}>
             {isLogin ? "Don't have an account?" : "Already have an account?"}{' '}
             <button
               onClick={() => {
@@ -451,7 +454,7 @@ export const Auth = () => {
                 setPendingConfirmationEmail(null);
                 setLocalFallbackMessage(null);
               }}
-              className="font-bold text-rose-500 hover:text-rose-600 transition-colors"
+              className="font-bold transition-colors" style={{ color: 'var(--accent)' }}
             >
               {isLogin ? 'Sign up' : 'Sign in'}
             </button>

@@ -224,6 +224,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await applyMfaStatus(nextSession);
       }
       if (!cancelled) setIsLoading(false);
+    }).catch((error) => {
+      // Without this the first session read could reject and leave the app on
+      // its loading spinner until the tab was reloaded by hand.
+      if (cancelled) return;
+      console.error('Could not read the current session:', error);
+      setMfaStatusReady(true);
+      setIsLoading(false);
     });
 
     const {
@@ -235,12 +242,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(nextSession?.user ?? null);
       setIsDemoUser(false);
       setIsLocalTestUser(false);
+      // Signing in resolves here rather than on a reload, so the very first
+      // event has to lift the loading gate too.
+      setIsLoading(false);
       if (recoverySession) {
         setNeedsMfaVerification(false);
         setMfaStatusReady(true);
-      } else {
-        void applyMfaStatus(nextSession);
+        return;
       }
+      // The readiness flag describes the *previous* session until the new one
+      // has been checked; leaving it true let the app show a signed-in shell
+      // for a frame before bouncing back to an MFA prompt.
+      if (nextSession && isSupabaseConfigured()) setMfaStatusReady(false);
+      // Supabase runs this callback while holding its auth lock, and
+      // getMfaStatus() takes that same lock. Calling it inline can wedge the
+      // sign-in; a task boundary lets the lock go first.
+      setTimeout(() => {
+        if (cancelled) return;
+        void applyMfaStatus(nextSession);
+      }, 0);
     });
 
     return () => {
