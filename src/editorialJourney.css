@@ -1259,16 +1259,7 @@ html[data-theme='dark'] .journey-day-place-preview > img { filter: saturate(.82)
     border-radius: 0 !important;
   }
   .wizard-dialog::after {
-    z-index: 0;
-    top: 132px;
-    right: 18px;
-    bottom: auto;
-    left: 18px;
-    width: auto;
-    height: 205px;
-    border: 1px solid var(--journey-line);
-    border-radius: 13px;
-    background-position: center 46%;
+    display: none;
   }
   .wizard-dialog-header,
   .wizard-dialog-content,
@@ -1276,7 +1267,7 @@ html[data-theme='dark'] .journey-day-place-preview > img { filter: saturate(.82)
   .wizard-dialog-header { padding: 20px 19px 17px !important; }
   .wizard-dialog-header h2 { font-size: 2.35rem !important; }
   .wizard-dialog-header p { display: none; }
-  .wizard-dialog-content { margin-top: 210px; padding: 22px 19px 24px !important; }
+  .wizard-dialog-content { margin-top: 0; padding: 22px 19px 24px !important; }
   .wizard-dialog-footer { padding: 14px 19px max(18px, var(--app-safe-bottom)) !important; }
   .wizard-dialog-footer .pill-btn { padding-inline: 14px; }
 }
