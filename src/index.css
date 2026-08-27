@@ -3574,7 +3574,7 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
   align-self: start;
   padding: 1rem;
   border: 1px solid var(--border);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-section, 1.25rem);
   background-color: var(--bg);
 }
 
@@ -3939,9 +3939,9 @@ html[data-visual-intensity='immersive'] .trip-surface-card {
 .editorial-input::placeholder,
 .editorial-textarea::placeholder {
   color: var(--ink-muted);
-  font-family: var(--font-serif);
-  font-style: italic;
-  opacity: 0.75;
+  font-family: var(--font-sans);
+  font-style: normal;
+  opacity: 0.82;
 }
 .editorial-input:hover,
 .editorial-select:hover,

@@ -308,7 +308,7 @@ export function PhotoWall({ itinerary }: Props) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
+              className="journey-photo-modal fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
             >
               <button
                 className="absolute inset-0 w-full h-full cursor-default"
@@ -331,7 +331,7 @@ export function PhotoWall({ itinerary }: Props) {
                 <h3 className="font-display text-xl" style={{ color: 'var(--ink)' }}>
                   Add a photo
                 </h3>
-                <button onClick={resetAddModal} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" style={{ color: 'var(--ink-muted)' }}>
+                <button type="button" aria-label="Close photo dialog" onClick={resetAddModal} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" style={{ color: 'var(--ink-muted)' }}>
                   <X className="w-5 h-5" />
                 </button>
               </div>

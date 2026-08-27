@@ -1231,7 +1231,7 @@ function App() {
       )}
 
       {/* Hero — split editorial layout */}
-      <JourneyContextBar itinerary={displayItinerary} />
+      {activeTab === 'itinerary' && <JourneyContextBar itinerary={displayItinerary} />}
 
       <section
         className="handbook-home-hero max-w-7xl mx-auto px-4 sm:px-6 md:px-10 pt-10 md:pt-20 pb-8 md:pb-16"

@@ -25,9 +25,10 @@ describe('choosing a colour palette from settings', () => {
 
     const green = screen.getByRole('radio', { name: /Journey green/ });
     expect(green).toHaveAttribute('aria-checked', 'true');
-    for (const name of [/Warm sand/, /Ink navy/, /Vermilion/]) {
+    for (const name of [/Warm sand/, /Ink navy/, /Vermilion/, /Planitenary pink/]) {
       expect(screen.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'false');
     }
+    expect(screen.getByLabelText('Selected colour palette preview')).toHaveTextContent('Your next journey');
   });
 
   it('applies the chosen palette to the document and remembers it', () => {
@@ -48,6 +49,15 @@ describe('choosing a colour palette from settings', () => {
     renderPanel();
 
     expect(screen.getByRole('radio', { name: /Vermilion/ })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('offers and persists the restored pink palette', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('radio', { name: /Planitenary pink/ }));
+
+    expect(document.documentElement.getAttribute('data-journey-palette')).toBe('rose-pink');
+    expect(loadJourneyPalette()).toBe('rose-pink');
   });
 
   it('leaves the light/dark choice alone', () => {

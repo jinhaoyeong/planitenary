@@ -12,7 +12,7 @@ import { safeGetItem, safeSetItem } from './safeLocalStorage';
 
 export const JOURNEY_PALETTE_STORAGE_KEY = 'journey-palette';
 
-export type JourneyPaletteId = 'journey-green' | 'warm-sand' | 'ink-navy' | 'vermilion';
+export type JourneyPaletteId = 'journey-green' | 'warm-sand' | 'ink-navy' | 'vermilion' | 'rose-pink';
 
 export interface JourneyPaletteOption {
   id: JourneyPaletteId;
@@ -46,6 +46,12 @@ export const JOURNEY_PALETTES: JourneyPaletteOption[] = [
     label: 'Vermilion',
     description: 'Warm cream with a red lacquer accent for a bolder feel.',
     swatches: ['#fbf5ef', '#b8442c', '#3a2320'],
+  },
+  {
+    id: 'rose-pink',
+    label: 'Planitenary pink',
+    description: 'Soft blush paper with a confident berry-pink accent.',
+    swatches: ['#fff7fa', '#d63f78', '#351d2a'],
   },
 ];
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, MouseEvent } from 'react';
-import { Check, Coins, Compass, Download, ImagePlus, Link2, Palette, PawPrint, Plus, Trash2, Upload, Wand2, type LucideIcon } from 'lucide-react';
+import { ArrowRight, Check, Coins, Compass, Download, ImagePlus, Link2, Palette, PawPrint, Plus, Trash2, Upload, Wand2, type LucideIcon } from 'lucide-react';
 import {
   createPetId,
   DEFAULT_PETS,
@@ -398,6 +398,23 @@ export function AppSettingsPanel({ showPets, onTogglePets, itinerary, onItinerar
                 </button>
               );
             })}
+          </div>
+
+          <div className="journey-palette-preview mt-4" aria-label="Selected colour palette preview">
+            <div className="journey-palette-preview-copy">
+              <span>Live preview</span>
+              <strong>{itinerary?.name || 'Your next journey'}</strong>
+              <small>The preview uses your saved app colour, including after you reopen settings.</small>
+            </div>
+            <div className="journey-palette-preview-route" aria-hidden="true">
+              <i />
+              <span />
+              <span />
+              <span />
+            </div>
+            <span className="journey-palette-preview-action" aria-hidden="true">
+              Continue planning <ArrowRight />
+            </span>
           </div>
         </div>
 

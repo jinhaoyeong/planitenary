@@ -51,6 +51,14 @@ const RECIPE_SHORT_DESCRIPTIONS: Record<DesignRecipeId, string> = {
   'nature-expedition': 'Crisp layout · outdoor feel',
 };
 
+const DESTINATION_ACCENT_VARIABLES = new Set([
+  '--accent',
+  '--accent-soft',
+  '--accent-ink',
+  '--accent-button',
+  '--accent-fill',
+]);
+
 /**
  * Settings for the Adaptive Destination Design System.
  * Intensity = how strongly the app adapts.
@@ -116,10 +124,13 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
   const previewMotif = previewIsOff ? 'none' : resolved.motifSet;
   const previewCity = profile.destinations[0]?.city || resolved.country.name || 'Your trip';
   const selectedIntensity = VISUAL_INTENSITY_OPTIONS.find((option) => option.id === visual.intensity) ?? VISUAL_INTENSITY_OPTIONS[2];
+  const previewRecipeVars = useMemo(
+    () => Object.fromEntries(
+      Object.entries(resolved.cssVars).filter(([name]) => !DESTINATION_ACCENT_VARIABLES.has(name)),
+    ),
+    [resolved.cssVars],
+  );
   const previewStyle = {
-    '--accent': theme === 'dark' ? '#FF6B9A' : '#EE4D87',
-    '--accent-soft': theme === 'dark' ? '#3A1F2A' : '#FFE4EE',
-    '--accent-ink': '#0F0E0D',
     '--card-radius': '1rem',
     '--card-shadow': theme === 'dark'
       ? '0 1px 0 rgba(255,255,255,0.04), 0 14px 30px -18px rgba(0,0,0,0.6)'
@@ -135,7 +146,10 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
     '--card-border-width': '1px',
     '--cover-frame-padding': '0px',
     '--content-density': '1',
-    ...resolved.cssVars,
+    // The recipe controls shape, density, typography and imagery here. Colour
+    // deliberately inherits from the user's app palette, just like the real
+    // handbook surfaces do outside this preview.
+    ...(previewIsOff ? {} : previewRecipeVars),
   } as CSSProperties;
 
   const recipeChoices: Array<{ id: DesignRecipeId | null; label: string; hint: string }> = [
@@ -278,7 +292,7 @@ export function VisualDesignControls({ profile, onChange }: VisualDesignControls
             <div className="flex items-center gap-2">
               <Wand2 className="w-4 h-4" style={{ color: 'var(--accent)' }} aria-hidden="true" />
               <span id="visual-preview-label" className="eyebrow m-0">Live preview</span>
-              <span className="visual-preview-accent-label">Accent <span className="visual-preview-accent-swatch" style={{ backgroundColor: 'var(--accent)' }} /></span>
+              <span className="visual-preview-accent-label">Your palette <span className="visual-preview-accent-swatch" style={{ backgroundColor: 'var(--accent)' }} /></span>
             </div>
             <button
               type="button"
