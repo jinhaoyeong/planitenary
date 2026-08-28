@@ -60,13 +60,27 @@ const draftFor = (type: TravelBookingType, startDate: string, city: string | und
  * field for every type would invite a traveller to fill in something the
  * timeline then has nowhere truthful to display.
  */
-const FIELDS: Record<TravelBookingType, Array<'route' | 'city' | 'operator' | 'service' | 'cabin' | 'room' | 'party' | 'endTime'>> = {
-  flight: ['route', 'operator', 'service', 'cabin', 'endTime'],
+const FIELDS: Record<TravelBookingType, Array<'route' | 'city' | 'operator' | 'service' | 'cabin' | 'room' | 'party' | 'endTime' | 'zones'>> = {
+  flight: ['route', 'operator', 'service', 'cabin', 'endTime', 'zones'],
   stay: ['city', 'operator', 'room'],
-  rail: ['route', 'operator', 'service', 'endTime'],
-  transfer: ['route', 'operator', 'endTime'],
+  rail: ['route', 'operator', 'service', 'endTime', 'zones'],
+  transfer: ['route', 'operator', 'endTime', 'zones'],
   'activity-ticket': ['city', 'operator', 'party', 'endTime'],
 };
+
+/**
+ * Zone names this runtime knows, for the datalist. Empty where the browser is
+ * too old to enumerate them — the field still accepts a typed name, and the
+ * sanitiser is what decides whether it is real.
+ */
+const KNOWN_TIME_ZONES: string[] = (() => {
+  try {
+    const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+    return typeof supported === 'function' ? supported('timeZone') : [];
+  } catch {
+    return [];
+  }
+})();
 
 /**
  * Manual entry for everything the traveller has already arranged.
@@ -157,6 +171,10 @@ export function BookingEditor({ bookings, cities, defaultDate, onChange, onClose
             </button>
           ))}
         </div>
+
+        <datalist id="booking-timezones">
+          {KNOWN_TIME_ZONES.map((zone) => <option key={zone} value={zone} />)}
+        </datalist>
 
         {drafts.length === 0 && (
           <p className="journey-booking-empty">Nothing added yet. Start with the flight that gets you there.</p>
@@ -313,6 +331,36 @@ export function BookingEditor({ bookings, cities, defaultDate, onChange, onClose
                       onChange={(event) => update(booking.id, { serviceNumber: event.target.value || undefined })}
                     />
                   </label>
+                )}
+
+                {/*
+                  Without both zones the two clocks are not comparable and no
+                  duration can be shown. Optional, because a traveller may not
+                  know them and a domestic hop does not need them.
+                */}
+                {fields.includes('zones') && (
+                  <>
+                    <label>
+                      <span>Departs timezone</span>
+                      <input
+                        className="editorial-input"
+                        list="booking-timezones"
+                        placeholder="Asia/Kuala_Lumpur"
+                        value={booking.originTimeZone || ''}
+                        onChange={(event) => update(booking.id, { originTimeZone: event.target.value || undefined })}
+                      />
+                    </label>
+                    <label>
+                      <span>Arrives timezone</span>
+                      <input
+                        className="editorial-input"
+                        list="booking-timezones"
+                        placeholder="Asia/Tokyo"
+                        value={booking.destinationTimeZone || ''}
+                        onChange={(event) => update(booking.id, { destinationTimeZone: event.target.value || undefined })}
+                      />
+                    </label>
+                  </>
                 )}
 
                 {fields.includes('cabin') && (

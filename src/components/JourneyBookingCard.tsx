@@ -1,7 +1,9 @@
 import { BedDouble, Plane, RefreshCw, Ticket, TrainFront, Car } from 'lucide-react';
 import type { ReactNode } from 'react';
 import {
+  elapsedMinutes,
   formatBookingPrice,
+  hasComparableClocks,
   priceCheckedLabel,
   priceFreshness,
   type TravelBooking,
@@ -69,6 +71,14 @@ export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compa
   const refreshable = canRefreshPrice(booking);
   const unavailable = refreshUnavailableReason(booking);
   const isManualPrice = booking.price?.source === 'manual' || !booking.price;
+  /**
+   * A refresh control appears only where the number is still a quote.
+   *
+   * Not for a price typed in by hand, and not for a confirmed booking either:
+   * what a held reservation cost is a receipt, and re-pricing it would replace
+   * the only record of what was actually charged.
+   */
+  const showsRefresh = !isManualPrice && booking.status !== 'confirmed';
 
   const route = booking.origin && booking.destination
     ? `${booking.origin} → ${booking.destination}`
@@ -76,6 +86,15 @@ export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compa
   const startDate = shortDate(booking.startDate);
   const endDate = shortDate(booking.endDate);
   const dateLine = endDate && endDate !== startDate ? `${startDate} → ${endDate}` : startDate;
+
+  const minutes = elapsedMinutes(booking);
+  const elapsed = minutes === undefined
+    ? undefined
+    : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+  const arrivesLaterDay = Boolean(booking.endDate && booking.endDate !== booking.startDate);
+  // Only where a duration would otherwise be assumed: a journey whose two
+  // clocks cannot be proved to share a zone.
+  const showsLocalClocksNote = Boolean(booking.startTime && booking.endTime) && !hasComparableClocks(booking);
 
   return (
     <article
@@ -104,10 +123,21 @@ export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compa
         <span className="journey-booking-meta">
           {dateLine}
           {booking.startTime ? ` · ${booking.startTime}` : ''}
-          {booking.endTime && booking.endTime !== booking.startTime ? ` – ${booking.endTime}` : ''}
+          {booking.endTime && booking.endTime !== booking.startTime ? ` – ${booking.endTime}${arrivesLaterDay ? ' (+1)' : ''}` : ''}
+          {elapsed ? ` · ${elapsed}` : ''}
           {booking.roomDescription ? ` · ${booking.roomDescription}` : ''}
           {booking.cabin ? ` · ${booking.cabin}` : ''}
         </span>
+
+        {/*
+          Two clocks in two zones are not a range. Without both zone names the
+          duration is unknowable — 10:55 to 17:20 is 7h25m between Osaka and
+          Kuala Lumpur and 6h25m if you just subtract — so the card says which
+          clock each time belongs to and prints no duration at all.
+        */}
+        {showsLocalClocksNote && (
+          <span className="journey-booking-meta">Times are local to each airport</span>
+        )}
 
         {booking.reference && (
           <span className="journey-booking-meta">Ref {booking.reference}</span>
@@ -134,7 +164,7 @@ export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compa
           number had just been re-checked, which is the one lie this whole
           layer exists to prevent.
         */}
-        {!isManualPrice && (
+        {showsRefresh && (
           <button
             type="button"
             className="journey-booking-refresh"

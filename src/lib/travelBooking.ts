@@ -25,6 +25,7 @@
  * shape of whichever one arrives first.
  */
 import { ISO_DATE_PATTERN, type IsoDate } from './dateRange';
+import { timezoneOffsetMinutes } from './timezones';
 
 /**
  * What kind of arrangement this is.
@@ -79,6 +80,26 @@ export interface PriceSnapshot {
  * Every field is either something a traveller can point at on a confirmation
  * email or something a provider published. Nothing derived belongs here — see
  * the note on `cityKey` for the one that keeps trying to.
+ *
+ * ## Which model owns what
+ *
+ * Planitenary already had two authorities before bookings existed, and a
+ * booking augments them rather than replacing either.
+ *
+ * **Flight schedule** belongs to the `Activity` with `type: 'flight'` on a day.
+ * That is what `listPersistedFlights` reads, what `itineraryProposal` turns
+ * into a fixed event with an arrival buffer and a departure lead, and what the
+ * Add Flight control writes. A `TravelBooking` of type `flight` carries the
+ * *commercial* half — reference, cabin, price, provider, confirmation — and
+ * must not become a second schedule. Nothing here is wired into the planner;
+ * see the note on {@link TravelBookingStatus} about what does and does not
+ * constrain a day.
+ *
+ * **Where the traveller sleeps** belongs to the stay plan
+ * (`tripProfile.cityStays` and `DayPlan.stayCity`). A `stay` booking says
+ * which hotel is reserved for those nights. Disagreements surface through
+ * `bookingConstraints.stayRouteConflicts`; neither side silently rewrites the
+ * other.
  */
 export interface TravelBooking {
   id: string;
@@ -107,6 +128,24 @@ export interface TravelBooking {
   /** For anything that moves: where it leaves from and arrives at. */
   origin?: string;
   destination?: string;
+  /**
+   * The zones the two clocks belong to, IANA names.
+   *
+   * `startTime` is wall time at the origin and `endTime` is wall time at the
+   * destination, and for anything crossing a zone those are not comparable
+   * numbers. KUL 23:30 → KIX 07:10 the next morning is seven hours forty in
+   * wall clock and six hours forty in the air, and nothing can tell the
+   * difference from four date/time fields alone.
+   *
+   * Optional because a traveller may not know them and a domestic hop does not
+   * need them. Their absence is never guessed at: {@link elapsedMinutes}
+   * returns nothing rather than subtracting two clocks that may be in
+   * different zones, and the card declines to print a duration it cannot
+   * stand behind. Never read from the browser — the traveller's own zone says
+   * nothing about where the aircraft is.
+   */
+  originTimeZone?: string;
+  destinationTimeZone?: string;
   /** Airline, rail operator, hotel group, tour company. */
   operator?: string;
   /** Flight number, train number, service code. */
@@ -239,6 +278,90 @@ export function bookingDayNumber(
   const dayNumber = Math.round((at - start) / 86400000) + 1;
   if (dayNumber < 1 || (dayCount > 0 && dayNumber > dayCount)) return undefined;
   return dayNumber;
+}
+
+/** A zone this runtime actually recognises. Never a guess, never the browser's. */
+export function isTimeZone(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The instant a wall-clock reading in a named zone actually refers to.
+ *
+ * Two passes because the offset is itself a function of the instant: reading
+ * it at the naive guess is an hour out on the two nights a year a zone shifts,
+ * and re-reading at the corrected instant settles it.
+ */
+function zonedInstant(date: string, clock: string, timeZone: string): number | undefined {
+  const naive = Date.parse(`${date}T${clock}:00Z`);
+  if (!Number.isFinite(naive)) return undefined;
+  const firstOffset = timezoneOffsetMinutes(timeZone, new Date(naive));
+  if (firstOffset === null) return undefined;
+  const corrected = naive - firstOffset * 60000;
+  const secondOffset = timezoneOffsetMinutes(timeZone, new Date(corrected));
+  if (secondOffset === null) return undefined;
+  return naive - secondOffset * 60000;
+}
+
+/**
+ * How long the journey actually takes, or nothing.
+ *
+ * Nothing is the important half. Subtracting a destination clock from an
+ * origin clock is only arithmetic when both are in the same zone, and this
+ * refuses to do it otherwise: a KIX 10:55 → KUL 17:20 flight is 7h25m, and the
+ * naive subtraction says 6h25m. Being an hour wrong about a flight is worse
+ * than saying nothing, so an unknown zone yields `undefined` and every caller
+ * is forced to handle it.
+ *
+ * Same-zone journeys — both zones given and equal, or neither given on a
+ * booking that stays within one date — are safe to subtract directly.
+ */
+export function elapsedMinutes(booking: TravelBooking): number | undefined {
+  const { startDate, startTime, endTime, originTimeZone, destinationTimeZone } = booking;
+  if (!startTime || !endTime) return undefined;
+  const endDate = booking.endDate || startDate;
+
+  if (originTimeZone && destinationTimeZone) {
+    if (!isTimeZone(originTimeZone) || !isTimeZone(destinationTimeZone)) return undefined;
+    const departure = zonedInstant(startDate, startTime, originTimeZone);
+    const arrival = zonedInstant(endDate, endTime, destinationTimeZone);
+    if (departure === undefined || arrival === undefined) return undefined;
+    const minutes = Math.round((arrival - departure) / 60000);
+    return minutes > 0 ? minutes : undefined;
+  }
+
+  // One zone named and not the other says the two clocks may differ and we
+  // cannot say by how much. That is exactly the case to refuse.
+  if (originTimeZone || destinationTimeZone) return undefined;
+
+  // No zones at all. Only safe where the journey cannot have crossed a date,
+  // which is the domestic hop the fields were adequate for in the first place.
+  if (endDate !== startDate) return undefined;
+  const departure = Date.parse(`${startDate}T${startTime}:00Z`);
+  const arrival = Date.parse(`${endDate}T${endTime}:00Z`);
+  if (!Number.isFinite(departure) || !Number.isFinite(arrival)) return undefined;
+  const minutes = Math.round((arrival - departure) / 60000);
+  return minutes > 0 ? minutes : undefined;
+}
+
+/**
+ * Whether the two clocks on this booking are known to be comparable.
+ *
+ * Drives presentation: a card that cannot prove the zones match must not show
+ * the two times as though they were on one dial.
+ */
+export function hasComparableClocks(booking: TravelBooking): boolean {
+  if (!isTransportBooking(booking)) return true;
+  const { originTimeZone, destinationTimeZone } = booking;
+  if (originTimeZone && destinationTimeZone) return originTimeZone === destinationTimeZone;
+  if (originTimeZone || destinationTimeZone) return false;
+  return (booking.endDate || booking.startDate) === booking.startDate;
 }
 
 /**

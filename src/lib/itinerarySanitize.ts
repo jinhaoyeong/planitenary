@@ -22,6 +22,7 @@ import {
   bookingCityKey,
   isBookingClock,
   isBookingDate,
+  isTimeZone,
   sortBookings,
   type PriceSnapshot,
   type PriceSource,
@@ -750,6 +751,11 @@ export const sanitizeTravelBooking = (value: unknown, index: number, scope = 'tr
     cityKey: city ? bookingCityKey(city) : undefined,
     origin: bookingText(raw.origin, 120),
     destination: bookingText(raw.destination, 120),
+    // A zone this runtime cannot resolve is dropped rather than stored. A bad
+    // name would make `elapsedMinutes` refuse forever while the record looked
+    // complete — worse than an honestly empty field.
+    originTimeZone: isTimeZone(raw.originTimeZone) ? raw.originTimeZone : undefined,
+    destinationTimeZone: isTimeZone(raw.destinationTimeZone) ? raw.destinationTimeZone : undefined,
     operator: bookingText(raw.operator, 120),
     serviceNumber: bookingText(raw.serviceNumber, 40),
     cabin: bookingText(raw.cabin, 60),

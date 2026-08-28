@@ -95,11 +95,15 @@ export const providerById = (id: string | undefined): TravelOfferProvider | unde
  * cannot perform — a refresh that silently does nothing is worse than no
  * refresh, because it implies the number was re-checked.
  */
-export function canRefreshPrice(booking: Pick<TravelBooking, 'provider' | 'price'>): boolean {
+export function canRefreshPrice(booking: Pick<TravelBooking, 'provider' | 'price' | 'status'>): boolean {
+  // What a confirmed booking cost is what the traveller paid. That is a
+  // historical fact with a receipt behind it, not a quote, and re-pricing it
+  // against today's market would overwrite the only record of the real number
+  // — then show a "price" the card cannot say was ever charged.
+  if (booking.status === 'confirmed') return false;
   if (!booking.provider) return false;
   if (booking.price && booking.price.source === 'manual') return false;
-  const provider = providerById(booking.provider);
-  return Boolean(provider);
+  return Boolean(providerById(booking.provider));
 }
 
 /**
@@ -108,8 +112,9 @@ export function canRefreshPrice(booking: Pick<TravelBooking, 'provider' | 'price
  * Returns undefined when refresh *is* available, so a caller can use the
  * presence of a reason as the disabled state without a second predicate.
  */
-export function refreshUnavailableReason(booking: Pick<TravelBooking, 'provider' | 'price'>): string | undefined {
+export function refreshUnavailableReason(booking: Pick<TravelBooking, 'provider' | 'price' | 'status'>): string | undefined {
   if (canRefreshPrice(booking)) return undefined;
+  if (booking.status === 'confirmed') return 'Price paid at booking';
   // The price's own `source` decides the wording, not whether `provider` is
   // filled in. Reading the absence of `provider` as "typed in by hand" let a
   // card say "Checked 12 minutes ago" and "Price entered manually" at once,

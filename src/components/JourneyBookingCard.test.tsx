@@ -41,6 +41,7 @@ describe('JourneyBookingCard', () => {
       <JourneyBookingCard
         booking={{
           ...base,
+          status: 'planned',
           provider: 'duffel',
           price: {
             amount: 608,
@@ -67,6 +68,7 @@ describe('JourneyBookingCard', () => {
       <JourneyBookingCard
         booking={{
           ...base,
+          status: 'planned',
           provider: 'duffel',
           price: {
             amount: 608,
@@ -89,6 +91,78 @@ describe('JourneyBookingCard', () => {
     expect(screen.getByText('Nara Hotel')).toBeInTheDocument();
     expect(screen.getByText('Confirmed')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /refresh price/i })).toBeNull();
+  });
+
+  it('offers no refresh on a confirmed booking, whatever the price came from', () => {
+    // What a held reservation cost is a receipt. Re-pricing it against today's
+    // market would replace the only record of what was actually charged.
+    render(
+      <JourneyBookingCard
+        booking={{
+          ...base,
+          status: 'confirmed',
+          provider: 'duffel',
+          price: {
+            amount: 3596, currency: 'MYR', source: 'provider',
+            retrievedAt: new Date(NOW - 40 * 60000).toISOString(),
+            expiresAt: new Date(NOW - 60000).toISOString(),
+          },
+        }}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText('Confirmed')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /refresh price/i })).toBeNull();
+  });
+
+  it('prints no duration for a flight whose zones it cannot prove', () => {
+    // KUL 23:30 to KIX 07:10 is 6h40m, not the 7h40m the clocks suggest. With
+    // no zones recorded the card must say neither number.
+    render(
+      <JourneyBookingCard
+        booking={{
+          ...base, type: 'flight', title: 'AK 12', origin: 'KUL', destination: 'KIX',
+          startDate: '2027-01-21', startTime: '23:30', endDate: '2027-01-22', endTime: '07:10',
+        }}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText(/Times are local to each airport/)).toBeInTheDocument();
+    // The arrival is marked as landing on another date rather than reading as
+    // an earlier time on the same one.
+    expect(screen.getByText(/07:10 \(\+1\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/\dh \d\dm/)).toBeNull();
+  });
+
+  it('prints the real duration once both zones are recorded', () => {
+    render(
+      <JourneyBookingCard
+        booking={{
+          ...base, type: 'flight', title: 'AK 12', origin: 'KUL', destination: 'KIX',
+          startDate: '2027-01-21', startTime: '23:30', endDate: '2027-01-22', endTime: '07:10',
+          originTimeZone: 'Asia/Kuala_Lumpur', destinationTimeZone: 'Asia/Tokyo',
+        }}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText(/6h 40m/)).toBeInTheDocument();
+    // The note stays: the two clocks really are in different zones, and it is
+    // what explains why 23:30 to 07:10 is six hours forty rather than seven.
+    expect(screen.getByText(/Times are local to each airport/)).toBeInTheDocument();
+  });
+
+  it('says nothing about zones for a same-day domestic hop', () => {
+    render(
+      <JourneyBookingCard
+        booking={{
+          ...base, type: 'rail', title: 'Nozomi', origin: 'Kyoto', destination: 'Osaka',
+          startDate: '2027-01-21', startTime: '09:40', endDate: '2027-01-21', endTime: '11:05',
+        }}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText(/1h 25m/)).toBeInTheDocument();
+    expect(screen.queryByText(/Times are local to each airport/)).toBeNull();
   });
 
   it('draws a route for anything that moves', () => {

@@ -221,8 +221,31 @@ describe('price freshness', () => {
 });
 
 describe('refresh availability', () => {
+  it('never re-prices what the traveller already paid for', () => {
+    // Four different facts share one field, and only one of them is a live
+    // quote. A confirmed booking's amount is a receipt: replacing it with
+    // today's market price would destroy the only record of the real one.
+    const paid = {
+      status: 'confirmed' as const,
+      provider: 'duffel',
+      price: { amount: 3596, currency: 'MYR', source: 'provider' as const, retrievedAt: '' },
+    };
+    expect(canRefreshPrice(paid)).toBe(false);
+    expect(refreshUnavailableReason(paid)).toBe('Price paid at booking');
+  });
+
+  it('treats an official researched fare as research, not bookable inventory', () => {
+    const researched = {
+      status: 'planned' as const,
+      provider: undefined,
+      price: { amount: 600, currency: 'JPY', source: 'official-website' as const, retrievedAt: '' },
+    };
+    expect(canRefreshPrice(researched)).toBe(false);
+    expect(refreshUnavailableReason(researched)).toBe('This provider is not connected');
+  });
+
   it('offers no refresh for a manually entered price', () => {
-    const manual = { provider: undefined, price: { amount: 1, currency: 'MYR', source: 'manual' as const, retrievedAt: '' } };
+    const manual = { status: 'planned' as const, provider: undefined, price: { amount: 1, currency: 'MYR', source: 'manual' as const, retrievedAt: '' } };
     expect(canRefreshPrice(manual)).toBe(false);
     expect(refreshUnavailableReason(manual)).toBe('Price entered manually');
   });
@@ -230,7 +253,7 @@ describe('refresh availability', () => {
   it('never calls a fetched price manual, even when the provider field is missing', () => {
     // Otherwise one card could say "Checked 12 min ago" and "Price entered
     // manually" at the same time — two contradictory claims about one number.
-    const fetched = { provider: undefined, price: { amount: 154, currency: 'CNY', source: 'provider' as const, retrievedAt: '' } };
+    const fetched = { status: 'planned' as const, provider: undefined, price: { amount: 154, currency: 'CNY', source: 'provider' as const, retrievedAt: '' } };
     expect(canRefreshPrice(fetched)).toBe(false);
     expect(refreshUnavailableReason(fetched)).toBe('This provider is not connected');
   });
@@ -239,7 +262,7 @@ describe('refresh availability', () => {
     // V1 ships no providers, and the control must say so rather than render a
     // button that silently does nothing and implies a re-check happened.
     expect(travelOfferProviders).toHaveLength(0);
-    const orphaned = { provider: 'duffel', price: { amount: 1, currency: 'MYR', source: 'provider' as const, retrievedAt: '' } };
+    const orphaned = { status: 'planned' as const, provider: 'duffel', price: { amount: 1, currency: 'MYR', source: 'provider' as const, retrievedAt: '' } };
     expect(canRefreshPrice(orphaned)).toBe(false);
     expect(refreshUnavailableReason(orphaned)).toBe('This provider is not connected');
   });

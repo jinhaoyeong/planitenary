@@ -300,6 +300,60 @@ export function bookingConflicts(
 }
 
 /**
+ * Where a hotel reservation and the route disagree about the same night.
+ *
+ * These are two different facts and each owns its own half. The stay plan is
+ * authority for **where the traveller sleeps** — it is what builds legs, day
+ * base cities and `activityCities`. A `stay` booking is authority for **which
+ * hotel is reserved**, its reference, its price and its check-in hour.
+ *
+ * Neither may overwrite the other. A booking that could move the route would
+ * let a mistyped city silently relocate a whole leg; a route change that
+ * rewrote the booking would edit a reservation the hotel has not agreed to.
+ * So a disagreement is surfaced and left for the traveller to settle.
+ *
+ * Compared by night, not by leg. A city can be visited twice — `osaka#1` and
+ * `osaka#2` — and matching on the city name alone would happily attach a
+ * January hotel to a March stay. The date is what separates the two visits.
+ */
+export function stayRouteConflicts(
+  bookings: TravelBooking[],
+  days: Array<{ day: number; stayCity?: string }>,
+  tripStartDate: string | undefined,
+): BookingConflict[] {
+  const conflicts: BookingConflict[] = [];
+  const dayCount = days.length;
+  const byNumber = new Map(days.map((day) => [day.day, day]));
+
+  for (const booking of bookings) {
+    if (booking.type !== 'stay' || !isCommittedBooking(booking)) continue;
+    if (!booking.cityKey) continue;
+
+    const firstNight = bookingDayNumber(booking, tripStartDate, dayCount);
+    if (firstNight === undefined) continue;
+    // A stay covers the nights from check-in up to but not including check-out:
+    // a room booked the 20th to the 23rd is three nights, not four.
+    const lastNight = booking.endDate
+      ? (bookingDayNumber({ startDate: booking.endDate }, tripStartDate, dayCount) ?? firstNight) - 1
+      : firstNight;
+
+    for (let night = firstNight; night <= Math.max(firstNight, lastNight); night += 1) {
+      const day = byNumber.get(night);
+      const routeCity = day?.stayCity?.trim();
+      if (!routeCity) continue;
+      if (routeCity.toLowerCase() === booking.cityKey) continue;
+      conflicts.push({
+        dayNumber: night,
+        bookingId: booking.id,
+        message: `Day ${night} is planned in ${routeCity}, but ${booking.title} is booked in ${booking.city || booking.cityKey}.`,
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+/**
  * The fields a committed booking owns, which no plan revision may rewrite.
  *
  * Times, dates and identity — the facts a confirmation email would contradict.
