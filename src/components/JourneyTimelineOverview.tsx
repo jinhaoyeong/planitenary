@@ -1,14 +1,27 @@
 import { useRef, useState } from 'react';
-import { BedDouble, CalendarDays, ChevronRight, Clock3, MapPin, PencilLine, Route, TrainFront } from 'lucide-react';
+import { BedDouble, CalendarDays, ChevronRight, Clock3, MapPin, PencilLine, Route, TicketCheck, TrainFront } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Activity, DayPhoto, DayPlan, Itinerary } from '../data';
 import { countryArtworkForItinerary } from '../lib/countryArtwork';
 import { sanitizeTripProfile } from '../lib/tripProfile';
+import { bookingDayNumber, type TravelBooking } from '../lib/travelBooking';
+import { JourneyBookingCard } from './JourneyBookingCard';
 
 interface JourneyTimelineOverviewProps {
   itinerary: Itinerary;
   onSelectDay: (day: number) => void;
   dayPhotos?: Record<number, DayPhoto[]>;
+  /** What the traveller has arranged, placed on the days it actually falls on. */
+  bookings?: TravelBooking[];
+  /** Opens manual booking entry. Absent in read-only contexts. */
+  onManageBookings?: () => void;
+  /**
+   * The clock price freshness is read against.
+   *
+   * A prop rather than a `Date.now()` inside the render, so a test can assert
+   * that a price expired without waiting for it to.
+   */
+  now?: number;
   /**
    * Opens the route editor. The strip is where a traveller looks at their
    * route, so it is where changing it should start from — previously the stay
@@ -99,9 +112,61 @@ const durationLabel = (day: DayPlan) => {
   return `${activities} ${activities === 1 ? 'activity' : 'activities'}`;
 };
 
-export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}, onEditRoute, actions }: JourneyTimelineOverviewProps) {
+/**
+ * Bookings sorted onto the days they fall on.
+ *
+ * Keyed by day number rather than by stay, because a stay is derived from the
+ * route and renumbers when the route is reordered. A date does not.
+ *
+ * Anything whose date cannot be placed — a trip with no start date, a booking
+ * outside the trip's span — lands in `unplaced` rather than being dropped. A
+ * traveller who typed in a flight is entitled to see it even when the itinerary
+ * cannot yet say which day it belongs to.
+ */
+function placeBookings(itinerary: Itinerary, bookings: TravelBooking[]) {
+  const tripStartDate = sanitizeTripProfile(itinerary.tripProfile)?.startDate;
+  const dayCount = itinerary.days.length;
+  const byDay = new Map<number, TravelBooking[]>();
+  const unplaced: TravelBooking[] = [];
+
+  for (const booking of bookings) {
+    if (booking.status === 'cancelled') continue;
+    const dayNumber = bookingDayNumber(booking, tripStartDate, dayCount);
+    if (dayNumber === undefined) {
+      unplaced.push(booking);
+      continue;
+    }
+    const existing = byDay.get(dayNumber);
+    if (existing) existing.push(booking);
+    else byDay.set(dayNumber, [booking]);
+  }
+
+  return { byDay, unplaced };
+}
+
+export function JourneyTimelineOverview({
+  itinerary,
+  onSelectDay,
+  dayPhotos = {},
+  onEditRoute,
+  actions,
+  bookings = [],
+  onManageBookings,
+  now,
+}: JourneyTimelineOverviewProps) {
+  /**
+   * The clock price freshness is read against, captured once.
+   *
+   * Reading `Date.now()` during render is impure — two cards in the same pass
+   * could disagree about the time, and a re-render for an unrelated reason
+   * would silently age every price. A state initialiser runs once, which is
+   * what "as of when this screen opened" actually means.
+   */
+  const [openedAt] = useState(() => Date.now());
+  const readAt = now ?? openedAt;
   const segments = staySegments(itinerary);
   const countryArtwork = countryArtworkForItinerary(itinerary);
+  const placed = placeBookings(itinerary, bookings);
   const [activeSegment, setActiveSegment] = useState(0);
   const segmentRefs = useRef<Array<HTMLElement | null>>([]);
   const verifiedSources = itinerary.days.reduce((total, day) => total + day.activities.filter((activity) => activity.sourceReferences?.length || activity.lastVerifiedAt).length, 0);
@@ -150,6 +215,12 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
       </nav>
       <div className="journey-route-actions">
         {actions}
+        {onManageBookings && (
+          <button type="button" className="journey-route-edit" onClick={onManageBookings}>
+            <TicketCheck className="w-3.5 h-3.5" aria-hidden="true" />
+            Bookings{bookings.length ? ` (${bookings.length})` : ''}
+          </button>
+        )}
         {onEditRoute && (
           <button type="button" className="journey-route-edit" onClick={onEditRoute}>
             <PencilLine className="w-3.5 h-3.5" aria-hidden="true" />
@@ -185,8 +256,10 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
               <div className="journey-day-rows">
                 {segment.days.map((day) => {
                   const preview = dayPreview(day, segment.city, dayPhotos);
+                  const dayBookings = placed.byDay.get(day.day) || [];
                   return (
-                  <button type="button" className="journey-day-row" key={day.day} onClick={() => onSelectDay(day.day)}>
+                  <div className="journey-day-block" key={day.day}>
+                  <button type="button" className="journey-day-row" onClick={() => onSelectDay(day.day)}>
                     <span className="journey-day-place-preview">
                       {preview.image ? (
                         <img src={preview.image} alt={`Preview for ${preview.label}`} loading="lazy" />
@@ -202,6 +275,20 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
                     </span>
                     <ChevronRight aria-hidden="true" />
                   </button>
+                  {dayBookings.length > 0 && (
+                    <div className="journey-day-bookings">
+                      {dayBookings.map((booking) => (
+                        <JourneyBookingCard
+                          key={booking.id}
+                          booking={booking}
+                          now={readAt}
+                          onEdit={onManageBookings ? () => onManageBookings() : undefined}
+                          compact
+                        />
+                      ))}
+                    </div>
+                  )}
+                  </div>
                   );
                 })}
               </div>
@@ -217,6 +304,29 @@ export function JourneyTimelineOverview({ itinerary, onSelectDay, dayPhotos = {}
           </section>
         ))}
       </div>
+
+      {placed.unplaced.length > 0 && (
+        <section className="journey-unplaced-bookings">
+          <header>
+            <span className="journey-kicker"><i /> Booked</span>
+            <h3>Not yet on a day</h3>
+            <p>
+              These have dates outside the trip, or the trip has no start date to count from.
+              Set the trip dates and they will move onto the days they belong to.
+            </p>
+          </header>
+          <div className="journey-day-bookings">
+            {placed.unplaced.map((booking) => (
+              <JourneyBookingCard
+                key={booking.id}
+                booking={booking}
+                now={readAt}
+                onEdit={onManageBookings ? () => onManageBookings() : undefined}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -1991,3 +1991,285 @@ aside.journey-ask-panel {
     backdrop-filter: blur(10px);
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Bookings
+ *
+ * What the traveller has already arranged, sitting on the day it falls on.
+ * Every colour is a journey token, so the cards follow the four palettes and
+ * both themes without a single hard-coded value.
+ * ------------------------------------------------------------------------ */
+
+.journey-day-block { display: grid; gap: 9px; }
+
+.journey-day-bookings { display: grid; gap: 8px; padding-left: 12px; }
+
+.journey-booking-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 13px;
+  padding: 13px 15px;
+  border: 1px solid var(--journey-line);
+  border-radius: var(--radius-card, 14px);
+  color: var(--journey-copy);
+  background: color-mix(in srgb, var(--journey-surface) 94%, var(--journey-paper));
+  box-shadow: 0 10px 26px -28px rgba(47, 38, 25, .7);
+}
+.journey-booking-card.is-compact { padding: 11px 13px; }
+.journey-booking-card[data-booking-status="cancelled"] { opacity: .58; }
+
+.journey-booking-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--journey-green-deep);
+  background: var(--journey-soft-green);
+}
+.journey-booking-icon svg { width: 17px; height: 17px; }
+
+.journey-booking-body { display: grid; gap: 3px; min-width: 0; }
+.journey-booking-kicker {
+  color: var(--journey-red);
+  font-size: .6rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.journey-booking-title {
+  overflow-wrap: anywhere;
+  color: var(--journey-ink);
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 400;
+  line-height: 1.15;
+}
+.journey-booking-route {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: var(--journey-copy);
+  font-size: .74rem;
+  font-weight: 600;
+}
+.journey-booking-route span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.journey-booking-route i {
+  flex: 1 1 auto;
+  min-width: 18px;
+  height: 1px;
+  background: var(--journey-line);
+}
+.journey-booking-meta {
+  overflow-wrap: anywhere;
+  color: var(--journey-muted);
+  font-size: .68rem;
+  line-height: 1.45;
+}
+
+.journey-booking-side {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  max-width: 190px;
+  text-align: right;
+}
+.journey-booking-status {
+  padding: 3px 8px;
+  border-radius: var(--radius-chip, 999px);
+  font-size: .58rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.journey-booking-status.is-confirmed { color: var(--journey-green-deep); background: var(--journey-soft-green); }
+.journey-booking-status.is-requested { color: var(--journey-ink); background: var(--journey-soft-yellow); }
+.journey-booking-status.is-planned { color: var(--journey-muted); background: color-mix(in srgb, var(--journey-line) 40%, transparent); }
+.journey-booking-status.is-cancelled { color: var(--journey-red); background: color-mix(in srgb, var(--journey-red) 12%, transparent); }
+
+.journey-booking-price {
+  color: var(--journey-ink);
+  font-size: .95rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.journey-booking-price.is-expired { color: var(--journey-muted); }
+.journey-booking-price s { text-decoration-thickness: 1px; }
+
+.journey-booking-flag {
+  padding: 2px 7px;
+  border-radius: var(--radius-chip, 999px);
+  color: var(--journey-red);
+  background: color-mix(in srgb, var(--journey-red) 12%, transparent);
+  font-size: .58rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.journey-booking-flag.is-soft {
+  color: var(--journey-muted);
+  background: color-mix(in srgb, var(--journey-line) 42%, transparent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+.journey-booking-checked { color: var(--journey-muted); font-size: .62rem; white-space: nowrap; }
+
+.journey-booking-refresh,
+.journey-booking-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--journey-line);
+  border-radius: var(--radius-button, 9px);
+  color: var(--journey-copy);
+  background: var(--journey-surface);
+  font-size: .66rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.journey-booking-refresh svg { width: 12px; height: 12px; }
+.journey-booking-refresh:disabled { opacity: .45; cursor: not-allowed; }
+.journey-booking-refresh:not(:disabled):hover,
+.journey-booking-edit:hover { border-color: var(--journey-green); color: var(--journey-green-deep); }
+
+.journey-unplaced-bookings { margin-top: 26px; display: grid; gap: 12px; }
+.journey-unplaced-bookings header h3 {
+  margin: 3px 0 0;
+  color: var(--journey-ink);
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  font-weight: 400;
+  line-height: 1.1;
+}
+.journey-unplaced-bookings header p {
+  max-width: 62ch;
+  margin: 5px 0 0;
+  color: var(--journey-muted);
+  font-size: .72rem;
+  line-height: 1.5;
+}
+.journey-unplaced-bookings .journey-day-bookings { padding-left: 0; }
+
+/* Manual entry */
+.journey-booking-editor { display: flex; flex-direction: column; min-height: 0; }
+.journey-booking-hint {
+  max-width: 64ch;
+  margin: 0 0 14px;
+  color: var(--journey-muted);
+  font-size: .74rem;
+  line-height: 1.55;
+}
+.journey-booking-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.journey-booking-add button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--journey-line);
+  border-radius: var(--radius-button, 9px);
+  color: var(--journey-copy);
+  background: var(--journey-surface);
+  font-size: .7rem;
+  font-weight: 600;
+}
+.journey-booking-add button svg { width: 13px; height: 13px; }
+.journey-booking-add button:hover { border-color: var(--journey-green); color: var(--journey-green-deep); }
+
+.journey-booking-empty { color: var(--journey-muted); font-size: .74rem; }
+
+.journey-booking-forms { display: grid; gap: 14px; }
+.journey-booking-form {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 14px 15px 15px;
+  border: 1px solid var(--journey-line);
+  border-radius: var(--radius-section, 13px);
+  background: color-mix(in srgb, var(--journey-surface) 92%, transparent);
+}
+.journey-booking-form legend {
+  padding: 0 6px;
+  color: var(--journey-red);
+  font-size: .6rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.journey-booking-form label { display: grid; gap: 4px; min-width: 0; }
+.journey-booking-form label > span { color: var(--journey-muted); font-size: .64rem; font-weight: 600; }
+.journey-booking-form .editorial-input,
+.journey-booking-form .editorial-select { width: 100%; min-width: 0; }
+.journey-booking-remove {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--radius-button, 8px);
+  color: var(--journey-muted);
+}
+.journey-booking-remove svg { width: 14px; height: 14px; }
+.journey-booking-remove:hover { color: var(--journey-red); }
+
+.journey-booking-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--journey-line);
+}
+.journey-booking-cancel,
+.journey-booking-save {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--journey-line);
+  border-radius: var(--radius-button, 9px);
+  font-size: .74rem;
+  font-weight: 650;
+}
+.journey-booking-cancel { color: var(--journey-copy); background: var(--journey-surface); }
+.journey-booking-save { border-color: var(--journey-green); color: #fffdf7; background: var(--journey-green); }
+.journey-booking-save:disabled { opacity: .5; cursor: not-allowed; }
+
+@media (max-width: 760px) {
+  .journey-booking-card { grid-template-columns: 32px minmax(0, 1fr); }
+  .journey-booking-side {
+    grid-column: 1 / -1;
+    justify-items: start;
+    max-width: none;
+    text-align: left;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-items: center;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .journey-booking-side::-webkit-scrollbar { display: none; }
+  .journey-booking-icon { width: 32px; height: 32px; }
+  .journey-day-bookings { padding-left: 0; }
+  .journey-booking-form { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The bookings dialog carries an eyebrow above its title; the route editor
+   does not, so the shared head needs the two stacked here rather than run
+   together on one line. */
+.journey-booking-editor .journey-route-editor-head > div { display: grid; gap: 3px; }
+.journey-booking-editor .journey-route-editor-head > div > span {
+  color: var(--journey-red);
+  font-size: .6rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}

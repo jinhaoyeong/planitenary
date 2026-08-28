@@ -16,6 +16,8 @@ import { getPhotos, subscribeToPhotoChanges, syncAllPhotosFromRemote } from '../
 import { PhotoGallery } from './PhotoGallery';
 import { PlannerPreview } from './PlannerPreview';
 import { JourneyTimelineOverview, resolvedDayCity } from './JourneyTimelineOverview';
+import { BookingEditor } from './BookingEditor';
+import type { TravelBooking } from '../lib/travelBooking';
 import { ItineraryChangeHistoryPanel } from './ItineraryChangeHistoryPanel';
 import { createPortal } from 'react-dom';
 import { TripIdentityPanel } from './TripIdentityPanel';
@@ -1192,6 +1194,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [routeEditorOpen, setRouteEditorOpen] = useState(false);
+  const [bookingEditorOpen, setBookingEditorOpen] = useState(false);
 
   // Hold the page still while the route editor or the Add Activity dialog is
   // open, the same way the assistant panel does, so a scroll that runs past the
@@ -1703,6 +1706,20 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     onItineraryChange?.(updatedItinerary);
   };
 
+  /**
+   * Save what the traveller has arranged.
+   *
+   * Bookings replace wholesale rather than merging, because the editor holds
+   * the complete list and a removal has to be expressible. The itinerary's own
+   * days are untouched: adding a hotel does not reschedule anything by itself,
+   * it only changes what the next plan has to fit around.
+   */
+  const handleBookingsChange = (bookings: TravelBooking[]) => {
+    const updatedItinerary = { ...customItinerary, bookings };
+    setCustomItinerary(updatedItinerary);
+    onItineraryChange?.(updatedItinerary);
+  };
+
   const handleCityEdit = (dayIndex: number, nextCity = editedCity) => {
     setEditingCityIndex(null);
     const targetDay = customItinerary.days[dayIndex];
@@ -1783,6 +1800,8 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             itinerary={customItinerary}
             onSelectDay={setSelectedDay}
             dayPhotos={dayPhotos}
+            bookings={customItinerary.bookings || []}
+            onManageBookings={onItineraryChange ? () => setBookingEditorOpen(true) : undefined}
             onEditRoute={onItineraryChange ? () => setRouteEditorOpen(true) : undefined}
             actions={(
               <>
@@ -1796,6 +1815,31 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               </>
             )}
           />
+        )}
+
+        {bookingEditorOpen && createPortal(
+          <div
+            className="journey-route-editor-backdrop"
+            role="presentation"
+            data-lenis-prevent
+            data-lenis-prevent-wheel
+            data-lenis-prevent-touch
+            style={{ touchAction: 'pan-y' }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setBookingEditorOpen(false);
+            }}
+          >
+            <div className="journey-route-editor" role="dialog" aria-modal="true" aria-label="Bookings">
+              <BookingEditor
+                bookings={customItinerary.bookings || []}
+                cities={customItinerary.cities}
+                defaultDate={sanitizeTripProfile(customItinerary.tripProfile)?.startDate}
+                onChange={handleBookingsChange}
+                onClose={() => setBookingEditorOpen(false)}
+              />
+            </div>
+          </div>,
+          document.body,
         )}
 
         {routeEditorOpen && createPortal(

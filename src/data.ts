@@ -5,6 +5,7 @@ import type { PlaceAdmission } from '../supabase/functions/_shared/placeCost';
 import type { DayTransfer } from '../supabase/functions/_shared/dayCitySemantics';
 import type { StructuredPlaceRef } from '../supabase/functions/_shared/placeReference';
 import type { TripCoverRef } from './lib/verifiedImage';
+import type { TravelBooking } from './lib/travelBooking';
 
 export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 'travel' | 'flight' | 'cafe' | 'shop' | 'nightlife' | 'other';
 
@@ -343,6 +344,20 @@ export interface Itinerary {
   plannerHistory?: PlannerChangeRecord[];
   unassignedActivities?: Activity[];
   lastPlannerProfileRevision?: string;
+  /**
+   * What the traveller has actually arranged: flights, rooms, trains, tickets.
+   *
+   * Beside `days` rather than inside them, because a booking is not an
+   * activity. An entry in `days[].activities` is material the planner may move,
+   * shorten or drop; a confirmed flight is a fact it has to fit around. Keeping
+   * them apart is what stops a replan quietly rescheduling a seat the traveller
+   * already holds — see `bookingConstraints.committedBookingMutations`.
+   *
+   * Anchored to calendar dates and city names, never to a `CityLeg.legId`:
+   * `osaka#1` renumbers whenever the route is reordered, so a stored one would
+   * silently retarget to a different stay.
+   */
+  bookings?: TravelBooking[];
   days: DayPlan[];
 }
 

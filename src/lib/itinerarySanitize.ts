@@ -18,6 +18,17 @@ import {
   type StructuredPlaceRef,
 } from '../../supabase/functions/_shared/placeReference';
 import { parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
+import {
+  bookingCityKey,
+  isBookingClock,
+  isBookingDate,
+  sortBookings,
+  type PriceSnapshot,
+  type PriceSource,
+  type TravelBooking,
+  type TravelBookingStatus,
+  type TravelBookingType,
+} from './travelBooking';
 import type {
   AdmissionClass,
   AdmissionExpectation,
@@ -615,6 +626,161 @@ const sanitizePlannerHistory = (value: unknown): PlannerChangeRecord[] | undefin
   }));
 };
 
+const BOOKING_TYPES: Record<TravelBookingType, true> = {
+  flight: true,
+  stay: true,
+  rail: true,
+  transfer: true,
+  'activity-ticket': true,
+};
+const BOOKING_STATUSES: Record<TravelBookingStatus, true> = {
+  planned: true,
+  requested: true,
+  confirmed: true,
+  cancelled: true,
+};
+const PRICE_SOURCE_VALUES: Record<PriceSource, true> = {
+  manual: true,
+  provider: true,
+  'official-website': true,
+};
+
+const bookingText = (value: unknown, limit = 160): string | undefined => {
+  const text = trimmed(value);
+  return text ? text.slice(0, limit) : undefined;
+};
+
+const bookingDate = (value: unknown): string | undefined =>
+  (isBookingDate(value) ? value : undefined);
+
+const bookingClock = (value: unknown): string | undefined => {
+  if (!isBookingClock(value)) return undefined;
+  // `9:05` and `09:05` are the same minute and must not be two saved values,
+  // or an idempotence check comparing stringified output would fail on the
+  // second pass.
+  const [hours, minutes] = value.split(':');
+  return `${hours.padStart(2, '0')}:${minutes}`;
+};
+
+/**
+ * A stored price, or nothing.
+ *
+ * Deliberately strict about the two fields that make a price a fact: an amount
+ * needs a currency, and a figure needs the moment it was read. A snapshot
+ * missing either is dropped whole rather than kept as a bare number — the same
+ * rule `sanitizeFare` enforces, and for the same reason.
+ *
+ * `expiresAt` is carried through untouched and never synthesised. Inventing one
+ * would make every manually entered fare expire on a schedule nothing can
+ * refresh.
+ */
+const sanitizePriceSnapshot = (value: unknown): PriceSnapshot | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.amount !== 'number' || !Number.isFinite(raw.amount) || raw.amount < 0) return undefined;
+  const currency = trimmed(raw.currency)?.toUpperCase();
+  if (!currency) return undefined;
+  const retrievedAt = trimmed(raw.retrievedAt);
+  if (!retrievedAt) return undefined;
+  const source = has(PRICE_SOURCE_VALUES, raw.source) ? raw.source as PriceSource : 'manual';
+  return {
+    amount: raw.amount,
+    currency,
+    source,
+    sourceUrl: bookingText(raw.sourceUrl, 500),
+    retrievedAt,
+    expiresAt: trimmed(raw.expiresAt),
+  };
+};
+
+/**
+ * Identity for a booking that arrived without one.
+ *
+ * Derived from what the record already says rather than generated, because
+ * `sanitizeItinerary` has to be idempotent down to `JSON.stringify` output —
+ * a `crypto.randomUUID()` here would produce a different id on every read and
+ * make the realtime sync treat its own echo as a remote change, forever.
+ */
+const derivedBookingId = (scope: string, type: string, startDate: string, title: string, index: number) =>
+  `booking-${stableHash(`${scope}|${type}|${startDate}|${title}|${index}`.toLowerCase())}`;
+
+/**
+ * One booking through a save and back, unchanged.
+ *
+ * Fails closed. A record without a valid type or start date is not a booking
+ * with gaps — it is something else that happened to be in the array, and
+ * keeping it would put a card on the timeline claiming an arrangement the
+ * traveller never made.
+ *
+ * Note what cannot survive this function: any field not named below, `legId`
+ * included. `CityLeg.legId` is derived inside a single build and renumbers when
+ * a route is reordered, so a persisted one would silently retarget to a
+ * different stay. The allow-list is what guarantees it can never be stored,
+ * whatever a future writer passes in.
+ */
+export const sanitizeTravelBooking = (value: unknown, index: number, scope = 'trip'): TravelBooking | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  if (!has(BOOKING_TYPES, raw.type)) return undefined;
+  const startDate = bookingDate(raw.startDate);
+  if (!startDate) return undefined;
+  const type = raw.type as TravelBookingType;
+  const title = bookingText(raw.title) || 'Booking';
+  const status = has(BOOKING_STATUSES, raw.status) ? raw.status as TravelBookingStatus : 'planned';
+  const city = bookingText(raw.city, 120);
+  const endDate = bookingDate(raw.endDate);
+  // An end before its start is a typo, not a booking that travels backwards.
+  const orderedEnd = endDate && endDate >= startDate ? endDate : undefined;
+  const partySize = typeof raw.partySize === 'number' && Number.isFinite(raw.partySize)
+    ? Math.max(1, Math.min(99, Math.round(raw.partySize)))
+    : undefined;
+
+  return {
+    id: trimmed(raw.id) || derivedBookingId(scope, type, startDate, title, index),
+    type,
+    status,
+    title,
+    startDate,
+    startTime: bookingClock(raw.startTime),
+    endDate: orderedEnd,
+    endTime: bookingClock(raw.endTime),
+    city,
+    // Recomputed from the city rather than trusted, so the two can never
+    // disagree about which stay a booking belongs to.
+    cityKey: city ? bookingCityKey(city) : undefined,
+    origin: bookingText(raw.origin, 120),
+    destination: bookingText(raw.destination, 120),
+    operator: bookingText(raw.operator, 120),
+    serviceNumber: bookingText(raw.serviceNumber, 40),
+    cabin: bookingText(raw.cabin, 60),
+    roomDescription: bookingText(raw.roomDescription, 200),
+    partySize,
+    reference: bookingText(raw.reference, 60),
+    price: sanitizePriceSnapshot(raw.price),
+    provider: bookingText(raw.provider, 60),
+    providerBookingId: bookingText(raw.providerBookingId, 120),
+    providerOfferId: bookingText(raw.providerOfferId, 120),
+    notes: bookingText(raw.notes, 500),
+  };
+};
+
+/**
+ * Every booking on a trip, in a stable order.
+ *
+ * Sorted by date and clock rather than by arrival in the array: two devices
+ * that added the same two bookings in a different order would otherwise
+ * produce two different `JSON.stringify` outputs for the same trip, and the
+ * realtime sync would ping-pong between them.
+ */
+export const sanitizeTravelBookings = (value: unknown, scope = 'trip'): TravelBooking[] => {
+  if (!Array.isArray(value)) return [];
+  const bookings = value
+    .slice(0, 200)
+    .map((entry, index) => sanitizeTravelBooking(entry, index, scope))
+    .filter((entry): entry is TravelBooking => Boolean(entry));
+  return sortBookings(bookings);
+};
+
 /**
  * TEMPORARY. Traces which of the three writers last touched `customItinerary`.
  * Remove once the flicker report is confirmed closed; it is deliberately one
@@ -653,6 +819,10 @@ export const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerar
   const unassignedActivities = Array.isArray(source.unassignedActivities)
     ? source.unassignedActivities.map((activity, index) => sanitizeActivity(activity, fallbackActivity, index, `${fallback.id}|inbox`))
     : (Array.isArray(fallback.unassignedActivities) ? fallback.unassignedActivities : []);
+  const sanitizedBookings = sanitizeTravelBookings(
+    source.bookings ?? fallback.bookings,
+    fallback.id,
+  );
   const sanitizedCities = Array.isArray(source.cities)
     ? source.cities.filter((city): city is string => typeof city === 'string' && city.trim().length > 0)
     : [];
@@ -681,6 +851,11 @@ export const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerar
     discoveryState: sanitizeDiscoveryState(source.discoveryState) ?? sanitizeDiscoveryState(fallback.discoveryState),
     plannerHistory: sanitizePlannerHistory(source.plannerHistory) ?? sanitizePlannerHistory(fallback.plannerHistory),
     unassignedActivities,
+    // Undefined rather than `[]` when there are none, so a trip that predates
+    // bookings serialises byte-for-byte as it did before — the realtime sync
+    // compares `JSON.stringify` output, and an empty array appearing on every
+    // existing trip would look like an edit to every one of them.
+    bookings: sanitizedBookings.length ? sanitizedBookings : undefined,
     lastPlannerProfileRevision: typeof source.lastPlannerProfileRevision === 'string' ? source.lastPlannerProfileRevision : fallback.lastPlannerProfileRevision,
     brandTitle: optionalText(source.brandTitle, fallback.brandTitle),
     overviewEyebrow: optionalText(source.overviewEyebrow, fallback.overviewEyebrow),
