@@ -756,6 +756,7 @@ export const sanitizeTravelBooking = (value: unknown, index: number, scope = 'tr
     // complete — worse than an honestly empty field.
     originTimeZone: isTimeZone(raw.originTimeZone) ? raw.originTimeZone : undefined,
     destinationTimeZone: isTimeZone(raw.destinationTimeZone) ? raw.destinationTimeZone : undefined,
+    relatedActivityId: bookingText(raw.relatedActivityId, 120),
     operator: bookingText(raw.operator, 120),
     serviceNumber: bookingText(raw.serviceNumber, 40),
     cabin: bookingText(raw.cabin, 60),

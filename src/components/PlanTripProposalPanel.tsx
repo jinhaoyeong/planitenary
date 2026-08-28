@@ -873,6 +873,14 @@ export function PlanTripProposalPanel({ tripId, tripName, itinerary, onApplied, 
                           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                             Generated {new Date(proposal.createdAt).toLocaleString()} · {proposal.meta.suggestedPlaceCount} verified suggestions
                           </p>
+                          {(proposal.meta.bookingConstraintsApplied ?? 0) > 0 && (
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              {proposal.meta.confirmedBookingsApplied ?? 0} confirmed bookings protected
+                              {(proposal.meta.requestedBookingsProtected ?? 0) > 0
+                                ? ` · ${proposal.meta.requestedBookingsProtected} requested (pending) protected`
+                                : ''}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                           <ShieldCheck className="h-4 w-4 text-emerald-600" />

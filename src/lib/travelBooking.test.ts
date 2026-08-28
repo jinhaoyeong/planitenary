@@ -97,6 +97,12 @@ describe('travel booking persistence', () => {
     expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
   });
 
+  it('persists only an explicit Activity relationship, never a leg id', () => {
+    const trip = tripWith([{ ...flight, relatedActivityId: 'activity-flight-1', legId: 'osaka#2' }]);
+    expect(trip.bookings?.[0].relatedActivityId).toBe('activity-flight-1');
+    expect(trip.bookings?.[0]).not.toHaveProperty('legId');
+  });
+
   it('drops fields it does not know about, legId above all', () => {
     const trip = tripWith([{
       ...flight,

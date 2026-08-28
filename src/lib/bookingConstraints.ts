@@ -360,7 +360,7 @@ export function stayRouteConflicts(
  * Notes and status are deliberately absent: a traveller cancelling their own
  * hotel is an edit, not a violation.
  */
-const OWNED_FIELDS = ['type', 'startDate', 'startTime', 'endDate', 'endTime', 'reference', 'title'] as const;
+const OWNED_FIELDS = ['type', 'startDate', 'startTime', 'endDate', 'endTime', 'reference', 'title', 'relatedActivityId'] as const;
 
 export interface BookingMutation {
   bookingId: string;

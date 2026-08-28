@@ -25,7 +25,10 @@
  * shape of whichever one arrives first.
  */
 import { ISO_DATE_PATTERN, type IsoDate } from './dateRange';
-import { timezoneOffsetMinutes } from './timezones';
+import {
+  elapsedMinutes as elapsedZonedMinutes,
+  isTimeZone as isIanaTimeZone,
+} from '../../supabase/functions/_shared/timeZoneMath';
 
 /**
  * What kind of arrangement this is.
@@ -42,7 +45,9 @@ export type TravelBookingType = 'flight' | 'stay' | 'rail' | 'transfer' | 'activ
  *
  * Deliberately about the traveller's commitment, not about money: a booking is
  * `confirmed` because they hold it, never because a price was fetched
- * successfully. Nothing in this module promotes a status on its own.
+ * successfully. `requested` protects its pending slot but is never presented
+ * as equally factual; `planned` is soft information and `cancelled` is inert.
+ * Nothing in this module promotes a status on its own.
  */
 export type TravelBookingStatus = 'planned' | 'requested' | 'confirmed' | 'cancelled';
 
@@ -86,14 +91,12 @@ export interface PriceSnapshot {
  * Planitenary already had two authorities before bookings existed, and a
  * booking augments them rather than replacing either.
  *
- * **Flight schedule** belongs to the `Activity` with `type: 'flight'` on a day.
- * That is what `listPersistedFlights` reads, what `itineraryProposal` turns
- * into a fixed event with an arrival buffer and a departure lead, and what the
- * Add Flight control writes. A `TravelBooking` of type `flight` carries the
- * *commercial* half — reference, cabin, price, provider, confirmation — and
- * must not become a second schedule. Nothing here is wired into the planner;
- * see the note on {@link TravelBookingStatus} about what does and does not
- * constrain a day.
+ * **Legacy flight schedule** belongs to the `Activity` with `type: 'flight'`
+ * on a day. An unlinked flight booking can also protect its own factual local
+ * departure/arrival clocks, so the traveller never has to enter a flight
+ * twice. When {@link relatedActivityId} explicitly joins the two records they
+ * are one real flight: planning de-duplicates them and reports a deterministic
+ * mismatch instead of silently choosing between disagreeing schedules.
  *
  * **Where the traveller sleeps** belongs to the stay plan
  * (`tripProfile.cityStays` and `DayPlan.stayCity`). A `stay` booking says
@@ -146,6 +149,11 @@ export interface TravelBooking {
    */
   originTimeZone?: string;
   destinationTimeZone?: string;
+  /**
+   * Explicit stable link to the legacy flight Activity representing this same
+   * real flight. Never inferred from a name, and never a Stage-4 legId.
+   */
+  relatedActivityId?: string;
   /** Airline, rail operator, hotel group, tour company. */
   operator?: string;
   /** Flight number, train number, service code. */
@@ -173,6 +181,15 @@ export const PRICE_SOURCES: PriceSource[] = ['manual', 'provider', 'official-web
 /** A booking the traveller is actually holding, rather than sketching. */
 export const isCommittedBooking = (booking: TravelBooking): boolean =>
   booking.status === 'confirmed' || booking.status === 'requested';
+
+export type BookingConstraintStrength = 'hard' | 'provisional' | 'none';
+
+/** Confirmed is factual; requested is protected but explicitly pending. */
+export const bookingConstraintStrength = (booking: Pick<TravelBooking, 'status'>): BookingConstraintStrength => {
+  if (booking.status === 'confirmed') return 'hard';
+  if (booking.status === 'requested') return 'provisional';
+  return 'none';
+};
 
 /** Types that move the traveller from one place to another. */
 export const isTransportBooking = (booking: TravelBooking): boolean =>
@@ -282,31 +299,7 @@ export function bookingDayNumber(
 
 /** A zone this runtime actually recognises. Never a guess, never the browser's. */
 export function isTimeZone(value: unknown): value is string {
-  if (typeof value !== 'string' || !value.trim()) return false;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The instant a wall-clock reading in a named zone actually refers to.
- *
- * Two passes because the offset is itself a function of the instant: reading
- * it at the naive guess is an hour out on the two nights a year a zone shifts,
- * and re-reading at the corrected instant settles it.
- */
-function zonedInstant(date: string, clock: string, timeZone: string): number | undefined {
-  const naive = Date.parse(`${date}T${clock}:00Z`);
-  if (!Number.isFinite(naive)) return undefined;
-  const firstOffset = timezoneOffsetMinutes(timeZone, new Date(naive));
-  if (firstOffset === null) return undefined;
-  const corrected = naive - firstOffset * 60000;
-  const secondOffset = timezoneOffsetMinutes(timeZone, new Date(corrected));
-  if (secondOffset === null) return undefined;
-  return naive - secondOffset * 60000;
+  return isIanaTimeZone(value);
 }
 
 /**
@@ -323,31 +316,7 @@ function zonedInstant(date: string, clock: string, timeZone: string): number | u
  * booking that stays within one date — are safe to subtract directly.
  */
 export function elapsedMinutes(booking: TravelBooking): number | undefined {
-  const { startDate, startTime, endTime, originTimeZone, destinationTimeZone } = booking;
-  if (!startTime || !endTime) return undefined;
-  const endDate = booking.endDate || startDate;
-
-  if (originTimeZone && destinationTimeZone) {
-    if (!isTimeZone(originTimeZone) || !isTimeZone(destinationTimeZone)) return undefined;
-    const departure = zonedInstant(startDate, startTime, originTimeZone);
-    const arrival = zonedInstant(endDate, endTime, destinationTimeZone);
-    if (departure === undefined || arrival === undefined) return undefined;
-    const minutes = Math.round((arrival - departure) / 60000);
-    return minutes > 0 ? minutes : undefined;
-  }
-
-  // One zone named and not the other says the two clocks may differ and we
-  // cannot say by how much. That is exactly the case to refuse.
-  if (originTimeZone || destinationTimeZone) return undefined;
-
-  // No zones at all. Only safe where the journey cannot have crossed a date,
-  // which is the domestic hop the fields were adequate for in the first place.
-  if (endDate !== startDate) return undefined;
-  const departure = Date.parse(`${startDate}T${startTime}:00Z`);
-  const arrival = Date.parse(`${endDate}T${endTime}:00Z`);
-  if (!Number.isFinite(departure) || !Number.isFinite(arrival)) return undefined;
-  const minutes = Math.round((arrival - departure) / 60000);
-  return minutes > 0 ? minutes : undefined;
+  return elapsedZonedMinutes(booking);
 }
 
 /**

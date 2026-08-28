@@ -21,6 +21,12 @@
  */
 import { canonicalFingerprint } from './canonicalHash.ts';
 import {
+  buildBookingPlanningConstraints,
+  type BookingConstraintStatus,
+  type BookingConstraintTrace,
+  type BookingPlanningConflict,
+} from './bookingPlanning.ts';
+import {
   cityKey,
   cityReachability,
   isPlacementAllowed,
@@ -95,8 +101,8 @@ export interface PlanningPlace {
   image?: PlaceImage;
 }
 
-export type FixedTransportRole = 'arrival' | 'departure' | 'transfer';
-export type FixedTransportKind = 'flight' | 'transport';
+export type FixedTransportRole = 'arrival' | 'departure' | 'transfer' | 'fixed';
+export type FixedTransportKind = 'flight' | 'transport' | 'reservation';
 
 /**
  * A timed flight or user-entered transport already on the itinerary.
@@ -112,6 +118,10 @@ export interface PlanningFixedEvent {
   role: FixedTransportRole;
   transportKind: FixedTransportKind;
   coordinates?: [number, number];
+  /** Requested uses identical protected arithmetic but remains visibly pending. */
+  constraintStatus?: BookingConstraintStatus;
+  /** Actual timezone-safe duration when both booking clocks can prove it. */
+  elapsedMinutes?: number;
 }
 
 /** One usable sightseeing interval on a day, after fixed transport is reserved. */
@@ -167,6 +177,10 @@ export interface PlanningMaterial {
   /** Required places outside the bounded provider matrix, reported as errors. */
   excludedRequiredPlaces: Array<{ id: string; name: string }>;
   clusters: Array<{ id: string; city: string; placeIds: string[] }>;
+  /** Deterministic booking errors are never sent to the model repair loop. */
+  bookingConflicts?: BookingPlanningConflict[];
+  /** Bounded counts only; no booking identifiers or commercial facts. */
+  bookingTrace?: BookingConstraintTrace;
   limits: {
     maxPlaces: number;
     maxDays: number;
@@ -292,7 +306,11 @@ export type ProposalConflictCode =
   | 'unauthorized-base-change'
   | 'unknown-place'
   | 'duplicate-place'
-  | 'empty-proposal';
+  | 'empty-proposal'
+  | 'booking-date-unplaced'
+  | 'flight-booking-mismatch'
+  | 'stay-booking-conflict'
+  | 'booking-schedule-invalid';
 
 export interface ProposalConflict {
   code: ProposalConflictCode;
@@ -301,6 +319,8 @@ export interface ProposalConflict {
   day?: number;
   placeId?: string;
   relatedPlaceId?: string;
+  /** Booking conflicts are deterministic facts and never model repair input. */
+  source?: 'booking';
 }
 
 export interface TripItineraryProposal {
@@ -567,6 +587,11 @@ interface RawFixedTransport {
   end: number;
   transportKind: FixedTransportKind;
   coordinates?: [number, number];
+  roleHint?: FixedTransportRole;
+  constraintStatus?: BookingConstraintStatus;
+  elapsedMinutes?: number;
+  /** Only an existing Activity/Stage-4 fact may authorize a base transfer. */
+  authorizesTransfer: boolean;
 }
 
 /**
@@ -597,6 +622,7 @@ const extractFixedTransport = (activity: Record<string, unknown>, dayNumber: num
     end,
     transportKind: type === 'flight' ? 'flight' : 'transport',
     coordinates: coordinates(activity.coordinates),
+    authorizesTransfer: true,
   };
 };
 
@@ -660,19 +686,22 @@ const constrainDayAroundFixedTransport = (
   if (rawEvents.length === 0) return day;
   const sorted = [...rawEvents].sort((left, right) => left.start - right.start || left.end - right.end);
   const startCity = day.transfer?.from ?? day.stayCity;
-  const roles = sorted.map((_event, index) => classifyFixedTransport(
-      index,
-      sorted.length,
-      context.dayIndex,
-      context.dayCount,
-      startCity,
-      context.prevCity,
-      context.nextCity,
-    ));
+  const roles = sorted.map((event, index) => event.roleHint ?? classifyFixedTransport(
+    index,
+    sorted.length,
+    context.dayIndex,
+    context.dayCount,
+    startCity,
+    context.prevCity,
+    context.nextCity,
+  ));
   // A persisted transfer remains explicit on the next proposal build. The
   // first build inferred it from the same fixed event plus the following base;
   // after Apply, both this day and the following day correctly stay in `to`.
-  if (day.transfer && !roles.includes('transfer')) roles[roles.length - 1] = 'transfer';
+  if (day.transfer && !roles.includes('transfer')) {
+    const authorizingIndex = sorted.findLastIndex((event) => event.authorizesTransfer);
+    if (authorizingIndex >= 0) roles[authorizingIndex] = 'transfer';
+  }
   const fixedEvents: PlanningFixedEvent[] = sorted.map((event, index) => ({
     id: event.id,
     name: event.name,
@@ -681,11 +710,13 @@ const constrainDayAroundFixedTransport = (
     role: roles[index],
     transportKind: event.transportKind,
     coordinates: event.coordinates,
+    constraintStatus: event.constraintStatus,
+    elapsedMinutes: event.elapsedMinutes,
   }));
   const transfer = day.transfer ?? (
     context.nextCity
     && !sameCity(startCity, context.nextCity)
-    && fixedEvents.some((event) => event.role === 'transfer')
+    && sorted.some((event, index) => roles[index] === 'transfer' && event.authorizesTransfer)
       ? { from: startCity, to: context.nextCity }
       : undefined
   );
@@ -718,11 +749,13 @@ const constrainDayAroundFixedTransport = (
       } else {
         holes.push({ start: eventStart, end: eventEnd });
       }
-    } else {
+    } else if (event.role === 'transfer') {
       holes.push({
         start: Math.max(0, eventStart - lead),
         end: eventEnd + settling,
       });
+    } else {
+      holes.push({ start: eventStart, end: eventEnd });
     }
     if (event.role === 'transfer' || event.role === 'departure') lastOutboundEnd = eventEnd + settling;
   }
@@ -814,8 +847,14 @@ const overlappingFixedEvent = (
   events?.find((event) => {
     const eventStart = clockToMinutes(event.startTime);
     const eventEnd = clockToMinutes(event.endTime);
-    return eventStart !== undefined && eventEnd !== undefined && start < eventEnd && end > eventStart;
+    if (eventStart === undefined || eventEnd === undefined) return false;
+    return eventStart === eventEnd
+      ? start < eventStart && end > eventStart
+      : start < eventEnd && end > eventStart;
   });
+
+const bookingConflictSource = (...events: Array<PlanningFixedEvent | undefined>): 'booking' | undefined =>
+  events.some((event) => event?.constraintStatus) ? 'booking' : undefined;
 
 const nextFeasibleStart = (
   day: PlanningDayMaterial,
@@ -837,7 +876,11 @@ const nextFeasibleStart = (
       const blockStart = clockToMinutes(block.startTime);
       const blockEnd = clockToMinutes(block.endTime);
       if (blockStart === undefined || blockEnd === undefined) continue;
-      if (start < blockEnd && start + duration > blockStart) start = blockEnd;
+      if (blockStart === blockEnd) {
+        if (start < blockStart && start + duration > blockStart) start = blockStart;
+      } else if (start < blockEnd && start + duration > blockStart) {
+        start = blockEnd;
+      }
     }
     if (start >= windowStart && start + duration <= windowEnd) return start;
   }
@@ -1037,6 +1080,7 @@ export async function buildPlanningMaterial(
   };
 
   const fixedByDay: RawFixedTransport[][] = [];
+  const persistedFlights: Array<{ id: string; day: number; startTime: string; durationMinutes: number; name: string }> = [];
   const draftDays = rawDays.map((raw, index): PlanningDayMaterial => {
     const day = asRecord(raw) ?? {};
     const dayNumber = Number.isInteger(day.day) ? Number(day.day) : index + 1;
@@ -1051,7 +1095,18 @@ export async function buildPlanningMaterial(
       const activity = asRecord(rawActivity);
       if (!activity) continue;
       const fixed = extractFixedTransport(activity, dayNumber);
-      if (fixed) events.push(fixed);
+      if (fixed) {
+        events.push(fixed);
+        if (fixed.transportKind === 'flight') {
+          persistedFlights.push({
+            id: fixed.id,
+            day: dayNumber,
+            startTime: fixed.startTime,
+            durationMinutes: fixed.end - fixed.start,
+            name: fixed.name,
+          });
+        }
+      }
       if (recordPlanningExclusion(activity, dayNumber)) continue;
       const place = activityPlace(activity, { day: dayNumber, decisions, mustDo, safeLegacyKeys });
       if (!place || seen.has(place.id)) continue;
@@ -1089,6 +1144,26 @@ export async function buildPlanningMaterial(
       note,
     };
   });
+
+  const bookingPlanning = buildBookingPlanningConstraints({
+    bookings: itinerary.bookings,
+    days: draftDays.map((day, index) => ({
+      day: day.day,
+      calendarDate: addDays(startDate, index),
+      stayCity: day.stayCity,
+    })),
+    persistedFlights,
+  });
+  const linkedActivities = new Set(bookingPlanning.linkedActivityIds);
+  for (let index = 0; index < fixedByDay.length; index += 1) {
+    fixedByDay[index] = (fixedByDay[index] ?? []).filter((event) => !linkedActivities.has(event.id));
+  }
+  const dayIndexByNumber = new Map(draftDays.map((day, index) => [day.day, index]));
+  for (const event of bookingPlanning.events) {
+    const dayIndex = dayIndexByNumber.get(event.day);
+    if (dayIndex === undefined) continue;
+    fixedByDay[dayIndex] = [...(fixedByDay[dayIndex] ?? []), event];
+  }
   const days = draftDays.map((draft, index) => constrainDayAroundFixedTransport(draft, fixedByDay[index] ?? [], {
     dayIndex: index,
     dayCount: draftDays.length,
@@ -1164,6 +1239,8 @@ export async function buildPlanningMaterial(
     excludedPlanningPlaces: [...excludedPlanningPlaces]
       .map(([id, decision]) => ({ id, decision }))
       .sort((left, right) => left.id.localeCompare(right.id)),
+    bookingConflicts: bookingPlanning.conflicts.length > 0 ? bookingPlanning.conflicts : undefined,
+    bookingTrace: bookingPlanning.trace,
   })}`;
 
   return {
@@ -1189,6 +1266,8 @@ export async function buildPlanningMaterial(
     suggestedPlaceCount: 0,
     excludedRequiredPlaces,
     clusters: [...byCluster.values()],
+    bookingConflicts: bookingPlanning.conflicts.length > 0 ? bookingPlanning.conflicts : undefined,
+    bookingTrace: bookingPlanning.trace,
     limits: { maxPlaces: MAX_PLACES, maxDays: MAX_DAYS, maxRepairIterations: MAX_REPAIR_ITERATIONS },
   };
 }
@@ -1461,6 +1540,7 @@ function composeSchedule(
         code: edgeCode,
         severity: 'error',
         day: day.day,
+        source: bookingConflictSource(...(day.fixedEvents ?? [])),
         message: day.maxMainActivities === 0 && (day.fixedEvents?.length ?? 0) > 0
           ? `Day ${day.day} has no usable planning window around fixed transport.`
           : `Day ${day.day} allows ${day.maxMainActivities} movable ${day.maxMainActivities === 1 ? 'place' : 'places'} at this pace, but ${movableCount} were proposed.`,
@@ -1588,6 +1668,18 @@ function composeSchedule(
           buffer = from ? rules.buffer : 0;
         }
         const feasible = nextFeasibleStart(day, place.city, start, duration);
+        if (fixedStart !== undefined && feasible !== fixedStart) {
+          const blocked = overlappingFixedEvent(day.fixedEvents, fixedStart, fixedStart + duration);
+          conflicts.push({
+            code: 'fixed-reservation-conflict',
+            severity: 'error',
+            day: day.day,
+            placeId: place.id,
+            source: bookingConflictSource(blocked),
+            message: `${place.name}'s fixed ${place.fixedStartTime} start overlaps ${blocked?.name ?? 'a protected booking constraint'}.`,
+          });
+          continue;
+        }
         if (feasible === undefined || overlappingFixedEvent(day.fixedEvents, feasible, feasible + duration)) {
           const blocked = overlappingFixedEvent(day.fixedEvents, start, end);
           const departure = outboundEvent || blocked?.role === 'departure' || blocked?.role === 'transfer';
@@ -1607,9 +1699,15 @@ function composeSchedule(
                 ? `${place.name} starts before you arrive.`
                 : `${place.name} does not fit around fixed transport on Day ${day.day}.`;
           if (place.priority === 'must-do' || place.locked) {
-            conflicts.push({ code, severity: 'error', day: day.day, placeId: place.id, message });
+            conflicts.push({
+              code, severity: 'error', day: day.day, placeId: place.id, message,
+              source: bookingConflictSource(blocked, inboundEvent, outboundEvent),
+            });
           } else if (blocked) {
-            conflicts.push({ code, severity: 'error', day: day.day, placeId: place.id, message });
+            conflicts.push({
+              code, severity: 'error', day: day.day, placeId: place.id, message,
+              source: bookingConflictSource(blocked),
+            });
           }
           continue;
         }
@@ -1630,6 +1728,7 @@ function composeSchedule(
                 severity: 'error',
                 day: day.day,
                 placeId: place.id,
+                source: bookingConflictSource(outboundEvent),
                 message: `${place.name} could not fit before your departure.`,
               });
               continue;
@@ -1651,6 +1750,7 @@ function composeSchedule(
           code: outboundEvent || (day.day === material.days[material.days.length - 1]?.day && material.departureTime)
             ? 'departure-day-infeasible' : 'day-window-exceeded',
           severity: 'error', day: day.day, placeId: place.id,
+          source: bookingConflictSource(outboundEvent),
           message: outboundEvent
             ? `${place.name} could not fit before your departure.`
             : `${place.name} would end at ${minutesToClock(end)}, after Day ${day.day}'s ${day.endTime} limit.`,
@@ -1661,6 +1761,7 @@ function composeSchedule(
         || (inboundEvent && start < dayStart)) {
         conflicts.push({
           code: 'arrival-day-infeasible', severity: 'error', day: day.day, placeId: place.id,
+          source: bookingConflictSource(inboundEvent),
           message: inboundEvent
             ? `${place.name} starts before you arrive.`
             : `${place.name} starts before the arrival-day buffer ends.`,
@@ -1779,6 +1880,7 @@ function composeSchedule(
         severity: 'error',
         placeId: place.id,
         day: blockedDay?.day,
+        source: bookingConflictSource(...(blockedDay?.fixedEvents ?? [])),
         message: departure
           ? `${place.name} could not fit before your departure.`
           : arrival
@@ -1907,6 +2009,7 @@ export function validateItineraryProposal(
           severity: 'error',
           day: day.day,
           placeId: item.placeId,
+          source: bookingConflictSource(blocked),
           message: `${item.name} overlaps ${blocked.name}.`,
         });
       }
@@ -1928,6 +2031,7 @@ export function validateItineraryProposal(
             severity: 'error',
             day: day.day,
             placeId: item.placeId,
+            source: bookingConflictSource(...(materialDay.fixedEvents ?? [])),
             message: arrival && startLimit !== undefined && start < startLimit
               ? `${item.name} starts before you arrive.`
               : departure
@@ -1950,6 +2054,7 @@ export function validateItineraryProposal(
         severity: 'error',
         placeId: place.id,
         day: blockedDay?.day,
+        source: bookingConflictSource(...(blockedDay?.fixedEvents ?? [])),
         message: departure
           ? `${place.name} could not fit before your departure.`
           : arrival
@@ -1977,6 +2082,15 @@ const dedupeConflicts = (conflicts: ProposalConflict[]): ProposalConflict[] => {
   });
 };
 
+/** Booking errors are deterministic preflight facts, not model repair input. */
+export function planningMaterialForModel(material: PlanningMaterial): PlanningMaterial {
+  if (!material.bookingConflicts && !material.bookingTrace) return material;
+  const safe = { ...material };
+  delete safe.bookingConflicts;
+  delete safe.bookingTrace;
+  return safe;
+}
+
 export async function runItineraryProposalEngine(
   material: PlanningMaterial,
   deps: ProposalEngineDeps,
@@ -1987,10 +2101,16 @@ export async function runItineraryProposalEngine(
   let routeLegs: RouteMatrixLeg[] = [];
   let matrixCalls = 0;
   let repairIterations = 0;
+  const modelMaterial = planningMaterialForModel(material);
 
   for (let attempt = 0; attempt <= MAX_REPAIR_ITERATIONS; attempt += 1) {
     deps.onProgress?.('scheduling_started');
-    const raw = await deps.chooseComposition({ material, round: attempt + 1, conflicts, previous });
+    const raw = await deps.chooseComposition({
+      material: modelMaterial,
+      round: attempt + 1,
+      conflicts: conflicts.filter((conflict) => conflict.source !== 'booking'),
+      previous,
+    });
     const composition = parseModelComposition(raw, material) ?? defaultComposition(material);
     const placeIds = [...new Set([
       ...composition.days.flatMap((day) => day.placeIds),
@@ -2008,9 +2128,18 @@ export async function runItineraryProposalEngine(
     conflicts = dedupeConflicts([...built.conflicts, ...validateItineraryProposal(finalDays, material)]);
     deps.onProgress?.('validation_complete');
     previous = composition;
-    if (!conflicts.some((conflict) => conflict.severity === 'error')) break;
+    const errors = conflicts.filter((conflict) => conflict.severity === 'error');
+    if (errors.length === 0 || errors.every((conflict) => conflict.source === 'booking')) break;
     if (attempt < MAX_REPAIR_ITERATIONS) repairIterations += 1;
   }
+
+  // Stay-route and linked-flight disagreements cannot be repaired by moving
+  // places. Add them only after the model loop so no model is asked to reason
+  // about a deterministic booking fact.
+  conflicts = dedupeConflicts([
+    ...conflicts,
+    ...(material.bookingConflicts ?? []).map((conflict): ProposalConflict => ({ ...conflict })),
+  ]);
 
   const scheduled = new Set(finalDays.flatMap((day) => day.items.flatMap((item) => item.placeId ? [item.placeId] : [])));
   if (scheduled.size === 0) {
@@ -2058,6 +2187,10 @@ export async function runItineraryProposalEngine(
     routedLegCount: confirmedLegs,
     validationVersion: 2,
     arrangementFingerprint,
+    bookingConstraintsApplied: material.bookingTrace?.bookingConstraintsApplied,
+    confirmedBookingsApplied: material.bookingTrace?.confirmedBookingsApplied,
+    requestedBookingsProtected: material.bookingTrace?.requestedBookingsProtected,
+    bookingConflicts: material.bookingTrace?.bookingConflicts,
   };
   /**
    * The ID is a fingerprint of the plan, not of the moment it was made.

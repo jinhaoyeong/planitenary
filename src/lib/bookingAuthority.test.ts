@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Activity, Itinerary } from '../data';
 import { emptyItinerary, sanitizeItinerary } from './itinerarySanitize';
-import { bookingDayNumber, elapsedMinutes, hasComparableClocks, isTimeZone, type TravelBooking } from './travelBooking';
+import { bookingConstraintStrength, bookingDayNumber, elapsedMinutes, hasComparableClocks, isTimeZone, type TravelBooking } from './travelBooking';
 import { bookingDayShape, committedBookingsForDay, stayRouteConflicts } from './bookingConstraints';
 
 const TRIP_START = '2027-01-21';
@@ -20,11 +20,10 @@ const booking = (overrides: Partial<TravelBooking> & Pick<TravelBooking, 'id' | 
   ...overrides,
 } as TravelBooking);
 
-describe('flight authority stays with the itinerary activity', () => {
+describe('flight authorities only join through an explicit relationship', () => {
   it('leaves the scheduling fields of a flight activity untouched by a booking', () => {
     // The Add Flight control writes `type: 'flight'` + `durationMinutes` onto a
-    // day. That is what the proposal engine reads. A booking beside it must not
-    // change any of it.
+    // day. An unlinked booking beside it must not mutate any Activity field.
     const flightActivity: Activity = {
       id: 'act-flight',
       type: 'flight',
@@ -52,7 +51,7 @@ describe('flight authority stays with the itinerary activity', () => {
     expect(savedFlight.type).toBe('flight');
     expect(savedFlight.time).toBe('10:55');
     expect(savedFlight.durationMinutes).toBe(445);
-    // The booking carries the commercial half only.
+    // The booking carries its own richer reservation facts without rewriting.
     expect(saved.bookings?.[0].reference).toBe('X7QK2M');
     expect(saved.bookings?.[0]).not.toHaveProperty('durationMinutes');
   });
@@ -243,6 +242,15 @@ describe('status decides what constrains a day', () => {
     const confirmed = bookingDayShape(committedBookingsForDay([flight('confirmed')], 11, TRIP_START, 11));
     expect(planned).not.toEqual(confirmed);
     expect(confirmed.returnTimeOverride).toBe('07:25');
+  });
+
+  it.each([
+    ['confirmed', 'hard'],
+    ['requested', 'provisional'],
+    ['planned', 'none'],
+    ['cancelled', 'none'],
+  ] as const)('%s has %s planning authority', (status, strength) => {
+    expect(bookingConstraintStrength({ status })).toBe(strength);
   });
 });
 

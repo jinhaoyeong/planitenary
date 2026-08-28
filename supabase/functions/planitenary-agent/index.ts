@@ -1228,11 +1228,11 @@ Deno.serve(async (request) => {
 
     try {
       const proposal = await runItineraryProposalEngine(material, {
-        chooseComposition: async ({ round, conflicts, previous }) => {
+        chooseComposition: async ({ material: modelMaterial, round, conflicts, previous }) => {
           const outcome = await callOneRound({
             operation,
             round,
-            planningMaterial: material,
+            planningMaterial: modelMaterial,
             conflicts,
             previousComposition: previous,
             finalRound: round >= 1 + material.limits.maxRepairIterations,

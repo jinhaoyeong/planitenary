@@ -13,6 +13,7 @@ import {
 interface BookingEditorProps {
   bookings: TravelBooking[];
   cities: string[];
+  flightActivities?: Array<{ id: string; day: number; time: string; name: string }>;
   /** `YYYY-MM-DD`, used only to seed a new booking's date. */
   defaultDate?: string;
   onChange: (bookings: TravelBooking[]) => void;
@@ -93,7 +94,7 @@ const KNOWN_TIME_ZONES: string[] = (() => {
  * traveller does not care to record is still a constraint on the day, and
  * demanding a number would push people into typing a wrong one.
  */
-export function BookingEditor({ bookings, cities, defaultDate, onChange, onClose }: BookingEditorProps) {
+export function BookingEditor({ bookings, cities, flightActivities = [], defaultDate, onChange, onClose }: BookingEditorProps) {
   const seedDate = defaultDate || new Date().toISOString().slice(0, 10);
   const [drafts, setDrafts] = useState<TravelBooking[]>(() => sortBookings(bookings));
   const [priceText, setPriceText] = useState<Record<string, string>>(() =>
@@ -218,6 +219,32 @@ export function BookingEditor({ bookings, cities, defaultDate, onChange, onClose
                     ))}
                   </select>
                 </label>
+
+                {booking.type === 'flight' && (flightActivities.length > 0 || booking.relatedActivityId) && (
+                  <label>
+                    <span>Existing flight schedule</span>
+                    <select
+                      className="editorial-select"
+                      value={booking.relatedActivityId || ''}
+                      aria-label="Existing flight schedule"
+                      aria-describedby={`booking-flight-link-${booking.id}`}
+                      onChange={(event) => update(booking.id, { relatedActivityId: event.target.value || undefined })}
+                    >
+                      <option value="">Separate flight — no link</option>
+                      {flightActivities.map((activity) => (
+                        <option key={activity.id} value={activity.id}>
+                          Day {activity.day} · {activity.time} · {activity.name}
+                        </option>
+                      ))}
+                      {booking.relatedActivityId && !flightActivities.some((activity) => activity.id === booking.relatedActivityId) && (
+                        <option value={booking.relatedActivityId}>Linked flight no longer exists</option>
+                      )}
+                    </select>
+                    <small id={`booking-flight-link-${booking.id}`} className="journey-booking-field-note">
+                      Link only when this booking and the itinerary flight are the same real flight.
+                    </small>
+                  </label>
+                )}
 
                 {fields.includes('route') && (
                   <>

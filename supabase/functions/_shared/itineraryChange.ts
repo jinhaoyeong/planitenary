@@ -187,6 +187,8 @@ export interface AppliedItineraryResult {
   unresolvedPlaceIds: string[];
   /** Proposed overnight moves lacking the exact explicit transfer authority. */
   unauthorizedBaseChanges: Array<{ day: number; from: string; to: string }>;
+  /** Byte-for-byte guard over the entire booking array, including planned rows. */
+  bookingsPreserved: boolean;
 }
 
 /**
@@ -202,7 +204,9 @@ export function applyProposalToItinerary(
   itineraryValue: unknown,
   proposal: TripItineraryProposal,
 ): AppliedItineraryResult {
-  const itinerary = clone(asRecord(itineraryValue) ?? {});
+  const source = asRecord(itineraryValue) ?? {};
+  const sourceBookings = JSON.stringify(source.bookings);
+  const itinerary = clone(source);
   const refs = indexPlannerActivities(itinerary);
   const byPlaceId = new Map(refs.map((ref) => [ref.placeId, ref]));
   const plannedDays = new Set(plannedDayNumbers(itinerary));
@@ -302,7 +306,13 @@ export function applyProposalToItinerary(
   }
   itinerary.revision = Math.max(0, Math.round(finite(itinerary.revision) ?? 0)) + 1;
 
-  return { itinerary, unscheduledPlaceIds, unresolvedPlaceIds, unauthorizedBaseChanges };
+  return {
+    itinerary,
+    unscheduledPlaceIds,
+    unresolvedPlaceIds,
+    unauthorizedBaseChanges,
+    bookingsPreserved: JSON.stringify(itinerary.bookings) === sourceBookings,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +359,9 @@ export function validateStagedChange(
   }
   if (applied.unresolvedPlaceIds.length > 0) {
     blocking.push(`The proposal references ${applied.unresolvedPlaceIds.length} place(s) that are no longer in this trip.`);
+  }
+  if (!applied.bookingsPreserved) {
+    blocking.push('Smart Plan changed booking facts it has no authority to edit.');
   }
   for (const change of applied.unauthorizedBaseChanges) {
     blocking.push(`Day ${change.day} cannot change its overnight base from ${change.from || 'unknown'} to ${change.to || 'unknown'} without an authorized transfer.`);

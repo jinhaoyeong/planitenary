@@ -203,6 +203,7 @@ const parseConflict = (value: unknown): ProposalConflict | undefined => {
     day: finite(raw.day),
     placeId: text(raw.placeId, 120),
     relatedPlaceId: text(raw.relatedPlaceId, 120),
+    source: raw.source === 'booking' ? 'booking' : undefined,
   };
 };
 
@@ -225,6 +226,14 @@ const parseProposalMeta = (value: unknown): ProposalMeta | undefined => {
     omittedCount: Math.max(0, Math.round(finite(raw.omittedCount) ?? 0)),
     routedLegCount: Math.max(0, Math.round(finite(raw.routedLegCount) ?? 0)),
     validationVersion: Math.round(validationVersion),
+    bookingConstraintsApplied: finite(raw.bookingConstraintsApplied) === undefined
+      ? undefined : Math.max(0, Math.round(finite(raw.bookingConstraintsApplied)!)),
+    confirmedBookingsApplied: finite(raw.confirmedBookingsApplied) === undefined
+      ? undefined : Math.max(0, Math.round(finite(raw.confirmedBookingsApplied)!)),
+    requestedBookingsProtected: finite(raw.requestedBookingsProtected) === undefined
+      ? undefined : Math.max(0, Math.round(finite(raw.requestedBookingsProtected)!)),
+    bookingConflicts: finite(raw.bookingConflicts) === undefined
+      ? undefined : Math.max(0, Math.round(finite(raw.bookingConflicts)!)),
     arrangementFingerprint,
   };
 };

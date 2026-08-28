@@ -2207,6 +2207,12 @@ aside.journey-ask-panel {
 }
 .journey-booking-form label { display: grid; gap: 4px; min-width: 0; }
 .journey-booking-form label > span { color: var(--journey-muted); font-size: .64rem; font-weight: 600; }
+.journey-booking-field-note {
+  color: var(--journey-muted);
+  font-size: .62rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .journey-booking-form .editorial-input,
 .journey-booking-form .editorial-select { width: 100%; min-width: 0; }
 .journey-booking-remove {

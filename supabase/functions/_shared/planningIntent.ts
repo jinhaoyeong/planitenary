@@ -46,6 +46,10 @@ export interface ProposalMeta {
   omittedCount: number;
   routedLegCount: number;
   validationVersion: number;
+  bookingConstraintsApplied?: number;
+  confirmedBookingsApplied?: number;
+  requestedBookingsProtected?: number;
+  bookingConflicts?: number;
   /** Stable assignment structure; timestamps and prose are deliberately absent. */
   arrangementFingerprint: string;
 }

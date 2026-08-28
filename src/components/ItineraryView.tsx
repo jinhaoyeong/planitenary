@@ -1270,6 +1270,13 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
    */
   const cityOptions = useMemo(() => tripCityOptions(customItinerary), [customItinerary]);
   const dateOptions = useMemo(() => tripDateOptions(customItinerary), [customItinerary]);
+  const flightActivityOptions = useMemo(
+    () => customItinerary.days.flatMap((day) => day.activities.flatMap((activity) =>
+      activity.type === 'flight' && activity.id
+        ? [{ id: activity.id, day: day.day, time: activity.time, name: activity.name }]
+        : [])),
+    [customItinerary.days],
+  );
 
   const plannerProfile = useMemo(() => sanitizeTripProfile(customItinerary.tripProfile), [customItinerary.tripProfile]);
   /**
@@ -1833,6 +1840,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
               <BookingEditor
                 bookings={customItinerary.bookings || []}
                 cities={customItinerary.cities}
+                flightActivities={flightActivityOptions}
                 defaultDate={sanitizeTripProfile(customItinerary.tripProfile)?.startDate}
                 onChange={handleBookingsChange}
                 onClose={() => setBookingEditorOpen(false)}

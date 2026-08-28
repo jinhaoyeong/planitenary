@@ -7,33 +7,9 @@
  * question we can answer ourselves would be rude.
  */
 
-/**
- * Minutes a zone is ahead of UTC on a given date, or null when the zone is
- * unknown or the runtime cannot answer.
- *
- * Uses the date rather than a fixed offset because zones move: Melbourne is
- * +10 in July and +11 in January, and a trip planned across a daylight-saving
- * boundary would otherwise be an hour out.
- */
-export function timezoneOffsetMinutes(timeZone: string | undefined, at: Date = new Date()): number | null {
-  if (!timeZone) return null;
-  try {
-    const formatted = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
-      .formatToParts(at)
-      .find((part) => part.type === 'timeZoneName')?.value;
-    if (!formatted) return null;
-    // "GMT" alone means UTC; otherwise "GMT+09:00" or "GMT-05:30".
-    if (/^GMT$/i.test(formatted.trim())) return 0;
-    const match = formatted.match(/GMT([+-])(\d{1,2}):?(\d{2})?/i);
-    if (!match) return null;
-    const sign = match[1] === '-' ? -1 : 1;
-    return sign * (Number(match[2]) * 60 + Number(match[3] || 0));
-  } catch {
-    // An invalid zone name, or a runtime without `longOffset`. Either way the
-    // honest answer is "unknown", which the planner treats as no jet lag.
-    return null;
-  }
-}
+import { timezoneOffsetMinutes } from '../../supabase/functions/_shared/timeZoneMath';
+
+export { timezoneOffsetMinutes };
 
 /** The traveller's own zone, or undefined where the runtime will not say. */
 export function homeTimezone(): string | undefined {
