@@ -66,6 +66,22 @@ export interface Activity {
    * kept only so old records still render.
    */
   admission?: PlaceAdmission;
+  /**
+   * Whether this stop needs booking ahead — a property of the place, not a
+   * reservation record.
+   *
+   * It is written from `reservationRequirement` when a place is discovered
+   * (`destinationIntelligence`) and read to mark a slot as reserved when a
+   * proposal is built (`itineraryProposal`). It has never held a date, a
+   * reference or a price, and it should not start: the actual arrangement
+   * lives in {@link Itinerary.bookings} as a `TravelBooking`.
+   *
+   * Kept deliberately, rather than folded into the booking layer. One field
+   * answers "does this museum want a ticket in advance"; the other answers
+   * "which ticket do I hold". Collapsing them would give a single value two
+   * authorities and force every place card to own a reservation it does not
+   * have.
+   */
   bookingStatus?: BookingStatus;
   reservationRequirement?: 'not-needed' | 'recommended' | 'required' | 'unknown';
   /**
