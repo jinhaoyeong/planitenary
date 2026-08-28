@@ -402,6 +402,72 @@ describe('revision ordering decides which write wins', () => {
   });
 });
 
+describe('a blank placeholder never outranks a real trip at the same revision', () => {
+  /** What `App` shows while the first fetch is in flight: `emptyItinerary` under the trip's id. */
+  const placeholder = (revision?: number): Itinerary => {
+    const blank = { ...emptyItinerary, id: 'trip-874ca879' } as Itinerary;
+    if (revision === undefined) delete (blank as { revision?: number }).revision;
+    else blank.revision = revision;
+    return blank;
+  };
+
+  /** A trip as stored before revisions existed: real days, no revision. */
+  const legacyTrip = (city: string): Itinerary => {
+    const trip = {
+      ...emptyItinerary,
+      id: 'trip-874ca879',
+      name: `${city} 2026`,
+      cities: [city],
+      days: [{ day: 1, date: '2027-01-21', stayCity: city, activityCities: [], city, title: 'Day one', activities: [] }],
+    } as Itinerary;
+    delete (trip as { revision?: number }).revision;
+    return trip;
+  };
+
+  it('adopts a real server trip over the blank slate when both read as 0', () => {
+    // The reported failure: Bangkok 2026 rendered as "New Trip" on any device
+    // with no local copy, because 0 > 0 is false.
+    expect(isNewerItineraryRevision(legacyTrip('Bangkok'), placeholder())).toBe(true);
+  });
+
+  it('adopts it when both carry an explicit revision 0', () => {
+    expect(isNewerItineraryRevision({ ...legacyTrip('Phuket'), revision: 0 }, placeholder(0))).toBe(true);
+  });
+
+  it('adopts a server trip whose only content is what the traveller booked', () => {
+    const booked = { ...placeholder(), bookings: [{ id: 'b1', type: 'rail', status: 'confirmed', title: 'BKK → Ayutthaya', startDate: '2027-01-21' }] } as unknown as Itinerary;
+    expect(isNewerItineraryRevision(booked, placeholder())).toBe(true);
+  });
+
+  it('still refuses to overwrite a real local trip at the same revision', () => {
+    // Two genuine plans at one revision is the concurrent-edit case, which a
+    // number cannot resolve. Keeping what is in hand stays the safer half.
+    expect(isNewerItineraryRevision(legacyTrip('Seoul'), legacyTrip('Bangkok'))).toBe(false);
+  });
+
+  it('refuses to overwrite local bookings with an equal-revision copy', () => {
+    const local = { ...legacyTrip('Bangkok'), bookings: [{ id: 'b1', type: 'rail', status: 'confirmed', title: 'Held seat', startDate: '2027-01-21' }] } as unknown as Itinerary;
+    expect(isNewerItineraryRevision(legacyTrip('Bangkok'), local)).toBe(false);
+  });
+
+  it('keeps ordering intact once revisions actually differ', () => {
+    expect(isNewerItineraryRevision({ ...legacyTrip('Bangkok'), revision: 1 }, { ...legacyTrip('Bangkok'), revision: 2 })).toBe(false);
+    expect(isNewerItineraryRevision({ ...legacyTrip('Bangkok'), revision: 2 }, { ...legacyTrip('Bangkok'), revision: 1 })).toBe(true);
+  });
+
+  it('settles after one adoption rather than looping', () => {
+    // Once the real trip is in hand it has content, so the next identical
+    // payload is refused and the realtime echo cannot ping-pong.
+    const adopted = legacyTrip('Bangkok');
+    expect(isNewerItineraryRevision(adopted, placeholder())).toBe(true);
+    expect(isNewerItineraryRevision(legacyTrip('Bangkok'), adopted)).toBe(false);
+  });
+
+  it('does not adopt one blank over another', () => {
+    expect(isNewerItineraryRevision(placeholder(), placeholder())).toBe(false);
+  });
+});
+
 describe('flight duration survives sanitisation', () => {
   it('keeps a positive flight durationMinutes through save and reload', () => {
     const flight: Activity = {

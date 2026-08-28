@@ -814,9 +814,34 @@ export const logItinerarySync = (writer: string, detail: Record<string, unknown>
  * write is dropped rather than merged. Ordering by a number cannot fix that —
  * only a real merge could — but silently losing the newer plan is the worse
  * failure, and it is the one being reported.
+ *
+ * The one exception is the blank slate. A trip saved before revisions existed
+ * carries none, so it reads as 0 — and the placeholder `App` shows while the
+ * fetch is in flight is `emptyItinerary`, which is also 0. Ordering alone then
+ * says "already have it" and the real trip is discarded, leaving the traveller
+ * looking at "New Trip" on any device that has no local copy. Nothing is lost
+ * on the server, but the trip cannot be opened at all.
+ *
+ * So an equal revision defers to content: an itinerary holding nothing has no
+ * claim to outrank one that does. This deliberately does not extend to a real
+ * local trip — that keeps the ordering rule above, because two genuine plans at
+ * the same revision are the concurrent-edit case, where dropping the incoming
+ * copy is the safer half of a choice a number cannot make correctly.
  */
-export const isNewerItineraryRevision = (incoming: Itinerary, current: Itinerary | null): boolean =>
-  !current || (incoming.revision || 0) > (current.revision || 0);
+const hasTripContent = (itinerary: Itinerary): boolean =>
+  itinerary.days.length > 0
+  || (itinerary.unassignedActivities?.length ?? 0) > 0
+  || (itinerary.bookings?.length ?? 0) > 0
+  || itinerary.cities.length > 0
+  || Boolean(itinerary.tripProfile);
+
+export const isNewerItineraryRevision = (incoming: Itinerary, current: Itinerary | null): boolean => {
+  if (!current) return true;
+  const incomingRevision = incoming.revision || 0;
+  const currentRevision = current.revision || 0;
+  if (incomingRevision !== currentRevision) return incomingRevision > currentRevision;
+  return !hasTripContent(current) && hasTripContent(incoming);
+};
 
 export const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
   const source = value && typeof value === 'object' ? value as Partial<Itinerary> : {};
