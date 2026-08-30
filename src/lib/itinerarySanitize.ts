@@ -644,6 +644,7 @@ const PRICE_SOURCE_VALUES: Record<PriceSource, true> = {
   manual: true,
   provider: true,
   'official-website': true,
+  unspecified: true,
 };
 
 const bookingText = (value: unknown, limit = 160): string | undefined => {
@@ -683,7 +684,11 @@ const sanitizePriceSnapshot = (value: unknown): PriceSnapshot | undefined => {
   if (!currency) return undefined;
   const retrievedAt = trimmed(raw.retrievedAt);
   if (!retrievedAt) return undefined;
-  const source = has(PRICE_SOURCE_VALUES, raw.source) ? raw.source as PriceSource : 'manual';
+  // An unreadable source is not a manual one. Defaulting to 'manual' claimed
+  // the traveller typed a figure they may never have seen — invented provenance
+  // in the opposite direction from trusting a provider. The amount survives;
+  // the claim about who supplied it does not.
+  const source = has(PRICE_SOURCE_VALUES, raw.source) ? raw.source as PriceSource : 'unspecified';
   return {
     amount: raw.amount,
     currency,

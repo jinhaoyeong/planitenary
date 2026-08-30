@@ -487,17 +487,90 @@ describe('telling an absent price from a manual one', () => {
     expect(priceFreshness(saved?.price, NOW)).toBe('checked');
   });
 
-  it('falls back to manual only when stored provenance is unreadable', () => {
-    // The conservative direction: an unrecognised source must never be promoted
-    // into a claim that some provider or operator supplied the figure.
-    const saved = sanitizeTravelBooking({
-      id: 'booking-activity-3',
-      type: 'activity-ticket',
-      status: 'planned',
-      title: 'Older record',
-      startDate: '2027-01-29',
-      price: { amount: 40, currency: 'MYR', source: 'scraped-from-somewhere', retrievedAt: '2027-01-29T11:40:00Z' },
-    }, 0);
-    expect(saved?.price?.source).toBe('manual');
+
+});
+
+/**
+ * A stored amount whose `source` is unreadable is a price without provenance.
+ *
+ * The first fix for this defaulted it to `manual`, which is safe from a
+ * provider-trust angle and still untrue: it asserts the traveller typed a
+ * figure they may never have seen. The amount is knowable; who supplied it is
+ * not, and the model now keeps those two facts apart.
+ */
+describe('a price whose provenance did not survive', () => {
+  const legacy = (source: unknown) => sanitizeTravelBooking({
+    id: 'booking-activity-legacy',
+    type: 'activity-ticket',
+    status: 'planned',
+    title: 'Older record',
+    startDate: '2027-01-29',
+    price: { amount: 50, currency: 'MYR', source, retrievedAt: '2027-01-29T11:40:00Z' },
+  }, 0);
+
+  it('keeps the amount rather than discarding a real number', () => {
+    const saved = legacy('scraped-from-somewhere');
+    expect(saved?.price?.amount).toBe(50);
+    expect(saved?.price?.currency).toBe('MYR');
+  });
+
+  it('never claims the traveller entered it', () => {
+    for (const source of ['scraped-from-somewhere', undefined, '', 42, null]) {
+      expect(legacy(source)?.price?.source).toBe('unspecified');
+      expect(legacy(source)?.price?.source).not.toBe('manual');
+    }
+  });
+
+  it('never claims anyone vouched for it either', () => {
+    const price = legacy('scraped-from-somewhere')?.price;
+    const state = priceFreshness(price, NOW);
+    expect(state).toBe('unsourced');
+    for (const claim of ['checked', 'live', 'manual', 'expired', 'unknown']) {
+      expect(state).not.toBe(claim);
+    }
+  });
+
+  it('says what it can and no more', () => {
+    const price = legacy('scraped-from-somewhere')?.price;
+    expect(priceValidityLabel(price, NOW)).toBe('Source not recorded');
+    expect(priceCheckedLabel(price, NOW)).toBe('Source not recorded');
+    expect(formatBookingPrice(price)).toBe('MYR 50');
+  });
+
+  it('does not let an expiry it never carried apply to it', () => {
+    // An unsourced price has no provider boundary, so it cannot expire, and an
+    // age-based policy must not quietly promote it to "checked then stale".
+    const price = legacy('scraped-from-somewhere')?.price;
+    const ageing: FreshnessPolicy = { mode: 'age-based', staleAfterMinutes: 1 };
+    expect(priceFreshness(price, NOW, ageing)).toBe('unsourced');
+  });
+
+  it('does not become a receipt when the booking is confirmed', () => {
+    const price = legacy('scraped-from-somewhere')?.price;
+    const confirmed = { status: 'confirmed' as const, provider: undefined, price };
+    expect(bookingPriceFreshness(confirmed, NOW)).toBe('unsourced');
+    expect(bookingPriceValidityLabel(confirmed, NOW)).toBe('Source not recorded');
+    expect(refreshUnavailableReason(confirmed)).toBe('Price paid at booking');
+  });
+
+  it('offers no refresh, and says why truthfully', () => {
+    const price = legacy('scraped-from-somewhere')?.price;
+    const planned = { status: 'planned' as const, provider: undefined, price };
+    expect(canRefreshPrice(planned)).toBe(false);
+    expect(refreshUnavailableReason(planned)).toBe('Source not recorded');
+  });
+
+  it('round-trips deterministically without acquiring provenance', () => {
+    const once = legacy('scraped-from-somewhere');
+    const twice = sanitizeTravelBooking(JSON.parse(JSON.stringify(once)), 0);
+    expect(twice?.price).toEqual(once?.price);
+    expect(twice?.price?.source).toBe('unspecified');
+    expect(priceFreshness(twice?.price, NOW)).toBe('unsourced');
+  });
+
+  it('leaves a readable source alone', () => {
+    expect(legacy('official-website')?.price?.source).toBe('official-website');
+    expect(legacy('provider')?.price?.source).toBe('provider');
+    expect(legacy('manual')?.price?.source).toBe('manual');
   });
 });

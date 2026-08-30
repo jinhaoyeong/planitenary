@@ -132,7 +132,7 @@ export const bookingPriceFreshness = (
   // `unknown` survives confirmation: a booking nobody recorded a price for has
   // no receipt to downgrade to, and calling it `checked` would assert a figure
   // was read when none exists.
-  if (freshness === 'unknown' || freshness === 'manual') return freshness;
+  if (freshness === 'unknown' || freshness === 'manual' || freshness === 'unsourced') return freshness;
   if (booking.status !== 'confirmed') return freshness;
   return 'checked';
 };
@@ -142,7 +142,11 @@ export const bookingPriceValidityLabel = (
   booking: Pick<TravelBooking, 'provider' | 'price' | 'status'>,
   now: number,
 ): string | undefined => {
-  if (booking.status === 'confirmed' && booking.price && booking.price.source !== 'manual') {
+  // 'Price paid at booking' asserts this figure is what was charged. That holds
+  // for a sourced price on a confirmed record, and not for one whose provenance
+  // is unknown — nobody can say the amount was ever quoted, let alone paid.
+  const sourced = booking.price && booking.price.source !== 'manual' && booking.price.source !== 'unspecified';
+  if (booking.status === 'confirmed' && sourced) {
     return 'Price paid at booking';
   }
   return priceValidityLabel(booking.price, now, freshnessPolicyFor(booking.provider));
@@ -185,5 +189,6 @@ export function refreshUnavailableReason(booking: Pick<TravelBooking, 'provider'
   // entered invents a traveller action, and it is the state most activities
   // are in — an attraction with no provider has no figure to refresh.
   if (!booking.price && !booking.provider) return 'No price to refresh';
+  if (booking.price?.source === 'unspecified' && !booking.provider) return 'Source not recorded';
   return 'This provider is not connected';
 }

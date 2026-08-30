@@ -15,7 +15,7 @@
  * supplies it, and "Available" without an authority is the exact failure the
  * booking layer exists to prevent.
  */
-import { isLikelyResellerUrl, isSafePublicUrl } from '../../supabase/functions/_shared/officialSource';
+import { isLikelyResellerUrl, isSafePublicUrl } from '../../supabase/functions/_shared/urlSafety';
 import type { PriceSnapshot } from './travelBooking';
 
 /**

@@ -21,57 +21,10 @@
 
 import type { OpeningRule } from './osmPlaces.ts';
 import { parseAdmissionText, resolveCurrency, type AdmissionFare, type PlaceAdmission } from './placeCost.ts';
+import { isSafePublicUrl } from './urlSafety.ts';
 
-/**
- * Whether a URL is safe for the server to fetch.
- *
- * Place websites come from community-edited map data, so this is a
- * server-side request forgery surface: an edited tag pointing at
- * `http://169.254.169.254/` or `http://10.0.0.5/` would make our server read
- * something the traveller could never reach.
- *
- * Rejected: anything not HTTPS, embedded credentials, non-standard ports,
- * loopback and link-local names, internal-only suffixes, and IP literals in
- * private or reserved ranges.
- *
- * Residual risk: a public hostname whose DNS resolves to a private address
- * still passes, because resolution happens after this check. Closing that
- * needs resolve-then-pin, which the Edge runtime does not expose. The
- * consequence is bounded — the response is only ever parsed for opening hours
- * and never returned to the traveller verbatim.
- */
-export function isSafePublicUrl(raw: string | undefined): boolean {
-  if (!raw) return false;
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== 'https:') return false;
-  if (url.username || url.password) return false;
-  if (url.port && url.port !== '443') return false;
-
-  const host = url.hostname.toLowerCase();
-  if (!host || host === 'localhost') return false;
-  if (/\.(local|internal|localdomain|home\.arpa)$/.test(host)) return false;
-
-  // IPv6 literals arrive bracketed; no legitimate venue publishes one.
-  if (host.startsWith('[')) return false;
-
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-    if (a === 10 || a === 127 || a === 0) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    // Link-local, including the cloud metadata endpoint at 169.254.169.254.
-    if (a === 169 && b === 254) return false;
-    if (a === 100 && b >= 64 && b <= 127) return false;
-    if (a >= 224) return false;
-  }
-  return true;
-}
+// Both guards moved to the runtime-neutral leaf so the browser can share them.
+export { isLikelyResellerUrl, isSafePublicUrl } from './urlSafety.ts';
 
 /** schema.org day names → `Date.getDay()`. Accepts bare names and full URLs. */
 const DAY_NAMES: Record<string, number> = {
@@ -522,19 +475,6 @@ export function officialTicketLinks(html: string, baseUrl: string, max = 3): str
   return found;
 }
 
-/** Known map, guide and reseller hosts are not official operator sources. */
-export function isLikelyResellerUrl(raw: string | undefined): boolean {
-  if (!raw) return false;
-  let host = '';
-  try { host = new URL(raw).hostname.toLowerCase().replace(/^www\./, ''); } catch { return true; }
-  return [
-    'booking.com', 'expedia.com', 'getyourguide.com', 'klook.com', 'viator.com',
-    'tripadvisor.com', 'rakutentravel.com', 'kkday.com', 'traveloka.com',
-    'trip.com', 'ctrip.com', 'agoda.com', 'tiqets.com', 'headout.com',
-    'google.com', 'google.co.jp', 'maps.google.com', 'amap.com', 'baidu.com',
-    'wikivoyage.org', 'wikipedia.org',
-  ].some((blocked) => host === blocked || host.endsWith(`.${blocked}`));
-}
 
 /**
  * Closure and renovation notices, which are the operational facts only an

@@ -55,8 +55,18 @@ export type TravelBookingStatus = 'planned' | 'requested' | 'confirmed' | 'cance
  * Where a figure came from. `manual` is the honest answer for everything a
  * traveller typed in, and it is what stops the UI offering to "refresh" a
  * number that no system can re-fetch.
+ *
+ * `unspecified` is for a stored amount whose provenance cannot be established
+ * — a legacy record, or one whose `source` did not survive whatever wrote it.
+ * It exists because the alternatives are both lies: `manual` claims the
+ * traveller typed a figure they may never have seen, and any sourced value
+ * claims someone vouched for it. The amount is knowable; who supplied it is
+ * not, and those are separate facts.
+ *
+ * Nothing ever writes `unspecified` deliberately. It is what reading an
+ * unreadable record yields.
  */
-export type PriceSource = 'manual' | 'provider' | 'official-website';
+export type PriceSource = 'manual' | 'provider' | 'official-website' | 'unspecified';
 
 /**
  * One price, as it stood at one moment.
@@ -176,7 +186,7 @@ export const bookingCityKey = (city: string): string => city.trim().toLowerCase(
 
 export const TRAVEL_BOOKING_TYPES: TravelBookingType[] = ['flight', 'stay', 'rail', 'transfer', 'activity-ticket'];
 export const TRAVEL_BOOKING_STATUSES: TravelBookingStatus[] = ['planned', 'requested', 'confirmed', 'cancelled'];
-export const PRICE_SOURCES: PriceSource[] = ['manual', 'provider', 'official-website'];
+export const PRICE_SOURCES: PriceSource[] = ['manual', 'provider', 'official-website', 'unspecified'];
 
 /** A booking the traveller is actually holding, rather than sketching. */
 export const isCommittedBooking = (booking: TravelBooking): boolean =>
@@ -231,8 +241,14 @@ export type PriceFreshness = 'live' | 'checked' | 'stale' | 'expired' | 'manual'
  *
  * Absence is still modelled by the absent snapshot itself — `unknown` is the
  * derived reading of `price === undefined`, never a stored value.
+ *
+ * `unsourced` is the third case, and it is not the same as either: there *is*
+ * an amount, but nobody can say where it came from (see `PriceSource`'s
+ * `unspecified`). It cannot be `checked`, which would assert we asked someone,
+ * and it cannot be `manual`, which would assert the traveller answered. The
+ * number is shown; the vouching is not.
  */
-export type PriceState = 'unknown' | PriceFreshness;
+export type PriceState = 'unknown' | 'unsourced' | PriceFreshness;
 
 /**
  * How a given provider's prices age, declared by that provider.
@@ -281,6 +297,9 @@ export function priceFreshness(
   // to attribute to the traveller and nothing to refresh.
   if (!price) return 'unknown';
   if (price.source === 'manual') return 'manual';
+  // An amount whose provenance did not survive. Reporting it as checked would
+  // claim a reading nobody can point at, so the number stands alone.
+  if (price.source === 'unspecified') return 'unsourced';
 
   // Only a provider's own expiry can expire a price, and inside that boundary
   // the provider is still standing behind the number — however long ago we
@@ -309,6 +328,7 @@ export function priceFreshness(
 export function priceCheckedLabel(price: PriceSnapshot | undefined, now: number): string | undefined {
   if (!price) return undefined;
   if (price.source === 'manual') return 'Price entered manually';
+  if (price.source === 'unspecified') return 'Source not recorded';
   const retrievedAt = parseInstant(price.retrievedAt);
   if (retrievedAt === undefined) return undefined;
   const minutes = Math.max(0, Math.round((now - retrievedAt) / 60000));
@@ -340,6 +360,7 @@ export function priceValidityLabel(
   // than a claim about a figure, so this layer stays silent.
   if (freshness === 'unknown') return undefined;
   if (freshness === 'manual') return 'Price entered manually';
+  if (freshness === 'unsourced') return 'Source not recorded';
   if (freshness === 'expired') return 'Expired';
   if (freshness === 'stale') return 'Price may have changed';
   if (freshness === 'checked') return priceCheckedLabel(price, now);
