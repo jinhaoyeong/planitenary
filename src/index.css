@@ -1412,6 +1412,10 @@ body.planner-intelligence-active .pet-overlay {
  */
 .destination-detail-official-link {
   display: inline-block;
+  /* `.destination-detail-section` is a grid; without this the link stretches
+     to the column width and the :focus-visible ring becomes a full-row bar
+     around three words. */
+  justify-self: start;
   margin-top: 0.4rem;
   color: var(--ink);
   font-size: 0.72rem;
