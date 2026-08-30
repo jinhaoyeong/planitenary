@@ -335,6 +335,19 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
    */
   const officialLink = activityBookingLink({ officialWebsiteUrl: candidate.website });
   const officialLinkLabel = bookingCtaLabel(officialLink, admission.sourced);
+  const officialLinkNode = officialLink && officialLinkLabel ? (
+    <a
+      className="destination-detail-official-link"
+      href={officialLink.url}
+      target="_blank"
+      rel="noreferrer noopener"
+      // Same reason as the photo credit: this sits in a swipeable deck card,
+      // and a drag that ends here must not also open a tab.
+      draggable={false}
+    >
+      {officialLinkLabel}
+    </a>
+  ) : null;
   const hours = describeOpeningHours(candidate.openingHours, {
     tripStart: context?.tripStart,
     tripEnd: context?.tripEnd,
@@ -523,20 +536,14 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
           {/* The source's own words, whenever parsing could not represent all
               of them. Better a quote than a number we had to round off. */}
           {admission.rawText && <p className="destination-detail-quote">“{admission.rawText}”</p>}
+          {/* With no published price the link is the answer to the question
+              this section just failed to answer, so it comes before the
+              explanation of why there is no figure — the traveller wants the
+              way out more than the reason. Where a price *was* published the
+              link is supplementary and stays at the end. */}
+          {!admission.sourced && officialLinkNode}
           {admission.provenance && <p className="destination-detail-provenance">{admission.provenance}</p>}
-          {officialLink && officialLinkLabel && (
-            <a
-              className="destination-detail-official-link"
-              href={officialLink.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              // Same reason as the photo credit: this sits in a swipeable deck
-              // card, and a drag that ends here must not also open a tab.
-              draggable={false}
-            >
-              {officialLinkLabel}
-            </a>
-          )}
+          {admission.sourced && officialLinkNode}
         </div>
       )}
 

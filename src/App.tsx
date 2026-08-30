@@ -65,6 +65,14 @@ const HandbookCapture = qaEnabled
       })),
     )
   : null;
+
+const DiscoveryCommerceQa = qaEnabled
+  ? lazy(() =>
+      import('./components/DiscoveryCommerceQa').then((module) => ({
+        default: module.DiscoveryCommerceQa,
+      })),
+    )
+  : null;
 import {
   markManualFieldEdits,
 } from './lib/identityFields';
@@ -914,6 +922,20 @@ function App() {
         }
       >
         <HandbookCapture />
+      </Suspense>
+    );
+  }
+
+  // Local-only visual smoke for discovery commerce. Never a production URL.
+  if (
+    qaEnabled &&
+    DiscoveryCommerceQa &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('discoveryCommerceQa')
+  ) {
+    return (
+      <Suspense fallback={<div className="min-h-screen" style={{ backgroundColor: 'var(--bg)' }} />}>
+        <DiscoveryCommerceQa />
       </Suspense>
     );
   }

@@ -897,6 +897,24 @@ describe('the way out of an unpublished price', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
+  it('puts the way out above the reason there is no price', () => {
+    // The provenance sentence explains why no figure exists; the link is what
+    // to do about it. Reading order should match that, or the answer sits
+    // below the excuse.
+    return (async () => {
+      discoveryFixture.candidates = withWebsite('https://www.osakacastle.net/');
+      await startReview();
+      await clickDecision('Details');
+
+      const link = await screen.findByRole('link', { name: 'Official website' });
+      const section = link.closest('.destination-detail-section');
+      const provenance = section?.querySelector('.destination-detail-provenance');
+      expect(provenance).not.toBeNull();
+      const order = link.compareDocumentPosition(provenance as Node);
+      expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    })();
+  });
+
   it('never presents a marketplace as the operator', async () => {
     // An OpenStreetMap `website` tag is community-editable, so this is exactly
     // the path by which a reseller could arrive labelled "Official website".
