@@ -23,7 +23,9 @@ import { createPortal } from 'react-dom';
 import { TripIdentityPanel } from './TripIdentityPanel';
 import { hapticSuccess } from '../lib/haptics';
 import { useSwipe } from '../hooks/useSwipe';
-import { admissionChip } from '../lib/admissionCopy';
+import { admissionChip, describeAdmission } from '../lib/admissionCopy';
+import { activityBookingLink } from '../lib/activityCommerce';
+import { bookingCtaLabel } from '../lib/activityCommerceCopy';
 import { activityHoursToDateAware, describeOpeningHours } from '../lib/openingHours';
 import { convertCurrency, formatCurrency, hasRate } from '../lib/currency';
 import { addDays } from '../lib/dateRange';
@@ -226,6 +228,32 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
     // bolted on, which is what the old `¥ {activity.cost}` did.
     return chip ?? (activity.cost?.trim() || undefined);
   }, [activity.admission, activity.cost, homeCurrency, rates]);
+
+  /**
+   * Where a traveller goes to act on this attraction, and what the link may
+   * claim it is.
+   *
+   * Routed through `activityBookingLink` rather than reading the fields
+   * directly, so the safety and reseller guards run again at render: a saved
+   * trip is editable and syncable, and a tampered object must not be able to
+   * acquire a ticket label on its way to the screen.
+   */
+  const attractionLink = useMemo(() => {
+    const link = activityBookingLink({
+      officialTicketUrl: activity.officialLinks?.tickets,
+      websiteUrl: activity.website,
+    });
+    if (!link) return undefined;
+    /**
+     * Only this attraction's own published admission may turn "Check tickets"
+     * into "View tickets". A price sitting on some `TravelBooking` elsewhere in
+     * the trip proves nothing about this venue's admission, and borrowing it
+     * would invent exactly the authority the price layer spent V2F removing.
+     * When in doubt the traveller is asked to check, which is always safe.
+     */
+    const label = bookingCtaLabel(link, describeAdmission(activity.admission).sourced);
+    return label ? { ...link, label } : undefined;
+  }, [activity.officialLinks?.tickets, activity.website, activity.admission]);
 
   const dayHours = useMemo(() => describeOpeningHours(
     activityHoursToDateAware(
@@ -1011,6 +1039,20 @@ const ActivityItem = ({ activity, isEditing, onEdit, onDelete, dayDate, timezone
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 font-bold border border-amber-100/50 dark:border-amber-800/50">
               Booking required
             </span>
+          )}
+          {/* Navigation, not commerce: one chip in the row the card already
+              has, styled like the neutral facts beside it rather than as a
+              promotional button. Opening it is a click on a link and nothing
+              more — no booking is created and no status moves. */}
+          {attractionLink && (
+            <a
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-medium underline decoration-slate-300 dark:decoration-slate-600 underline-offset-2 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
+              href={attractionLink.url}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              {attractionLink.label} <ExternalLink className="w-3.5 h-3.5" />
+            </a>
           )}
         </div>
 
