@@ -57,13 +57,13 @@ export function DiscoveryCommerceQa() {
       {
         id: 'safe-unknown',
         title: 'A+B · safe website, unpublished price',
-        expect: 'Admission section with “Official website”. Cost does not shout. No “Book now”, no “Check tickets”.',
+        expect: 'Admission section with “Website” — never “Official website”, since an OSM tag proves no ownership. Cost does not shout. No “Book now”.',
         ranked: withWebsite(unpublished, 'https://www.osakacastle.net/'),
       },
       {
         id: 'priced-official',
         title: 'priced + official website',
-        expect: 'Still “Official website”, never “View tickets” — this surface only has a homepage.',
+        expect: 'Still “Website”, never “View tickets” — this surface has an unverified site, not a ticket page.',
         ranked: withWebsite(priced, 'https://www.osakacastle.net/'),
       },
       {
