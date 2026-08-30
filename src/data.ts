@@ -39,6 +39,20 @@ export interface ActivityCost {
   basis?: 'per-person' | 'per-group' | 'fixed' | 'unknown';
 }
 
+/**
+ * Official URLs for an attraction, separated by authority.
+ *
+ * Two fields rather than one because "Official website" and "Tickets" are
+ * different promises, and a surface must never have to guess which it holds.
+ * Absent means absent: neither field is ever an empty string.
+ */
+export interface ActivityOfficialLinks {
+  /** The operator's site. Safe and non-marketplace — see officialLinks.ts. */
+  homepage?: string;
+  /** A page on the operator's own site that published a fare. */
+  tickets?: string;
+}
+
 export interface Activity {
   id?: string;
   kind?: ScheduleItemKind;
@@ -119,6 +133,15 @@ export interface Activity {
   photoLicenseUrl?: string;
   photoImageKey?: string;
   sourceReferences?: Array<{ label: string; url: string }>;
+  /**
+   * The attraction's own URLs, kept apart by what each one may claim.
+   *
+   * Metadata, never identity: changing or losing a link must not make this a
+   * different attraction, so nothing here may reach `id`, `placeRef` or any
+   * dedupe decision. See `lib/officialLinks.ts` for what each field is
+   * actually evidence of — `homepage` is weaker than it sounds.
+   */
+  officialLinks?: ActivityOfficialLinks;
   lastVerifiedAt?: string;
   rating?: number;
   coordinates?: [number, number]; // [lat, lng] for manual location search

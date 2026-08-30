@@ -17,6 +17,7 @@ import {
   parseStructuredPlaceRef,
   type StructuredPlaceRef,
 } from '../../supabase/functions/_shared/placeReference';
+import { sanitizeOfficialLinks } from './officialLinks';
 import { parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
 import {
   bookingCityKey,
@@ -445,6 +446,11 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
         : [])
       : undefined,
     lastVerifiedAt: typeof source.lastVerifiedAt === 'string' ? source.lastVerifiedAt : undefined,
+    // Re-classified on every read rather than trusted. A saved itinerary is
+    // editable, syncable and restorable, so a URL arriving from storage has no
+    // more standing than one arriving from the network — and a bad one is
+    // dropped by itself, never taking the attraction with it.
+    officialLinks: sanitizeOfficialLinks(source.officialLinks),
     rating,
     coordinates,
     moodVotes,

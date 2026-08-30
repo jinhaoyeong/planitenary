@@ -1,4 +1,5 @@
 import type { Activity, DiscoveryProvider } from '../data';
+import { officialLinksFrom } from './officialLinks';
 // Type-only, so the placeRationale ↔ placeIntelligence ↔ here cycle erases at
 // runtime rather than becoming a real import loop.
 import type { RationalePoint } from './placeRationale';
@@ -379,6 +380,14 @@ export function candidateToActivity(candidate: PlaceCandidate): Activity {
     bookingStatus: candidate.reservationStatus === 'required' ? 'requested' : 'none',
     reservationRequirement: candidate.reservationStatus,
     sourceReferences: candidate.sourceReferences.map((source) => ({ label: source.label, url: source.url })),
+    // The candidate's website has never survived into the plan, so a saved
+    // attraction could not offer the link the discovery card was already
+    // showing. Classified rather than copied: see `officialLinksFrom`.
+    officialLinks: officialLinksFrom({
+      website: candidate.website,
+      admissionSource: admission?.source,
+      admissionSourceUrl: admission?.sourceUrl,
+    }),
     lastVerifiedAt: candidate.lastVerifiedAt,
     lockedFields: [],
     // Records that these came from a provider rather than the traveller, so a
