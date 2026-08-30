@@ -68,6 +68,8 @@ import { SWIPE_COMMIT_PX, isDragIntent, shouldCloseFromSurface, swipeDecision } 
 import { manualDestination, type TripProfile } from '../lib/tripProfile';
 import { admissionFor } from '../lib/destinationIntelligence';
 import { admissionLine, describeAdmission } from '../lib/admissionCopy';
+import { activityBookingLink } from '../lib/activityCommerce';
+import { bookingCtaLabel } from '../lib/activityCommerceCopy';
 import { describeOpeningHours } from '../lib/openingHours';
 import { countryTimezone } from '../lib/destinations';
 import { convertCurrency, formatCurrency, hasRate } from '../lib/currency';
@@ -322,6 +324,17 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
   const tags = candidate.experienceTags.slice(0, 5);
 
   const admission = describeAdmission(admissionFor(candidate), { toHomeCurrency: context?.toHomeCurrency });
+  /**
+   * Where a traveller goes to settle a price we cannot state.
+   *
+   * The candidate has carried `website` all along and nothing ever showed it,
+   * so "No admission price published" was a dead end on a card that already
+   * knew where the answer lived. The ladder decides the destination — and its
+   * reseller guard is why a marketplace tagged onto a place in OpenStreetMap
+   * can never appear here under the word "Official".
+   */
+  const officialLink = activityBookingLink({ officialWebsiteUrl: candidate.website });
+  const officialLinkLabel = bookingCtaLabel(officialLink, admission.sourced);
   const hours = describeOpeningHours(candidate.openingHours, {
     tripStart: context?.tripStart,
     tripEnd: context?.tripEnd,
@@ -494,7 +507,7 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
           are extra fares. A single ¥600 with no source behind it is a number
           the traveller has no way to weigh, which is what the provenance line
           exists to prevent. */}
-      {(admission.fares.length > 0 || admission.rawText || (admission.sourced && admission.provenance)) && (
+      {(admission.fares.length > 0 || admission.rawText || officialLink || (admission.sourced && admission.provenance)) && (
         <div className="destination-detail-section">
           <h6>Admission</h6>
           {admission.fares.length > 0 && (
@@ -511,6 +524,19 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
               of them. Better a quote than a number we had to round off. */}
           {admission.rawText && <p className="destination-detail-quote">“{admission.rawText}”</p>}
           {admission.provenance && <p className="destination-detail-provenance">{admission.provenance}</p>}
+          {officialLink && officialLinkLabel && (
+            <a
+              className="destination-detail-official-link"
+              href={officialLink.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              // Same reason as the photo credit: this sits in a swipeable deck
+              // card, and a drag that ends here must not also open a tab.
+              draggable={false}
+            >
+              {officialLinkLabel}
+            </a>
+          )}
         </div>
       )}
 

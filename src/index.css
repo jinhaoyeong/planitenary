@@ -1404,6 +1404,28 @@ body.planner-intelligence-active .pet-overlay {
   font-weight: 650;
 }
 
+/**
+ * The way out of "no price published" — deliberately the most legible thing in
+ * this section rather than the least. It is an action, so it takes full ink and
+ * a larger size than the provenance note above it; small grey print is what a
+ * link nobody is meant to click looks like.
+ */
+.destination-detail-official-link {
+  display: inline-block;
+  margin-top: 0.4rem;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.destination-detail-official-link:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .destination-flip-back-close {
   position: absolute;
   top: 0.65rem;

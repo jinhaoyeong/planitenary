@@ -874,3 +874,56 @@ describe('saved-place decision binding in review UI', () => {
     expect(decisions['activity-park-b']).toBeUndefined();
   });
 });
+
+/**
+ * The candidate has carried `website` since discovery existed and nothing ever
+ * rendered it, so "No admission price published" was a dead end on a card that
+ * already knew where the answer lived.
+ */
+describe('the way out of an unpublished price', () => {
+  const withWebsite = (website: string | undefined) => OSAKA_PLACE_FIXTURE.map((candidate) => (
+    { ...candidate, website }
+  ));
+
+  it("offers the operator's own site when one is known", async () => {
+    discoveryFixture.candidates = withWebsite('https://www.osakacastle.net/');
+    await startReview();
+    await clickDecision('Details');
+
+    const link = await screen.findByRole('link', { name: 'Official website' });
+    expect(link).toHaveAttribute('href', 'https://www.osakacastle.net/');
+    // Opened away from the deck, and not as a referrer-leaking window handle.
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+  });
+
+  it('never presents a marketplace as the operator', async () => {
+    // An OpenStreetMap `website` tag is community-editable, so this is exactly
+    // the path by which a reseller could arrive labelled "Official website".
+    discoveryFixture.candidates = withWebsite('https://www.klook.com/en-MY/activity/123-osaka-castle/');
+    await startReview();
+    await clickDecision('Details');
+
+    expect(screen.queryByRole('link', { name: 'Official website' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /tickets/i })).toBeNull();
+  });
+
+  it('refuses a website that is not safe to open', async () => {
+    discoveryFixture.candidates = withWebsite('http://localhost/admin');
+    await startReview();
+    await clickDecision('Details');
+
+    expect(screen.queryByRole('link', { name: 'Official website' })).toBeNull();
+  });
+
+  it('shows no commerce chrome at all when there is nowhere to send anyone', async () => {
+    discoveryFixture.candidates = withWebsite(undefined);
+    await startReview();
+    await clickDecision('Details');
+
+    expect(screen.queryByRole('link', { name: 'Official website' })).toBeNull();
+    // The absence of a link is not an error worth announcing.
+    expect(document.body.textContent).not.toContain('No booking provider');
+    expect(document.body.textContent).not.toContain('No price data');
+  });
+});
