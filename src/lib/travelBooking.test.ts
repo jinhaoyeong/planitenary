@@ -387,3 +387,117 @@ describe('placing a booking on a day', () => {
     expect(bookingDayNumber(booking, '2027-01-21', 3)).toBeUndefined();
   });
 });
+
+/**
+ * "No price" and "the traveller typed a price" were the same value until
+ * 2026-08-31, which made a card with nothing to show say "Price entered
+ * manually" about an entry nobody made. Most attractions have no price at all,
+ * so this is the ordinary case rather than an edge one.
+ */
+describe('telling an absent price from a manual one', () => {
+  const provider = (over: Record<string, unknown> = {}) => ({
+    amount: 120,
+    currency: 'MYR',
+    source: 'provider' as const,
+    retrievedAt: '2027-01-29T11:40:00Z',
+    ...over,
+  });
+
+  it('reports no price as unknown, never as manual', () => {
+    expect(priceFreshness(undefined, NOW)).toBe('unknown');
+    expect(priceFreshness(undefined, NOW)).not.toBe('manual');
+  });
+
+  it('says nothing at all about a price that does not exist', () => {
+    // The old answer here was "Price entered manually", a claim about an act
+    // the traveller never performed.
+    expect(priceValidityLabel(undefined, NOW)).toBeUndefined();
+    expect(priceCheckedLabel(undefined, NOW)).toBeUndefined();
+    expect(formatBookingPrice(undefined)).toBeUndefined();
+  });
+
+  it('still reports a figure the traveller typed as manual', () => {
+    const manual = { amount: 80, currency: 'MYR', source: 'manual' as const, retrievedAt: '2027-01-29T09:00:00Z' };
+    expect(priceFreshness(manual, NOW)).toBe('manual');
+    expect(priceValidityLabel(manual, NOW)).toBe('Price entered manually');
+  });
+
+  it("treats an operator's published admission as checked, not guaranteed", () => {
+    // An admission rate on a venue's own page is a real, sourced figure — and
+    // the venue guaranteed nothing about how long it stands.
+    const official = provider({ source: 'official-website', sourceUrl: 'https://www.louvre.fr/en/tickets' });
+    expect(priceFreshness(official, NOW)).toBe('checked');
+  });
+
+  it('leaves the four sourced states exactly as they were', () => {
+    expect(priceFreshness(provider(), NOW)).toBe('checked');
+    expect(priceFreshness(provider({ expiresAt: '2027-01-29T12:30:00Z' }), NOW)).toBe('live');
+    expect(priceFreshness(provider({ expiresAt: '2027-01-29T11:30:00Z' }), NOW)).toBe('expired');
+    const ageing: FreshnessPolicy = { mode: 'age-based', staleAfterMinutes: 10 };
+    expect(priceFreshness(provider(), NOW, ageing)).toBe('stale');
+  });
+
+  it('does not turn an unpriced confirmed booking into a checked one', () => {
+    // `bookingPriceFreshness` downgrades a confirmed price to `checked` because
+    // what was paid is a receipt. With no price there is no receipt to report.
+    const unpriced = { status: 'confirmed' as const, provider: 'duffel', price: undefined };
+    expect(bookingPriceFreshness(unpriced, NOW)).toBe('unknown');
+    expect(bookingPriceValidityLabel(unpriced, NOW)).toBeUndefined();
+  });
+
+  it('gives a truthful reason when there is no price and nobody to ask', () => {
+    const nothing = { status: 'planned' as const, provider: undefined, price: undefined };
+    expect(canRefreshPrice(nothing)).toBe(false);
+    expect(refreshUnavailableReason(nothing)).toBe('No price to refresh');
+  });
+
+  it('still offers refresh when a wired provider could price it for the first time', () => {
+    const unpriced = { status: 'planned' as const, provider: travelOfferProviders[0].id, price: undefined };
+    expect(canRefreshPrice(unpriced)).toBe(true);
+    expect(refreshUnavailableReason(unpriced)).toBeUndefined();
+  });
+
+  it('survives persistence without acquiring a price nobody entered', () => {
+    const saved = sanitizeTravelBooking({
+      id: 'booking-activity-1',
+      type: 'activity-ticket',
+      status: 'planned',
+      title: 'Batu Caves',
+      startDate: '2027-01-29',
+    }, 0);
+    expect(saved?.price).toBeUndefined();
+    expect(priceFreshness(saved?.price, NOW)).toBe('unknown');
+
+    const roundTripped = JSON.parse(JSON.stringify(saved)) as TravelBooking;
+    expect(roundTripped.price).toBeUndefined();
+    expect(priceFreshness(roundTripped.price, NOW)).toBe('unknown');
+  });
+
+  it('keeps where a stored price came from', () => {
+    const saved = sanitizeTravelBooking({
+      id: 'booking-activity-2',
+      type: 'activity-ticket',
+      status: 'planned',
+      title: 'Petronas Towers',
+      startDate: '2027-01-29',
+      price: { amount: 98, currency: 'myr', source: 'official-website', sourceUrl: 'https://www.petronastwintowers.com.my/', retrievedAt: '2027-01-29T11:40:00Z' },
+    }, 0);
+    expect(saved?.price?.source).toBe('official-website');
+    expect(saved?.price?.currency).toBe('MYR');
+    expect(priceFreshness(saved?.price, NOW)).toBe('checked');
+  });
+
+  it('falls back to manual only when stored provenance is unreadable', () => {
+    // The conservative direction: an unrecognised source must never be promoted
+    // into a claim that some provider or operator supplied the figure.
+    const saved = sanitizeTravelBooking({
+      id: 'booking-activity-3',
+      type: 'activity-ticket',
+      status: 'planned',
+      title: 'Older record',
+      startDate: '2027-01-29',
+      price: { amount: 40, currency: 'MYR', source: 'scraped-from-somewhere', retrievedAt: '2027-01-29T11:40:00Z' },
+    }, 0);
+    expect(saved?.price?.source).toBe('manual');
+  });
+});

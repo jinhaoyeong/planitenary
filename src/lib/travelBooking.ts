@@ -217,6 +217,24 @@ export const isTransportBooking = (booking: TravelBooking): boolean =>
 export type PriceFreshness = 'live' | 'checked' | 'stale' | 'expired' | 'manual';
 
 /**
+ * What we know about a price, including the case where there is not one.
+ *
+ * `PriceFreshness` answers "how much can this number be trusted", which is a
+ * question about a number that exists. Most attractions have no number at all:
+ * an OSM museum nobody has priced is the *normal* state of a plan, not a
+ * degraded one, and it is not the same fact as a figure the traveller typed in.
+ *
+ * Those two were the same value until 2026-08-31, so a card with no price
+ * announced "Price entered manually" — a sentence about an entry nobody made.
+ * `unknown` exists to keep the absence sayable, and it is deliberately *not* a
+ * member of `PriceFreshness`: there is nothing to be fresh about.
+ *
+ * Absence is still modelled by the absent snapshot itself — `unknown` is the
+ * derived reading of `price === undefined`, never a stored value.
+ */
+export type PriceState = 'unknown' | PriceFreshness;
+
+/**
  * How a given provider's prices age, declared by that provider.
  *
  * Deliberately not one universal number. Duffel issues a real `expires_at` and
@@ -247,7 +265,7 @@ const parseInstant = (value: string | undefined): number | undefined => {
 };
 
 /**
- * Whether a price is guaranteed, merely observed, ageing, or dead.
+ * Whether a price is absent, guaranteed, merely observed, ageing, or dead.
  *
  * `now` is passed in rather than read here so every caller — the UI, the tests,
  * a future refresh sweep — asks the same question against a clock it controls.
@@ -258,8 +276,10 @@ export function priceFreshness(
   price: PriceSnapshot | undefined,
   now: number,
   policy: FreshnessPolicy = DEFAULT_FRESHNESS_POLICY,
-): PriceFreshness {
-  if (!price) return 'manual';
+): PriceState {
+  // No price is not a manual price. Nobody typed anything, so there is nothing
+  // to attribute to the traveller and nothing to refresh.
+  if (!price) return 'unknown';
   if (price.source === 'manual') return 'manual';
 
   // Only a provider's own expiry can expire a price, and inside that boundary
@@ -315,6 +335,10 @@ export function priceValidityLabel(
   policy: FreshnessPolicy = DEFAULT_FRESHNESS_POLICY,
 ): string | undefined {
   const freshness = priceFreshness(price, now, policy);
+  // Nothing to label. A caller with no price should say what it will do about
+  // that ("Check current price"), which is a decision about the surface rather
+  // than a claim about a figure, so this layer stays silent.
+  if (freshness === 'unknown') return undefined;
   if (freshness === 'manual') return 'Price entered manually';
   if (freshness === 'expired') return 'Expired';
   if (freshness === 'stale') return 'Price may have changed';

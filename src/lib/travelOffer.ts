@@ -22,8 +22,8 @@ import {
   priceFreshness,
   priceValidityLabel,
   type FreshnessPolicy,
-  type PriceFreshness,
   type PriceSnapshot,
+  type PriceState,
   type TravelBooking,
   type TravelBookingType,
 } from './travelBooking';
@@ -127,9 +127,13 @@ export const freshnessPolicyFor = (providerId: string | undefined): FreshnessPol
 export const bookingPriceFreshness = (
   booking: Pick<TravelBooking, 'provider' | 'price' | 'status'>,
   now: number,
-): PriceFreshness => {
+): PriceState => {
   const freshness = priceFreshness(booking.price, now, freshnessPolicyFor(booking.provider));
-  if (booking.status !== 'confirmed' || freshness === 'manual') return freshness;
+  // `unknown` survives confirmation: a booking nobody recorded a price for has
+  // no receipt to downgrade to, and calling it `checked` would assert a figure
+  // was read when none exists.
+  if (freshness === 'unknown' || freshness === 'manual') return freshness;
+  if (booking.status !== 'confirmed') return freshness;
   return 'checked';
 };
 
@@ -176,6 +180,10 @@ export function refreshUnavailableReason(booking: Pick<TravelBooking, 'provider'
   // filled in. Reading the absence of `provider` as "typed in by hand" let a
   // card say "Checked 12 minutes ago" and "Price entered manually" at once,
   // which is two contradictory claims about the same number.
-  if (!booking.price || booking.price.source === 'manual') return 'Price entered manually';
+  if (booking.price?.source === 'manual') return 'Price entered manually';
+  // Absent is not manual. Saying "entered manually" about a price nobody
+  // entered invents a traveller action, and it is the state most activities
+  // are in — an attraction with no provider has no figure to refresh.
+  if (!booking.price && !booking.provider) return 'No price to refresh';
   return 'This provider is not connected';
 }

@@ -70,7 +70,10 @@ export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compa
   const checked = priceCheckedLabel(booking.price, now);
   const refreshable = canRefreshPrice(booking);
   const unavailable = refreshUnavailableReason(booking);
-  const isManualPrice = booking.price?.source === 'manual' || !booking.price;
+  // Absence of a price is not a manual price. Reading it as one hid refresh on
+  // exactly the records a provider could still price for the first time, and
+  // it is the state most activities are in.
+  const isManualPrice = booking.price?.source === 'manual';
   /**
    * A refresh control appears only where the number is still a quote.
    *
@@ -78,7 +81,12 @@ export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compa
    * what a held reservation cost is a receipt, and re-pricing it would replace
    * the only record of what was actually charged.
    */
-  const showsRefresh = !isManualPrice && booking.status !== 'confirmed';
+  // A provider is what makes refresh meaningful, so an unpriced attraction with
+  // nobody to ask shows no control at all rather than a disabled one — that is
+  // the ordinary state of a plan, not a fault worth flagging on every card.
+  const showsRefresh = !isManualPrice
+    && Boolean(booking.provider)
+    && booking.status !== 'confirmed';
 
   const route = booking.origin && booking.destination
     ? `${booking.origin} → ${booking.destination}`
