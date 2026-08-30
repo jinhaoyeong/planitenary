@@ -17,7 +17,7 @@ import {
   parseStructuredPlaceRef,
   type StructuredPlaceRef,
 } from '../../supabase/functions/_shared/placeReference';
-import { sanitizeOfficialLinks } from './officialLinks';
+import { sanitizeOfficialLinks, sanitizeWebsite } from './officialLinks';
 import { parseDayTransfer } from '../../supabase/functions/_shared/dayCitySemantics';
 import {
   bookingCityKey,
@@ -450,6 +450,7 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
     // editable, syncable and restorable, so a URL arriving from storage has no
     // more standing than one arriving from the network — and a bad one is
     // dropped by itself, never taking the attraction with it.
+    website: sanitizeWebsite(source.website),
     officialLinks: sanitizeOfficialLinks(source.officialLinks),
     rating,
     coordinates,

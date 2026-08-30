@@ -103,7 +103,10 @@ export function bookingCtaLabel(
   priceKnown: boolean,
 ): string | undefined {
   if (!link) return undefined;
-  if (link.authority === 'official-website') return 'Official website';
+  // Not 'Official website'. The URL behind this authority is a community map
+  // tag nobody has tied to the operator, and the word would be a claim the
+  // evidence does not support.
+  if (link.authority === 'website') return 'Website';
   // A ticket destination with a figure already shown is somewhere to confirm
   // and buy; without one it is somewhere to go and find out.
   return priceKnown ? 'View tickets' : 'Check tickets';

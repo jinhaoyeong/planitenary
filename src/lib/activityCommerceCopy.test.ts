@@ -106,8 +106,8 @@ describe('what the button says', () => {
   });
 
   it('names the operator’s site for what it is', () => {
-    expect(bookingCtaLabel(link('official-website'), false)).toBe('Official website');
-    expect(bookingCtaLabel(link('official-website'), true)).toBe('Official website');
+    expect(bookingCtaLabel(link('website'), false)).toBe('Website');
+    expect(bookingCtaLabel(link('website'), true)).toBe('Website');
   });
 
   it('asks the traveller to check when no price is known', () => {
@@ -121,7 +121,7 @@ describe('what the button says', () => {
   });
 
   it('never promises a booking flow we do not operate', () => {
-    for (const authority of ['official-ticket', 'official-website', 'provider'] as const) {
+    for (const authority of ['official-ticket', 'website', 'provider'] as const) {
       for (const known of [true, false]) {
         expect(bookingCtaLabel(link(authority), known)).not.toMatch(/book now/i);
       }

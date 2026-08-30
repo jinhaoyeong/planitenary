@@ -29,14 +29,20 @@ export type ActivityCommerceState =
   /** Nothing to say beyond the attraction itself. Still fully schedulable. */
   | 'no-commerce-data'
   /** No amount, but an honest place to go and find out. */
-  | 'official-link-only'
+  | 'link-only'
   /** The operator publishes an admission price. Not an offer, not inventory. */
   | 'official-price'
   /** A commerce provider quoted a price for this attraction. */
   | 'marketplace-enriched';
 
-/** Which authority a booking link came from. Never guessed, never blended. */
-export type BookingLinkAuthority = 'official-ticket' | 'official-website' | 'provider';
+/**
+ * Which authority a booking link came from. Never guessed, never blended.
+ *
+ * `website` is deliberately not called official: it reaches us from a
+ * community-edited map tag, and only its safety and non-marketplace status
+ * have been established. Only `official-ticket` has earned the word.
+ */
+export type BookingLinkAuthority = 'official-ticket' | 'website' | 'provider';
 
 export interface ActivityBookingLink {
   url: string;
@@ -53,10 +59,10 @@ export interface ActivityBookingLink {
 export interface ActivityCommerceInput {
   /** The price we hold, if any. Absent is the normal case. */
   price?: PriceSnapshot;
-  /** The operator's own ticket page, e.g. from `officialTicketLinks`. */
+  /** A page on the operator's own site that published a fare. Authority earned. */
   officialTicketUrl?: string;
-  /** The operator's own website. */
-  officialWebsiteUrl?: string;
+  /** A site associated with the place. Safe and non-marketplace, not verified. */
+  websiteUrl?: string;
   /** A URL from a provider we deliberately support, with its attribution. */
   providerUrl?: string;
   /** The provider id backing `providerUrl`. A URL without one is not trusted. */
@@ -87,7 +93,7 @@ const asOfficialUrl = (raw: string | undefined): string | undefined =>
 export function activityCommerceState(input: ActivityCommerceInput): ActivityCommerceState {
   if (input.price?.source === 'provider') return 'marketplace-enriched';
   if (input.price?.source === 'official-website') return 'official-price';
-  return activityBookingLink(input) ? 'official-link-only' : 'no-commerce-data';
+  return activityBookingLink(input) ? 'link-only' : 'no-commerce-data';
 }
 
 /**
@@ -107,8 +113,8 @@ export function activityBookingLink(input: ActivityCommerceInput): ActivityBooki
   const ticket = asOfficialUrl(input.officialTicketUrl);
   if (ticket) return { url: ticket, authority: 'official-ticket' };
 
-  const website = asOfficialUrl(input.officialWebsiteUrl);
-  if (website) return { url: website, authority: 'official-website' };
+  const website = asOfficialUrl(input.websiteUrl);
+  if (website) return { url: website, authority: 'website' };
 
   // A provider link is allowed to be a marketplace host — that is the point of
   // it — but it must still be a safe public URL and must name its provider.

@@ -1,5 +1,5 @@
 import type { Activity, DiscoveryProvider } from '../data';
-import { officialLinksFrom } from './officialLinks';
+import { attractionLinksFrom } from './officialLinks';
 // Type-only, so the placeRationale ↔ placeIntelligence ↔ here cycle erases at
 // runtime rather than becoming a real import loop.
 import type { RationalePoint } from './placeRationale';
@@ -383,7 +383,7 @@ export function candidateToActivity(candidate: PlaceCandidate): Activity {
     // The candidate's website has never survived into the plan, so a saved
     // attraction could not offer the link the discovery card was already
     // showing. Classified rather than copied: see `officialLinksFrom`.
-    officialLinks: officialLinksFrom({
+    ...attractionLinksFrom({
       website: candidate.website,
       admissionSource: admission?.source,
       admissionSourceUrl: admission?.sourceUrl,

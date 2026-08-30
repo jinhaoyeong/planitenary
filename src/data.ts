@@ -40,15 +40,17 @@ export interface ActivityCost {
 }
 
 /**
- * Official URLs for an attraction, separated by authority.
+ * URLs whose authority has actually been established.
  *
- * Two fields rather than one because "Official website" and "Tickets" are
- * different promises, and a surface must never have to guess which it holds.
- * Absent means absent: neither field is ever an empty string.
+ * Only `tickets` qualifies today, and the bar is deliberately high: a page on
+ * the operator's own origin, reached by a ticket-shaped link, that published a
+ * fare. That is what lets a surface print the word "Tickets".
+ *
+ * A merely plausible website does **not** belong here — see `Activity.website`.
+ * This type carries authority, so anything inside it may be presented as
+ * official, and a field that cannot survive that sentence must live elsewhere.
  */
 export interface ActivityOfficialLinks {
-  /** The operator's site. Safe and non-marketplace — see officialLinks.ts. */
-  homepage?: string;
   /** A page on the operator's own site that published a fare. */
   tickets?: string;
 }
@@ -134,12 +136,26 @@ export interface Activity {
   photoImageKey?: string;
   sourceReferences?: Array<{ label: string; url: string }>;
   /**
-   * The attraction's own URLs, kept apart by what each one may claim.
+   * A website associated with this place. **Not proven to be the operator's.**
+   *
+   * It reaches us from a community-edited OpenStreetMap tag, so what has been
+   * established is only that the URL is safe, public, HTTPS and not a known
+   * marketplace. Nobody has verified who owns it.
+   *
+   * The name is the guardrail. This was briefly `officialLinks.homepage`, and
+   * a field sitting under `officialLinks` invites every future surface to
+   * print "Official website" over an unverified tag. **Label it "Website".**
+   * If a source ever genuinely proves operator ownership, that earns a new
+   * field in {@link ActivityOfficialLinks} — today's tag is not promoted into
+   * one.
+   */
+  website?: string;
+  /**
+   * URLs that survived an authority check. See {@link ActivityOfficialLinks}.
    *
    * Metadata, never identity: changing or losing a link must not make this a
    * different attraction, so nothing here may reach `id`, `placeRef` or any
-   * dedupe decision. See `lib/officialLinks.ts` for what each field is
-   * actually evidence of — `homepage` is weaker than it sounds.
+   * dedupe decision.
    */
   officialLinks?: ActivityOfficialLinks;
   lastVerifiedAt?: string;

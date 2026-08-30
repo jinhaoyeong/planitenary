@@ -333,7 +333,7 @@ export function CandidateDetails({ ranked, context }: { ranked: RankedCandidate;
    * reseller guard is why a marketplace tagged onto a place in OpenStreetMap
    * can never appear here under the word "Official".
    */
-  const officialLink = activityBookingLink({ officialWebsiteUrl: candidate.website });
+  const officialLink = activityBookingLink({ websiteUrl: candidate.website });
   const officialLinkLabel = bookingCtaLabel(officialLink, admission.sourced);
   const officialLinkNode = officialLink && officialLinkLabel ? (
     <a

@@ -28,7 +28,7 @@ describe('what we can honestly say about buying a ticket', () => {
   });
 
   it('reports an honest link when there is no amount', () => {
-    expect(activityCommerceState({ officialWebsiteUrl: OFFICIAL })).toBe('official-link-only');
+    expect(activityCommerceState({ websiteUrl: OFFICIAL })).toBe('link-only');
   });
 
   it("separates an operator's published price from a provider's quote", () => {
@@ -40,7 +40,7 @@ describe('what we can honestly say about buying a ticket', () => {
     // A manual price is the traveller's note to themselves. It is reported as
     // `manual` by priceFreshness and must not promote the commerce state.
     expect(activityCommerceState({ price: price('manual') })).toBe('no-commerce-data');
-    expect(activityCommerceState({ price: price('manual'), officialWebsiteUrl: OFFICIAL })).toBe('official-link-only');
+    expect(activityCommerceState({ price: price('manual'), websiteUrl: OFFICIAL })).toBe('link-only');
   });
 });
 
@@ -48,7 +48,7 @@ describe('the booking link ladder', () => {
   it("prefers the operator's own ticket page over everything", () => {
     expect(activityBookingLink({
       officialTicketUrl: OFFICIAL_TICKETS,
-      officialWebsiteUrl: OFFICIAL,
+      websiteUrl: OFFICIAL,
       providerUrl: 'https://www.tiqets.com/en/x?partner=planitenary',
       provider: 'tiqets',
     })).toEqual({ url: OFFICIAL_TICKETS, authority: 'official-ticket' });
@@ -56,10 +56,10 @@ describe('the booking link ladder', () => {
 
   it("falls back to the operator's website before any marketplace", () => {
     expect(activityBookingLink({
-      officialWebsiteUrl: OFFICIAL,
+      websiteUrl: OFFICIAL,
       providerUrl: 'https://www.tiqets.com/en/x?partner=planitenary',
       provider: 'tiqets',
-    })).toEqual({ url: OFFICIAL, authority: 'official-website' });
+    })).toEqual({ url: OFFICIAL, authority: 'website' });
   });
 
   it('reaches a marketplace only for a provider we deliberately support', () => {
@@ -81,14 +81,14 @@ describe('the booking link ladder', () => {
       'https://www.tiqets.com/en/x',
       'https://www.headout.com/x',
     ]) {
-      expect(activityBookingLink({ officialTicketUrl: reseller, officialWebsiteUrl: reseller })).toBeUndefined();
-      expect(activityCommerceState({ officialWebsiteUrl: reseller })).toBe('no-commerce-data');
+      expect(activityBookingLink({ officialTicketUrl: reseller, websiteUrl: reseller })).toBeUndefined();
+      expect(activityCommerceState({ websiteUrl: reseller })).toBe('no-commerce-data');
     }
   });
 
   it('refuses a URL that is not safe to follow', () => {
     for (const unsafe of ['javascript:alert(1)', 'http://localhost/admin', 'https://192.168.1.1/']) {
-      expect(activityBookingLink({ officialWebsiteUrl: unsafe })).toBeUndefined();
+      expect(activityBookingLink({ websiteUrl: unsafe })).toBeUndefined();
       expect(activityBookingLink({ providerUrl: unsafe, provider: 'tiqets' })).toBeUndefined();
     }
   });

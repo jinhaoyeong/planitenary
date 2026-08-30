@@ -890,7 +890,7 @@ describe('the way out of an unpublished price', () => {
     await startReview();
     await clickDecision('Details');
 
-    const link = await screen.findByRole('link', { name: 'Official website' });
+    const link = await screen.findByRole('link', { name: 'Website' });
     expect(link).toHaveAttribute('href', 'https://www.osakacastle.net/');
     // Opened away from the deck, and not as a referrer-leaking window handle.
     expect(link).toHaveAttribute('target', '_blank');
@@ -906,7 +906,7 @@ describe('the way out of an unpublished price', () => {
       await startReview();
       await clickDecision('Details');
 
-      const link = await screen.findByRole('link', { name: 'Official website' });
+      const link = await screen.findByRole('link', { name: 'Website' });
       const section = link.closest('.destination-detail-section');
       const provenance = section?.querySelector('.destination-detail-provenance');
       expect(provenance).not.toBeNull();
@@ -922,7 +922,7 @@ describe('the way out of an unpublished price', () => {
     await startReview();
     await clickDecision('Details');
 
-    expect(screen.queryByRole('link', { name: 'Official website' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Website' })).toBeNull();
     expect(screen.queryByRole('link', { name: /tickets/i })).toBeNull();
   });
 
@@ -931,7 +931,7 @@ describe('the way out of an unpublished price', () => {
     await startReview();
     await clickDecision('Details');
 
-    expect(screen.queryByRole('link', { name: 'Official website' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Website' })).toBeNull();
   });
 
   it('shows no commerce chrome at all when there is nowhere to send anyone', async () => {
@@ -939,7 +939,7 @@ describe('the way out of an unpublished price', () => {
     await startReview();
     await clickDecision('Details');
 
-    expect(screen.queryByRole('link', { name: 'Official website' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Website' })).toBeNull();
     // The absence of a link is not an error worth announcing.
     expect(document.body.textContent).not.toContain('No booking provider');
     expect(document.body.textContent).not.toContain('No price data');
