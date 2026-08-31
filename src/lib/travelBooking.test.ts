@@ -452,9 +452,26 @@ describe('telling an absent price from a manual one', () => {
   });
 
   it('still offers refresh when a wired provider could price it for the first time', () => {
-    const unpriced = { status: 'planned' as const, provider: travelOfferProviders[0].id, price: undefined };
-    expect(canRefreshPrice(unpriced)).toBe(true);
-    expect(refreshUnavailableReason(unpriced)).toBeUndefined();
+    // No adapter ships in this release, so the wired provider is registered
+    // here rather than borrowed from the roster. That also keeps the assertion
+    // about `canRefreshPrice` itself instead of about which providers happen to
+    // exist on any given branch.
+    const stub = {
+      id: 'test-provider',
+      label: 'Test provider',
+      supports: () => true,
+      search: async () => [],
+      refresh: async () => null,
+      materialise: () => ({ type: 'activity-ticket' as const, status: 'planned' as const, title: '', startDate: '2027-01-29' }),
+    };
+    travelOfferProviders.push(stub);
+    try {
+      const unpriced = { status: 'planned' as const, provider: stub.id, price: undefined };
+      expect(canRefreshPrice(unpriced)).toBe(true);
+      expect(refreshUnavailableReason(unpriced)).toBeUndefined();
+    } finally {
+      travelOfferProviders.splice(travelOfferProviders.indexOf(stub), 1);
+    }
   });
 
   it('survives persistence without acquiring a price nobody entered', () => {
