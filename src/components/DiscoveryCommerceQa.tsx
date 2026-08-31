@@ -1,7 +1,8 @@
 /**
  * Local-only visual smoke for V2G discovery commerce.
  *
- * Mirrors `?duffelQa`: never a production URL. The four cases are the same
+ * Gated behind `qaEnabled` and a query parameter, so it is never reachable as
+ * a production URL. The four cases are the same
  * overlays the component tests already use — a real ranked Osaka fixture with
  * `website` swapped — so this board shows what those tests cannot: weight,
  * wrapping, focus, and whether a reseller URL is absent from the painted card.
