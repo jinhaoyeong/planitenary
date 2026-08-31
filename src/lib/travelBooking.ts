@@ -196,24 +196,49 @@ export const isTransportBooking = (booking: TravelBooking): boolean =>
   booking.type === 'flight' || booking.type === 'rail' || booking.type === 'transfer';
 
 /**
- * How current a stored price is, read against a clock.
+ * How much a stored price can be trusted, in five distinguishable states.
+ *
+ * The distinction that matters is *who* is making the claim. `live` and
+ * `expired` are the provider's own words: it named a boundary and we are
+ * either inside it or past it. `checked` and `stale` are ours: the provider
+ * told us a number and said nothing about how long it stands, so the most we
+ * can honestly report is when we asked and whether that was long enough ago to
+ * be worth asking again.
+ *
+ * Collapsing those two pairs would let a Viator-style price with no expiry
+ * either claim a guarantee nobody gave (`live` forever) or announce an expiry
+ * nobody declared (`expired` on a timer we invented).
  *
  * Derived at display time and never written back. Persisting `'expired'` would
  * make the record change without anyone editing it, and the realtime sync
  * compares `JSON.stringify` output to decide whether a remote payload differs
  * from local state — a self-changing field would loop it forever.
  */
-export type PriceFreshness = 'live' | 'stale' | 'expired' | 'manual';
+export type PriceFreshness = 'live' | 'checked' | 'stale' | 'expired' | 'manual';
 
 /**
- * How long a provider figure stands when the provider named no expiry.
+ * How a given provider's prices age, declared by that provider.
  *
- * Applies to provider material only. A traveller's own typed-in fare is not
- * "stale" after half an hour — nobody is going to re-fetch it — so `manual`
- * prices leave this path entirely rather than accumulating a badge that
- * suggests an action nothing can perform.
+ * Deliberately not one universal number. Duffel issues a real `expires_at` and
+ * a price is good until then no matter how long ago we fetched it; an activity
+ * provider that guarantees nothing needs an age rule instead. A shared
+ * threshold would either expire Duffel quotes early or invent a deadline the
+ * other provider never gave.
  */
-export const PROVIDER_PRICE_STALE_AFTER_MINUTES = 30;
+export type FreshnessPolicy =
+  /** The provider states a validity boundary. Only that boundary expires it. */
+  | { mode: 'provider-expiry' }
+  /** No boundary given; recommend re-checking after this many minutes. */
+  | { mode: 'age-based'; staleAfterMinutes: number };
+
+/**
+ * What we assume about a provider that has not declared a policy.
+ *
+ * `provider-expiry` is the conservative default in both directions: it honours
+ * an explicit expiry when one exists, and when none does it stops at `checked`
+ * rather than inventing a staleness deadline nobody approved.
+ */
+export const DEFAULT_FRESHNESS_POLICY: FreshnessPolicy = { mode: 'provider-expiry' };
 
 const parseInstant = (value: string | undefined): number | undefined => {
   if (!value) return undefined;
@@ -222,23 +247,37 @@ const parseInstant = (value: string | undefined): number | undefined => {
 };
 
 /**
- * Whether a price should be shown as current, ageing, or dead.
+ * Whether a price is guaranteed, merely observed, ageing, or dead.
  *
  * `now` is passed in rather than read here so every caller — the UI, the tests,
  * a future refresh sweep — asks the same question against a clock it controls.
+ * `policy` comes from the provider that supplied the number; see
+ * `freshnessPolicyFor` in `travelOffer.ts`.
  */
-export function priceFreshness(price: PriceSnapshot | undefined, now: number): PriceFreshness {
+export function priceFreshness(
+  price: PriceSnapshot | undefined,
+  now: number,
+  policy: FreshnessPolicy = DEFAULT_FRESHNESS_POLICY,
+): PriceFreshness {
   if (!price) return 'manual';
   if (price.source === 'manual') return 'manual';
+
+  // Only a provider's own expiry can expire a price, and inside that boundary
+  // the provider is still standing behind the number — however long ago we
+  // asked. Age does not weaken a guarantee that has not run out.
   const expiresAt = parseInstant(price.expiresAt);
-  // Only a provider's own expiry can expire a price. The absence of one is not
-  // an expiry of zero, which is the mistake that would mark every fetched price
-  // dead on arrival.
-  if (expiresAt !== undefined && now > expiresAt) return 'expired';
+  if (expiresAt !== undefined) return now > expiresAt ? 'expired' : 'live';
+
+  // No boundary was given. The absence of one is not an expiry of zero, which
+  // is the mistake that would mark every fetched price dead on arrival — but
+  // it is not a guarantee either, so this can never reach `live`.
   const retrievedAt = parseInstant(price.retrievedAt);
+  // Without a readable `retrievedAt` we cannot say *when* it was checked, so
+  // "checked" would be a claim we cannot support. Recommend asking again.
   if (retrievedAt === undefined) return 'stale';
+  if (policy.mode !== 'age-based') return 'checked';
   const ageMinutes = (now - retrievedAt) / 60000;
-  return ageMinutes > PROVIDER_PRICE_STALE_AFTER_MINUTES ? 'stale' : 'live';
+  return ageMinutes > policy.staleAfterMinutes ? 'stale' : 'checked';
 }
 
 /**
@@ -259,6 +298,36 @@ export function priceCheckedLabel(price: PriceSnapshot | undefined, now: number)
   if (hours < 24) return `Checked ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
   const days = Math.round(hours / 24);
   return `Checked ${days} ${days === 1 ? 'day' : 'days'} ago`;
+}
+
+/**
+ * The single phrase that tells the truth about this price, given its state.
+ *
+ * Separate from `priceCheckedLabel` because "Checked 12 min ago" is only the
+ * right sentence for a number nobody guaranteed. Said about a quote that
+ * expires in three minutes it buries the fact that actually matters; and
+ * "Expired" said about a price that merely aged claims the provider withdrew
+ * it when the provider never said anything at all.
+ */
+export function priceValidityLabel(
+  price: PriceSnapshot | undefined,
+  now: number,
+  policy: FreshnessPolicy = DEFAULT_FRESHNESS_POLICY,
+): string | undefined {
+  const freshness = priceFreshness(price, now, policy);
+  if (freshness === 'manual') return 'Price entered manually';
+  if (freshness === 'expired') return 'Expired';
+  if (freshness === 'stale') return 'Price may have changed';
+  if (freshness === 'checked') return priceCheckedLabel(price, now);
+  // `live` is the only state carrying a provider-declared boundary, so it is
+  // the only one that can count down to anything.
+  const expiresAt = parseInstant(price?.expiresAt);
+  if (expiresAt === undefined) return priceCheckedLabel(price, now);
+  const minutes = Math.max(0, Math.ceil((expiresAt - now) / 60000));
+  if (minutes < 1) return 'Expires in under a minute';
+  if (minutes < 60) return `Expires in ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return `Expires in ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
 }
 
 /** `MYR 988`. The currency is never optional — see `PriceSnapshot.currency`. */

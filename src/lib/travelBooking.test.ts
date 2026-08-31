@@ -5,10 +5,19 @@ import {
   formatBookingPrice,
   priceCheckedLabel,
   priceFreshness,
+  priceValidityLabel,
   bookingDayNumber,
+  type FreshnessPolicy,
   type TravelBooking,
 } from './travelBooking';
-import { canRefreshPrice, refreshUnavailableReason, travelOfferProviders } from './travelOffer';
+import {
+  bookingPriceFreshness,
+  bookingPriceValidityLabel,
+  canRefreshPrice,
+  freshnessPolicyFor,
+  refreshUnavailableReason,
+  travelOfferProviders,
+} from './travelOffer';
 
 const NOW = Date.parse('2027-01-29T12:00:00Z');
 
@@ -195,12 +204,100 @@ describe('price freshness', () => {
     expect(priceFreshness(expired, NOW)).toBe('expired');
   });
 
-  it('does not expire a price that carries no expiry', () => {
+  it('keeps a provider-guaranteed price live until its boundary, however old the fetch', () => {
+    // Age does not weaken a guarantee that has not run out. Duffel quotes us
+    // an hour; a quote fetched 50 minutes ago is still the one being honoured.
+    const aged = providerPrice({
+      retrievedAt: new Date(NOW - 50 * 60000).toISOString(),
+      expiresAt: new Date(NOW + 10 * 60000).toISOString(),
+    });
+    expect(priceFreshness(aged, NOW)).toBe('live');
+    expect(priceValidityLabel(aged, NOW)).toBe('Expires in 10 min');
+  });
+
+  it('reports a price with no provider guarantee as checked, never live', () => {
+    // "Live" is the provider's word, not ours. Without a boundary the most we
+    // can say is when we asked.
+    expect(priceFreshness(providerPrice(), NOW)).toBe('checked');
+    expect(priceValidityLabel(providerPrice(), NOW)).toBe('Checked 5 min ago');
+  });
+
+  it('never expires a price on age alone, however ancient', () => {
     // The absence of an expiry is not an expiry of zero. Treating it as one
     // would mark every fetched price dead on arrival.
-    expect(priceFreshness(providerPrice(), NOW)).toBe('live');
+    const ancient = providerPrice({ retrievedAt: new Date(NOW - 400 * 24 * 60 * 60000).toISOString() });
+    expect(priceFreshness(ancient, NOW)).not.toBe('expired');
+  });
+
+  it('leaves an unguaranteed price checked at any age until a policy approves a threshold', () => {
+    // An invented deadline is the same failure as an invented guarantee.
     const old = providerPrice({ retrievedAt: new Date(NOW - 90 * 60000).toISOString() });
-    expect(priceFreshness(old, NOW)).toBe('stale');
+    expect(priceFreshness(old, NOW)).toBe('checked');
+    expect(priceFreshness(old, NOW, { mode: 'provider-expiry' })).toBe('checked');
+  });
+
+  it('lets a provider policy age its own unguaranteed prices into stale', () => {
+    const policy: FreshnessPolicy = { mode: 'age-based', staleAfterMinutes: 30 };
+    const recent = providerPrice({ retrievedAt: new Date(NOW - 20 * 60000).toISOString() });
+    const old = providerPrice({ retrievedAt: new Date(NOW - 90 * 60000).toISOString() });
+    expect(priceFreshness(recent, NOW, policy)).toBe('checked');
+    expect(priceFreshness(old, NOW, policy)).toBe('stale');
+    expect(priceValidityLabel(old, NOW, policy)).toBe('Price may have changed');
+    // Even under an age policy, ageing recommends a re-check — it never claims
+    // the provider withdrew the price.
+    expect(priceFreshness(old, NOW, policy)).not.toBe('expired');
+  });
+
+  it('will not call a price checked when it cannot say when it was checked', () => {
+    const undated = providerPrice({ retrievedAt: 'not-an-instant' });
+    expect(priceFreshness(undated, NOW)).toBe('stale');
+  });
+
+  it("does not let one provider's ageing rule reach another provider's prices", () => {
+    // Duffel states its own expiry, so it must never inherit an activity
+    // provider's refresh window.
+    expect(freshnessPolicyFor('duffel')).toEqual({ mode: 'provider-expiry' });
+    // An unknown provider is not guessed at.
+    expect(freshnessPolicyFor('viator')).toEqual({ mode: 'provider-expiry' });
+    expect(freshnessPolicyFor(undefined)).toEqual({ mode: 'provider-expiry' });
+  });
+
+  it('keeps a confirmed booking price historical rather than market-fresh', () => {
+    // What a held reservation cost is a receipt. Striking it through as
+    // "Expired" would tell the traveller their money lapsed.
+    const paid = {
+      provider: 'duffel',
+      status: 'confirmed' as const,
+      price: providerPrice({ expiresAt: new Date(NOW - 60 * 60000).toISOString() }),
+    };
+    expect(priceFreshness(paid.price, NOW)).toBe('expired');
+    expect(bookingPriceFreshness(paid, NOW)).toBe('checked');
+    expect(bookingPriceFreshness(paid, NOW)).not.toBe('stale');
+    expect(bookingPriceValidityLabel(paid, NOW)).toBe('Price paid at booking');
+  });
+
+  it('decides refreshability separately from freshness', () => {
+    const price = providerPrice({ expiresAt: new Date(NOW - 60000).toISOString() });
+    // Same dead quote, different answers: a requested booking can be re-quoted,
+    // a confirmed one cannot, and freshness had no say in either.
+    const requested = { provider: 'duffel', status: 'requested' as const, price };
+    const confirmed = { provider: 'duffel', status: 'confirmed' as const, price };
+    expect(bookingPriceFreshness(requested, NOW)).toBe('expired');
+    // No provider is wired in this release, so the reason refresh is
+    // unavailable is the missing adapter — not the status and not the
+    // freshness, which is the independence this test exists to show.
+    expect(canRefreshPrice(requested)).toBe(false);
+    expect(refreshUnavailableReason(requested)).toBe('This provider is not connected');
+    // Status still decides on its own: a confirmed booking is unrefreshable
+    // for a different reason entirely.
+    expect(canRefreshPrice(confirmed)).toBe(false);
+    expect(refreshUnavailableReason(confirmed)).toBe('Price paid at booking');
+
+    // And a perfectly live price is still unrefreshable without an adapter.
+    const unwired = { provider: 'viator', status: 'planned' as const, price: providerPrice() };
+    expect(bookingPriceFreshness(unwired, NOW)).toBe('checked');
+    expect(canRefreshPrice(unwired)).toBe(false);
+    expect(refreshUnavailableReason(unwired)).toBe('This provider is not connected');
   });
 
   it('treats a price the traveller typed in as manual, never stale or expired', () => {

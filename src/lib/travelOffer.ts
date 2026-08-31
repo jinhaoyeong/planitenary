@@ -17,7 +17,16 @@
  * an implementation of {@link TravelOfferProvider} and not a redesign of
  * {@link TravelBooking}.
  */
-import type { PriceSnapshot, TravelBooking, TravelBookingType } from './travelBooking';
+import {
+  DEFAULT_FRESHNESS_POLICY,
+  priceFreshness,
+  priceValidityLabel,
+  type FreshnessPolicy,
+  type PriceFreshness,
+  type PriceSnapshot,
+  type TravelBooking,
+  type TravelBookingType,
+} from './travelBooking';
 
 /**
  * A quote, as the provider returned it.
@@ -75,6 +84,14 @@ export interface TravelOfferProvider {
   refresh(offer: Pick<TravelOffer, 'provider' | 'providerOfferId'>): Promise<TravelOffer | null>;
   /** Pure: the durable record this offer would become if chosen. */
   materialise(offer: TravelOffer): Omit<TravelBooking, 'id'>;
+  /**
+   * How this provider's prices age.
+   *
+   * Optional because a provider that has not been researched yet should not be
+   * guessed at: without a declaration its prices stop at `checked` instead of
+   * acquiring a staleness deadline nobody approved.
+   */
+  freshnessPolicy?: FreshnessPolicy;
 }
 
 /**
@@ -86,6 +103,46 @@ export const travelOfferProviders: TravelOfferProvider[] = [];
 
 export const providerById = (id: string | undefined): TravelOfferProvider | undefined =>
   (id ? travelOfferProviders.find((provider) => provider.id === id) : undefined);
+
+/**
+ * The ageing rule for whoever supplied this number.
+ *
+ * An unknown or unwired provider falls back to the conservative default rather
+ * than to any other provider's policy: Duffel's expiry semantics must not leak
+ * onto an activity price, and an activity provider's refresh window must not
+ * start expiring flight quotes.
+ */
+export const freshnessPolicyFor = (providerId: string | undefined): FreshnessPolicy =>
+  providerById(providerId)?.freshnessPolicy || DEFAULT_FRESHNESS_POLICY;
+
+/**
+ * Whether a *booking's* price is guaranteed, observed, ageing or dead.
+ *
+ * A confirmed booking is the exception: what it cost is a receipt, not a
+ * quote. Market freshness must never touch it — striking through the paid
+ * price as "Expired" an hour after the provider's quote lapsed would tell the
+ * traveller their money expired, which is both false and unfixable, since
+ * refresh is correctly unavailable on a confirmed record.
+ */
+export const bookingPriceFreshness = (
+  booking: Pick<TravelBooking, 'provider' | 'price' | 'status'>,
+  now: number,
+): PriceFreshness => {
+  const freshness = priceFreshness(booking.price, now, freshnessPolicyFor(booking.provider));
+  if (booking.status !== 'confirmed' || freshness === 'manual') return freshness;
+  return 'checked';
+};
+
+/** `priceValidityLabel` with the policy of the provider that supplied the price. */
+export const bookingPriceValidityLabel = (
+  booking: Pick<TravelBooking, 'provider' | 'price' | 'status'>,
+  now: number,
+): string | undefined => {
+  if (booking.status === 'confirmed' && booking.price && booking.price.source !== 'manual') {
+    return 'Price paid at booking';
+  }
+  return priceValidityLabel(booking.price, now, freshnessPolicyFor(booking.provider));
+};
 
 /**
  * Whether a "Refresh price" control is truthful for this booking.
