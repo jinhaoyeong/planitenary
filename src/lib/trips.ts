@@ -184,9 +184,25 @@ export function syncDaysWithDuration(itinerary: Itinerary, profile: TripProfile)
   // and a writer that depends on being cleaned up afterwards is a writer that
   // breaks as soon as its output is read directly.
   const city = cityForDay(cities);
-  const named = (day: DayPlan): DayPlan => {
-    const stayCity = day.stayCity || day.city || city;
-    return { ...day, stayCity, city: stayCity };
+  const previousCities = new Set([
+    ...itinerary.cities,
+    ...itinerary.days.flatMap((day) => [day.stayCity, day.city]),
+  ].map((value) => value.trim().toLowerCase()).filter(Boolean));
+  const destinationChanged = Boolean(city && previousCities.size > 0 && !previousCities.has(city.toLowerCase()));
+  const generatedForDestination = destinationChanged ? buildDaysFromProfile(profile) : [];
+  const named = (day: DayPlan, index: number): DayPlan => {
+    const stayCity = destinationChanged ? city : (day.stayCity || day.city || city);
+    return {
+      ...day,
+      stayCity,
+      city: stayCity,
+      // Empty cards contain no user-authored itinerary work. Refresh their
+      // generated place name as part of the explicit destination change so a
+      // Tokyo trip cannot keep saying "Arrive in Osaka" after save.
+      title: destinationChanged && day.activities.length === 0
+        ? (generatedForDestination[index]?.title || day.title)
+        : day.title,
+    };
   };
   return {
     days: city ? days.map(named) : days,

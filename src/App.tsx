@@ -72,9 +72,9 @@ import {
 import {
   DEFAULT_MARQUEE_ITEMS,
   emptyItinerary,
-  isNewerItineraryRevision,
   logItinerarySync,
   sanitizeItinerary,
+  shouldAdoptItineraryForTrip,
 } from './lib/itinerarySanitize';
 import { resolveDisplayedDayBadge } from './lib/trips';
 import { resolveTripCover, tripCoverSurface } from './lib/verifiedImage';
@@ -253,6 +253,13 @@ function App() {
    * whichever itinerary existed when the subscription was opened.
    */
   const latestItineraryRef = useRef<Itinerary | null>(null);
+  /**
+   * Async fetch/realtime callbacks must prove they still belong to the trip the
+   * user selected. State updates are batched, so this mirror is advanced
+   * synchronously in `handleOpenTrip` before an old callback can land.
+   */
+  const activeItineraryIdRef = useRef(activeItineraryId);
+  activeItineraryIdRef.current = activeItineraryId;
 
   const demoItinerary = itineraries.find((i) => i.id === activeItineraryId) ?? itineraries[0];
   const activeItinerary = useMemo(
@@ -372,6 +379,8 @@ function App() {
 
   const handleOpenTrip = (trip: Itinerary) => {
     setShowAccountSettings(false);
+    activeItineraryIdRef.current = trip.id;
+    latestItineraryRef.current = trip;
     setSelectedTripId(trip.id);
     setCustomItinerary(trip);
   };
@@ -393,6 +402,8 @@ function App() {
         .single();
       if (data?.data) {
         const sanitized = sanitizeItinerary(data.data, activeItinerary);
+        if (activeItineraryIdRef.current !== activeItineraryId || sanitized.id !== activeItineraryId) return;
+        latestItineraryRef.current = sanitized;
         setCustomItinerary(sanitized);
         saveToStorage(itineraryStorageKey, sanitized);
       }
@@ -412,22 +423,39 @@ function App() {
         : undefined;
       const recovered = loadFromStorage<Itinerary>(storageKey, { preferRecovery: preferProfileRecovery });
       if (recovered) {
-        setCustomItinerary(sanitizeItinerary(recovered, activeItinerary));
-        hasLocalItineraryRef.current = true;
+        const sanitized = sanitizeItinerary(recovered, activeItinerary);
+        if (sanitized.id === activeItineraryId) {
+          latestItineraryRef.current = sanitized;
+          setCustomItinerary(sanitized);
+          hasLocalItineraryRef.current = true;
+        } else {
+          latestItineraryRef.current = activeItinerary;
+          setCustomItinerary(activeItinerary);
+        }
       } else if (isDemoUser) {
         // Keep edits made before account-scoped storage was introduced.
         const legacyDemoData = loadFromStorage<Itinerary>(`itinerary-${activeItineraryId}`, { preferRecovery: preferProfileRecovery });
         if (legacyDemoData) {
-          setCustomItinerary(sanitizeItinerary(legacyDemoData, activeItinerary));
-          hasLocalItineraryRef.current = true;
+          const sanitized = sanitizeItinerary(legacyDemoData, activeItinerary);
+          if (sanitized.id === activeItineraryId) {
+            latestItineraryRef.current = sanitized;
+            setCustomItinerary(sanitized);
+            hasLocalItineraryRef.current = true;
+          } else {
+            latestItineraryRef.current = activeItinerary;
+            setCustomItinerary(activeItinerary);
+          }
         } else {
+          latestItineraryRef.current = activeItinerary;
           setCustomItinerary(activeItinerary);
         }
       } else {
+        latestItineraryRef.current = activeItinerary;
         setCustomItinerary(activeItinerary);
       }
     } catch (e) {
       console.error("Failed to load itinerary", e);
+      latestItineraryRef.current = activeItinerary;
       setCustomItinerary(activeItinerary);
     }
     setHydratedItineraryStorageKey(storageKey);
@@ -453,13 +481,14 @@ function App() {
         .single();
 
       if (!isMounted) return;
+      if (activeItineraryIdRef.current !== activeItineraryId) return;
 
       if (data?.data) {
         const sanitized = sanitizeItinerary(data.data, activeItinerary);
         const current = latestItineraryRef.current;
         // A fetch that resolves after a local rebuild describes an older trip,
         // and must not be allowed to undo it.
-        const applied = isNewerItineraryRevision(sanitized, current);
+        const applied = shouldAdoptItineraryForTrip(activeItineraryId, sanitized, current);
         logItinerarySync('remote-fetch', {
           applied,
           incomingRevision: sanitized.revision,
@@ -469,6 +498,7 @@ function App() {
         });
         hasLocalItineraryRef.current = true;
         if (applied) {
+          latestItineraryRef.current = sanitized;
           setCustomItinerary(sanitized);
           saveToStorage(itineraryStorageKey, sanitized);
         }
@@ -490,6 +520,7 @@ function App() {
           const nextData = payload.new && 'data' in payload.new ? (payload.new.data as Itinerary | undefined) : undefined;
           if (!nextData) return;
           const sanitized = sanitizeItinerary(nextData, activeItinerary);
+          if (activeItineraryIdRef.current !== activeItineraryId) return;
           const current = latestItineraryRef.current;
           hasLocalItineraryRef.current = true;
           /**
@@ -497,7 +528,7 @@ function App() {
            * upsert. Applying one is at best a no-op and at worst a rollback,
            * because the echo describes whatever was written 800ms ago.
            */
-          const applied = isNewerItineraryRevision(sanitized, current)
+          const applied = shouldAdoptItineraryForTrip(activeItineraryId, sanitized, current)
             && JSON.stringify(current) !== JSON.stringify(sanitized);
           logItinerarySync('realtime-echo', {
             applied,
@@ -507,6 +538,7 @@ function App() {
             currentDays: current?.days.length,
           });
           if (!applied) return;
+          latestItineraryRef.current = sanitized;
           saveToStorage(itineraryStorageKey, sanitized);
           setCustomItinerary(sanitized);
         }
@@ -528,6 +560,7 @@ function App() {
     const itineraryToSync = customItinerary;
     if (
       !itineraryToSync ||
+      itineraryToSync.id !== activeItineraryId ||
       hydratedItineraryStorageKey !== itineraryStorageKey ||
       !itinerarySyncReadyRef.current ||
       !remoteItineraryLoadedRef.current
@@ -562,7 +595,7 @@ function App() {
     }, 800);
 
     return () => clearTimeout(timeoutId);
-  }, [customItinerary, activeItinerary, hydratedItineraryStorageKey, itineraryStorageKey, isDemoUser, user]);
+  }, [customItinerary, activeItinerary, activeItineraryId, hydratedItineraryStorageKey, itineraryStorageKey, isDemoUser, user]);
 
   useEffect(() => {
     const key = itineraryStorageKey;
@@ -570,8 +603,11 @@ function App() {
       if (event.key !== key || !event.newValue) return;
       try {
         const incoming = sanitizeItinerary(JSON.parse(event.newValue), activeItinerary);
+        if (incoming.id !== activeItineraryId || activeItineraryIdRef.current !== activeItineraryId) return;
         setCustomItinerary((prev) => {
           if (prev && JSON.stringify(prev) === JSON.stringify(incoming)) return prev;
+          if (!shouldAdoptItineraryForTrip(activeItineraryId, incoming, prev)) return prev;
+          latestItineraryRef.current = incoming;
           return incoming;
         });
       } catch (error) {

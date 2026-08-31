@@ -1272,14 +1272,37 @@ export function buildDestinationItinerary(
       : `${rebalanced.moves} stops were moved to lighter days so no single day is much harder than the rest.`);
   }
 
+  const isPreservedActivity = (activity: Activity): boolean =>
+    (activity.source === undefined && activity.locked !== false)
+    || activity.source === 'manual'
+    || Boolean(activity.locked)
+    || Boolean(activity.lockedFields?.includes('all'))
+    || Boolean(activity.lockedFields?.includes('schedule'));
+  const preservedActivityIds = new Set(itinerary.days.flatMap((day) => day.activities
+    .filter(isPreservedActivity)
+    .flatMap((activity) => activity.id ? [activity.id] : [])));
+
   // --- Pass three: turn the final simulation into the plan ------------------
   for (let index = 0; index < simulations.length; index += 1) {
     const simulated = simulations[index];
     const existing = itinerary.days[index];
-    const protectedActivities = (existing?.activities || []).filter((activity) =>
-      activity.locked || activity.lockedFields?.includes('all') || activity.lockedFields?.includes('schedule'));
+    /**
+     * Rebuilding the discovered layer is not consent to delete the traveller's
+     * own itinerary. Legacy manual entries often have no `source` until their
+     * next sanitisation pass, so absence is treated as manual unless an older
+     * planner explicitly marked the row unlocked and replaceable.
+     *
+     * Imported/generated activities remain replaceable unless explicitly
+     * locked; otherwise every rebuild would accumulate stale provider results.
+     */
+    const protectedActivities = (existing?.activities || []).filter(isPreservedActivity);
 
     const discoveredActivities = simulated.slots
+      // A saved manual activity can also appear as a review candidate. It is
+      // already present in `protectedActivities`; converting that candidate
+      // would either duplicate it or reject its deliberately unsourced facts.
+      .filter((slot) => !slot.candidate
+        || !preservedActivityIds.has(slot.candidate.savedActivityId || slot.candidate.id))
       .map((slot) => slotToActivity(slot, index + 1, transportMode))
       .filter((activity): activity is Activity => activity !== null);
 

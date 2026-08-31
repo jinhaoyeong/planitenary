@@ -57,10 +57,16 @@ export function structuredFunctionEnvelope(payload: unknown): Record<string, unk
  * Structured refusals are the exception: they are returned as data so a stale
  * or expired plan can be explained without looking like a transport crash.
  */
-export async function invokeTravelFunction(name: string, body?: unknown): Promise<unknown> {
+export async function invokeTravelFunction(
+  name: string,
+  body?: unknown,
+  options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<unknown> {
   if (!hasSupabaseConfig) throw new Error('Supabase is not configured.');
   const { data, error } = await supabase.functions.invoke(name, {
     body: body ?? {},
+    signal: options?.signal,
+    timeout: options?.timeoutMs,
   });
   if (error) {
     // FunctionsHttpError keeps the response body on `context`. Preserve the

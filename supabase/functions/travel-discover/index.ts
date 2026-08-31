@@ -928,7 +928,11 @@ async function searchOsm(
 
   const preferredEntries = await fetchBatch(plan.preferredQueries);
   let entries = preferredEntries;
-  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+  // A timeout is evidence that this source is unavailable for the request, not
+  // a reason to ask the same endpoint a second time with fallback categories.
+  // Retrying here created the 55-76s 503s seen in production. A factual empty
+  // response may still use the fallback round; a failed source may not.
+  if (selectDiscoveryEntries(entries, plan, limit).length < limit && !report?.overpassFailed) {
     entries = [...entries, ...(await fetchBatch(plan.fallbackQueries))];
   }
   return selectPlannedRecords(entries, plan, limit);

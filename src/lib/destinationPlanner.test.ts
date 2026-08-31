@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Itinerary } from '../data';
 import { OSAKA_PLACE_FIXTURE, ROME_PLACE_FIXTURE, SEOUL_PLACE_FIXTURE } from './destinationFixtures';
 import { buildDestinationItinerary, rankDestinationCandidates } from './destinationPlanner';
+import { reviewCandidatesForItinerary } from './decisionTarget';
 import { createEmptyProfile, manualDestination, type TripProfile } from './tripProfile';
 
 const profile = (): TripProfile => ({
@@ -93,6 +94,32 @@ describe('destination planner vertical slice', () => {
     const decisions = Object.fromEntries(ranked.map(({ candidate }) => [candidate.id, 'interested' as const]));
     const result = buildDestinationItinerary(current, profile(), ranked, decisions);
     expect(result.days[0].activities.find((activity) => activity.id === 'locked-arrival')?.time).toBe('13:00');
+  });
+
+  it('preserves an ordinary manual activity while adding generated places', () => {
+    const current = itinerary();
+    current.days[0].activities.push({
+      id: 'manual-grand-palace',
+      kind: 'place',
+      time: '08:30',
+      durationMinutes: 90,
+      name: 'Grand Palace Test',
+      description: 'Added by the traveller',
+      type: 'sight',
+      lockedFields: [],
+    });
+    const ranked = rankDestinationCandidates(
+      reviewCandidatesForItinerary(OSAKA_PLACE_FIXTURE.slice(0, 1), current, { city: 'Osaka' }),
+      profile(),
+    );
+    const decisions = Object.fromEntries(ranked.map(({ candidate }) => [candidate.id, 'interested' as const]));
+
+    const result = buildDestinationItinerary(current, profile(), ranked, decisions);
+    const allActivities = result.days.flatMap((day) => day.activities);
+
+    expect(allActivities.filter((activity) => activity.id === 'manual-grand-palace')).toHaveLength(1);
+    expect(allActivities.filter((activity) => activity.name === 'Grand Palace Test')).toHaveLength(1);
+    expect(allActivities.some((activity) => activity.source === 'imported')).toBe(true);
   });
 
   it.each([

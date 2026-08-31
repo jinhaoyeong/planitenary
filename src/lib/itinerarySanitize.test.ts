@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   emptyItinerary,
   isNewerItineraryRevision,
+  shouldAdoptItineraryForTrip,
   sanitizeActivity,
   sanitizeItinerary,
 } from './itinerarySanitize';
@@ -399,6 +400,41 @@ describe('revision ordering decides which write wins', () => {
     const legacy = { ...emptyItinerary } as Itinerary;
     delete (legacy as { revision?: number }).revision;
     expect(isNewerItineraryRevision(legacy, at(1))).toBe(false);
+  });
+});
+
+describe('revision ordering is scoped to the selected trip id', () => {
+  const trip = (id: string, city: string, revision: number): Itinerary => ({
+    ...emptyItinerary,
+    id,
+    name: `${city} trip`,
+    cities: [city],
+    revision,
+    days: [{ day: 1, date: 'Apr 2', stayCity: city, activityCities: [], city, title: city, activities: [] }],
+  });
+
+  it('adopts Bangkok even when the previously open Phuket trip has a higher revision', () => {
+    expect(shouldAdoptItineraryForTrip(
+      'trip-bangkok',
+      trip('trip-bangkok', 'Bangkok', 2),
+      trip('trip-phuket', 'Phuket', 99),
+    )).toBe(true);
+  });
+
+  it('rejects a stale response for a different trip', () => {
+    expect(shouldAdoptItineraryForTrip(
+      'trip-bangkok',
+      trip('trip-phuket', 'Phuket', 100),
+      trip('trip-bangkok', 'Bangkok', 2),
+    )).toBe(false);
+  });
+
+  it('still uses revisions when both copies belong to Bangkok', () => {
+    expect(shouldAdoptItineraryForTrip(
+      'trip-bangkok',
+      trip('trip-bangkok', 'Bangkok', 3),
+      trip('trip-bangkok', 'Bangkok', 2),
+    )).toBe(true);
   });
 });
 

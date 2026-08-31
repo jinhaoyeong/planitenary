@@ -2332,7 +2332,7 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
             </button>
           )}
           <button type="button" className={`pill-btn ${canResumeReview && candidates.length > 0 ? 'pill-ghost' : 'pill-primary'}`} onClick={() => void beginDiscovery()} disabled={loading}>
-            <Sparkles className="w-4 h-4" /> {loading ? 'Loading places…' : 'Start'}
+            <Sparkles className="w-4 h-4" /> {loading ? 'Loading places…' : error ? 'Retry' : 'Start'}
           </button>
         </div>
         {error && <p className="destination-discovery-error" role="alert">{error} Try again; your itinerary has not changed.</p>}

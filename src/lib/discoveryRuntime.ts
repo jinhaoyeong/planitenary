@@ -30,6 +30,48 @@ import type { TripDestination } from './tripProfile';
 import { isPlaceAdmission, type PlaceAdmission } from '../../supabase/functions/_shared/placeCost';
 import { parsePlaceImage } from '../../supabase/functions/_shared/placeImages';
 
+/**
+ * Interactive discovery uses the backend's existing planning contract:
+ * geocoding (8s) + Wikivoyage (12s) + one Overpass planning round (22s), with
+ * a small relay/database margin. The server does not retry the same failed
+ * Overpass source, so 50s is a terminal boundary rather than an arbitrary UX
+ * preference.
+ */
+export const DISCOVERY_PLANNING_REQUEST_TIMEOUT_MS = 50_000;
+
+interface DiscoveryInvokeOptions {
+  signal?: AbortSignal;
+}
+
+type DiscoveryInvoke = (
+  name: string,
+  body: unknown,
+  options?: DiscoveryInvokeOptions,
+) => Promise<unknown>;
+
+const invokeDiscoveryWithDeadline = async (
+  invoke: DiscoveryInvoke,
+  body: unknown,
+): Promise<unknown> => {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error('Place search timed out.'));
+    }, DISCOVERY_PLANNING_REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([
+      invoke('travel-discover', body, { signal: controller.signal }),
+      timeout,
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+};
+
 /** Cached so every panel mount does not re-ask the server. */
 let runtimeCache: { value: ProviderRuntime; fetchedAt: number } | null = null;
 const RUNTIME_TTL_MS = 5 * 60 * 1000;
@@ -338,7 +380,7 @@ export type EvidenceDigest = Pick<
 export async function fetchPlaceEvidence(
   destination: Pick<TripDestination, 'city' | 'countryCode'>,
   candidates: PlaceCandidate[],
-  invoke?: (name: string, body: unknown) => Promise<unknown>,
+  invoke?: DiscoveryInvoke,
   options?: { provider?: string; travelStartsInDays?: number },
 ): Promise<EvidenceDigest> {
   const withProviderId = candidates.filter((candidate) => candidate.providerPlaceId);
@@ -506,7 +548,7 @@ export async function discoverPlaces(
 
   if (capability.places.status === 'live' && invoke) {
     try {
-      const payload = await invoke('travel-discover', {
+      const payload = await invokeDiscoveryWithDeadline(invoke, {
         city: destination.city,
         countryCode: destination.countryCode,
         provider: capability.places.provider,
@@ -521,6 +563,9 @@ export async function discoverPlaces(
         // chosen from search rather than typed by hand.
         lat: destination.lat,
         lng: destination.lng,
+        // This panel is an interactive itinerary build, not an open-ended
+        // browse. Omitting this selected the backend's slower browse budgets.
+        mode: 'planning',
       });
       const candidates = Array.isArray(payload) ? (payload as PlaceCandidate[]) : [];
       if (candidates.length > 0) {

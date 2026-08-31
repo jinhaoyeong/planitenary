@@ -179,3 +179,33 @@ describe('naming the city on a day that had none', () => {
     for (const day of synced.days) expect(day.city).toBe(day.stayCity);
   });
 });
+
+describe('changing a single-city destination', () => {
+  it('cannot save Tokyo metadata while leaving empty day cards based in Osaka', () => {
+    const osaka: Itinerary = {
+      ...createItineraryFromProfile(kyoto()),
+      cities: ['Osaka'],
+      tripProfile: {
+        ...kyoto(),
+        destinations: [manualDestination('Osaka', 'Japan')],
+      },
+      days: createItineraryFromProfile(kyoto()).days.map((day, index) => ({
+        ...day,
+        city: 'Osaka',
+        stayCity: 'Osaka',
+        title: index === 0 ? 'Arrive in Osaka' : `Day ${index + 1} in Osaka`,
+      })),
+    };
+    const tokyo = {
+      ...kyoto(),
+      destinations: [manualDestination('Tokyo', 'Japan')],
+    };
+
+    const saved = syncDurationDependentFields(osaka, tokyo);
+
+    expect(saved.cities).toEqual(['Tokyo']);
+    expect((saved.tripProfile as TripProfile).destinations.map((destination) => destination.city)).toEqual(['Tokyo']);
+    expect(saved.days.every((day) => day.city === 'Tokyo' && day.stayCity === 'Tokyo')).toBe(true);
+    expect(saved.days.every((day) => !day.title.includes('Osaka'))).toBe(true);
+  });
+});

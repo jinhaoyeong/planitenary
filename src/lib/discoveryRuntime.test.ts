@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PROVIDER_RUNTIME, type ProviderRuntime } from './destinationCapability';
 import {
   capabilityFor,
+  DISCOVERY_PLANNING_REQUEST_TIMEOUT_MS,
   discoverPlaces,
   fetchPlaceEvidence,
   fetchPlacePhotos,
@@ -87,7 +88,11 @@ describe('discovering places', () => {
     const outcome = await discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
     expect(outcome.usingFixture).toBe(false);
     expect(outcome.candidates).toHaveLength(1);
-    expect(invoke).toHaveBeenCalledWith('travel-discover', expect.objectContaining({ city: 'Melbourne' }));
+    expect(invoke).toHaveBeenCalledWith(
+      'travel-discover',
+      expect.objectContaining({ city: 'Melbourne', mode: 'planning' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('sends the selected Trip Setup values to discovery as query-plan input', async () => {
@@ -99,12 +104,17 @@ describe('discovering places', () => {
       { limit: 25, interests: ['street-food', 'shopping', 'nature'], hiddenGems: true },
     );
 
-    expect(invoke).toHaveBeenCalledWith('travel-discover', expect.objectContaining({
-      city: 'Tokyo',
-      limit: 25,
-      interests: ['street-food', 'shopping', 'nature'],
-      hiddenGems: true,
-    }));
+    expect(invoke).toHaveBeenCalledWith(
+      'travel-discover',
+      expect.objectContaining({
+        city: 'Tokyo',
+        limit: 25,
+        interests: ['street-food', 'shopping', 'nature'],
+        hiddenGems: true,
+        mode: 'planning',
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('falls back to the fixture when the live call fails, and says so', async () => {
@@ -114,6 +124,22 @@ describe('discovering places', () => {
     expect(outcome.candidates.length).toBeGreaterThan(0);
     // Must not keep claiming "live" while serving captured data.
     expect(outcome.capability.places.status).toBe('fixture');
+  });
+
+  it('reaches a terminal timeout when a live discovery request never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const invoke = vi.fn(() => new Promise<unknown>(() => undefined));
+      const pending = discoverPlaces({ city: 'Melbourne', countryCode: 'AU' }, liveRuntime(), invoke);
+
+      await vi.advanceTimersByTimeAsync(DISCOVERY_PLANNING_REQUEST_TIMEOUT_MS);
+      const outcome = await pending;
+
+      expect(outcome.candidates).toEqual([]);
+      expect(outcome.providerError).toMatch(/timed out/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /** One evidence document as the backend actually returns it. */

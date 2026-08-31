@@ -198,6 +198,10 @@ describe('deployed discovery boundaries', () => {
     expect(discoverSource).not.toMatch(/Promise\.all\(\[\s*fetchOverpassPlaces\(/);
   });
 
+  it('does not ask the same failed Overpass source for a fallback round', () => {
+    expect(discoverSource).toContain("&& !report?.overpassFailed");
+  });
+
   it('gives interactive planning a shorter source deadline than browsing', () => {
     const budget = (name: string) => {
       const match = discoverSource.match(

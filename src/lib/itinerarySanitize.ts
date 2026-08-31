@@ -855,6 +855,21 @@ export const isNewerItineraryRevision = (incoming: Itinerary, current: Itinerary
   return !hasTripContent(current) && hasTripContent(incoming);
 };
 
+/**
+ * Revision counters belong to one trip. They are meaningless across trips:
+ * Phuket revision 99 cannot outrank Bangkok revision 2 when Bangkok is the
+ * selected id. This is the adoption gate for storage, fetch and realtime data.
+ */
+export const shouldAdoptItineraryForTrip = (
+  selectedTripId: string,
+  incoming: Itinerary,
+  current: Itinerary | null,
+): boolean => {
+  if (incoming.id !== selectedTripId) return false;
+  if (current?.id !== selectedTripId) return true;
+  return isNewerItineraryRevision(incoming, current);
+};
+
 export const sanitizeItinerary = (value: unknown, fallback: Itinerary): Itinerary => {
   const source = value && typeof value === 'object' ? value as Partial<Itinerary> : {};
   const sourceDays = Array.isArray(source.days) && source.days.length > 0 ? source.days : fallback.days;

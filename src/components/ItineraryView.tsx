@@ -26,6 +26,7 @@ import { useSwipe } from '../hooks/useSwipe';
 import { admissionChip, describeAdmission } from '../lib/admissionCopy';
 import { activityBookingLink } from '../lib/activityCommerce';
 import { bookingCtaLabel } from '../lib/activityCommerceCopy';
+import { removeActivityFromDay } from '../lib/activityMutations';
 import { activityHoursToDateAware, describeOpeningHours } from '../lib/openingHours';
 import { convertCurrency, formatCurrency, hasRate } from '../lib/currency';
 import { addDays } from '../lib/dateRange';
@@ -1467,6 +1468,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
       type: newActivity.type as ActivityType || 'other',
       time: normalizedTime,
       description: newActivity.description || 'Added manually',
+      source: 'manual',
       location: newActivity.location || '',
       cost: newActivity.cost || '',
       coordinates: newActivity.coordinates // Include coordinates if available
@@ -1509,14 +1511,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     }
 
     if (window.confirm('Delete this activity?')) {
-      const updatedDays = customItinerary.days.map((day, idx) => {
-        if (idx !== dayIndex) return day;
-        return {
-          ...day,
-          activities: day.activities.filter((_, activityIdx) => activityIdx !== activityIndex)
-        };
-      });
-      const updatedItinerary = { ...customItinerary, days: updatedDays };
+      const updatedItinerary = removeActivityFromDay(customItinerary, dayNumber, activityIndex);
       setCustomItinerary(updatedItinerary);
       onItineraryChange?.(updatedItinerary);
       setEditingActivityIndex(null);

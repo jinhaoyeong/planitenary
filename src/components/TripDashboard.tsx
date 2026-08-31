@@ -16,6 +16,7 @@ import { parseTripCoverRef, resolveTripCover, tripCoverSurface } from '../lib/ve
 import { countryArtworkForSummary } from '../lib/countryArtwork';
 import { resolveCountryIdentity, resolveTripCountry } from '../lib/tripCountry';
 import tripEmptyIllustration from '../assets/illustrations/trip-empty.webp';
+import { currentTripFirst, currentTripStorageKey, itineraryMatchesTrip } from '../lib/tripSelection';
 
 interface TripDashboardProps {
   onOpenTrip: (trip: Itinerary) => void;
@@ -163,11 +164,28 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     const openedAt = new Date().toISOString();
     if (localOnly) {
       const stored = safeGetItem(`itinerary-${user.id}-${summary.id}`);
+      let itinerary: Itinerary;
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as unknown;
+          if (!itineraryMatchesTrip(summary.id, parsed)) {
+            setError('That trip could not be opened because its saved identity does not match.');
+            return;
+          }
+          itinerary = parsed;
+        } catch {
+          setError('That trip could not be opened because its saved data is invalid.');
+          return;
+        }
+      } else {
+        itinerary = createBlankItinerary(summary.id);
+      }
       const next = trips
         .map((trip) => trip.id === summary.id ? { ...trip, updatedAt: openedAt } : trip)
         .sort(recentFirst);
       persistLocalTrips(next);
-      onOpenTrip(stored ? JSON.parse(stored) as Itinerary : createBlankItinerary(summary.id));
+      safeSetItem(currentTripStorageKey(user.id), summary.id);
+      onOpenTrip(itinerary);
       return;
     }
     const { data, error: queryError } = await supabase
@@ -180,13 +198,19 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       setError('That trip could not be opened.');
       return;
     }
+    const opened = data?.data as unknown;
+    if (opened && !itineraryMatchesTrip(summary.id, opened)) {
+      setError('That trip could not be opened because its saved identity does not match.');
+      return;
+    }
     const { error: recentError } = await supabase
       .from('trip_registry')
       .update({ updated_at: openedAt })
       .eq('id', summary.id)
       .eq('user_id', user.id);
     if (recentError) console.error('Failed to mark the trip as current:', recentError);
-    onOpenTrip(data?.data as Itinerary || createBlankItinerary(summary.id));
+    safeSetItem(currentTripStorageKey(user.id), summary.id);
+    onOpenTrip((opened as Itinerary | undefined) ?? createBlankItinerary(summary.id));
   };
 
   const createTrip = async (profile?: TripProfile) => {
@@ -205,6 +229,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
       persistLocalTrips(next);
       setTrips(next);
       setWizardOpen(false);
+      safeSetItem(currentTripStorageKey(user.id), itinerary.id);
       onOpenTrip(itinerary);
       setCreating(false);
       return;
@@ -231,6 +256,7 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     } else {
       setTrips((current) => [summary, ...current]);
       setWizardOpen(false);
+      safeSetItem(currentTripStorageKey(user.id), itinerary.id);
       onOpenTrip(itinerary);
     }
     setCreating(false);
@@ -346,10 +372,13 @@ export function TripDashboard({ onOpenTrip, onOpenProfile }: TripDashboardProps)
     }
   };
 
-  // "Current" means the active trip most recently opened or edited. The same
-  // updated_at ordering is used locally and in Supabase, so the large card is
-  // deterministic across desktop, mobile, refreshes, and devices.
-  const visibleTrips = trips.filter((trip) => trip.status === shelf).sort(recentFirst);
+  // "Current" means the trip explicitly opened on this device. Updated-at
+  // ordering remains the fallback before a device has remembered a selection.
+  const rememberedTripId = user ? safeGetItem(currentTripStorageKey(user.id)) : null;
+  const visibleTrips = currentTripFirst(
+    trips.filter((trip) => trip.status === shelf).sort(recentFirst),
+    shelf === 'active' ? rememberedTripId : null,
+  );
   const currentTrip = visibleTrips[0];
   const otherTrips = visibleTrips.slice(1);
   const currentArtwork = currentTrip ? countryArtworkForSummary(currentTrip) : undefined;
