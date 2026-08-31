@@ -2,7 +2,7 @@
  * Two URL judgements that both runtimes need, and neither owns.
  *
  * `isSafePublicUrl` decides what the *server* may fetch, because a place
- * website arrives from a community-edited OpenStreetMap tag. 
+ * website arrives from a community-edited OpenStreetMap tag.
  * `isLikelyResellerUrl` decides whether a host may speak as the operator.
  * The Edge functions have always needed both; the browser now needs them too,
  * to build a booking link ladder that cannot caption a marketplace page
