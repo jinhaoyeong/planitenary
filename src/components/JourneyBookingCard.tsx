@@ -5,11 +5,15 @@ import {
   formatBookingPrice,
   hasComparableClocks,
   priceCheckedLabel,
-  priceFreshness,
   type TravelBooking,
   type TravelBookingType,
 } from '../lib/travelBooking';
-import { canRefreshPrice, refreshUnavailableReason } from '../lib/travelOffer';
+import {
+  bookingPriceFreshness,
+  bookingPriceValidityLabel,
+  canRefreshPrice,
+  refreshUnavailableReason,
+} from '../lib/travelOffer';
 
 interface JourneyBookingCardProps {
   booking: TravelBooking;
@@ -65,9 +69,15 @@ const shortDate = (iso: string | undefined): string | undefined => {
  * kind of fact on it rather than an advertisement pasted into it.
  */
 export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compact = false }: JourneyBookingCardProps) {
-  const freshness = priceFreshness(booking.price, now);
+  const freshness = bookingPriceFreshness(booking, now);
   const price = formatBookingPrice(booking.price);
   const checked = priceCheckedLabel(booking.price, now);
+  // A guaranteed price answers "how long have I got", not "how old is this",
+  // and a paid one answers neither. Every other state has no boundary to count
+  // down to, so the plain age stands.
+  const validity = freshness === 'live' || booking.status === 'confirmed'
+    ? bookingPriceValidityLabel(booking, now)
+    : checked;
   const refreshable = canRefreshPrice(booking);
   const unavailable = refreshUnavailableReason(booking);
   // Absence of a price is not a manual price. Reading it as one hid refresh on
@@ -163,7 +173,7 @@ export function JourneyBookingCard({ booking, now, onEdit, onRefreshPrice, compa
 
         {freshness === 'expired' && <span className="journey-booking-flag">Expired</span>}
         {freshness === 'stale' && <span className="journey-booking-flag is-soft">Price may have changed</span>}
-        {checked && <small className="journey-booking-checked">{checked}</small>}
+        {validity && <small className="journey-booking-checked">{validity}</small>}
 
         {/*
           A refresh control appears only where something can actually refresh.
