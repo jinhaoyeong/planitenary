@@ -43,6 +43,7 @@ import {
   reconcileCityStays,
 } from './cityStays';
 import { distanceMeters } from './placeIdentity';
+import { candidatePlaceIdentityKeys, indexHasPlace, placeIdentityIndex } from './activityPlaceIdentity';
 import {
   ARRIVAL_SETTLING_MINUTES,
   DEPARTURE_LEAD_MINUTES,
@@ -1272,37 +1273,52 @@ export function buildDestinationItinerary(
       : `${rebalanced.moves} stops were moved to lighter days so no single day is much harder than the rest.`);
   }
 
+  /**
+   * What a rebuild may not throw away.
+   *
+   * `manual` is the traveller's own work. `legacy-unknown` is a row whose
+   * author cannot be established — it may be theirs, so it is kept for the same
+   * reason, but it is never *called* theirs (see {@link ActivitySource}).
+   * `generated` and `imported` are this planner's own previous output and stay
+   * replaceable, or every rebuild would silt up with stale provider results.
+   */
   const isPreservedActivity = (activity: Activity): boolean =>
-    (activity.source === undefined && activity.locked !== false)
-    || activity.source === 'manual'
+    activity.source === 'manual'
+    || activity.source === 'legacy-unknown'
     || Boolean(activity.locked)
     || Boolean(activity.lockedFields?.includes('all'))
-    || Boolean(activity.lockedFields?.includes('schedule'));
-  const preservedActivityIds = new Set(itinerary.days.flatMap((day) => day.activities
-    .filter(isPreservedActivity)
-    .flatMap((activity) => activity.id ? [activity.id] : [])));
+    || Boolean(activity.lockedFields?.includes('schedule'))
+    /**
+     * A row with no `source` at all has never been through the sanitiser, so it
+     * is not stored data — it is one this session built. `locked: false` on one
+     * of those is the builder saying "replaceable", which is a real instruction
+     * and not the absence of one. Anything persisted arrives as
+     * `legacy-unknown` above and is kept whatever its lock says.
+     */
+    || (activity.source === undefined && activity.locked !== false);
+  const preservedPlaces = placeIdentityIndex(
+    itinerary.days.flatMap((day) => day.activities.filter(isPreservedActivity)),
+  );
 
   // --- Pass three: turn the final simulation into the plan ------------------
   for (let index = 0; index < simulations.length; index += 1) {
     const simulated = simulations[index];
     const existing = itinerary.days[index];
-    /**
-     * Rebuilding the discovered layer is not consent to delete the traveller's
-     * own itinerary. Legacy manual entries often have no `source` until their
-     * next sanitisation pass, so absence is treated as manual unless an older
-     * planner explicitly marked the row unlocked and replaceable.
-     *
-     * Imported/generated activities remain replaceable unless explicitly
-     * locked; otherwise every rebuild would accumulate stale provider results.
-     */
+    // Rebuilding the discovered layer is not consent to delete the traveller's
+    // own itinerary.
     const protectedActivities = (existing?.activities || []).filter(isPreservedActivity);
 
     const discoveredActivities = simulated.slots
-      // A saved manual activity can also appear as a review candidate. It is
-      // already present in `protectedActivities`; converting that candidate
-      // would either duplicate it or reject its deliberately unsourced facts.
+      /**
+       * A place that is already preserved must not also arrive as a candidate.
+       *
+       * Matched on proven place identity — canonical ref, then provider id,
+       * then the activity id a candidate names — because a preserved legacy row
+       * and the candidate offering the same museum hold ids from different
+       * namespaces, and an id-only test let both through on every rebuild.
+       */
       .filter((slot) => !slot.candidate
-        || !preservedActivityIds.has(slot.candidate.savedActivityId || slot.candidate.id))
+        || !indexHasPlace(preservedPlaces, candidatePlaceIdentityKeys(slot.candidate)))
       .map((slot) => slotToActivity(slot, index + 1, transportMode))
       .filter((activity): activity is Activity => activity !== null);
 

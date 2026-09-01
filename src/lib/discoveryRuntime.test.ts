@@ -142,6 +142,74 @@ describe('discovering places', () => {
     }
   });
 
+  it('aborts the request the caller has given up on', async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const invoke = vi.fn((_name: string, _body: unknown, options?: { signal?: AbortSignal }) => {
+      seen = options?.signal;
+      return new Promise<unknown>(() => undefined);
+    });
+
+    const pending = discoverPlaces(
+      { city: 'Melbourne', countryCode: 'AU' },
+      liveRuntime(),
+      invoke,
+      { signal: controller.signal },
+    );
+
+    expect(seen?.aborted).toBe(false);
+    controller.abort();
+    expect(seen?.aborted).toBe(true);
+
+    // The panel unmounted or retried; the request must not hang the caller.
+    controller.abort();
+    void pending;
+  });
+
+  it('does not start a request the caller has already abandoned', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let seen: AbortSignal | undefined;
+    const invoke = vi.fn((_name: string, _body: unknown, options?: { signal?: AbortSignal }) => {
+      seen = options?.signal;
+      return Promise.resolve([{ id: 'live-1', name: 'Live place' }]);
+    });
+
+    await discoverPlaces(
+      { city: 'Melbourne', countryCode: 'AU' },
+      liveRuntime(),
+      invoke,
+      { signal: controller.signal },
+    );
+
+    expect(seen?.aborted).toBe(true);
+  });
+
+  it('lets a newer attempt win when an abandoned one resolves late', async () => {
+    const first = vi.fn(() => new Promise<unknown>((resolve) => {
+      setTimeout(() => resolve([{ id: 'stale', name: 'Stale place' }]), 50);
+    }));
+    const controller = new AbortController();
+    const stale = discoverPlaces(
+      { city: 'Melbourne', countryCode: 'AU' },
+      liveRuntime(),
+      first,
+      { signal: controller.signal },
+    );
+    controller.abort();
+
+    const fresh = await discoverPlaces(
+      { city: 'Melbourne', countryCode: 'AU' },
+      liveRuntime(),
+      vi.fn().mockResolvedValue([{ id: 'fresh', name: 'Fresh place' }]),
+    );
+    expect(fresh.candidates.map((candidate) => candidate.id)).toEqual(['fresh']);
+
+    // The abandoned attempt still settles; nothing is listening to it.
+    const abandoned = await stale;
+    expect(abandoned.candidates.map((candidate) => candidate.id)).not.toContain('fresh');
+  });
+
   /** One evidence document as the backend actually returns it. */
   const document = (placeId: string, queueMinutes?: number) => ({
     id: `e-${placeId}-${Math.random()}`,

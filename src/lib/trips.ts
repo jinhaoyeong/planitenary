@@ -79,6 +79,52 @@ const addDays = (iso: string, offset: number) => {
  */
 const cityForDay = (cities: string[]) => (cities.length === 1 ? cities[0] : '');
 
+/**
+ * The one formula for a generated day title.
+ *
+ * Extracted so the writer below and the reader that has to recognise its own
+ * output cannot drift apart: a title is generated exactly when this function
+ * could have produced it.
+ */
+const generatedDayTitle = (index: number, dayCount: number, city: string): string => {
+  if (index === 0) return city ? `Arrive in ${city}` : 'Arrival day';
+  if (index === dayCount - 1 && dayCount > 1) return city ? `Last morning in ${city}` : 'Departure day';
+  return city ? `Day ${index + 1} in ${city}` : `Day ${index + 1}`;
+};
+
+/**
+ * Whether this title is something the generator wrote, for any city the trip
+ * has been based in.
+ *
+ * An empty day is *not* evidence of a generated title — a traveller can name a
+ * day before planning anything in it, and rewriting "Grandma's birthday" during
+ * a destination change would delete their words. Only a title the generator
+ * could have produced may be refreshed; anything else is theirs and is kept.
+ *
+ * The day count is not fixed, because the trip may have grown or shrunk since
+ * the title was written, so every position the generator uses is accepted.
+ */
+const isGeneratedDayTitle = (title: string, index: number, cities: readonly string[]): boolean => {
+  const value = title.trim();
+  if (!value) return true;
+  const forms = new Set<string>(['Arrival day', 'Departure day', `Day ${index + 1}`]);
+  for (const city of cities) {
+    if (!city) continue;
+    forms.add(`Arrive in ${city}`);
+    forms.add(`Last morning in ${city}`);
+    forms.add(`Day ${index + 1} in ${city}`);
+  }
+  return forms.has(value);
+};
+
+const sameCitySet = (left: readonly string[], right: readonly string[]): boolean => {
+  const normalise = (cities: readonly string[]) =>
+    new Set(cities.map((city) => city.trim().toLowerCase()).filter(Boolean));
+  const a = normalise(left);
+  const b = normalise(right);
+  return a.size === b.size && [...a].every((city) => b.has(city));
+};
+
 /** Guards against a mistyped year turning into thousands of day cards. */
 // MAX_GENERATED_DAYS is re-exported from tripDuration above.
 
@@ -94,13 +140,7 @@ export function buildDaysFromProfile(profile: TripProfile): DayPlan[] {
   return Array.from({ length: days }, (_, index) => {
     const city = cityForDay(cities);
     const date = profile.startDate ? SHORT_DATE.format(addDays(profile.startDate, index)) : `Day ${index + 1}`;
-    const isFirst = index === 0;
-    const isLast = index === days - 1 && days > 1;
-    const title = isFirst
-      ? city ? `Arrive in ${city}` : 'Arrival day'
-      : isLast
-        ? city ? `Last morning in ${city}` : 'Departure day'
-        : city ? `Day ${index + 1} in ${city}` : `Day ${index + 1}`;
+    const title = generatedDayTitle(index, days, city);
 
     // A generated card has one city and no recorded stops, so the base is that
     // city and the activity list is genuinely empty rather than unknown.
@@ -184,23 +224,46 @@ export function syncDaysWithDuration(itinerary: Itinerary, profile: TripProfile)
   // and a writer that depends on being cleaned up afterwards is a writer that
   // breaks as soon as its output is read directly.
   const city = cityForDay(cities);
-  const previousCities = new Set([
-    ...itinerary.cities,
-    ...itinerary.days.flatMap((day) => [day.stayCity, day.city]),
-  ].map((value) => value.trim().toLowerCase()).filter(Boolean));
-  const destinationChanged = Boolean(city && previousCities.size > 0 && !previousCities.has(city.toLowerCase()));
-  const generatedForDestination = destinationChanged ? buildDaysFromProfile(profile) : [];
+
+  /**
+   * Did this write convert the trip to a single destination?
+   *
+   * The question is about the *destination configuration*, not about which
+   * cities happen to appear on the day cards. Asking whether the new city was
+   * absent from the old route answered a narrower question and missed the
+   * commonest case: removing Kyoto from an Osaka + Kyoto trip left days 3 and 4
+   * still based in Kyoto, under a profile that no longer contained it.
+   *
+   * The previous configuration comes from the profile the itinerary was saved
+   * with — `syncDurationDependentFields` replaces `tripProfile` only after this
+   * runs, so it is still the old one here. `cities` is the fallback for trips
+   * saved before profiles were structured.
+   *
+   * Only an explicit profile write reaches this code, so a reload, a hydration
+   * or a legacy read can never trigger a rebase.
+   */
+  const previousProfile = sanitizeTripProfile(itinerary.tripProfile);
+  const previousDestinations = previousProfile
+    ? destinationCities(previousProfile)
+    : itinerary.cities;
+  const convertedToSingleCity = Boolean(city)
+    && previousDestinations.length > 0
+    && !sameCitySet(previousDestinations, cities);
+  const titleCities = [...previousDestinations, ...itinerary.days.flatMap((day) => [day.stayCity, day.city])];
+
   const named = (day: DayPlan, index: number): DayPlan => {
-    const stayCity = destinationChanged ? city : (day.stayCity || day.city || city);
+    const stayCity = convertedToSingleCity ? city : (day.stayCity || day.city || city);
     return {
       ...day,
       stayCity,
       city: stayCity,
-      // Empty cards contain no user-authored itinerary work. Refresh their
-      // generated place name as part of the explicit destination change so a
-      // Tokyo trip cannot keep saying "Arrive in Osaka" after save.
-      title: destinationChanged && day.activities.length === 0
-        ? (generatedForDestination[index]?.title || day.title)
+      /**
+       * Refresh the generated name so a Tokyo trip cannot keep saying "Arrive
+       * in Osaka" — but only where the generator wrote that name. A title the
+       * traveller chose is theirs on an empty day as much as on a full one.
+       */
+      title: convertedToSingleCity && isGeneratedDayTitle(day.title, index, titleCities)
+        ? generatedDayTitle(index, days.length, city)
         : day.title,
     };
   };

@@ -65,10 +65,13 @@ import {
   type PlannedDiscoveryQuery,
 } from '../_shared/discoveryPlan.ts';
 import {
+  createRequestDeadline,
+  DISCOVERY_REQUEST_BUDGET_MS,
   emptySourceReport,
   factualDiscoveryOutcome,
   settleFactualSource,
   type DiscoverySourceReport,
+  type RequestDeadline,
 } from '../_shared/discoveryResilience.ts';
 
 interface DiscoverBody {
@@ -584,7 +587,13 @@ interface OpenCandidate {
  * better radius than a fixed guess — a city state and a small town should not
  * be searched at the same scale.
  */
-async function resolveCityArea(city: string, countryCode: string, lat?: number, lng?: number): Promise<CityArea> {
+async function resolveCityArea(
+  city: string,
+  countryCode: string,
+  lat?: number,
+  lng?: number,
+  budgetMs: number = GEOCODE_TIMEOUT_MS,
+): Promise<CityArea> {
   if (typeof lat === 'number' && typeof lng === 'number') {
     return { centre: [lat, lng], radiusMetres: 12_000 };
   }
@@ -594,6 +603,7 @@ async function resolveCityArea(city: string, countryCode: string, lat?: number, 
   const payload = await fetchJson(
     `https://nominatim.openstreetmap.org/search?${params}`,
     { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } },
+    budgetMs,
   ).catch(() => null);
 
   const hit = Array.isArray(payload) ? payload[0] as Record<string, unknown> : null;
@@ -672,6 +682,16 @@ const overpassClausesFor = (categories: readonly string[], scope: string): strin
  * three times over inside a single 149s planning call.
  */
 const OVERPASS_TIMEOUT_MS = { browse: 45_000, planning: 22_000 } as const;
+/** Geocoding and Wikivoyage ceilings, named so the request budget can add them up. */
+const GEOCODE_TIMEOUT_MS = 8_000;
+const WIKIVOYAGE_TIMEOUT_MS = 12_000;
+/**
+ * Planning fits one full round — geocode, Wikivoyage, one Overpass round — with
+ * enough left for a fallback round only when the earlier sources were quick.
+ * The number itself is shared, because the browser derives its deadline from it.
+ */
+/** Below this there is not enough left for an Overpass round to return anything. */
+const OVERPASS_MINIMUM_VIABLE_MS = 8_000;
 const OVERPASS_FOOD_TIMEOUT_MS = { browse: 35_000, planning: 12_000 } as const;
 /**
  * Planning asks for fewer results as well as sooner.
@@ -688,13 +708,14 @@ async function fetchOverpassPlaces(
   area: CityArea,
   categories: readonly string[],
   mode: DiscoveryMode = 'browse',
+  budgetMs: number = OVERPASS_TIMEOUT_MS[mode],
 ): Promise<OsmElement[]> {
   const [lat, lng] = area.centre;
   const scope = `(around:${area.radiusMetres},${lat},${lng})`;
   const clauses = overpassClausesFor(categories, scope);
   if (clauses.length === 0) return [];
   // Keep Overpass's own budget under our abort, so it answers rather than hangs.
-  const serverTimeout = Math.max(5, Math.round(OVERPASS_TIMEOUT_MS[mode] / 1000) - 5);
+  const serverTimeout = Math.max(5, Math.round(budgetMs / 1000) - 5);
   const query = `[out:json][timeout:${serverTimeout}];
 (
   ${clauses.join('\n  ')}
@@ -708,7 +729,7 @@ out center tags ${OVERPASS_RESULT_CAP[mode]};`;
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
       body: `data=${encodeURIComponent(query)}`,
     },
-    OVERPASS_TIMEOUT_MS[mode],
+    budgetMs,
   );
   const elements = (payload as { elements?: OsmElement[] } | null)?.elements;
   return Array.isArray(elements) ? elements : [];
@@ -730,11 +751,15 @@ out center tags ${OVERPASS_RESULT_CAP[mode]};`;
  * Wikivoyage's `eat` listings are merged on top of this and rank higher, being
  * hand-picked rather than merely present.
  */
-async function fetchOverpassFood(area: CityArea, mode: DiscoveryMode = 'browse'): Promise<OsmElement[]> {
+async function fetchOverpassFood(
+  area: CityArea,
+  mode: DiscoveryMode = 'browse',
+  budgetMs: number = OVERPASS_FOOD_TIMEOUT_MS[mode],
+): Promise<OsmElement[]> {
   const [lat, lng] = area.centre;
   // Tighter than the sights radius: nobody crosses a city for an average lunch.
   const radius = Math.min(area.radiusMetres, 8_000);
-  const serverTimeout = Math.max(5, Math.round(OVERPASS_FOOD_TIMEOUT_MS[mode] / 1000) - 5);
+  const serverTimeout = Math.max(5, Math.round(budgetMs / 1000) - 5);
   const query = `[out:json][timeout:${serverTimeout}];
 (
   nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["name"]["cuisine"](around:${radius},${lat},${lng});
@@ -749,7 +774,7 @@ out center tags 150;`;
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
       body: `data=${encodeURIComponent(query)}`,
     },
-    OVERPASS_FOOD_TIMEOUT_MS[mode],
+    budgetMs,
   ).catch(() => null);
 
   const elements = (payload as { elements?: OsmElement[] } | null)?.elements;
@@ -764,7 +789,10 @@ out center tags 150;`;
  * A missing page is normal (not every town has one) and returns an empty list
  * rather than failing discovery.
  */
-async function fetchWikivoyageListings(city: string): Promise<WikivoyageListing[]> {
+async function fetchWikivoyageListings(
+  city: string,
+  budgetMs: number = WIKIVOYAGE_TIMEOUT_MS,
+): Promise<WikivoyageListing[]> {
   const params = new URLSearchParams({
     action: 'parse',
     page: city,
@@ -776,7 +804,7 @@ async function fetchWikivoyageListings(city: string): Promise<WikivoyageListing[
   const payload = await fetchJson(
     `https://en.wikivoyage.org/w/api.php?${params}`,
     { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } },
-    12_000,
+    budgetMs,
   ).catch(() => null);
 
   const wikitext = (payload as { parse?: { wikitext?: string } } | null)?.parse?.wikitext;
@@ -801,14 +829,22 @@ async function searchOsm(
   coordinates?: { lat?: number; lng?: number },
   mode: DiscoveryMode = 'browse',
   report?: DiscoverySourceReport,
+  deadline: RequestDeadline = createRequestDeadline(DISCOVERY_REQUEST_BUDGET_MS[mode]),
 ) {
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
-  const area = await resolveCityArea(city, countryCode, coordinates?.lat, coordinates?.lng);
+  const area = await resolveCityArea(
+    city,
+    countryCode,
+    coordinates?.lat,
+    coordinates?.lng,
+    deadline.allow(GEOCODE_TIMEOUT_MS, 0) ?? GEOCODE_TIMEOUT_MS,
+  );
 
   const usedListings = new Set<WikivoyageListing>();
-  const listings = await settleFactualSource(
-    () => fetchWikivoyageListings(city),
+  const wikivoyageBudget = deadline.allow(WIKIVOYAGE_TIMEOUT_MS, 1_000);
+  const listings = wikivoyageBudget === null ? [] : await settleFactualSource(
+    () => fetchWikivoyageListings(city, wikivoyageBudget),
     [] as WikivoyageListing[],
     (error) => {
       if (report) report.wikivoyageFailed = true;
@@ -821,6 +857,20 @@ async function searchOsm(
     const categories = [...new Set(queries.flatMap((query) => query.categories))];
     const wantsFood = categories.some((category) => FOOD_CATEGORIES.includes(category));
     /**
+     * What is left of the request, not what this source would like.
+     *
+     * Starting a 22s round with 4s to run cannot return anything and still
+     * spends the 4s, so below the viable minimum the round is not attempted and
+     * the request says so rather than reporting the city as empty.
+     */
+    const placesBudget = deadline.allow(OVERPASS_TIMEOUT_MS[mode], OVERPASS_MINIMUM_VIABLE_MS);
+    if (placesBudget === null) {
+      if (report) report.deadlineExceeded = true;
+      console.warn(`[travel-discover] deadline_exceeded city=${city} mode=${mode}`);
+      return [];
+    }
+    const foodBudget = Math.min(OVERPASS_FOOD_TIMEOUT_MS[mode], placesBudget);
+    /**
      * Independent sources, so one being down must not sink the other.
      *
      * This comment was here before the catch was. `fetchOverpassPlaces` sat
@@ -832,7 +882,7 @@ async function searchOsm(
      */
     const [elements, food] = await Promise.all([
       settleFactualSource(
-        () => fetchOverpassPlaces(area, categories, mode),
+        () => fetchOverpassPlaces(area, categories, mode, placesBudget),
         [] as OsmElement[],
         (error) => {
           if (report) report.overpassFailed = true;
@@ -840,7 +890,7 @@ async function searchOsm(
         },
       ),
       wantsFood
-        ? settleFactualSource(() => fetchOverpassFood(area, mode), [] as OsmElement[])
+        ? settleFactualSource(() => fetchOverpassFood(area, mode, foodBudget), [] as OsmElement[])
         : Promise.resolve([] as OsmElement[]),
     ]);
     const byKey = new Map<string, OpenCandidate>();
@@ -928,11 +978,20 @@ async function searchOsm(
 
   const preferredEntries = await fetchBatch(plan.preferredQueries);
   let entries = preferredEntries;
-  // A timeout is evidence that this source is unavailable for the request, not
-  // a reason to ask the same endpoint a second time with fallback categories.
-  // Retrying here created the 55-76s 503s seen in production. A factual empty
-  // response may still use the fallback round; a failed source may not.
-  if (selectDiscoveryEntries(entries, plan, limit).length < limit && !report?.overpassFailed) {
+  /**
+   * A second round is a second whole Overpass timeout, and it is only worth
+   * starting when both things are true: the source is still answering, and
+   * there is enough of the request budget left to hear the answer.
+   *
+   * A timeout is evidence the source is unavailable for this request, not a
+   * reason to ask it again with fallback categories — that retry is what
+   * produced the 55-76s 503s in production. Budget is the other half: without
+   * it the fallback round ran regardless, which is how a legitimately
+   * progressing request reached 56-64s while the client had already given up.
+   */
+  const canRetry = !report?.overpassFailed
+    && deadline.allow(OVERPASS_TIMEOUT_MS[mode], OVERPASS_MINIMUM_VIABLE_MS) !== null;
+  if (selectDiscoveryEntries(entries, plan, limit).length < limit && canRetry) {
     entries = [...entries, ...(await fetchBatch(plan.fallbackQueries))];
   }
   return selectPlannedRecords(entries, plan, limit);
@@ -1149,6 +1208,8 @@ Deno.serve(async (request) => {
 
     const mode: DiscoveryMode = body.mode === 'planning' ? 'planning' : 'browse';
     const sourceReport: DiscoverySourceReport = emptySourceReport();
+    // One clock for the whole request, started before any source is asked.
+    const deadline = createRequestDeadline(DISCOVERY_REQUEST_BUDGET_MS[mode]);
     const candidates = selectedProvider === 'amap'
       ? await searchAmap(city, countryCode, limit, body.travelStartsInDays, plan)
       : selectedProvider === 'baidu'
@@ -1163,6 +1224,7 @@ Deno.serve(async (request) => {
             { lat: body.lat, lng: body.lng },
             mode,
             sourceReport,
+            deadline,
           )
           : await searchGoogle(city, countryCode, limit, body.travelStartsInDays, plan);
     if (candidates.length === 0) {
@@ -1178,7 +1240,8 @@ Deno.serve(async (request) => {
       console.warn(
         `[travel-discover] ${verdict === 'sources-unavailable' ? 'sources_unavailable' : 'no_candidates'}`
         + ` city=${city} provider=${selectedProvider} mode=${mode}`
-        + ` overpassFailed=${sourceReport.overpassFailed} wikivoyageFailed=${sourceReport.wikivoyageFailed}`,
+        + ` overpassFailed=${sourceReport.overpassFailed} wikivoyageFailed=${sourceReport.wikivoyageFailed}`
+        + ` deadlineExceeded=${sourceReport.deadlineExceeded} remainingMs=${deadline.remainingMs()}`,
       );
       return verdict === 'sources-unavailable'
         ? json({

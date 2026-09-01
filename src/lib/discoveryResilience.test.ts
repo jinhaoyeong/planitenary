@@ -34,7 +34,7 @@ describe('factual source independence', () => {
 
     expect(elements).toEqual([]);
     expect(listings).toEqual(['wv:Ohori Park']);
-    expect(report).toEqual({ overpassFailed: true, wikivoyageFailed: false });
+    expect(report).toEqual({ overpassFailed: true, wikivoyageFailed: false, deadlineExceeded: false });
     expect(factualDiscoveryOutcome({ candidateCount: listings.length, report })).toBe('ok');
   });
 
@@ -46,12 +46,12 @@ describe('factual source independence', () => {
     ]);
 
     expect(elements).toEqual(['osm:node/1']);
-    expect(report).toEqual({ overpassFailed: false, wikivoyageFailed: true });
+    expect(report).toEqual({ overpassFailed: false, wikivoyageFailed: true, deadlineExceeded: false });
     expect(factualDiscoveryOutcome({ candidateCount: elements.length, report })).toBe('ok');
   });
 
   it('reports an outage, not an absence, when every source fails', () => {
-    const report = { overpassFailed: true, wikivoyageFailed: true };
+    const report = { overpassFailed: true, wikivoyageFailed: true, deadlineExceeded: false };
     expect(factualDiscoveryOutcome({ candidateCount: 0, report })).toBe('sources-unavailable');
   });
 
@@ -194,12 +194,12 @@ describe('legacy saved-place identity recovery', () => {
 
 describe('deployed discovery boundaries', () => {
   it('protects the Overpass sights call that used to reject the whole batch', () => {
-    expect(discoverSource).toContain('settleFactualSource(\n        () => fetchOverpassPlaces(area, categories, mode)');
+    expect(discoverSource).toContain('settleFactualSource(\n        () => fetchOverpassPlaces(area, categories, mode, placesBudget)');
     expect(discoverSource).not.toMatch(/Promise\.all\(\[\s*fetchOverpassPlaces\(/);
   });
 
   it('does not ask the same failed Overpass source for a fallback round', () => {
-    expect(discoverSource).toContain("&& !report?.overpassFailed");
+    expect(discoverSource).toContain("const canRetry = !report?.overpassFailed");
   });
 
   it('gives interactive planning a shorter source deadline than browsing', () => {

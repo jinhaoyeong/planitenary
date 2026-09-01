@@ -90,7 +90,7 @@ export const DEFAULT_MARQUEE_ITEMS = ['Travel Handbook', 'Plans', 'Notes', 'Maps
 const VALID_HOME_TABS = ['itinerary', 'maps', 'draft', 'budget', 'checklist', 'documents', 'photos', 'profile', 'settings'] as const;
 
 const VALID_ACTIVITY_TYPES: ActivityType[] = ['food', 'sight', 'culture', 'walk', 'nature', 'travel', 'flight', 'cafe', 'shop', 'nightlife', 'other'];
-const VALID_ACTIVITY_SOURCES: ActivitySource[] = ['manual', 'generated', 'imported'];
+const VALID_ACTIVITY_SOURCES: ActivitySource[] = ['manual', 'generated', 'imported', 'legacy-unknown'];
 const VALID_BOOKING_STATUSES: BookingStatus[] = ['none', 'requested', 'confirmed', 'cancelled'];
 const VALID_LOCKED_FIELDS: ActivityLockedField[] = ['schedule', 'location', 'duration', 'cost', 'booking', 'all'];
 const VALID_SCHEDULE_KINDS: ScheduleItemKind[] = ['place', 'reservation', 'transport', 'meal-window', 'rest-window', 'free-time'];
@@ -319,9 +319,17 @@ export const sanitizeActivity = (value: unknown, fallback: Activity, index = 0, 
       })
     : undefined;
   const admission = sanitizeAdmission(source.admission);
+  /**
+   * An unreadable `source` is unknown provenance, never user authorship.
+   *
+   * This defaulted to `manual`, which asserted the traveller had entered every
+   * pre-provenance row themselves. The planner believes that claim: it treats
+   * `manual` as untouchable, so a discovered place written by an older planner
+   * became permanent, and repeated rebuilds could never replace it.
+   */
   const sourceValue = typeof source.source === 'string' && VALID_ACTIVITY_SOURCES.includes(source.source as ActivitySource)
     ? source.source as ActivitySource
-    : 'manual';
+    : 'legacy-unknown';
   const bookingStatus = typeof source.bookingStatus === 'string' && VALID_BOOKING_STATUSES.includes(source.bookingStatus as BookingStatus)
     ? source.bookingStatus as BookingStatus
     : 'none';

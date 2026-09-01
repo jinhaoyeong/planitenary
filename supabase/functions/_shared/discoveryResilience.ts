@@ -16,12 +16,69 @@
 export interface DiscoverySourceReport {
   overpassFailed: boolean;
   wikivoyageFailed: boolean;
+  /**
+   * The request budget ran out before a source could be asked.
+   *
+   * A separate fact from a source failing: nothing is known to be down, we
+   * simply stopped. Recorded because "we ran out of time" must not be reported
+   * to the traveller as "this city has nothing in it".
+   */
+  deadlineExceeded: boolean;
 }
 
 export const emptySourceReport = (): DiscoverySourceReport => ({
   overpassFailed: false,
   wikivoyageFailed: false,
+  deadlineExceeded: false,
 });
+
+/**
+ * The whole request's budget, by what is waiting on it.
+ *
+ * Lives here rather than in the function because the browser derives its own
+ * deadline from it. Two independently maintained numbers is how the client came
+ * to give up while the server was still allowed to work.
+ */
+export const DISCOVERY_REQUEST_BUDGET_MS = { browse: 110_000, planning: 45_000 } as const;
+
+/**
+ * One clock for a whole discovery request.
+ *
+ * Every source already had its own ceiling, but nothing added them up, so a
+ * request could legitimately spend 12s on Wikivoyage and then 22s twice on
+ * Overpass — past a minute — while the browser had given up at fifty seconds
+ * and shown a timeout for work that was still going. A per-source ceiling
+ * bounds a source; only a shared deadline bounds a request.
+ */
+export interface RequestDeadline {
+  remainingMs(): number;
+  expired(): boolean;
+  /**
+   * The budget a source may have, or `null` when it must not be started.
+   *
+   * Starting a 22s round with 3s left buys nothing: it cannot finish, and the
+   * traveller waits the 3s anyway. `minimumMs` is the point below which the
+   * attempt is not worth making.
+   */
+  allow(ceilingMs: number, minimumMs: number): number | null;
+}
+
+export const createRequestDeadline = (
+  budgetMs: number,
+  now: () => number = Date.now,
+): RequestDeadline => {
+  const endsAt = now() + budgetMs;
+  const remainingMs = () => Math.max(0, endsAt - now());
+  return {
+    remainingMs,
+    expired: () => remainingMs() <= 0,
+    allow(ceilingMs, minimumMs) {
+      const remaining = remainingMs();
+      if (remaining < minimumMs) return null;
+      return Math.min(ceilingMs, remaining);
+    },
+  };
+};
 
 /**
  * Await a factual source without letting it reject the batch around it.
@@ -55,7 +112,7 @@ export function factualDiscoveryOutcome(input: {
   report: DiscoverySourceReport;
 }): FactualDiscoveryOutcome {
   if (input.candidateCount > 0) return 'ok';
-  return input.report.overpassFailed || input.report.wikivoyageFailed
+  return input.report.overpassFailed || input.report.wikivoyageFailed || input.report.deadlineExceeded
     ? 'sources-unavailable'
     : 'no-candidates';
 }

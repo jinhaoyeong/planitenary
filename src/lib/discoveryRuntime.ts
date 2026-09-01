@@ -29,15 +29,22 @@ import {
 import type { TripDestination } from './tripProfile';
 import { isPlaceAdmission, type PlaceAdmission } from '../../supabase/functions/_shared/placeCost';
 import { parsePlaceImage } from '../../supabase/functions/_shared/placeImages';
+import { DISCOVERY_REQUEST_BUDGET_MS } from '../../supabase/functions/_shared/discoveryResilience';
 
 /**
- * Interactive discovery uses the backend's existing planning contract:
- * geocoding (8s) + Wikivoyage (12s) + one Overpass planning round (22s), with
- * a small relay/database margin. The server does not retry the same failed
- * Overpass source, so 50s is a terminal boundary rather than an arbitrary UX
- * preference.
+ * How long the browser waits, derived from how long the server may take.
+ *
+ * The client deadline is the server's own request budget plus what it costs to
+ * get there and back. It is written this way — imported, not restated — because
+ * the previous number was a plausible-sounding sum of a *subset* of the source
+ * ceilings, so it sat below what the server was still allowed to do and would
+ * abort a request that was legitimately working.
+ *
+ * If the server's budget changes, this moves with it.
  */
-export const DISCOVERY_PLANNING_REQUEST_TIMEOUT_MS = 50_000;
+const DISCOVERY_RELAY_MARGIN_MS = 5_000;
+export const DISCOVERY_PLANNING_REQUEST_TIMEOUT_MS =
+  DISCOVERY_REQUEST_BUDGET_MS.planning + DISCOVERY_RELAY_MARGIN_MS;
 
 interface DiscoveryInvokeOptions {
   signal?: AbortSignal;
@@ -49,15 +56,31 @@ type DiscoveryInvoke = (
   options?: DiscoveryInvokeOptions,
 ) => Promise<unknown>;
 
+/**
+ * One request, bounded, and cancelled the moment nobody is waiting for it.
+ *
+ * `caller` is the panel's own signal: aborting it — on unmount, or because the
+ * traveller pressed Retry — stops this request rather than leaving it to
+ * resolve into a screen that has moved on. `Promise.race` already discards the
+ * loser, so a late reply cannot overwrite a newer one; the abort is what stops
+ * the work as well as the result.
+ */
 const invokeDiscoveryWithDeadline = async (
   invoke: DiscoveryInvoke,
   body: unknown,
+  caller?: AbortSignal,
 ): Promise<unknown> => {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (caller) {
+    if (caller.aborted) abort();
+    else caller.addEventListener('abort', abort, { once: true });
+  }
+
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      controller.abort();
+      abort();
       reject(new Error('Place search timed out.'));
     }, DISCOVERY_PLANNING_REQUEST_TIMEOUT_MS);
   });
@@ -69,6 +92,7 @@ const invokeDiscoveryWithDeadline = async (
     ]);
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
+    caller?.removeEventListener('abort', abort);
   }
 };
 
@@ -493,7 +517,7 @@ function parsePhotos(payload: unknown, candidates: PlaceCandidate[]): Record<str
  */
 export async function fetchPlacePhotos(
   candidates: PlaceCandidate[],
-  invoke?: (name: string, body: unknown) => Promise<unknown>,
+  invoke?: DiscoveryInvoke,
   options?: { provider?: string; travelStartsInDays?: number },
 ): Promise<Record<string, PlacePhoto>> {
   /**
@@ -541,6 +565,8 @@ export async function discoverPlaces(
     /** Exact Trip Setup style ids; sent to the server as query-plan input. */
     interests?: readonly string[];
     hiddenGems?: boolean;
+    /** The caller's own cancellation: unmount, or a newer attempt replacing this one. */
+    signal?: AbortSignal;
   },
 ): Promise<DiscoveryOutcome> {
   const capability = capabilityFor(destination, runtime);
@@ -566,7 +592,7 @@ export async function discoverPlaces(
         // This panel is an interactive itinerary build, not an open-ended
         // browse. Omitting this selected the backend's slower browse budgets.
         mode: 'planning',
-      });
+      }, options?.signal);
       const candidates = Array.isArray(payload) ? (payload as PlaceCandidate[]) : [];
       if (candidates.length > 0) {
         return {

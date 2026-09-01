@@ -1302,6 +1302,9 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
     [candidatesByCity],
   );
   const [loading, setLoading] = useState(false);
+  /** The discovery request currently in flight, so it can be replaced or cancelled. */
+  const discoveryAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => discoveryAbortRef.current?.abort(), []);
   const [error, setError] = useState<string | null>(null);
   /** True once results are known to come from the captured library, not a provider. */
   const [usingFixture, setUsingFixture] = useState(false);
@@ -1733,6 +1736,16 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
    * city currently shown by the switcher.
    */
   const beginDiscovery = async (cityIndex = activeCityIndex) => {
+    /**
+     * One attempt at a time, and none once nobody is watching.
+     *
+     * Retry replaces the attempt it retries rather than racing it, and leaving
+     * the panel stops the request instead of letting it run on to nothing.
+     */
+    discoveryAbortRef.current?.abort();
+    const attempt = new AbortController();
+    discoveryAbortRef.current = attempt;
+
     const target = tripDestinations[cityIndex] ?? destination;
     const targetCapability = target
       ? capabilityFor({ city: target.city, region: target.region, countryCode: target.countryCode || '' }, runtime)
@@ -1774,8 +1787,10 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
           limit: targetDiscoveryTarget.visible,
           interests: profile.styles,
           hiddenGems: profile.hiddenGems,
+          signal: attempt.signal,
         },
       );
+      if (attempt.signal.aborted) return;
       setUsingFixture(outcome.usingFixture);
       // Discovery no longer carries evidence; it arrives per card from the
       // effect below. Clear the previous run's evidence and the record of what

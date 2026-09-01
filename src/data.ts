@@ -9,7 +9,20 @@ import type { TravelBooking } from './lib/travelBooking';
 
 export type ActivityType = 'food' | 'sight' | 'culture' | 'walk' | 'nature' | 'travel' | 'flight' | 'cafe' | 'shop' | 'nightlife' | 'other';
 
-export type ActivitySource = 'manual' | 'generated' | 'imported';
+/**
+ * Who put this activity in the trip.
+ *
+ * `legacy-unknown` is not a fourth kind of author, it is the honest absence of
+ * one. Rows saved before provenance existed carry no `source`, and the reader
+ * that used to fill that gap chose `manual` — inventing user authorship for
+ * every discovered place an older planner had written. That made the traveller
+ * appear to have hand-entered results they never touched, and left the planner
+ * unable to tell its own old output from their work.
+ *
+ * Unknown provenance is preserved like user content, because deleting what
+ * might be theirs is the worse error, but it must never *claim* to be theirs.
+ */
+export type ActivitySource = 'manual' | 'generated' | 'imported' | 'legacy-unknown';
 export type BookingStatus = 'none' | 'requested' | 'confirmed' | 'cancelled';
 export type ActivityLockedField = 'schedule' | 'location' | 'duration' | 'cost' | 'booking' | 'all';
 export type ScheduleItemKind = 'place' | 'reservation' | 'transport' | 'meal-window' | 'rest-window' | 'free-time';
