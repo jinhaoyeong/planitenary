@@ -503,6 +503,38 @@ function providerCategories(description: string): string[] {
   return [...new Set(categories.length > 0 ? categories : ['essential'])];
 }
 
+/**
+ * One regional-provider query, whose failure costs only that query.
+ *
+ * Amap and Baidu awaited their fetch bare inside the batch loop, so a single
+ * timeout rejected out of the whole search and discarded every place the
+ * earlier queries had already found: two good queries and one slow third
+ * returned an error instead of the places already in hand. Google has guarded
+ * this since it was written; these two never did, and clamping every call to
+ * the remaining request budget made the timeout that triggers it far more
+ * likely near the deadline.
+ *
+ * The failure is returned rather than thrown so the caller can keep what it
+ * has and still report the outage when it has nothing else. `fetchJson`
+ * normalises every failure - abort, transport, non-2xx - into a ProviderError,
+ * so one shape covers them all.
+ */
+const regionalQuery = async (
+  url: string,
+  budgetMs: number,
+  label: string,
+): Promise<{ payload: unknown; error?: ProviderError }> => {
+  try {
+    return { payload: await fetchJson(url, {}, budgetMs) };
+  } catch (error) {
+    console.warn(`Discovery query "${label}" failed:`, error instanceof Error ? error.message : error);
+    return {
+      payload: null,
+      error: error instanceof ProviderError ? error : new ProviderError(`Provider request failed: ${label}`),
+    };
+  }
+};
+
 async function searchAmap(
   city: string,
   countryCode: string,
@@ -517,6 +549,7 @@ async function searchAmap(
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
+  let lastProviderError: ProviderError | undefined;
   /** Returns false when no budget remains for another query. */
   const run = async (query: PlannedDiscoveryQuery): Promise<boolean> => {
     const budgetMs = deadline.allow(TEXT_SEARCH_TIMEOUT_MS, TEXT_SEARCH_MINIMUM_VIABLE_MS);
@@ -525,8 +558,13 @@ async function searchAmap(
       return false;
     }
     const params = new URLSearchParams({ key, keywords: query.text, city, citylimit: 'true', offset: '20', page: '1', extensions: 'all' });
-    const payload = await fetchJson(`https://restapi.amap.com/v5/place/text?${params}`, {}, budgetMs) as { status?: string; pois?: AmapPoi[] };
-    for (const place of payload.pois || []) {
+    const { payload, error } = await regionalQuery(`https://restapi.amap.com/v5/place/text?${params}`, budgetMs, query.text);
+    if (error) {
+      // One intent failing must not sink the intents that already answered.
+      lastProviderError = error;
+      return true;
+    }
+    for (const place of (payload as { pois?: AmapPoi[] } | null)?.pois || []) {
       const candidate = regionalCandidate('amap', place, city, countryCode, retrievedAt, expiresAt);
       if (candidate) entries.push({ candidate, query });
     }
@@ -542,6 +580,9 @@ async function searchAmap(
       if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
+  // Nothing collected and a real failure: report the outage rather than
+  // letting it read as a city with nothing in it.
+  if (entries.length === 0 && lastProviderError) throw lastProviderError;
   return selectPlannedRecords(entries, plan, limit);
 }
 
@@ -559,6 +600,7 @@ async function searchBaidu(
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
+  let lastProviderError: ProviderError | undefined;
   /** Returns false when no budget remains for another query. */
   const run = async (query: PlannedDiscoveryQuery): Promise<boolean> => {
     const budgetMs = deadline.allow(TEXT_SEARCH_TIMEOUT_MS, TEXT_SEARCH_MINIMUM_VIABLE_MS);
@@ -567,8 +609,12 @@ async function searchBaidu(
       return false;
     }
     const params = new URLSearchParams({ query: query.text, region: city, city_limit: 'true', output: 'json', ak: key, scope: '2' });
-    const payload = await fetchJson(`https://api.map.baidu.com/place/v3/region?${params}`, {}, budgetMs) as { status?: number; results?: BaiduPoi[] };
-    for (const place of payload.results || []) {
+    const { payload, error } = await regionalQuery(`https://api.map.baidu.com/place/v3/region?${params}`, budgetMs, query.text);
+    if (error) {
+      lastProviderError = error;
+      return true;
+    }
+    for (const place of (payload as { results?: BaiduPoi[] } | null)?.results || []) {
       const candidate = regionalCandidate('baidu', place, city, countryCode, retrievedAt, expiresAt);
       if (candidate) entries.push({ candidate, query });
     }
@@ -584,6 +630,7 @@ async function searchBaidu(
       if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
+  if (entries.length === 0 && lastProviderError) throw lastProviderError;
   return selectPlannedRecords(entries, plan, limit);
 }
 
