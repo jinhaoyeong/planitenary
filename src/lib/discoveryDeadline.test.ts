@@ -20,7 +20,7 @@ const discoverSource = readFileSync('supabase/functions/travel-discover/index.ts
 
 describe('one clock for the whole request', () => {
   it('gives a source its own ceiling while there is room for it', () => {
-    let now = 0;
+    const now = 0;
     const deadline = createRequestDeadline(45_000, () => now);
     expect(deadline.allow(22_000, 8_000)).toBe(22_000);
   });

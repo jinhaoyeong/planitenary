@@ -145,3 +145,42 @@ export async function mapWithConcurrency<T, R>(
   await Promise.all(workers);
   return results;
 }
+
+/**
+ * The same clock, reported short by the reserved slice.
+ *
+ * One deadline still governs the request; this is the view of it the sources
+ * are given, so they stop early enough to leave the tail its budget.
+ */
+export const reserving = (deadline: RequestDeadline, reserveMs: number): RequestDeadline => {
+  const remainingMs = () => Math.max(0, deadline.remainingMs() - reserveMs);
+  return {
+    remainingMs,
+    expired: () => remainingMs() <= 0,
+    allow: (ceilingMs, minimumMs) => {
+      const remaining = remainingMs();
+      if (remaining < minimumMs) return null;
+      return Math.min(ceilingMs, remaining);
+    },
+  };
+};
+
+/**
+ * Bound how long the response waits for work that cannot be aborted.
+ *
+ * The Supabase client takes no signal, so this bounds the wait rather than the
+ * query: a slow write may still finish in the background, but it can no longer
+ * hold the response past the deadline the request advertises.
+ */
+export async function withinBudget<T>(budgetMs: number, fallback: T, work: () => Promise<T>): Promise<T> {
+  if (budgetMs <= 0) return fallback;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work(),
+      new Promise<T>((resolve) => { timer = setTimeout(() => resolve(fallback), budgetMs); }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}

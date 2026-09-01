@@ -82,4 +82,30 @@ describe('discovery terminal state', () => {
     expect((await screen.findAllByText(OSAKA_PLACE_FIXTURE[0].name)).length).toBeGreaterThan(0);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  /**
+   * Leaving the panel must stop the request, not merely ignore its answer.
+   * A 45s discovery that nobody is waiting for still costs provider quota.
+   */
+  it('aborts the request in flight when the panel unmounts', async () => {
+    mocks.discoverPlaces.mockReset();
+    mocks.discoverPlaces.mockImplementation(() => new Promise(() => {}));
+
+    const view = render(
+      <CurrencyProvider>
+        <DestinationDiscoveryPanel itinerary={itinerary} profile={profile} onItineraryChange={vi.fn()} />
+      </CurrencyProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(mocks.discoverPlaces).toHaveBeenCalledTimes(1));
+
+    const options = mocks.discoverPlaces.mock.calls[0][3] as { signal?: AbortSignal };
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+    expect(options.signal?.aborted).toBe(false);
+
+    view.unmount();
+
+    expect(options.signal?.aborted).toBe(true);
+  });
 });

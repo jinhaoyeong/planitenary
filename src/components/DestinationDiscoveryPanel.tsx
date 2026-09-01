@@ -1842,9 +1842,18 @@ export function DestinationDiscoveryPanel({ itinerary, profile, onItineraryChang
       setPhase('review');
       persistDecisions(decisionsRef.current, new Date().toISOString());
     } catch (discoveryError) {
+      if (attempt.signal.aborted) return;
       setError(discoveryError instanceof Error ? discoveryError.message : 'Discovery could not be loaded.');
     } finally {
-      setLoading(false);
+      /*
+       * Only the attempt still in flight may say the panel has stopped loading.
+       *
+       * A replaced attempt reaches here after Retry has already started its
+       * successor - discoverPlaces resolves an aborted request rather than
+       * rejecting it - and clearing the flag then re-enabled the button while
+       * the newer request was still running.
+       */
+      if (discoveryAbortRef.current === attempt) setLoading(false);
     }
   };
 

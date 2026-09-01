@@ -500,7 +500,9 @@ export function generateInitialItinerary(itinerary: Itinerary, profile: TripProf
     const existing = day.activities.length > 0 ? day.activities : addBreaks(itinerary.id, day, [], profile, itinerary.planningConstraints);
     const generated = existing.map((activity) => ({
       ...activity,
-      source: activity.source || 'manual',
+      // Absence is not authorship: an activity that never recorded a source is
+      // legacy-unknown, the same contract the sanitizer now applies.
+      source: activity.source || 'legacy-unknown',
       durationMinutes: activity.durationMinutes || DEFAULT_ACTIVITY_MINUTES,
     }));
     const withBreaks = addBreaks(itinerary.id, day, generated, profile, itinerary.planningConstraints);
@@ -510,7 +512,7 @@ export function generateInitialItinerary(itinerary: Itinerary, profile: TripProf
   const assignedDays = afterDays.map((day) => ({ ...day, activities: [...day.activities] }));
   remainingInbox.forEach((activity, index) => {
     const target = assignedDays[index % Math.max(1, assignedDays.length)];
-    if (target) target.activities.push({ ...activity, source: activity.source || 'manual' });
+    if (target) target.activities.push({ ...activity, source: activity.source || 'legacy-unknown' });
   });
   const scheduledDays = assignedDays.map((day) => ({ ...day, activities: scheduleActivities(day.activities, planningStartMinutes(itinerary, profile), profile.transport[0]) }));
   return makeProposal(

@@ -67,6 +67,8 @@ import {
 import {
   createRequestDeadline,
   DISCOVERY_REQUEST_BUDGET_MS,
+  reserving,
+  withinBudget,
   emptySourceReport,
   factualDiscoveryOutcome,
   settleFactualSource,
@@ -328,12 +330,38 @@ const FIELD_MASK = [
   'places.addressComponents',
 ].join(',');
 
+/**
+ * One text-search query's ceiling, and the point below which starting one
+ * buys nothing.
+ *
+ * Google, Amap and Baidu answer a whole query per round trip, so the ceiling is
+ * the old `fetchJson` default made explicit. It is a ceiling, not a duration:
+ * every call clamps it to whatever the request deadline actually has left, which
+ * is the difference between bounding a source and bounding a request. Seven
+ * sequential 8s queries under a 45s budget was the shape of the defect.
+ */
+const TEXT_SEARCH_TIMEOUT_MS = 8_000;
+const TEXT_SEARCH_MINIMUM_VIABLE_MS = 2_000;
+
+/** A cache lookup that takes longer than this is slower than asking the sources. */
+const CACHE_READ_TIMEOUT_MS = 3_000;
+
+/**
+ * The slice of the budget held back for work that happens after the sources
+ * answer: the cache write and the canonical-place link. Both are database round
+ * trips with no timeout of their own, so letting the sources spend the whole
+ * budget and then running them would put unbounded work after a bounded clock.
+ */
+const RESPONSE_TAIL_RESERVE_MS = 4_000;
+
 async function searchGoogle(
   city: string,
   countryCode: string,
   limit: number,
   travelStartsInDays: number | undefined,
   plan: DiscoveryQueryPlan,
+  deadline: RequestDeadline,
+  report: DiscoverySourceReport,
 ) {
   const key = secrets.google();
   if (!key) throw new ProviderError('Google Places is not configured.', 503);
@@ -343,7 +371,16 @@ async function searchGoogle(
   const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof toCandidate>>>> = [];
   let lastProviderError: ProviderError | undefined;
 
-  const run = async (query: PlannedDiscoveryQuery) => {
+  /**
+   * Returns false when the request has no budget left for another query, so the
+   * caller stops instead of queueing more work the deadline cannot pay for.
+   */
+  const run = async (query: PlannedDiscoveryQuery): Promise<boolean> => {
+    const budgetMs = deadline.allow(TEXT_SEARCH_TIMEOUT_MS, TEXT_SEARCH_MINIMUM_VIABLE_MS);
+    if (budgetMs === null) {
+      report.deadlineExceeded = true;
+      return false;
+    }
     const payload = await fetchJson('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
@@ -356,7 +393,7 @@ async function searchGoogle(
         maxResultCount: 20,
         languageCode: 'en',
       }),
-    }).catch((error) => {
+    }, budgetMs).catch((error) => {
       // One failed intent must not sink the whole discovery run.
       console.warn(`Discovery query "${query.text}" failed:`, error.message);
       if (error instanceof ProviderError) lastProviderError = error;
@@ -367,17 +404,18 @@ async function searchGoogle(
       const candidate = toCandidate(place, city, countryCode, retrievedAt, expiresAt);
       if (candidate) entries.push({ candidate, query });
     }
+    return true;
   };
 
   // Preference queries run first. Once validated and deduped preferred results
   // fill the target, no generic query is sent at all.
   for (const query of plan.preferredQueries) {
-    await run(query);
+    if (!(await run(query))) break;
     if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
   }
   if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
     for (const query of plan.fallbackQueries) {
-      await run(query);
+      if (!(await run(query))) break;
       if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
@@ -463,27 +501,36 @@ async function searchAmap(
   limit: number,
   travelStartsInDays: number | undefined,
   plan: DiscoveryQueryPlan,
+  deadline: RequestDeadline,
+  report: DiscoverySourceReport,
 ) {
   const key = secrets.amap();
   if (!key) throw new ProviderError('Amap is not configured.', 503);
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
-  const run = async (query: PlannedDiscoveryQuery) => {
+  /** Returns false when no budget remains for another query. */
+  const run = async (query: PlannedDiscoveryQuery): Promise<boolean> => {
+    const budgetMs = deadline.allow(TEXT_SEARCH_TIMEOUT_MS, TEXT_SEARCH_MINIMUM_VIABLE_MS);
+    if (budgetMs === null) {
+      report.deadlineExceeded = true;
+      return false;
+    }
     const params = new URLSearchParams({ key, keywords: query.text, city, citylimit: 'true', offset: '20', page: '1', extensions: 'all' });
-    const payload = await fetchJson(`https://restapi.amap.com/v5/place/text?${params}`) as { status?: string; pois?: AmapPoi[] };
+    const payload = await fetchJson(`https://restapi.amap.com/v5/place/text?${params}`, {}, budgetMs) as { status?: string; pois?: AmapPoi[] };
     for (const place of payload.pois || []) {
       const candidate = regionalCandidate('amap', place, city, countryCode, retrievedAt, expiresAt);
       if (candidate) entries.push({ candidate, query });
     }
+    return true;
   };
   for (const query of plan.preferredQueries) {
-    await run(query);
+    if (!(await run(query))) break;
     if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
   }
   if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
     for (const query of plan.fallbackQueries) {
-      await run(query);
+      if (!(await run(query))) break;
       if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
@@ -496,27 +543,36 @@ async function searchBaidu(
   limit: number,
   travelStartsInDays: number | undefined,
   plan: DiscoveryQueryPlan,
+  deadline: RequestDeadline,
+  report: DiscoverySourceReport,
 ) {
   const key = secrets.baidu();
   if (!key) throw new ProviderError('Baidu Maps is not configured.', 503);
   const retrievedAt = new Date().toISOString();
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
-  const run = async (query: PlannedDiscoveryQuery) => {
+  /** Returns false when no budget remains for another query. */
+  const run = async (query: PlannedDiscoveryQuery): Promise<boolean> => {
+    const budgetMs = deadline.allow(TEXT_SEARCH_TIMEOUT_MS, TEXT_SEARCH_MINIMUM_VIABLE_MS);
+    if (budgetMs === null) {
+      report.deadlineExceeded = true;
+      return false;
+    }
     const params = new URLSearchParams({ query: query.text, region: city, city_limit: 'true', output: 'json', ak: key, scope: '2' });
-    const payload = await fetchJson(`https://api.map.baidu.com/place/v3/region?${params}`) as { status?: number; results?: BaiduPoi[] };
+    const payload = await fetchJson(`https://api.map.baidu.com/place/v3/region?${params}`, {}, budgetMs) as { status?: number; results?: BaiduPoi[] };
     for (const place of payload.results || []) {
       const candidate = regionalCandidate('baidu', place, city, countryCode, retrievedAt, expiresAt);
       if (candidate) entries.push({ candidate, query });
     }
+    return true;
   };
   for (const query of plan.preferredQueries) {
-    await run(query);
+    if (!(await run(query))) break;
     if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
   }
   if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
     for (const query of plan.fallbackQueries) {
-      await run(query);
+      if (!(await run(query))) break;
       if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
@@ -1195,25 +1251,47 @@ Deno.serve(async (request) => {
        * reference derived on the way out cannot go stale, so cached rows from
        * before this change serve references from their first request.
        */
-      const canonical = await linkCanonicalPlaces(cache, selectedProvider, places);
+      /**
+       * Enrichment, not the answer. If the link cannot be made inside what the
+       * request has left, the records go back without refs rather than holding
+       * the response open on a database call nothing can abort.
+       */
+      const canonical = await withinBudget(
+        deadline.remainingMs(),
+        new Map<string, string>(),
+        () => linkCanonicalPlaces(cache, selectedProvider, places),
+      );
       return attachPlaceRefs(records, selectedProvider, canonical);
     };
 
+    const mode: DiscoveryMode = body.mode === 'planning' ? 'planning' : 'browse';
+    const sourceReport: DiscoverySourceReport = emptySourceReport();
+    /**
+     * One clock for the whole request, started before the cache is read.
+     *
+     * It used to start after it. That made the advertised budget describe the
+     * source work rather than the request, and left three untimed database
+     * round trips - the cache read here, the write and the canonical link
+     * below - outside the only deadline the client was told about.
+     */
+    const deadline = createRequestDeadline(DISCOVERY_REQUEST_BUDGET_MS[mode]);
+    /** Sources stop early enough to leave the tail its reserved slice. */
+    const sourceDeadline = reserving(deadline, RESPONSE_TAIL_RESERVE_MS);
+
     if (cache) {
-      const cached = await readDiscoveryCache(cache, cityKey, selectedProvider);
+      const cached = await withinBudget(
+        deadline.allow(CACHE_READ_TIMEOUT_MS, 0) ?? 0,
+        null,
+        () => readDiscoveryCache(cache, cityKey, selectedProvider),
+      );
       if (cached && cached.length > 0) {
         return json(await withPlaceRefs(cached.slice(0, limit)));
       }
     }
-
-    const mode: DiscoveryMode = body.mode === 'planning' ? 'planning' : 'browse';
-    const sourceReport: DiscoverySourceReport = emptySourceReport();
-    // One clock for the whole request, started before any source is asked.
-    const deadline = createRequestDeadline(DISCOVERY_REQUEST_BUDGET_MS[mode]);
     const candidates = selectedProvider === 'amap'
-      ? await searchAmap(city, countryCode, limit, body.travelStartsInDays, plan)
+      ? await searchAmap(city, countryCode, limit, body.travelStartsInDays, plan, sourceDeadline, sourceReport)
       : selectedProvider === 'baidu'
-        ? await searchBaidu(city, countryCode, limit, body.travelStartsInDays, plan)
+        ? await searchBaidu(city, countryCode, limit, body.travelStartsInDays, plan, sourceDeadline, sourceReport)
         : selectedProvider === 'osm'
           ? await searchOsm(
             city,
@@ -1224,9 +1302,9 @@ Deno.serve(async (request) => {
             { lat: body.lat, lng: body.lng },
             mode,
             sourceReport,
-            deadline,
+            sourceDeadline,
           )
-          : await searchGoogle(city, countryCode, limit, body.travelStartsInDays, plan);
+          : await searchGoogle(city, countryCode, limit, body.travelStartsInDays, plan, sourceDeadline, sourceReport);
     if (candidates.length === 0) {
       /**
        * An outage is not an absence, and the difference is the whole point.
@@ -1253,13 +1331,14 @@ Deno.serve(async (request) => {
     }
 
     if (cache) {
-      await writeDiscoveryCache(
+      // Best effort: a slow write must not delay places the traveller already has.
+      await withinBudget(deadline.remainingMs(), undefined, () => writeDiscoveryCache(
         cache,
         cityKey,
         selectedProvider,
         candidates,
         expiryFor('placeIdentity', body.travelStartsInDays),
-      );
+      ));
       return json(await withPlaceRefs(candidates));
     }
 
