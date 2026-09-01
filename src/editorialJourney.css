@@ -1418,7 +1418,15 @@ html[data-theme='dark'] .journey-day-place-preview > img { filter: saturate(.82)
   .plan-trip-journey-panel > header p { display: none; }
   .plan-trip-journey-panel > div { padding: 18px 15px 28px !important; }
   .plan-trip-start-grid { display: flex; flex-direction: column; gap: 14px; }
-  .plan-trip-brief { position: static; order: -1; }
+  /*
+   * `align-self: start` earns its keep in the desktop grid, where it stops the
+   * sticky brief stretching to the height of the action column. Here the
+   * container is a flex *column*, so the identical declaration acts on the
+   * horizontal axis instead and sizes the card to its own content — which is
+   * why the brief rendered visibly narrower than the card stacked beneath it
+   * whenever its longest line happened to fit inside the phone.
+   */
+  .plan-trip-brief { position: static; order: -1; align-self: stretch; }
   .plan-trip-brief-head { padding: 18px 18px 12px; }
   .plan-trip-brief ol { grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 0 18px 14px; }
   .plan-trip-brief li { display: grid; min-height: 0; grid-template-columns: 1fr; justify-items: center; gap: 4px; }
