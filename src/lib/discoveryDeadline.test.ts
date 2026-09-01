@@ -107,8 +107,17 @@ describe('the discovery function honours the contract', () => {
   });
 
   it('gates the fallback round on remaining budget as well as source health', () => {
-    expect(discoverSource).toContain('const canRetry = !report?.overpassFailed');
-    expect(discoverSource).toContain("deadline.allow(OVERPASS_TIMEOUT_MS[mode], OVERPASS_MINIMUM_VIABLE_MS) !== null");
+    expect(discoverSource).toContain('const fallbackBudget = deadline.allow(OVERPASS_TIMEOUT_MS[mode], OVERPASS_MINIMUM_VIABLE_MS)');
+    expect(discoverSource).toContain("} else if (!report?.overpassFailed) {");
+  });
+
+  /**
+   * Skipping the round means never entering the batch that records exhaustion,
+   * so the branch has to record it itself. Behaviour is proved in
+   * discoveryTerminalTruth.test.ts; this only pins the wiring.
+   */
+  it('records exhaustion where the fallback is skipped, not only inside the batch', () => {
+    expect(discoverSource).toContain('fallback_skipped_deadline');
   });
 
   it('records the exhaustion rather than reporting an empty city', () => {

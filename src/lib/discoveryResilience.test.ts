@@ -199,7 +199,7 @@ describe('deployed discovery boundaries', () => {
   });
 
   it('does not ask the same failed Overpass source for a fallback round', () => {
-    expect(discoverSource).toContain("const canRetry = !report?.overpassFailed");
+    expect(discoverSource).toContain("} else if (!report?.overpassFailed) {");
   });
 
   it('gives interactive planning a shorter source deadline than browsing', () => {

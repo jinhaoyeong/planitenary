@@ -13,7 +13,14 @@ import {
   withinBudget,
 } from '../../supabase/functions/_shared/discoveryResilience';
 
-/** The values travel-discover uses, restated here so a drift breaks a test. */
+/**
+ * Representative values matching travel-discover, stated explicitly.
+ *
+ * These are copies, not imports: the handler is a Deno module and cannot be
+ * loaded here. So this file proves the budget *relationship* holds for these
+ * numbers - it cannot notice if the handler changes its own. The wiring at the
+ * call sites is what `discoveryDeadline.test.ts` pins by reading the source.
+ */
 const TEXT_SEARCH_TIMEOUT_MS = 8_000;
 const TEXT_SEARCH_MINIMUM_VIABLE_MS = 2_000;
 const RESPONSE_TAIL_RESERVE_MS = 4_000;

@@ -347,10 +347,18 @@ const TEXT_SEARCH_MINIMUM_VIABLE_MS = 2_000;
 const CACHE_READ_TIMEOUT_MS = 3_000;
 
 /**
- * The slice of the budget held back for work that happens after the sources
- * answer: the cache write and the canonical-place link. Both are database round
- * trips with no timeout of their own, so letting the sources spend the whole
- * budget and then running them would put unbounded work after a bounded clock.
+ * How early the source phase stops, so the work after it has room inside the
+ * same request budget: the cache write and the canonical-place link, both
+ * database round trips with no timeout of their own.
+ *
+ * A floor for the tail, not a ceiling on it. `reserving` shortens only the
+ * clock the sources read; the tail then gets whatever the request actually has
+ * left, which is everything the sources did not spend. A cache hit answered in
+ * 200ms can still take the full budget if the canonical link hangs.
+ *
+ * What is guaranteed is the outer bound: the response cannot outlast
+ * DISCOVERY_REQUEST_BUDGET_MS. The database call itself is never cancelled -
+ * see `withinBudget`, which bounds the wait rather than the query.
  */
 const RESPONSE_TAIL_RESERVE_MS = 4_000;
 
@@ -1045,10 +1053,28 @@ async function searchOsm(
    * it the fallback round ran regardless, which is how a legitimately
    * progressing request reached 56-64s while the client had already given up.
    */
-  const canRetry = !report?.overpassFailed
-    && deadline.allow(OVERPASS_TIMEOUT_MS[mode], OVERPASS_MINIMUM_VIABLE_MS) !== null;
-  if (selectDiscoveryEntries(entries, plan, limit).length < limit && canRetry) {
-    entries = [...entries, ...(await fetchBatch(plan.fallbackQueries))];
+  const fallbackBudget = deadline.allow(OVERPASS_TIMEOUT_MS[mode], OVERPASS_MINIMUM_VIABLE_MS);
+  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+    if (fallbackBudget === null) {
+      /*
+       * Stopped by the clock, and this is the only place that can say so.
+       *
+       * `fetchBatch` records an exhausted budget, but skipping the round means
+       * never entering it, so the two reasons for not retrying arrived at the
+       * terminal outcome looking identical. One of them is a fact about the
+       * city and the other is a fact about this request: a run that stopped
+       * with 7s left and an untried fallback had established nothing about
+       * whether the city has places in it, yet answered that it has none.
+       *
+       * Recorded whatever else went wrong. An exhausted deadline is true on its
+       * own terms, and `overpassFailed` keeps its own meaning beside it rather
+       * than being folded into this one.
+       */
+      if (report) report.deadlineExceeded = true;
+      console.warn(`[travel-discover] fallback_skipped_deadline city=${city} mode=${mode} remainingMs=${deadline.remainingMs()}`);
+    } else if (!report?.overpassFailed) {
+      entries = [...entries, ...(await fetchBatch(plan.fallbackQueries))];
+    }
   }
   return selectPlannedRecords(entries, plan, limit);
 }
