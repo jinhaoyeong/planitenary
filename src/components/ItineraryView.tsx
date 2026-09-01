@@ -1823,6 +1823,49 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
     }, 50);
   };
 
+  /**
+   * Planning tools, built once and rendered wherever the current layout puts
+   * them.
+   *
+   * One element rather than two copies: the editorial overview shows it
+   * through its planner slot, directly under the route it acts on, while the
+   * editing layout keeps it inline. It used to render last on the page, after
+   * a block of markup the stylesheet hides, so nothing led the eye to it.
+   */
+  const plannerSection = plannerProfile ? (
+    <>
+      {(customItinerary.unassignedActivities?.length || 0) > 0 && (
+        <section className="rounded-3xl p-4 sm:p-5 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow m-0">Activity inbox</div>
+              <h3 className="font-display text-2xl mt-2">Confirmed places waiting for a day.</h3>
+            </div>
+            <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
+              {customItinerary.unassignedActivities?.length} unassigned
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {customItinerary.unassignedActivities?.map((activity) => (
+              <span key={activity.id} className="rounded-full px-3 py-1.5 text-xs font-semibold" style={{ border: '1px solid var(--border)', color: 'var(--ink-muted)' }}>
+                {activity.name}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Organise my saved places will distribute these confirmed activities across available days. Nothing is discarded if it cannot be scheduled.</p>
+        </section>
+      )}
+      <PlannerPreview
+        itinerary={customItinerary}
+        profile={plannerProfile}
+        onItineraryChange={(next) => {
+          setCustomItinerary(next);
+          onItineraryChange?.(next);
+        }}
+      />
+    </>
+  ) : null;
+
   // Overview Mode (Default)
   if (selectedDay === null) {
     return (
@@ -1847,6 +1890,7 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
             bookings={customItinerary.bookings || []}
             onManageBookings={onItineraryChange ? () => setBookingEditorOpen(true) : undefined}
             onEditRoute={onItineraryChange ? () => setRouteEditorOpen(true) : undefined}
+            planner={plannerSection}
             actions={(
               <>
                 <button type="button" className="journey-route-action" onClick={() => setIsEditingMode(true)}>
@@ -2170,39 +2214,12 @@ export const ItineraryView = ({ itinerary: initialItinerary, onItineraryChange, 
           </div>
         </div>
 
-        {plannerProfile && (
-          <>
-            {(customItinerary.unassignedActivities?.length || 0) > 0 && (
-              <section className="rounded-3xl p-4 sm:p-5 space-y-3" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="eyebrow m-0">Activity inbox</div>
-                    <h3 className="font-display text-2xl mt-2">Confirmed places waiting for a day.</h3>
-                  </div>
-                  <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: 'var(--accent-soft)', color: 'var(--ink)' }}>
-                    {customItinerary.unassignedActivities?.length} unassigned
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {customItinerary.unassignedActivities?.map((activity) => (
-                    <span key={activity.id} className="rounded-full px-3 py-1.5 text-xs font-semibold" style={{ border: '1px solid var(--border)', color: 'var(--ink-muted)' }}>
-                      {activity.name}
-                    </span>
-                  ))}
-                </div>
-                <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>Organise my saved places will distribute these confirmed activities across available days. Nothing is discarded if it cannot be scheduled.</p>
-              </section>
-            )}
-          <PlannerPreview
-            itinerary={customItinerary}
-            profile={plannerProfile}
-            onItineraryChange={(next) => {
-              setCustomItinerary(next);
-              onItineraryChange?.(next);
-            }}
-          />
-          </>
-        )}
+        {/*
+          Editing swaps the editorial overview for the legacy grid, which has
+          no route strip to hang the planner under, so it keeps the position it
+          has always had here. The card stays reachable in both modes.
+        */}
+        {isEditingMode && plannerSection}
 
         {/* Days Grid - Overview */}
         <DragDropContext onDragEnd={onDragEnd}>

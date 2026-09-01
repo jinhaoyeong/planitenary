@@ -30,6 +30,16 @@ interface JourneyTimelineOverviewProps {
   onEditRoute?: () => void;
   /** Trip-level actions shown alongside Edit route. */
   actions?: ReactNode;
+  /**
+   * Planning tools, shown between the route and the days they act on.
+   *
+   * A slot rather than an import: this component describes a route and must
+   * not depend on the planner. It sits here because the traveller reads the
+   * route, decides the days are thin, and acts — and the card used to render
+   * last on the page, below a block of markup the stylesheet hides, where
+   * nothing pointed to it.
+   */
+  planner?: ReactNode;
 }
 
 interface StaySegment {
@@ -150,6 +160,7 @@ export function JourneyTimelineOverview({
   dayPhotos = {},
   onEditRoute,
   actions,
+  planner,
   bookings = [],
   onManageBookings,
   now,
@@ -229,6 +240,8 @@ export function JourneyTimelineOverview({
         )}
       </div>
       </div>
+
+      {planner}
 
       <div className="journey-stay-timeline">
         {segments.map((segment, segmentIndex) => (

@@ -69,4 +69,38 @@ describe('JourneyTimelineOverview', () => {
     expect(screen.getAllByText('Tokyo').length).toBeGreaterThan(1);
     expect(screen.getAllByText('Kyoto').length).toBeGreaterThan(1);
   });
+
+  /**
+   * The planner card used to render last on the page, below markup the
+   * stylesheet hides, where nothing led the eye to it. Its position is the
+   * point of the slot, so the order is asserted rather than its presence.
+   */
+  it('places the planner between the route and the days it acts on', () => {
+    const { container } = render(
+      <JourneyTimelineOverview
+        itinerary={trip()}
+        onSelectDay={vi.fn()}
+        planner={<div data-testid="planner-slot">Build a Kyoto itinerary</div>}
+      />,
+    );
+
+    const overview = container.querySelector('.journey-itinerary-overview');
+    expect(overview).not.toBeNull();
+
+    const position = (selector: string) => Array.from(overview!.children).findIndex((child) => child.matches(selector));
+    const route = position('.journey-route-row');
+    const slot = position('[data-testid="planner-slot"]');
+    const timeline = position('.journey-stay-timeline');
+
+    expect(route).toBeGreaterThanOrEqual(0);
+    expect(slot).toBeGreaterThan(route);
+    expect(timeline).toBeGreaterThan(slot);
+  });
+
+  it('renders nothing extra when no planner is supplied', () => {
+    const { container } = render(<JourneyTimelineOverview itinerary={trip()} onSelectDay={vi.fn()} />);
+
+    expect(container.querySelector('.journey-stay-timeline')).not.toBeNull();
+    expect(screen.queryByTestId('planner-slot')).toBeNull();
+  });
 });
