@@ -504,7 +504,7 @@ function providerCategories(description: string): string[] {
 }
 
 /**
- * One regional-provider query, whose failure costs only that query.
+ * One regional-provider query, whose failure ends the batch without erasing it.
  *
  * Amap and Baidu awaited their fetch bare inside the batch loop, so a single
  * timeout rejected out of the whole search and discarded every place the
@@ -515,9 +515,11 @@ function providerCategories(description: string): string[] {
  * likely near the deadline.
  *
  * The failure is returned rather than thrown so the caller can keep what it
- * has and still report the outage when it has nothing else. `fetchJson`
- * normalises every failure - abort, transport, non-2xx - into a ProviderError,
- * so one shape covers them all.
+ * has and still report the outage when it has nothing else. It is not a licence
+ * to carry on: the caller stops its loop on the first failure, because a
+ * provider that has just failed should not be asked the rest of the plan and
+ * charged for it. `fetchJson` normalises every failure - abort, transport,
+ * non-2xx - into a ProviderError, so one shape covers them all.
  */
 const regionalQuery = async (
   url: string,
@@ -550,7 +552,7 @@ async function searchAmap(
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
   let lastProviderError: ProviderError | undefined;
-  /** Returns false when no budget remains for another query. */
+  /** Returns false when the loop must stop: no budget remains, or the provider failed. */
   const run = async (query: PlannedDiscoveryQuery): Promise<boolean> => {
     const budgetMs = deadline.allow(TEXT_SEARCH_TIMEOUT_MS, TEXT_SEARCH_MINIMUM_VIABLE_MS);
     if (budgetMs === null) {
@@ -560,11 +562,12 @@ async function searchAmap(
     const params = new URLSearchParams({ key, keywords: query.text, city, citylimit: 'true', offset: '20', page: '1', extensions: 'all' });
     const { payload, error } = await regionalQuery(`https://restapi.amap.com/v5/place/text?${params}`, budgetMs, query.text);
     if (error) {
-      // One intent failing must not sink the intents that already answered.
+      // One intent failing must not sink the intents that already answered -
+      // and must not buy the rest of the plan a trip to a failing provider.
       lastProviderError = error;
-      return true;
+      return false;
     }
-    for (const place of (payload as { pois?: AmapPoi[] } | null)?.pois || []) {
+    for (const place of (payload as { status?: string; pois?: AmapPoi[] } | null)?.pois || []) {
       const candidate = regionalCandidate('amap', place, city, countryCode, retrievedAt, expiresAt);
       if (candidate) entries.push({ candidate, query });
     }
@@ -574,16 +577,26 @@ async function searchAmap(
     if (!(await run(query))) break;
     if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
   }
-  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+  // A provider failure ends the preferred loop; the fallback loop must not
+  // reopen it and spend the remaining budget on the same failing provider.
+  if (!lastProviderError && selectDiscoveryEntries(entries, plan, limit).length < limit) {
     for (const query of plan.fallbackQueries) {
       if (!(await run(query))) break;
       if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
-  // Nothing collected and a real failure: report the outage rather than
-  // letting it read as a city with nothing in it.
-  if (entries.length === 0 && lastProviderError) throw lastProviderError;
-  return selectPlannedRecords(entries, plan, limit);
+  const records = selectPlannedRecords(entries, plan, limit);
+  /**
+   * Nothing admitted and a real failure: report the outage rather than letting
+   * it read as a city with nothing in it.
+   *
+   * The test is the admitted records, not the raw entries. A parsed candidate
+   * that the general-query gate then rejects - an unrated POI, say - leaves
+   * entries non-empty and the answer empty, and judging by entries would have
+   * called that outage a city with nothing worth seeing in it.
+   */
+  if (records.length === 0 && lastProviderError) throw lastProviderError;
+  return records;
 }
 
 async function searchBaidu(
@@ -601,7 +614,7 @@ async function searchBaidu(
   const expiresAt = expiryFor('placeIdentity', travelStartsInDays);
   const entries: Array<DiscoveryQueryEntry<NonNullable<ReturnType<typeof regionalCandidate>>>> = [];
   let lastProviderError: ProviderError | undefined;
-  /** Returns false when no budget remains for another query. */
+  /** Returns false when the loop must stop: no budget remains, or the provider failed. */
   const run = async (query: PlannedDiscoveryQuery): Promise<boolean> => {
     const budgetMs = deadline.allow(TEXT_SEARCH_TIMEOUT_MS, TEXT_SEARCH_MINIMUM_VIABLE_MS);
     if (budgetMs === null) {
@@ -612,9 +625,9 @@ async function searchBaidu(
     const { payload, error } = await regionalQuery(`https://api.map.baidu.com/place/v3/region?${params}`, budgetMs, query.text);
     if (error) {
       lastProviderError = error;
-      return true;
+      return false;
     }
-    for (const place of (payload as { results?: BaiduPoi[] } | null)?.results || []) {
+    for (const place of (payload as { status?: number; results?: BaiduPoi[] } | null)?.results || []) {
       const candidate = regionalCandidate('baidu', place, city, countryCode, retrievedAt, expiresAt);
       if (candidate) entries.push({ candidate, query });
     }
@@ -624,14 +637,15 @@ async function searchBaidu(
     if (!(await run(query))) break;
     if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
   }
-  if (selectDiscoveryEntries(entries, plan, limit).length < limit) {
+  if (!lastProviderError && selectDiscoveryEntries(entries, plan, limit).length < limit) {
     for (const query of plan.fallbackQueries) {
       if (!(await run(query))) break;
       if (selectDiscoveryEntries(entries, plan, limit).length >= limit) break;
     }
   }
-  if (entries.length === 0 && lastProviderError) throw lastProviderError;
-  return selectPlannedRecords(entries, plan, limit);
+  const records = selectPlannedRecords(entries, plan, limit);
+  if (records.length === 0 && lastProviderError) throw lastProviderError;
+  return records;
 }
 
 // ---------------------------------------------------------------------------
